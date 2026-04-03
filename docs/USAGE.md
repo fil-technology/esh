@@ -8,6 +8,7 @@ This guide explains how to use Esh in day-to-day work.
 
 ```bash
 ./scripts/bootstrap.sh
+./esh
 ./esh doctor
 ./esh chat
 ```
@@ -17,6 +18,8 @@ What bootstrap does:
 - installs pinned Python bridge dependencies
 - builds the Swift CLI
 - prepares the local runtime
+
+Running `./esh` with no arguments opens the default interactive launcher menu.
 
 ### Release mode
 
@@ -38,6 +41,7 @@ The packaged release includes:
 Main commands:
 
 ```text
+esh
 esh chat [session-name]
 esh doctor
 esh model list
@@ -50,6 +54,8 @@ esh cache build --session <uuid> [--mode raw|turbo] [--model <id>]
 esh cache load --artifact <uuid> --message <text> [--model <id>]
 esh cache inspect [artifact-uuid]
 ```
+
+Plain `esh` opens a command menu with common actions like chat, model list, install model, sessions, caches, and doctor.
 
 ## 3. Find and Install Models
 
@@ -86,6 +92,14 @@ Start a chat:
 ```bash
 ./esh chat
 ```
+
+Or open the launcher menu:
+
+```bash
+./esh
+```
+
+and select `1. Chat`.
 
 Start a named chat:
 

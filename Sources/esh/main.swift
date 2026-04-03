@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import EshCore
 
 do {
@@ -14,7 +15,7 @@ private struct CLI {
     func run(arguments: [String]) async throws {
         let command = Array(arguments.dropFirst())
         guard let head = command.first else {
-            printUsage()
+            try await showDefaultMenu()
             return
         }
 
@@ -37,6 +38,75 @@ private struct CLI {
             try await handleChat(arguments: Array(command.dropFirst()), sessionStore: sessionStore)
         default:
             printUsage()
+        }
+    }
+
+    private func showDefaultMenu() async throws {
+        guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
+            printUsage()
+            return
+        }
+
+        let modelStore = FileModelStore(root: root)
+        let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
+        let modelService = ModelService(store: modelStore, downloader: modelDownloader)
+        let sessionStore = FileSessionStore(root: root)
+        let cacheStore = FileCacheStore(root: root)
+
+        while true {
+            renderDefaultMenu(
+                modelCount: (try? modelStore.listInstalls().count) ?? 0,
+                sessionCount: (try? sessionStore.listSessions().count) ?? 0,
+                cacheCount: (try? cacheStore.listArtifacts().count) ?? 0
+            )
+
+            guard let selection = prompt("Choose an option")?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !selection.isEmpty else {
+                continue
+            }
+
+            switch selection {
+            case "1":
+                let sessionName = prompt("Session name (blank for default)")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                try await handleChat(
+                    arguments: [sessionName].compactMap { value in
+                        guard let value, !value.isEmpty else { return nil }
+                        return value
+                    },
+                    sessionStore: sessionStore
+                )
+            case "2":
+                ModelListCommand.run(service: modelService)
+                pauseForMenu()
+            case "3":
+                guard let repoID = prompt("Hugging Face repo id")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !repoID.isEmpty else {
+                    print("Install cancelled.")
+                    pauseForMenu()
+                    continue
+                }
+                try await ModelInstallCommand.run(repoID: repoID, service: modelService)
+                pauseForMenu()
+            case "4":
+                try handleSession(arguments: ["list"], store: sessionStore)
+                pauseForMenu()
+            case "5":
+                try CacheInspectCommand.run(arguments: [], store: cacheStore)
+                pauseForMenu()
+            case "6":
+                try DoctorCommand.run()
+                pauseForMenu()
+            case "7":
+                printUsage()
+                pauseForMenu()
+            case "0", "q", "quit", "exit":
+                return
+            default:
+                print("Unknown option: \(selection)")
+                pauseForMenu()
+            }
         }
     }
 
@@ -99,6 +169,7 @@ private struct CLI {
         print(
             """
             esh commands:
+              esh
               esh chat [session-name]
               esh doctor
               esh model list
@@ -111,5 +182,38 @@ private struct CLI {
               esh cache inspect [artifact-uuid]
             """
         )
+    }
+
+    private func renderDefaultMenu(modelCount: Int, sessionCount: Int, cacheCount: Int) {
+        print(
+            """
+
+            Esh
+            Local-first LLM chat for Apple Silicon
+
+            Installed models: \(modelCount)
+            Saved sessions:   \(sessionCount)
+            Saved caches:     \(cacheCount)
+
+            1. Chat
+            2. List models
+            3. Install model
+            4. List sessions
+            5. List caches
+            6. Doctor
+            7. Show CLI help
+            0. Exit
+            """
+        )
+    }
+
+    private func prompt(_ label: String) -> String? {
+        print("\(label): ", terminator: "")
+        fflush(stdout)
+        return readLine()
+    }
+
+    private func pauseForMenu() {
+        _ = prompt("Press Enter to return to menu")
     }
 }

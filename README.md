@@ -42,10 +42,13 @@ Bootstrap once:
 Then use the stable launcher:
 
 ```bash
+./esh
 ./esh doctor
 ./esh model list
 ./esh chat
 ```
+
+Running `./esh` with no command opens a default interactive launcher menu with the most common actions.
 
 ### Release mode
 
@@ -91,6 +94,14 @@ Launch chat:
 ```bash
 ./esh chat
 ```
+
+Or just run:
+
+```bash
+./esh
+```
+
+and choose `1. Chat` from the default menu.
 
 Launch or reopen a named session:
 
