@@ -1,10 +1,37 @@
 # Esh
 
-Local LLM chat and cache tooling for Apple Silicon, built in Swift with an MLX-backed Python bridge.
+Esh is a local-first LLM tool for Apple Silicon.
+
+It gives you:
+- local model install and management
+- interactive terminal chat
+- saved sessions
+- backend-native execution cache export/import
+- TurboQuant cache compression for MLX
+- self-contained release packaging
+
+Today, Esh is built around an MLX backend with a Swift core and CLI/TUI, plus a small Python bridge for `mlx-lm` and `mlx-vlm`.
+
+## What Esh Is For
+
+Esh is designed for people who want a local chat tool that is:
+- fast to run from terminal
+- practical for repeated conversations
+- honest about model and cache compatibility
+- ready to grow into more backends later
+
+This is a text-chat tool in v1.
+
+It does not yet do:
+- document ingestion
+- codebase indexing
+- embeddings or RAG
+- multimodal chat
+- in-tool Hugging Face model search
 
 ## Quick Start
 
-### Dev mode
+### Developer mode
 
 Bootstrap once:
 
@@ -12,7 +39,7 @@ Bootstrap once:
 ./scripts/bootstrap.sh
 ```
 
-Then run the tool with the project launcher:
+Then use the stable launcher:
 
 ```bash
 ./esh doctor
@@ -20,66 +47,13 @@ Then run the tool with the project launcher:
 ./esh chat
 ```
 
-### Install the small Qwen model used in testing
+### Release mode
 
-```bash
-./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
-```
-
-List installed models:
-
-```bash
-./esh model list
-```
-
-Inspect the model:
-
-```bash
-./esh model inspect mlx-community--qwen2.5-0.5b-instruct-4bit
-```
-
-### Chat with that model
-
-`esh chat` currently loads the first installed model. If the Qwen model above is the one you installed, you can just run:
-
-```bash
-./esh chat
-```
-
-Example session:
-
-```text
-> hello how are you, what can you do?
-> what is the name of Apple's CEO?
-> 1+1
-> /save
-> /exit
-```
-
-### Useful commands
-
-```bash
-./esh session list
-./esh cache build --session <session-uuid> --mode raw
-./esh cache build --session <session-uuid> --mode turbo
-./esh cache inspect <artifact-uuid>
-./esh cache load --artifact <artifact-uuid> --message "Continue this chat"
-```
-
-## Release packaging
-
-Build a self-contained release artifact:
+Build a self-contained release bundle:
 
 ```bash
 ./scripts/package-release.sh
 ```
-
-That creates a bundle under `dist/` containing:
-
-- `esh` launcher
-- `bin/esh` release binary
-- embedded `python/`
-- packaged bridge files under `share/esh/`
 
 Run the packaged tool:
 
@@ -88,16 +62,240 @@ Run the packaged tool:
 ./dist/esh-macos-<version>/esh chat
 ```
 
-## Data location
+## Install a Model
 
-By default, models, sessions, and caches live under:
+Esh currently installs models directly from a Hugging Face repo id.
+
+Example:
+
+```bash
+./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
+```
+
+Then inspect what is installed:
+
+```bash
+./esh model list
+./esh model inspect mlx-community--qwen2.5-0.5b-instruct-4bit
+```
+
+Notes:
+- the install command takes a Hugging Face repo id
+- most other model commands use the installed model id
+- installed ids are normalized like `mlx-community--qwen2.5-0.5b-instruct-4bit`
+
+## Chat
+
+Launch chat:
+
+```bash
+./esh chat
+```
+
+Launch or reopen a named session:
+
+```bash
+./esh chat default
+./esh chat work
+./esh chat experiments
+```
+
+Inside chat, you can type normal messages and slash commands.
+
+Example:
+
+```text
+> hello how are you, what can you do?
+> /autosave on
+> /sessions
+> /new scratch
+> /switch default
+> /save
+> /exit
+```
+
+## TUI Features
+
+The chat UI includes:
+- transcript pane
+- fixed input bar
+- fixed footer stats
+- command overlay
+- saved session switching from inside chat
+
+Useful slash commands:
+
+```text
+/menu
+/help
+/save
+/autosave on
+/autosave off
+/autosave toggle
+/new
+/new my-session
+/switch my-session
+/switch <uuid>
+/models
+/sessions
+/caches
+/doctor
+/model inspect <id>
+/session show <uuid>
+/cache inspect <uuid>
+/close
+/exit
+```
+
+## Sessions
+
+List sessions from the CLI:
+
+```bash
+./esh session list
+```
+
+Show a specific saved session:
+
+```bash
+./esh session show <session-uuid>
+```
+
+The chat UI shows sessions in a more human-friendly way:
+- session name
+- short id
+- message count
+
+Example:
+
+```text
+default [8C56AF77] | 2 messages
+lifecycle [D59E570E] | 2 messages
+demo-session [2AB2CAF3] | 2 messages
+```
+
+## Cache Workflows
+
+Esh supports:
+- raw cache artifacts
+- TurboQuant-compressed cache artifacts
+- cache inspect
+- cache load and resume
+
+List saved cache artifacts:
+
+```bash
+./esh cache inspect
+```
+
+Inspect one artifact:
+
+```bash
+./esh cache inspect C46B9A7C-0636-4111-B300-C5A9AE1341C1
+```
+
+Build a cache from a saved session:
+
+```bash
+./esh session list
+./esh cache build --session <session-uuid> --mode raw
+./esh cache build --session <session-uuid> --mode turbo
+```
+
+Resume from a saved cache:
+
+```bash
+./esh cache load --artifact <artifact-uuid> --message "Continue this chat"
+```
+
+Important:
+- cache artifacts are backend-specific
+- cache artifacts are model-specific
+- Esh reuses one cache pipeline, but artifacts are not portable across runtimes/models
+
+## Typical Use Cases
+
+### 1. Quick local chat
+
+```bash
+./scripts/bootstrap.sh
+./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
+./esh chat
+```
+
+### 2. Keep multiple named chats
+
+```bash
+./esh chat work
+./esh chat ideas
+./esh chat debugging
+```
+
+Or from inside chat:
+
+```text
+/new work
+/switch ideas
+/sessions
+```
+
+### 3. Save a conversation state and benchmark cache modes
+
+```bash
+./esh session list
+./esh cache build --session <session-uuid> --mode raw
+./esh cache build --session <session-uuid> --mode turbo
+./esh cache inspect
+```
+
+### 4. Verify environment health before debugging
+
+```bash
+./esh doctor
+./scripts/verify-env.sh
+```
+
+## Data Layout
+
+By default, Esh stores data under:
 
 ```text
 ~/.esh
 ```
 
-You can override that with:
+This includes separate locations for:
+- models
+- sessions
+- caches
+
+Override the root if needed:
 
 ```bash
 ESH_HOME=/path/to/custom-root ./esh chat
 ```
+
+Esh also accepts legacy `LLMCACHE_*` env vars for compatibility during the rename transition.
+
+## Project Layout
+
+- [Package.swift](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/Package.swift)
+- [Sources/EshCore](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/Sources/EshCore)
+- [Sources/esh](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/Sources/esh)
+- [Tools/mlx_vlm_bridge.py](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/Tools/mlx_vlm_bridge.py)
+- [scripts/bootstrap.sh](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/scripts/bootstrap.sh)
+- [scripts/package-release.sh](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/scripts/package-release.sh)
+- [docs/USAGE.md](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/docs/USAGE.md)
+
+## Current Limitations
+
+These are the most important current caveats:
+
+- `esh chat` currently loads the first installed model rather than exposing a polished CLI `--model` selector
+- `esh cache build` currently expects a saved session UUID, not a session name
+- `esh session show` currently expects a UUID in the CLI
+- model search is not built into Esh yet; you find repo ids on Hugging Face and install by id
+- some build runs still show Swift concurrency warnings from `ProcessRunner.swift`, but the tool functions correctly
+
+## More Detailed Guide
+
+See the full guide at [docs/USAGE.md](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/docs/USAGE.md).
