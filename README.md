@@ -27,7 +27,7 @@ It does not yet do:
 - codebase indexing
 - embeddings or RAG
 - multimodal chat
-- in-tool Hugging Face model search
+- in-tool model install directly from arbitrary search results outside local installs and Hugging Face
 
 ## Quick Start
 
@@ -112,6 +112,14 @@ GitHub surfaces:
 ## Install a Model
 
 Esh currently installs models directly from a Hugging Face repo id.
+
+You can search first:
+
+```bash
+./esh model search qwen
+./esh model search qwen --source local
+./esh model search qwen --source hf --limit 5
+```
 
 Example:
 
@@ -367,7 +375,7 @@ Esh also accepts legacy `LLMCACHE_*` env vars for compatibility during the renam
 
 These are the most important current caveats:
 
-- model search is not built into Esh yet; you find repo ids on Hugging Face and install by id
+- model search covers installed models and Hugging Face, but install still happens by explicit repo id
 - cache artifacts remain runtime/model specific and are not cross-backend portable
 - some build runs still show Swift concurrency warnings from `ProcessRunner.swift`, but the tool functions correctly
 

@@ -6,13 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-03
+
 ### Added
-- explicit `esh chat --model <id-or-repo>` model selection
-- session/model name support across more CLI commands
-- `esh benchmark` and `esh benchmark history`
-- session search with `esh session grep <text>`
-- in-chat `/use-model`, `/model current`, and `/search`
-- GitHub Actions CI and release packaging
+- `esh model search <query>` across local installs and Hugging Face
+- a shared model catalog layer for local and remote discovery
+- default launcher menu support for model search
 
 ## [0.1.0] - 2026-04-03
 

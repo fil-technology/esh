@@ -51,6 +51,7 @@ esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
 esh benchmark history
 esh doctor
 esh model list
+esh model search <query> [--source all|local|hf] [--limit N]
 esh model install <hf-repo-id>
 esh model inspect <model-id-or-repo>
 esh model remove <model-id-or-repo>
@@ -66,12 +67,18 @@ Plain `esh` opens a command menu with common actions like chat, model list, inst
 
 ## 3. Find and Install Models
 
-Esh does not yet search Hugging Face for you.
-
-Current model workflow:
-1. Find an MLX-compatible repo on Hugging Face.
-2. Copy its repo id.
+Model workflow:
+1. Search local installs and/or Hugging Face from Esh.
+2. Pick a repo id you want.
 3. Install it with Esh.
+
+Examples:
+
+```bash
+./esh model search qwen
+./esh model search qwen --source local
+./esh model search qwen --source hf --limit 5
+```
 
 Example:
 
@@ -365,7 +372,7 @@ git push origin "$(./scripts/release-version.sh tag)"
 
 These are intentional current boundaries, not hidden bugs:
 
-- no built-in Hugging Face search yet
+- interactive install directly from search results is not built yet
 - cache artifacts are not portable across different runtimes/models
 - TUI transcript capture in logs will show ANSI redraw codes because it is a real terminal UI
 

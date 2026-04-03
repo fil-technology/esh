@@ -22,6 +22,11 @@ private struct CLI {
         let modelStore = FileModelStore(root: root)
         let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
+        let modelCatalogService = ModelCatalogService(
+            localCatalog: LocalModelCatalog(store: modelStore),
+            huggingFaceCatalog: HuggingFaceModelCatalog(),
+            modelStore: modelStore
+        )
         let sessionStore = FileSessionStore(root: root)
         let cacheStore = FileCacheStore(root: root)
 
@@ -31,7 +36,7 @@ private struct CLI {
         case "doctor":
             try DoctorCommand.run()
         case "model":
-            try await handleModel(arguments: Array(command.dropFirst()), service: modelService)
+            try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
@@ -52,6 +57,11 @@ private struct CLI {
         let modelStore = FileModelStore(root: root)
         let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
+        let modelCatalogService = ModelCatalogService(
+            localCatalog: LocalModelCatalog(store: modelStore),
+            huggingFaceCatalog: HuggingFaceModelCatalog(),
+            modelStore: modelStore
+        )
         let sessionStore = FileSessionStore(root: root)
         let cacheStore = FileCacheStore(root: root)
 
@@ -82,6 +92,16 @@ private struct CLI {
                 ModelListCommand.run(service: modelService)
                 pauseForMenu()
             case "3":
+                guard let query = prompt("Model search query")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !query.isEmpty else {
+                    print("Search cancelled.")
+                    pauseForMenu()
+                    continue
+                }
+                try await ModelSearchCommand.run(arguments: [query], service: modelCatalogService)
+                pauseForMenu()
+            case "4":
                 guard let repoID = prompt("Hugging Face repo id")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
@@ -91,19 +111,19 @@ private struct CLI {
                 }
                 try await ModelInstallCommand.run(repoID: repoID, service: modelService)
                 pauseForMenu()
-            case "4":
+            case "5":
                 try handleSession(arguments: ["list"], store: sessionStore)
                 pauseForMenu()
-            case "5":
+            case "6":
                 try CacheInspectCommand.run(arguments: [], store: cacheStore)
                 pauseForMenu()
-            case "6":
+            case "7":
                 try DoctorCommand.run()
                 pauseForMenu()
-            case "7":
+            case "8":
                 printUsage()
                 pauseForMenu()
-            case "8":
+            case "9":
                 try await BenchmarkCommand.run(arguments: ["history"])
                 pauseForMenu()
             case "0", "q", "quit", "exit":
@@ -115,7 +135,7 @@ private struct CLI {
         }
     }
 
-    private func handleModel(arguments: [String], service: ModelService) async throws {
+    private func handleModel(arguments: [String], service: ModelService, catalogService: ModelCatalogService) async throws {
         guard let subcommand = arguments.first else {
             ModelListCommand.run(service: service)
             return
@@ -124,6 +144,8 @@ private struct CLI {
         switch subcommand {
         case "list":
             ModelListCommand.run(service: service)
+        case "search":
+            try await ModelSearchCommand.run(arguments: Array(arguments.dropFirst()), service: catalogService)
         case "install":
             guard let repoID = arguments.dropFirst().first else {
                 throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id>")
@@ -187,6 +209,7 @@ private struct CLI {
               esh benchmark history
               esh doctor
               esh model list
+              esh model search <query> [--source all|local|hf] [--limit N]
               esh model install <hf-repo-id>
               esh model inspect <model-id>
               esh model remove <model-id>
@@ -211,12 +234,13 @@ private struct CLI {
 
             1. Chat
             2. List models
-            3. Install model
-            4. List sessions
-            5. List caches
-            6. Doctor
-            7. Show CLI help
-            8. Benchmark history
+            3. Search models
+            4. Install model
+            5. List sessions
+            6. List caches
+            7. Doctor
+            8. Show CLI help
+            9. Benchmark history
             0. Exit
             """
         )
