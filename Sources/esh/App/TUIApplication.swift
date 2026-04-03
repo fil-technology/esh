@@ -121,6 +121,29 @@ struct TUIApplication {
             return true
         }
 
+        if command.hasPrefix("/model open ") {
+            let identifier = String(command.dropFirst("/model open ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                try await ModelOpenCommand.run(
+                    identifier: identifier,
+                    service: modelService,
+                    registry: RecommendedModelRegistry(),
+                    catalogService: ModelCatalogService(
+                        localCatalog: LocalModelCatalog(store: modelStore),
+                        huggingFaceCatalog: HuggingFaceModelCatalog(),
+                        modelStore: modelStore
+                    )
+                )
+                state.statusText = "opened model page"
+            } catch {
+                state.overlay = OverlayPanelState(title: "Open Model Page", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "model open failed"
+            }
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+
         if command.hasPrefix("/session show ") {
             let rawID = String(command.dropFirst("/session show ".count))
             showSessionDetails(rawID: rawID, state: &state, sessionStore: sessionStore)
@@ -197,6 +220,7 @@ struct TUIApplication {
                     "/sessions       Show saved chat sessions",
                     "/caches         Show saved cache artifacts",
                     "/search <text>  Search the active session",
+                    "/model open <id-or-alias>",
                     "/model inspect <id>",
                     "/session show <uuid>",
                     "/cache inspect <uuid>",

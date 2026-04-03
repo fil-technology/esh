@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-03
+
+### Added
+- `esh model open` for opening a model page from an alias, installed id, repo id, or search term
+- interactive highlighted pickers for the launcher menu and model selection flows
+
+### Changed
+- Hugging Face model search now uses the strict `apps=mlx-lm` filter
+- model search and model lists now support opening and installing directly from the selected row
+- launcher list descriptions now render inline on the right for a more compact layout
+
 ## [0.1.3] - 2026-04-03
 
 ### Added

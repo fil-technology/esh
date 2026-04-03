@@ -40,6 +40,7 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
         var components = URLComponents(string: "https://huggingface.co/api/models")!
         components.queryItems = [
             .init(name: "search", value: trimmed),
+            .init(name: "apps", value: "mlx-lm"),
             .init(name: "limit", value: String(max(1, limit))),
             .init(name: "sort", value: "downloads"),
             .init(name: "direction", value: "-1"),
@@ -54,7 +55,6 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
 
         let entries = try decoder.decode([SearchEntry].self, from: data)
         return entries
-            .filter { isRelevantToMLX($0) }
             .prefix(limit)
             .map { entry in
                 ModelSearchResult(
@@ -71,33 +71,6 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
                     updatedAt: entry.lastModified
                 )
             }
-    }
-
-    private func isRelevantToMLX(_ entry: SearchEntry) -> Bool {
-        let tags = Set((entry.tags ?? []).map { $0.lowercased() })
-        let library = entry.libraryName?.lowercased()
-        let id = entry.id.lowercased()
-
-        if library == "mlx" {
-            return true
-        }
-        if tags.contains("mlx") || tags.contains("mlx-lm") {
-            return true
-        }
-        if id.contains("mlx") || id.hasPrefix("mlx-community/") {
-            return true
-        }
-        return hasMLXArtifacts(entry.siblings)
-    }
-
-    private func hasMLXArtifacts(_ siblings: [SearchEntry.Sibling]?) -> Bool {
-        guard let siblings else { return false }
-        return siblings.contains { sibling in
-            let file = sibling.rfilename.lowercased()
-            return file.hasSuffix(".safetensors")
-                || file.hasSuffix("config.json")
-                || file.contains("tokenizer")
-        }
     }
 
     private func totalSize(for siblings: [SearchEntry.Sibling]?) -> Int64? {

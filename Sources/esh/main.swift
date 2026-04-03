@@ -66,21 +66,21 @@ private struct CLI {
         )
         let sessionStore = FileSessionStore(root: root)
         let cacheStore = FileCacheStore(root: root)
+        let picker = InteractiveListPicker()
 
         while true {
-            renderDefaultMenu(
+            let menuItems = makeDefaultMenuItems(
                 modelCount: (try? modelStore.listInstalls().count) ?? 0,
                 sessionCount: (try? sessionStore.listSessions().count) ?? 0,
                 cacheCount: (try? cacheStore.listArtifacts().count) ?? 0
             )
-
-            guard let selection = prompt("Choose an option")?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !selection.isEmpty else {
-                continue
-            }
-
-            switch selection {
-            case "1":
+            switch picker.pick(
+                title: "Esh",
+                subtitle: "Local-first LLM chat for Apple Silicon",
+                items: menuItems,
+                primaryHint: "Enter select"
+            ) {
+            case .selected(0):
                 let sessionName = prompt("Session name (blank for default)")?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 try await handleChat(
@@ -90,28 +90,34 @@ private struct CLI {
                     },
                     sessionStore: sessionStore
                 )
-            case "2":
-                try ModelRecommendedCommand.run(arguments: [], registry: recommendedRegistry)
-                pauseForMenu()
-            case "3":
-                ModelListCommand.run(service: modelService)
-                pauseForMenu()
-            case "4":
+            case .selected(1):
+                try await showRecommendedModelsMenu(
+                    service: modelService,
+                    catalogService: modelCatalogService,
+                    registry: recommendedRegistry
+                )
+            case .selected(2):
+                try await showInstalledModelsMenu(
+                    service: modelService,
+                    catalogService: modelCatalogService,
+                    registry: recommendedRegistry
+                )
+            case .selected(3):
                 guard let query = prompt("Model search query")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !query.isEmpty else {
-                    print("Search cancelled.")
-                    pauseForMenu()
                     continue
                 }
-                try await ModelSearchCommand.run(arguments: [query], service: modelCatalogService)
-                pauseForMenu()
-            case "5":
+                try await showSearchModelsMenu(
+                    query: query,
+                    service: modelService,
+                    catalogService: modelCatalogService,
+                    registry: recommendedRegistry
+                )
+            case .selected(4):
                 guard let repoID = prompt("Repo id, alias, or search term")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
-                    print("Install cancelled.")
-                    pauseForMenu()
                     continue
                 }
                 try await ModelInstallCommand.run(
@@ -121,26 +127,25 @@ private struct CLI {
                     catalogService: modelCatalogService
                 )
                 pauseForMenu()
-            case "6":
+            case .selected(5):
                 try handleSession(arguments: ["list"], store: sessionStore)
                 pauseForMenu()
-            case "7":
+            case .selected(6):
                 try CacheInspectCommand.run(arguments: [], store: cacheStore)
                 pauseForMenu()
-            case "8":
+            case .selected(7):
                 try DoctorCommand.run()
                 pauseForMenu()
-            case "9":
+            case .selected(8):
                 printUsage()
                 pauseForMenu()
-            case "10":
+            case .selected(9):
                 try await BenchmarkCommand.run(arguments: ["history"])
                 pauseForMenu()
-            case "0", "q", "quit", "exit":
+            case .cancelled:
                 return
             default:
-                print("Unknown option: \(selection)")
-                pauseForMenu()
+                continue
             }
         }
     }
@@ -164,6 +169,16 @@ private struct CLI {
             }
             try await ModelInstallCommand.run(
                 identifier: repoID,
+                service: service,
+                registry: recommendedRegistry,
+                catalogService: catalogService
+            )
+        case "open":
+            guard let identifier = arguments.dropFirst().first else {
+                throw StoreError.invalidManifest("Usage: esh model open <model-id-or-alias-or-repo-or-search-term>")
+            }
+            try await ModelOpenCommand.run(
+                identifier: identifier,
                 service: service,
                 registry: recommendedRegistry,
                 catalogService: catalogService
@@ -229,6 +244,7 @@ private struct CLI {
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
               esh model install <hf-repo-id-or-alias-or-search-term>
+              esh model open <model-id-or-alias-or-repo-or-search-term>
               esh model inspect <model-id>
               esh model remove <model-id>
               esh session [list|show <uuid-or-name>|grep <text>]
@@ -239,30 +255,19 @@ private struct CLI {
         )
     }
 
-    private func renderDefaultMenu(modelCount: Int, sessionCount: Int, cacheCount: Int) {
-        print(
-            """
-
-            Esh
-            Local-first LLM chat for Apple Silicon
-
-            Installed models: \(modelCount)
-            Saved sessions:   \(sessionCount)
-            Saved caches:     \(cacheCount)
-
-            1. Chat
-            2. Recommended models
-            3. List models
-            4. Search models
-            5. Install model
-            6. List sessions
-            7. List caches
-            8. Doctor
-            9. Show CLI help
-            10. Benchmark history
-            0. Exit
-            """
-        )
+    private func makeDefaultMenuItems(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [InteractiveListPicker.Item] {
+        [
+            .init(title: "Chat", detail: "Open the interactive chat TUI"),
+            .init(title: "Recommended models", detail: "Fast setup presets"),
+            .init(title: "List models", detail: "\(modelCount) installed"),
+            .init(title: "Search models", detail: "Find MLX-compatible models"),
+            .init(title: "Install model", detail: "Install by alias, repo id, or search"),
+            .init(title: "List sessions", detail: "\(sessionCount) saved"),
+            .init(title: "List caches", detail: "\(cacheCount) saved"),
+            .init(title: "Doctor", detail: "Check Python, bridge, and runtime"),
+            .init(title: "Show CLI help", detail: "Print all commands"),
+            .init(title: "Benchmark history", detail: "Past raw vs turbo runs")
+        ]
     }
 
     private func prompt(_ label: String) -> String? {
@@ -273,5 +278,165 @@ private struct CLI {
 
     private func pauseForMenu() {
         _ = prompt("Press Enter to return to menu")
+    }
+
+    private func showRecommendedModelsMenu(
+        service: ModelService,
+        catalogService: ModelCatalogService,
+        registry: RecommendedModelRegistry
+    ) async throws {
+        let models = registry.list()
+        guard !models.isEmpty else {
+            print("No recommended models found.")
+            pauseForMenu()
+            return
+        }
+
+        let items = models.map { model in
+            InteractiveListPicker.Item(
+                title: "\(model.id)  \(model.profile.rawValue)  \(model.tier.rawValue)",
+                detail: "\(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
+            )
+        }
+        let picker = InteractiveListPicker()
+        switch picker.pick(
+            title: "Recommended Models",
+            subtitle: "Enter opens the model page. Press i to install the selected model.",
+            items: items,
+            primaryHint: "Enter open page",
+            secondaryHints: ["i install"],
+            secondaryKeys: ["i"]
+        ) {
+        case .selected(let index):
+            let model = models[index]
+            try await ModelOpenCommand.run(
+                identifier: model.id,
+                service: service,
+                registry: registry,
+                catalogService: catalogService
+            )
+        case .secondary("i", let index):
+            let model = models[index]
+            try await ModelInstallCommand.run(
+                identifier: model.id,
+                service: service,
+                registry: registry,
+                catalogService: catalogService
+            )
+        default:
+            return
+        }
+        pauseForMenu()
+    }
+
+    private func showInstalledModelsMenu(
+        service: ModelService,
+        catalogService: ModelCatalogService,
+        registry: RecommendedModelRegistry
+    ) async throws {
+        let installs = try service.list()
+        guard !installs.isEmpty else {
+            print("No installed models.")
+            pauseForMenu()
+            return
+        }
+        let items = installs.map { install in
+            InteractiveListPicker.Item(
+                title: "\(install.id)  \(ByteFormatting.string(for: install.sizeBytes))",
+                detail: install.installPath
+            )
+        }
+        let picker = InteractiveListPicker()
+        switch picker.pick(
+            title: "Installed Models",
+            subtitle: "Enter opens the selected model page in your browser.",
+            items: items,
+            primaryHint: "Enter open page"
+        ) {
+        case .selected(let index):
+            let install = installs[index]
+            try await ModelOpenCommand.run(
+                identifier: install.id,
+                service: service,
+                registry: registry,
+                catalogService: catalogService
+            )
+        default:
+            return
+        }
+        pauseForMenu()
+    }
+
+    private func showSearchModelsMenu(
+        query: String,
+        service: ModelService,
+        catalogService: ModelCatalogService,
+        registry: RecommendedModelRegistry
+    ) async throws {
+        let results = try await catalogService.search(query: query, sourceFilter: .all, limit: 10)
+        guard !results.isEmpty else {
+            print("No models found for \"\(query)\".")
+            pauseForMenu()
+            return
+        }
+
+        let items = results.map { result in
+            let source = result.source == .huggingFace ? "hf" : "local"
+            let state = result.isInstalled ? "installed" : "-"
+            let kind = result.backend?.rawValue ?? result.tags.first ?? "-"
+            let size = result.sizeBytes.map(ByteFormatting.string(for:)) ?? "-"
+            let downloads = result.downloads.map(compactNumber(_:)) ?? "-"
+            let date = result.updatedAt.map(menuDateFormatter.string(from:)) ?? "-"
+            return InteractiveListPicker.Item(
+                title: "\(result.displayName)",
+                detail: "\(source) | \(state) | \(kind) | \(size) | \(downloads) | \(date)"
+            )
+        }
+        let picker = InteractiveListPicker()
+        switch picker.pick(
+            title: "Model Search: \(query)",
+            subtitle: "Enter opens the selected model page. Press i to install it.",
+            items: items,
+            primaryHint: "Enter open page",
+            secondaryHints: ["i install"],
+            secondaryKeys: ["i"]
+        ) {
+        case .selected(let index):
+            let result = results[index]
+            try await ModelOpenCommand.run(
+                identifier: result.modelSource.reference,
+                service: service,
+                registry: registry,
+                catalogService: catalogService
+            )
+        case .secondary("i", let index):
+            let result = results[index]
+            try await ModelInstallCommand.run(
+                identifier: result.modelSource.reference,
+                service: service,
+                registry: registry,
+                catalogService: catalogService
+            )
+        default:
+            return
+        }
+        pauseForMenu()
+    }
+
+    private func compactNumber(_ value: Int) -> String {
+        switch value {
+        case 1_000_000...:
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        case 1_000...:
+            return String(format: "%.1fK", Double(value) / 1_000)
+        default:
+            return "\(value)"
+        }
+    }
+
+    private var menuDateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
     }
 }

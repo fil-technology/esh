@@ -91,11 +91,11 @@ private extension ModelSearchCommand {
         }
 
         private static func kindText(for result: ModelSearchResult) -> String {
+            if let backend = result.backend?.rawValue, !backend.isEmpty {
+                return backend
+            }
             if let firstTag = result.tags.first, !firstTag.isEmpty {
                 return firstTag
-            }
-            if let backend = result.backend?.rawValue {
-                return backend
             }
             return "-"
         }
