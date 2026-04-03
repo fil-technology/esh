@@ -74,23 +74,59 @@ public struct FileModelStore: ModelStore, Sendable {
         var manifest = manifest
         let canonicalInstallURL = installsURL.appendingPathComponent(manifest.install.id, isDirectory: true)
         let canonicalPath = canonicalInstallURL.path
+        var didChange = false
 
-        guard manifest.install.installPath != canonicalPath || manifest.install.spec.localPath != canonicalPath else {
-            return manifest
+        let resolvedInstallPath: String
+        if manifest.install.installPath == canonicalPath || manifest.install.spec.localPath == canonicalPath {
+            resolvedInstallPath = canonicalPath
+        } else {
+            let fileManager = FileManager.default
+            let currentInstallPath = manifest.install.installPath
+            let canonicalExists = fileManager.fileExists(atPath: canonicalPath)
+            let currentExists = fileManager.fileExists(atPath: currentInstallPath)
+
+            if canonicalExists || !currentExists {
+                manifest.install.installPath = canonicalPath
+                manifest.install.spec.localPath = canonicalPath
+                didChange = true
+                resolvedInstallPath = canonicalPath
+            } else {
+                resolvedInstallPath = currentInstallPath
+            }
         }
 
-        let fileManager = FileManager.default
-        let currentInstallPath = manifest.install.installPath
-        let canonicalExists = fileManager.fileExists(atPath: canonicalPath)
-        let currentExists = fileManager.fileExists(atPath: currentInstallPath)
-
-        guard canonicalExists || !currentExists else {
-            return manifest
+        if manifest.install.sizeBytes <= 0,
+           let actualSize = directorySize(atPath: resolvedInstallPath),
+           actualSize > 0 {
+            manifest.install.sizeBytes = actualSize
+            didChange = true
         }
 
-        manifest.install.installPath = canonicalPath
-        manifest.install.spec.localPath = canonicalPath
-        try manifestIO.write(manifest, to: manifestURL)
+        if didChange {
+            try manifestIO.write(manifest, to: manifestURL)
+        }
         return manifest
+    }
+
+    private func directorySize(atPath path: String) -> Int64? {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles],
+            errorHandler: nil
+        ) else {
+            return nil
+        }
+
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values?.isRegularFile == true, let fileSize = values?.fileSize else {
+                continue
+            }
+            total += Int64(fileSize)
+        }
+        return total
     }
 }

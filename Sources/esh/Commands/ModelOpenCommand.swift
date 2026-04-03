@@ -6,13 +6,11 @@ enum ModelOpenCommand {
     static func run(
         identifier: String,
         service: ModelService,
-        registry: RecommendedModelRegistry,
         catalogService: ModelCatalogService
     ) async throws {
         let url = try await resolveURL(
             identifier: identifier,
             service: service,
-            registry: registry,
             catalogService: catalogService
         )
 
@@ -32,10 +30,9 @@ enum ModelOpenCommand {
     static func resolveURL(
         identifier: String,
         service: ModelService,
-        registry: RecommendedModelRegistry,
         catalogService: ModelCatalogService
     ) async throws -> URL {
-        if let recommended = registry.resolve(alias: identifier) {
+        if let recommended = service.resolveRecommended(alias: identifier) {
             return try url(forRepoID: recommended.repoID)
         }
 

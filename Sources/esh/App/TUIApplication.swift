@@ -1,7 +1,16 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 import EshCore
 
 struct TUIApplication {
+    private enum CommandOutcome {
+        case notHandled
+        case handled
+        case exitChat
+    }
+
     func run(
         sessionName: String,
         modelIdentifier: String? = nil,
@@ -30,14 +39,18 @@ struct TUIApplication {
         let backend = MLXBackend()
         var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
         let chatService = ChatService()
-        state = makeScreenState(for: session, installID: install.id)
-        state.statusText = "ready | /menu for commands"
+        state = makeScreenState(
+            for: session,
+            installID: install.id,
+            cacheMode: latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw"
+        )
+        state.statusText = "ready | /menu commands | /back launcher"
         surface.render(state: state)
 
-        while let line = readLine() {
+        while let line = readInputLine(state: &state, surface: surface) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
-            if await handleCommand(
+            let commandOutcome = await handleCommand(
                 trimmed,
                 state: &state,
                 session: &session,
@@ -49,10 +62,13 @@ struct TUIApplication {
                 modelService: modelService,
                 cacheStore: cacheStore,
                 surface: surface
-            ) {
+            )
+            if commandOutcome == .handled {
                 continue
             }
-            if trimmed == "/exit" { break }
+            if commandOutcome == .exitChat || trimmed == "/exit" {
+                break
+            }
 
             state.inputText = trimmed
             state.overlay = nil
@@ -86,7 +102,7 @@ struct TUIApplication {
             state.metrics = await runtime.metrics
             state.inputText = ""
             state.streamingAssistantMessageID = nil
-            state.statusText = "ready"
+            state.statusText = "ready | /menu commands | /back launcher"
             updateStreamingAssistant(
                 state: &state,
                 assistantID: assistantID,
@@ -111,15 +127,15 @@ struct TUIApplication {
         modelService: ModelService,
         cacheStore: CacheStore,
         surface: TerminalSurface
-    ) async -> Bool {
-        guard command.hasPrefix("/") else { return false }
+    ) async -> CommandOutcome {
+        guard command.hasPrefix("/") else { return .notHandled }
 
         if command.hasPrefix("/model inspect ") {
             let modelID = String(command.dropFirst("/model inspect ".count))
             showModelDetails(modelID: modelID, state: &state, modelService: modelService)
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         if command.hasPrefix("/model open ") {
@@ -128,7 +144,6 @@ struct TUIApplication {
                 try await ModelOpenCommand.run(
                     identifier: identifier,
                     service: modelService,
-                    registry: RecommendedModelRegistry(),
                     catalogService: ModelCatalogService(
                         localCatalog: LocalModelCatalog(store: modelStore),
                         huggingFaceCatalog: HuggingFaceModelCatalog(),
@@ -142,7 +157,7 @@ struct TUIApplication {
             }
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         if command.hasPrefix("/session show ") {
@@ -150,7 +165,7 @@ struct TUIApplication {
             showSessionDetails(rawID: rawID, state: &state, sessionStore: sessionStore)
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         if command.hasPrefix("/cache inspect ") {
@@ -158,7 +173,7 @@ struct TUIApplication {
             showCacheDetails(rawID: rawID, state: &state, cacheStore: cacheStore)
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         if command.hasPrefix("/use-model ") {
@@ -184,7 +199,7 @@ struct TUIApplication {
             }
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         if command.hasPrefix("/search ") {
@@ -201,7 +216,7 @@ struct TUIApplication {
             state.statusText = matches.isEmpty ? "no search matches" : "showing search results"
             state.inputText = ""
             surface.render(state: state)
-            return true
+            return .handled
         }
 
         switch command {
@@ -210,6 +225,7 @@ struct TUIApplication {
                 title: "Command Menu",
                 lines: [
                     "/menu or /help  Show this command panel",
+                    "/back           Return to the launcher",
                     "/close          Close the current panel",
                     "/save           Save the active chat session",
                     "/autosave on|off|toggle",
@@ -244,7 +260,9 @@ struct TUIApplication {
             state.statusText = state.autosaveEnabled ? "autosave enabled" : "autosave disabled"
         case "/close":
             state.overlay = nil
-            state.statusText = "ready | /menu for commands"
+            state.statusText = "ready | /menu commands | /back launcher"
+        case "/back":
+            return .exitChat
         case "/model current":
             state.overlay = OverlayPanelState(
                 title: "Current Model",
@@ -274,7 +292,12 @@ struct TUIApplication {
                 session = ChatSession(name: requestedName.isEmpty ? try nextSessionName(sessionStore: sessionStore) : requestedName)
                 session.modelID = install.id
                 session.backend = .mlx
-                state = makeScreenState(for: session, installID: install.id, autosaveEnabled: state.autosaveEnabled)
+                state = makeScreenState(
+                    for: session,
+                    installID: install.id,
+                    cacheMode: "raw",
+                    autosaveEnabled: state.autosaveEnabled
+                )
                 state.statusText = "new session"
             } catch {
                 state.overlay = OverlayPanelState(title: "New Session", lines: ["Error: \(error.localizedDescription)"])
@@ -299,7 +322,12 @@ struct TUIApplication {
                 )
                 await runtime.unload()
                 runtime = try await backend.loadRuntime(for: install)
-                state = makeScreenState(for: session, installID: install.id, autosaveEnabled: state.autosaveEnabled)
+                state = makeScreenState(
+                    for: session,
+                    installID: install.id,
+                    cacheMode: latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
+                    autosaveEnabled: state.autosaveEnabled
+                )
                 state.statusText = "switched session"
             } catch {
                 state.overlay = OverlayPanelState(title: "Switch Session", lines: ["Error: \(error.localizedDescription)"])
@@ -358,7 +386,7 @@ struct TUIApplication {
                 state.statusText = "doctor failed"
             }
         case "/exit":
-            return false
+            return .exitChat
         default:
             state.overlay = OverlayPanelState(
                 title: "Unknown Command",
@@ -372,7 +400,7 @@ struct TUIApplication {
 
         state.inputText = ""
         surface.render(state: state)
-        return command != "/exit"
+        return .handled
     }
 
     private func showModelDetails(
@@ -444,15 +472,16 @@ struct TUIApplication {
     private func makeScreenState(
         for session: ChatSession,
         installID: String,
+        cacheMode: String = "raw",
         autosaveEnabled: Bool = false
     ) -> AppState {
         AppState(
             sessionName: session.name,
             backendLabel: "MLX",
             modelLabel: installID,
-            cacheMode: "raw",
+            cacheMode: cacheMode,
             metrics: .init(),
-            statusText: "ready | /menu for commands",
+            statusText: "ready | /menu commands | /back launcher",
             inputText: "",
             transcriptItems: transcriptItems(from: session),
             streamingAssistantMessageID: nil,
@@ -495,6 +524,15 @@ struct TUIApplication {
         let shortID = String(session.id.uuidString.prefix(8))
         let activeMarker = session.id == activeSessionID ? "*" : " "
         return "\(activeMarker) \(session.name) [\(shortID)]"
+    }
+
+    private func latestCacheMode(for session: ChatSession, cacheStore: CacheStore) -> String? {
+        let latest = try? cacheStore.listArtifacts()
+            .filter { $0.manifest.sessionID == session.id }
+            .max { lhs, rhs in
+                lhs.manifest.createdAt < rhs.manifest.createdAt
+            }
+        return latest?.manifest.cacheMode.rawValue
     }
 
     private func showCacheDetails(
@@ -551,8 +589,68 @@ struct TUIApplication {
         return "streaming…"
     }
 
-    private func readLine() -> String? {
+    private func readInputLine(state: inout AppState, surface: TerminalSurface) -> String? {
+        #if canImport(Darwin)
+        guard isatty(STDIN_FILENO) != 0 else {
+            fflush(stdout)
+            return Swift.readLine()
+        }
+
+        var original = termios()
+        guard tcgetattr(STDIN_FILENO, &original) == 0 else {
+            fflush(stdout)
+            return Swift.readLine()
+        }
+
+        var raw = original
+        raw.c_lflag &= ~UInt(ECHO | ICANON)
+        raw.c_iflag &= ~UInt(IXON | ICRNL)
+        guard tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0 else {
+            fflush(stdout)
+            return Swift.readLine()
+        }
+
+        defer {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original)
+            state.inputText = ""
+            surface.render(state: state)
+        }
+
+        state.inputText = ""
+        surface.render(state: state)
+
+        var buffer = ""
+        while true {
+            var byte: UInt8 = 0
+            let count = Darwin.read(STDIN_FILENO, &byte, 1)
+            if count != 1 {
+                return nil
+            }
+
+            switch byte {
+            case 3:
+                return "/exit"
+            case 10, 13:
+                return buffer
+            case 8, 127:
+                if !buffer.isEmpty {
+                    buffer.removeLast()
+                    state.inputText = buffer
+                    surface.render(state: state)
+                }
+            default:
+                guard let scalar = UnicodeScalar(Int(byte)),
+                      !CharacterSet.controlCharacters.contains(scalar) else {
+                    continue
+                }
+                buffer.append(Character(scalar))
+                state.inputText = buffer
+                surface.render(state: state)
+            }
+        }
+        #else
         fflush(stdout)
         return Swift.readLine()
+        #endif
     }
 }

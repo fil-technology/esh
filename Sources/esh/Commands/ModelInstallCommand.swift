@@ -6,10 +6,9 @@ enum ModelInstallCommand {
     static func run(
         identifier: String,
         service: ModelService,
-        registry: RecommendedModelRegistry,
         catalogService: ModelCatalogService
     ) async throws {
-        let resolved = registry.resolve(alias: identifier)
+        let resolved = service.resolveRecommended(alias: identifier)
         let repoID: String
         let resolutionMessage: String?
         let selectedSearchResult: ModelSearchResult?
@@ -35,7 +34,7 @@ enum ModelInstallCommand {
 
         try runResourcePreflight(
             repoID: repoID,
-            recommendedModel: resolved ?? registry.resolve(alias: repoID),
+            recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
             searchResult: selectedSearchResult
         )
 

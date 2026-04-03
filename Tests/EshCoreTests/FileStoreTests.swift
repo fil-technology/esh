@@ -44,6 +44,35 @@ struct FileStoreTests {
     }
 
     @Test
+    func modelStoreRepairsZeroSizeFromInstallDirectory() throws {
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let store = FileModelStore(root: root)
+        let installURL = try store.prepareInstallDirectory(id: "gemma")
+        let payload = Data(repeating: 0xAB, count: 2_048)
+        try payload.write(to: installURL.appendingPathComponent("weights.bin"))
+
+        let install = ModelInstall(
+            id: "gemma",
+            spec: ModelSpec(
+                id: "gemma",
+                displayName: "Gemma",
+                backend: .mlx,
+                source: ModelSource(kind: .huggingFace, reference: "mlx-community/gemma")
+            ),
+            installPath: installURL.path,
+            sizeBytes: 0,
+            backendFormat: "mlx"
+        )
+        let manifest = ModelManifest(install: install, files: ["weights.bin"])
+
+        try store.save(manifest: manifest)
+
+        let loaded = try store.loadManifest(id: "gemma")
+        #expect(loaded.install.sizeBytes == 2_048)
+        #expect(try store.listInstalls().first?.sizeBytes == 2_048)
+    }
+
+    @Test
     func cacheStoreRoundTrip() throws {
         let root = PersistenceRoot(rootURL: temporaryDirectory())
         let store = FileCacheStore(root: root)

@@ -33,7 +33,7 @@ struct InteractiveListPicker {
         let previous = enableRawMode()
         defer {
             restore(previous)
-            Swift.print("\u{001B}[0m", terminator: "")
+            Swift.print("\u{001B}[0m")
             fflush(stdout)
         }
 
@@ -156,27 +156,19 @@ struct InteractiveListPicker {
         }
 
         let normalizedDetail = detail.replacingOccurrences(of: "\n", with: " ")
-        let detailWidth = min(max(width / 3, 18), 42)
-        let titleWidth = max(width - prefix.count - detailWidth - 2, 12)
-        let left = pad(truncate(normalizedTitle, limit: titleWidth), width: titleWidth)
+        let separator = "  "
+        let availableWidth = max(width - prefix.count, 12)
+        let titleWidth = max(Int(Double(availableWidth) * 0.55), 12)
+        let detailWidth = max(availableWidth - titleWidth - separator.count, 10)
+        let left = truncate(normalizedTitle, limit: titleWidth)
         let right = truncate(normalizedDetail, limit: detailWidth)
-        let spacer = String(repeating: " ", count: max(width - prefix.count - visibleCount(left) - visibleCount(right), 2))
-        return prefix + left + spacer + "\u{001B}[38;5;245m\(right)\u{001B}[0m"
+        return prefix + left + separator + "\u{001B}[38;5;245m\(right)\u{001B}[0m"
     }
 
     private func truncate(_ value: String, limit: Int) -> String {
         guard value.count > limit else { return value }
         guard limit > 1 else { return String(value.prefix(limit)) }
         return String(value.prefix(limit - 1)) + "…"
-    }
-
-    private func pad(_ value: String, width: Int) -> String {
-        if value.count >= width { return value }
-        return value + String(repeating: " ", count: width - value.count)
-    }
-
-    private func visibleCount(_ value: String) -> Int {
-        value.count
     }
 
     private func terminalWidth() -> Int {

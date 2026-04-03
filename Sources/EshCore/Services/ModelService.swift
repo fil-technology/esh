@@ -3,10 +3,16 @@ import Foundation
 public struct ModelService: Sendable {
     private let store: ModelStore
     private let downloader: ModelDownloader
+    private let recommendedRegistry: RecommendedModelRegistry
 
-    public init(store: ModelStore, downloader: ModelDownloader) {
+    public init(
+        store: ModelStore,
+        downloader: ModelDownloader,
+        recommendedRegistry: RecommendedModelRegistry = RecommendedModelRegistry()
+    ) {
         self.store = store
         self.downloader = downloader
+        self.recommendedRegistry = recommendedRegistry
     }
 
     public func install(
@@ -23,6 +29,19 @@ public struct ModelService: Sendable {
 
     public func list() throws -> [ModelInstall] {
         try store.listInstalls()
+    }
+
+    public func listRecommended(
+        profile: RecommendedModel.Profile? = nil,
+        tier: RecommendedModel.Tier? = nil,
+        backend: BackendKind? = nil,
+        tag: String? = nil
+    ) -> [RecommendedModel] {
+        recommendedRegistry.list(profile: profile, tier: tier, backend: backend, tag: tag)
+    }
+
+    public func resolveRecommended(alias: String) -> RecommendedModel? {
+        recommendedRegistry.resolve(alias: alias)
     }
 
     public func inspect(id: String) throws -> ModelManifest {

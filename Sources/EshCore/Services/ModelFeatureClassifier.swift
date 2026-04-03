@@ -2,25 +2,20 @@ import Foundation
 
 public enum ModelFeatureClassifier {
     public static func features(for recommendedModel: RecommendedModel) -> [String] {
-        var result: [String] = []
+        var result = recommendedModel.tags
         switch recommendedModel.profile {
         case .chat:
             result.append("chat")
         case .code:
             result.append("code")
         }
-
-        let lower = recommendedModel.repoID.lowercased()
-        if lower.contains("coder") {
-            result.append("code")
-        }
-        if lower.contains("r1") || lower.contains("reason") || lower.contains("think") {
-            result.append("reason")
-        }
-        if lower.contains("vl") || lower.contains("vision") {
-            result.append("vision")
-        }
-        return dedupe(result)
+        return dedupe(
+            result + features(
+                name: recommendedModel.title,
+                reference: recommendedModel.repoID,
+                tags: recommendedModel.tags
+            )
+        )
     }
 
     public static func features(for install: ModelInstall) -> [String] {
