@@ -65,6 +65,22 @@ Run the packaged tool:
 ./dist/esh-macos-<version>/esh chat
 ```
 
+## GitHub CI/CD
+
+Esh includes GitHub Actions workflows for continuous integration and release packaging.
+
+CI workflow:
+- [ci.yml](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/.github/workflows/ci.yml)
+
+Release workflow:
+- [release.yml](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/.github/workflows/release.yml)
+
+What they do:
+- CI runs on pushes to `main` and on pull requests
+- release packaging runs for tags like `v0.1.0`
+- release packaging can also be started manually from GitHub Actions
+- macOS release builds upload the package as an artifact and publish the `.tar.gz` plus a SHA-256 checksum on the GitHub release
+
 ## Install a Model
 
 Esh currently installs models directly from a Hugging Face repo id.

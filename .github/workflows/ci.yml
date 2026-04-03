@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-and-verify:
+    name: Test and Verify
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Bootstrap runtime
+        run: ./scripts/bootstrap.sh
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Verify environment
+        run: ./esh doctor
+
+      - name: Show CLI help
+        run: ./esh --help
