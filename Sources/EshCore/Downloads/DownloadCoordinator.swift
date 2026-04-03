@@ -61,14 +61,14 @@ public struct DownloadCoordinator: Sendable {
                 )
             )
 
-            let request = try makeRequest(
-                repoID: plan.repoID,
-                revision: plan.revision,
-                file: file.path,
-                resumeFrom: downloadedBefore
+            let stream = try await openStream(
+                plan: plan,
+                file: file,
+                destinationURL: destinationURL,
+                aggregateDownloaded: &aggregateDownloaded,
+                reporter: reporter,
+                totalBytes: totalBytes > 0 ? totalBytes : nil
             )
-            let (bytes, response) = try await session.bytes(for: request)
-            try validate(response: response, file: file.path, resumeFrom: downloadedBefore)
 
             let handle: FileHandle
             if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -80,10 +80,10 @@ public struct DownloadCoordinator: Sendable {
             defer { try? handle.close() }
             try handle.seekToEnd()
 
-            var currentFileDownloaded = downloadedBefore
+            var currentFileDownloaded = ResumeSupport.existingSize(at: destinationURL)
             var buffer = Data()
             buffer.reserveCapacity(64 * 1024)
-            for try await byte in bytes {
+            for try await byte in stream.bytes {
                 buffer.append(byte)
                 if buffer.count < 64 * 1024 {
                     continue
@@ -128,6 +128,58 @@ public struct DownloadCoordinator: Sendable {
         }
 
         return downloadedFiles
+    }
+
+    private func openStream(
+        plan: DownloadPlan,
+        file: DownloadPlan.File,
+        destinationURL: URL,
+        aggregateDownloaded: inout Int64,
+        reporter: ProgressReporting,
+        totalBytes: Int64?
+    ) async throws -> (bytes: URLSession.AsyncBytes, response: URLResponse) {
+        let resumedBytes = ResumeSupport.existingSize(at: destinationURL)
+        do {
+            let request = try makeRequest(
+                repoID: plan.repoID,
+                revision: plan.revision,
+                file: file.path,
+                resumeFrom: resumedBytes
+            )
+            let (bytes, response) = try await session.bytes(for: request)
+            try validate(response: response, file: file.path, resumeFrom: resumedBytes)
+            return (bytes, response)
+        } catch let error as StoreError {
+            guard case let .invalidManifest(message) = error,
+                  resumedBytes > 0,
+                  message.contains("status 416") else {
+                throw error
+            }
+
+            try? FileManager.default.removeItem(at: destinationURL)
+            aggregateDownloaded -= resumedBytes
+            reporter.emit(
+                DownloadState(
+                    phase: .downloading,
+                    bytesDownloaded: aggregateDownloaded,
+                    totalBytes: totalBytes,
+                    bytesPerSecond: nil,
+                    etaSeconds: nil,
+                    currentFile: file.path,
+                    message: "Restarting"
+                )
+            )
+
+            let request = try makeRequest(
+                repoID: plan.repoID,
+                revision: plan.revision,
+                file: file.path,
+                resumeFrom: 0
+            )
+            let (bytes, response) = try await session.bytes(for: request)
+            try validate(response: response, file: file.path, resumeFrom: 0)
+            return (bytes, response)
+        }
     }
 
     private func makeRequest(

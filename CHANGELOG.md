@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-03
+
+### Added
+- install-by-search now shows a numbered model chooser before any download starts
+- install preflight now checks unified memory, available memory, and free disk space before downloading
+
+### Changed
+- stale partial downloads that trigger HTTP 416 now restart that file from zero automatically
+
 ## [0.1.2] - 2026-04-03
 
 ### Added

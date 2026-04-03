@@ -107,14 +107,19 @@ private struct CLI {
                 try await ModelSearchCommand.run(arguments: [query], service: modelCatalogService)
                 pauseForMenu()
             case "5":
-                guard let repoID = prompt("Repo id or recommended alias")?
+                guard let repoID = prompt("Repo id, alias, or search term")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
                     print("Install cancelled.")
                     pauseForMenu()
                     continue
                 }
-                try await ModelInstallCommand.run(identifier: repoID, service: modelService, registry: recommendedRegistry)
+                try await ModelInstallCommand.run(
+                    identifier: repoID,
+                    service: modelService,
+                    registry: recommendedRegistry,
+                    catalogService: modelCatalogService
+                )
                 pauseForMenu()
             case "6":
                 try handleSession(arguments: ["list"], store: sessionStore)
@@ -155,9 +160,14 @@ private struct CLI {
             try await ModelSearchCommand.run(arguments: Array(arguments.dropFirst()), service: catalogService)
         case "install":
             guard let repoID = arguments.dropFirst().first else {
-                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias>")
+                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias-or-search-term>")
             }
-            try await ModelInstallCommand.run(identifier: repoID, service: service, registry: recommendedRegistry)
+            try await ModelInstallCommand.run(
+                identifier: repoID,
+                service: service,
+                registry: recommendedRegistry,
+                catalogService: catalogService
+            )
         case "inspect":
             guard let modelID = arguments.dropFirst().first else {
                 throw StoreError.invalidManifest("Usage: esh model inspect <model-id>")
@@ -218,7 +228,7 @@ private struct CLI {
               esh model recommended [--profile chat|code]
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
-              esh model install <hf-repo-id-or-alias>
+              esh model install <hf-repo-id-or-alias-or-search-term>
               esh model inspect <model-id>
               esh model remove <model-id>
               esh session [list|show <uuid-or-name>|grep <text>]
