@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ -x "$SELF_DIR/scripts/run.sh" ]]; then
+  exec "$SELF_DIR/scripts/run.sh" "$@"
+fi
+
+if [[ -x "$SELF_DIR/share/llmcache/scripts/run.sh" ]]; then
+  exec "$SELF_DIR/share/llmcache/scripts/run.sh" "$@"
+fi
+
+echo "error: unable to locate llmcache launcher support files." >&2
+exit 1
