@@ -36,6 +36,10 @@ The packaged release includes:
 - bridge scripts
 - pinned Python dependencies
 
+GitHub release publishing also pushes the packaged macOS bundle to GitHub Packages via GHCR, so the repo exposes both:
+- a downloadable Release asset
+- a versioned Package entry
+
 ## 2. Understand the Command Surface
 
 Main commands:

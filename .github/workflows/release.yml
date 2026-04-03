@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -77,6 +78,25 @@ jobs:
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256
           if-no-files-found: error
+
+      - name: Install ORAS
+        run: brew install oras
+
+      - name: Publish GitHub package
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_REF: ghcr.io/${{ github.repository }}/esh-macos:${{ steps.version.outputs.version }}
+        run: |
+          echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          oras push "$PACKAGE_REF" \
+            --artifact-type application/vnd.fil-technology.esh.release.v1+tar.gz \
+            --annotation "org.opencontainers.image.title=esh-macos-${{ steps.version.outputs.version }}.tar.gz" \
+            --annotation "org.opencontainers.image.description=Self-contained Esh macOS release bundle" \
+            --annotation "org.opencontainers.image.version=${{ steps.version.outputs.version }}" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.revision=${{ github.sha }}" \
+            "dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz:application/gzip" \
+            "dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256:text/plain"
 
       - name: Publish GitHub release
         if: github.event_name == 'push' || inputs.publish_release

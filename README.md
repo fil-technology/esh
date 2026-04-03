@@ -79,7 +79,7 @@ What they do:
 - CI runs on pushes to `main` and on pull requests
 - release packaging runs for tags like `v0.1.0`
 - release packaging can also be started manually from GitHub Actions
-- macOS release builds upload the package as an artifact and publish the `.tar.gz` plus a SHA-256 checksum on the GitHub release
+- macOS release builds upload the package as an artifact, publish the `.tar.gz` plus a SHA-256 checksum on the GitHub release, and push the same bundle to GitHub Packages through GHCR
 
 ## Versioning and Releases
 
@@ -104,6 +104,10 @@ git push origin "$(./scripts/release-version.sh tag)"
 ```
 
 The GitHub release workflow verifies that the pushed tag matches `VERSION`.
+
+GitHub surfaces:
+- `Releases` shows downloadable end-user artifacts like `esh-macos-0.1.0.tar.gz`
+- `Packages` shows the same packaged bundle published to GHCR as `ghcr.io/fil-technology/esh/esh-macos:<version>`
 
 ## Install a Model
 
