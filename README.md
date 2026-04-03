@@ -1,4 +1,4 @@
-# llmcache
+# Esh
 
 Local LLM chat and cache tooling for Apple Silicon, built in Swift with an MLX-backed Python bridge.
 
@@ -15,35 +15,35 @@ Bootstrap once:
 Then run the tool with the project launcher:
 
 ```bash
-./llmcache doctor
-./llmcache model list
-./llmcache chat
+./esh doctor
+./esh model list
+./esh chat
 ```
 
 ### Install the small Qwen model used in testing
 
 ```bash
-./llmcache model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
+./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
 
 List installed models:
 
 ```bash
-./llmcache model list
+./esh model list
 ```
 
 Inspect the model:
 
 ```bash
-./llmcache model inspect mlx-community--qwen2.5-0.5b-instruct-4bit
+./esh model inspect mlx-community--qwen2.5-0.5b-instruct-4bit
 ```
 
 ### Chat with that model
 
-`llmcache chat` currently loads the first installed model. If the Qwen model above is the one you installed, you can just run:
+`esh chat` currently loads the first installed model. If the Qwen model above is the one you installed, you can just run:
 
 ```bash
-./llmcache chat
+./esh chat
 ```
 
 Example session:
@@ -59,11 +59,11 @@ Example session:
 ### Useful commands
 
 ```bash
-./llmcache session list
-./llmcache cache build --session <session-uuid> --mode raw
-./llmcache cache build --session <session-uuid> --mode turbo
-./llmcache cache inspect <artifact-uuid>
-./llmcache cache load --artifact <artifact-uuid> --message "Continue this chat"
+./esh session list
+./esh cache build --session <session-uuid> --mode raw
+./esh cache build --session <session-uuid> --mode turbo
+./esh cache inspect <artifact-uuid>
+./esh cache load --artifact <artifact-uuid> --message "Continue this chat"
 ```
 
 ## Release packaging
@@ -76,16 +76,16 @@ Build a self-contained release artifact:
 
 That creates a bundle under `dist/` containing:
 
-- `llmcache` launcher
-- `bin/llmcache` release binary
+- `esh` launcher
+- `bin/esh` release binary
 - embedded `python/`
-- packaged bridge files under `share/llmcache/`
+- packaged bridge files under `share/esh/`
 
 Run the packaged tool:
 
 ```bash
-./dist/llmcache-macos-<version>/llmcache doctor
-./dist/llmcache-macos-<version>/llmcache chat
+./dist/esh-macos-<version>/esh doctor
+./dist/esh-macos-<version>/esh chat
 ```
 
 ## Data location
@@ -93,11 +93,11 @@ Run the packaged tool:
 By default, models, sessions, and caches live under:
 
 ```text
-~/.llmcache
+~/.esh
 ```
 
 You can override that with:
 
 ```bash
-LLMCACHE_HOME=/path/to/custom-root ./llmcache chat
+ESH_HOME=/path/to/custom-root ./esh chat
 ```

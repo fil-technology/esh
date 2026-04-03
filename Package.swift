@@ -2,31 +2,31 @@
 import PackageDescription
 
 let package = Package(
-    name: "LLMCache",
+    name: "Esh",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .library(
-            name: "LLMCacheCore",
-            targets: ["LLMCacheCore"]
+            name: "EshCore",
+            targets: ["EshCore"]
         ),
         .executable(
-            name: "llmcache",
-            targets: ["llmcache"]
+            name: "esh",
+            targets: ["esh"]
         )
     ],
     targets: [
         .target(
-            name: "LLMCacheCore"
+            name: "EshCore"
         ),
         .executableTarget(
-            name: "llmcache",
-            dependencies: ["LLMCacheCore"]
+            name: "esh",
+            dependencies: ["EshCore"]
         ),
         .testTarget(
-            name: "LLMCacheCoreTests",
-            dependencies: ["LLMCacheCore"]
+            name: "EshCoreTests",
+            dependencies: ["EshCore"]
         )
     ]
 )

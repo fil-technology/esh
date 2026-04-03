@@ -1,121 +1,121 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-llmcache::die() {
+esh::die() {
   echo "error: $*" >&2
   exit 1
 }
 
-llmcache::common_dir() {
+esh::common_dir() {
   cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
 }
 
-llmcache::detect_layout() {
+esh::detect_layout() {
   local common_dir payload_root app_root
-  common_dir="$(llmcache::common_dir)"
+  common_dir="$(esh::common_dir)"
 
   if [[ -f "$common_dir/../../Package.swift" ]]; then
-    LLMCACHE_LAYOUT_MODE="repo"
-    LLMCACHE_APP_ROOT="$(cd "$common_dir/../.." && pwd)"
-    LLMCACHE_PAYLOAD_ROOT="$LLMCACHE_APP_ROOT"
+    ESH_LAYOUT_MODE="repo"
+    ESH_APP_ROOT="$(cd "$common_dir/../.." && pwd)"
+    ESH_PAYLOAD_ROOT="$ESH_APP_ROOT"
     return
   fi
 
   payload_root="$(cd "$common_dir/../.." && pwd)"
   app_root="$(cd "$common_dir/../../../.." && pwd)"
-  if [[ -f "$payload_root/Tools/python-requirements.txt" && -x "$app_root/bin/llmcache" ]]; then
-    LLMCACHE_LAYOUT_MODE="package"
-    LLMCACHE_APP_ROOT="$app_root"
-    LLMCACHE_PAYLOAD_ROOT="$payload_root"
+  if [[ -f "$payload_root/Tools/python-requirements.txt" && -x "$app_root/bin/esh" ]]; then
+    ESH_LAYOUT_MODE="package"
+    ESH_APP_ROOT="$app_root"
+    ESH_PAYLOAD_ROOT="$payload_root"
     return
   fi
 
-  llmcache::die "Unable to resolve llmcache layout from $common_dir"
+  esh::die "Unable to resolve esh layout from $common_dir"
 }
 
-llmcache::detect_layout
+esh::detect_layout
 
-llmcache::repo_root() {
-  [[ "$LLMCACHE_LAYOUT_MODE" == "repo" ]] || llmcache::die "Developer command is only available from a source checkout."
-  echo "$LLMCACHE_APP_ROOT"
+esh::repo_root() {
+  [[ "$ESH_LAYOUT_MODE" == "repo" ]] || esh::die "Developer command is only available from a source checkout."
+  echo "$ESH_APP_ROOT"
 }
 
-llmcache::payload_root() {
-  echo "$LLMCACHE_PAYLOAD_ROOT"
+esh::payload_root() {
+  echo "$ESH_PAYLOAD_ROOT"
 }
 
-llmcache::app_root() {
-  echo "$LLMCACHE_APP_ROOT"
+esh::app_root() {
+  echo "$ESH_APP_ROOT"
 }
 
-llmcache::requirements_file() {
-  echo "$(llmcache::payload_root)/Tools/python-requirements.txt"
+esh::requirements_file() {
+  echo "$(esh::payload_root)/Tools/python-requirements.txt"
 }
 
-llmcache::bridge_script() {
-  echo "$(llmcache::payload_root)/Tools/mlx_vlm_bridge.py"
+esh::bridge_script() {
+  echo "$(esh::payload_root)/Tools/mlx_vlm_bridge.py"
 }
 
-llmcache::dev_venv_dir() {
-  echo "$(llmcache::repo_root)/.venv"
+esh::dev_venv_dir() {
+  echo "$(esh::repo_root)/.venv"
 }
 
-llmcache::release_python_dir() {
-  echo "$(llmcache::app_root)/python"
+esh::release_python_dir() {
+  echo "$(esh::app_root)/python"
 }
 
-llmcache::python_executable() {
-  if [[ "$LLMCACHE_LAYOUT_MODE" == "package" ]]; then
-    echo "$(llmcache::release_python_dir)/bin/python3"
+esh::python_executable() {
+  if [[ "$ESH_LAYOUT_MODE" == "package" ]]; then
+    echo "$(esh::release_python_dir)/bin/python3"
   else
-    echo "$(llmcache::dev_venv_dir)/bin/python3"
+    echo "$(esh::dev_venv_dir)/bin/python3"
   fi
 }
 
-llmcache::bootstrap_python() {
-  if [[ -n "${LLMCACHE_BOOTSTRAP_PYTHON:-}" ]]; then
-    echo "$LLMCACHE_BOOTSTRAP_PYTHON"
+esh::bootstrap_python() {
+  if [[ -n "${ESH_BOOTSTRAP_PYTHON:-}" ]]; then
+    echo "$ESH_BOOTSTRAP_PYTHON"
     return
   fi
-  command -v python3 >/dev/null 2>&1 || llmcache::die "python3 is required for bootstrap."
+  command -v python3 >/dev/null 2>&1 || esh::die "python3 is required for bootstrap."
   command -v python3
 }
 
-llmcache::swift_binary() {
+esh::swift_binary() {
   local configuration="${1:-debug}"
-  if [[ "$LLMCACHE_LAYOUT_MODE" == "package" ]]; then
-    echo "$(llmcache::app_root)/bin/llmcache"
+  if [[ "$ESH_LAYOUT_MODE" == "package" ]]; then
+    echo "$(esh::app_root)/bin/esh"
   else
-    echo "$(llmcache::repo_root)/.build/$configuration/llmcache"
+    echo "$(esh::repo_root)/.build/$configuration/esh"
   fi
 }
 
-llmcache::ensure_dev_venv() {
-  [[ "$LLMCACHE_LAYOUT_MODE" == "repo" ]] || return 0
+esh::ensure_dev_venv() {
+  [[ "$ESH_LAYOUT_MODE" == "repo" ]] || return 0
   local venv_dir
-  venv_dir="$(llmcache::dev_venv_dir)"
+  venv_dir="$(esh::dev_venv_dir)"
   if [[ ! -x "$venv_dir/bin/python3" ]]; then
-    "$(llmcache::bootstrap_python)" -m venv "$venv_dir"
+    "$(esh::bootstrap_python)" -m venv "$venv_dir"
   fi
 }
 
-llmcache::requirements_stamp() {
-  if [[ "$LLMCACHE_LAYOUT_MODE" == "package" ]]; then
-    echo "$(llmcache::release_python_dir)/.llmcache-requirements.sha256"
+esh::requirements_stamp() {
+  if [[ "$ESH_LAYOUT_MODE" == "package" ]]; then
+    echo "$(esh::release_python_dir)/.esh-requirements.sha256"
   else
-    echo "$(llmcache::dev_venv_dir)/.llmcache-requirements.sha256"
+    echo "$(esh::dev_venv_dir)/.esh-requirements.sha256"
   fi
 }
 
-llmcache::requirements_hash() {
-  shasum -a 256 "$(llmcache::requirements_file)" | awk '{print $1}'
+esh::requirements_hash() {
+  shasum -a 256 "$(esh::requirements_file)" | awk '{print $1}'
 }
 
-llmcache::install_python_deps() {
+esh::install_python_deps() {
   local python_executable requirements_hash stamp_file current_hash
-  python_executable="$(llmcache::python_executable)"
-  stamp_file="$(llmcache::requirements_stamp)"
-  requirements_hash="$(llmcache::requirements_hash)"
+  python_executable="$(esh::python_executable)"
+  stamp_file="$(esh::requirements_stamp)"
+  requirements_hash="$(esh::requirements_hash)"
   current_hash=""
   if [[ -f "$stamp_file" ]]; then
     current_hash="$(cat "$stamp_file")"
@@ -126,47 +126,49 @@ llmcache::install_python_deps() {
   fi
 
   "$python_executable" -m pip install --upgrade pip setuptools wheel
-  "$python_executable" -m pip install -r "$(llmcache::requirements_file)"
+  "$python_executable" -m pip install -r "$(esh::requirements_file)"
   printf '%s' "$requirements_hash" >"$stamp_file"
 }
 
-llmcache::build_swift() {
-  [[ "$LLMCACHE_LAYOUT_MODE" == "repo" ]] || return 0
+esh::build_swift() {
+  [[ "$ESH_LAYOUT_MODE" == "repo" ]] || return 0
   local configuration="${1:-debug}"
-  swift build -c "$configuration" --product llmcache --package-path "$(llmcache::repo_root)"
+  swift build -c "$configuration" --product esh --package-path "$(esh::repo_root)"
 }
 
-llmcache::export_runtime_env() {
-  export LLMCACHE_PYTHON="$(llmcache::python_executable)"
-  export LLMCACHE_MLX_VLM_BRIDGE="$(llmcache::bridge_script)"
+esh::export_runtime_env() {
+  export ESH_PYTHON="$(esh::python_executable)"
+  export ESH_MLX_VLM_BRIDGE="$(esh::bridge_script)"
+  export LLMCACHE_PYTHON="$ESH_PYTHON"
+  export LLMCACHE_MLX_VLM_BRIDGE="$ESH_MLX_VLM_BRIDGE"
 }
 
-llmcache::ensure_dev_runtime() {
+esh::ensure_dev_runtime() {
   local configuration="${1:-debug}"
-  llmcache::ensure_dev_venv
-  llmcache::install_python_deps
-  llmcache::build_swift "$configuration"
-  llmcache::export_runtime_env
+  esh::ensure_dev_venv
+  esh::install_python_deps
+  esh::build_swift "$configuration"
+  esh::export_runtime_env
 }
 
-llmcache::ensure_packaged_runtime() {
-  [[ -x "$(llmcache::python_executable)" ]] || llmcache::die "Packaged Python runtime is missing."
-  [[ -x "$(llmcache::swift_binary)" ]] || llmcache::die "Packaged llmcache binary is missing."
-  [[ -f "$(llmcache::bridge_script)" ]] || llmcache::die "Packaged bridge script is missing."
-  llmcache::export_runtime_env
+esh::ensure_packaged_runtime() {
+  [[ -x "$(esh::python_executable)" ]] || esh::die "Packaged Python runtime is missing."
+  [[ -x "$(esh::swift_binary)" ]] || esh::die "Packaged esh binary is missing."
+  [[ -f "$(esh::bridge_script)" ]] || esh::die "Packaged bridge script is missing."
+  esh::export_runtime_env
 }
 
-llmcache::prepare_runtime() {
+esh::prepare_runtime() {
   local configuration="${1:-debug}"
-  if [[ "$LLMCACHE_LAYOUT_MODE" == "package" ]]; then
-    llmcache::ensure_packaged_runtime
+  if [[ "$ESH_LAYOUT_MODE" == "package" ]]; then
+    esh::ensure_packaged_runtime
   else
-    llmcache::ensure_dev_runtime "$configuration"
+    esh::ensure_dev_runtime "$configuration"
   fi
 }
 
-llmcache::run_cli() {
-  local configuration="${LLMCACHE_BUILD_CONFIGURATION:-debug}"
-  llmcache::prepare_runtime "$configuration"
-  exec "$(llmcache::swift_binary "$configuration")" "$@"
+esh::run_cli() {
+  local configuration="${ESH_BUILD_CONFIGURATION:-${LLMCACHE_BUILD_CONFIGURATION:-debug}}"
+  esh::prepare_runtime "$configuration"
+  exec "$(esh::swift_binary "$configuration")" "$@"
 }
