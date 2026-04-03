@@ -77,6 +77,7 @@ struct TUIApplication {
                     text: reply,
                     isStreaming: true
                 )
+                state.statusText = streamingStatusText(for: reply)
                 surface.render(state: state)
             }
             session.messages.append(Message(role: .assistant, text: reply))
@@ -540,6 +541,14 @@ struct TUIApplication {
         }
         state.transcriptItems[index].text = text
         state.transcriptItems[index].isStreaming = isStreaming
+    }
+
+    private func streamingStatusText(for text: String) -> String {
+        let source = text.lowercased()
+        if source.contains("<think>") && !source.contains("</think>") {
+            return "reasoning…"
+        }
+        return "streaming…"
     }
 
     private func readLine() -> String? {

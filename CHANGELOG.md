@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-03
+
+### Added
+- colorful startup banner with live model/session/cache counts in the launcher
+- model capability badges such as `chat`, `code`, `reason`, `vision`, and `long` in model pickers
+- reasoning-aware chat formatting for models that emit explicit `<think>...</think>` blocks
+
+### Changed
+- launcher and model lists now use interactive highlighted pickers with arrow-key navigation
+- pressing Enter on `Chat` now opens chat immediately, while `n` opens the named-session flow
+- launcher descriptions now render inline on the right for a tighter command-palette layout
+
 ## [0.1.4] - 2026-04-03
 
 ### Added

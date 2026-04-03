@@ -116,9 +116,9 @@ struct InteractiveListPicker {
     ) {
         let clear = "\u{001B}[2J\u{001B}[H"
         let width = terminalWidth()
-        var lines: [String] = [title]
+        var lines: [String] = title.components(separatedBy: "\n")
         if let subtitle, !subtitle.isEmpty {
-            lines.append(subtitle)
+            lines.append(contentsOf: subtitle.components(separatedBy: "\n"))
         }
         lines.append("")
 

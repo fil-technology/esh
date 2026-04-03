@@ -74,20 +74,34 @@ private struct CLI {
                 sessionCount: (try? sessionStore.listSessions().count) ?? 0,
                 cacheCount: (try? cacheStore.listArtifacts().count) ?? 0
             )
+            let modelCount = (try? modelStore.listInstalls().count) ?? 0
+            let sessionCount = (try? sessionStore.listSessions().count) ?? 0
+            let cacheCount = (try? cacheStore.listArtifacts().count) ?? 0
             switch picker.pick(
-                title: "Esh",
-                subtitle: "Local-first LLM chat for Apple Silicon",
+                title: StartupBanner.render(
+                    modelCount: modelCount,
+                    sessionCount: sessionCount,
+                    cacheCount: cacheCount
+                ),
+                subtitle: "Tips: Enter selects. Press n on Chat for a named session. Press i inside model lists to install the highlighted model.",
                 items: menuItems,
-                primaryHint: "Enter select"
+                primaryHint: "Enter select",
+                secondaryHints: ["n named chat"],
+                secondaryKeys: ["n"]
             ) {
             case .selected(0):
-                let sessionName = prompt("Session name (blank for default)")?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 try await handleChat(
-                    arguments: [sessionName].compactMap { value in
-                        guard let value, !value.isEmpty else { return nil }
-                        return value
-                    },
+                    arguments: [],
+                    sessionStore: sessionStore
+                )
+            case .secondary("n", 0):
+                let sessionName = prompt("Session name")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let sessionName, !sessionName.isEmpty else {
+                    continue
+                }
+                try await handleChat(
+                    arguments: [sessionName],
                     sessionStore: sessionStore
                 )
             case .selected(1):
@@ -293,8 +307,9 @@ private struct CLI {
         }
 
         let items = models.map { model in
-            InteractiveListPicker.Item(
-                title: "\(model.id)  \(model.profile.rawValue)  \(model.tier.rawValue)",
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
+            return InteractiveListPicker.Item(
+                title: "\(model.id)  \(features)",
                 detail: "\(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
             )
         }
@@ -341,8 +356,9 @@ private struct CLI {
             return
         }
         let items = installs.map { install in
-            InteractiveListPicker.Item(
-                title: "\(install.id)  \(ByteFormatting.string(for: install.sizeBytes))",
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: install))
+            return InteractiveListPicker.Item(
+                title: "\(install.id)  \(features)",
                 detail: install.installPath
             )
         }
@@ -381,6 +397,7 @@ private struct CLI {
         }
 
         let items = results.map { result in
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: result))
             let source = result.source == .huggingFace ? "hf" : "local"
             let state = result.isInstalled ? "installed" : "-"
             let kind = result.backend?.rawValue ?? result.tags.first ?? "-"
@@ -388,7 +405,7 @@ private struct CLI {
             let downloads = result.downloads.map(compactNumber(_:)) ?? "-"
             let date = result.updatedAt.map(menuDateFormatter.string(from:)) ?? "-"
             return InteractiveListPicker.Item(
-                title: "\(result.displayName)",
+                title: "\(result.displayName)  \(features)",
                 detail: "\(source) | \(state) | \(kind) | \(size) | \(downloads) | \(date)"
             )
         }
@@ -438,5 +455,10 @@ private struct CLI {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM"
         return formatter
+    }
+
+    private func featureBadgeText(_ features: [String]) -> String {
+        guard !features.isEmpty else { return "[mlx]" }
+        return features.prefix(3).map { "[\($0)]" }.joined(separator: " ")
     }
 }
