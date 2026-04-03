@@ -5,12 +5,14 @@ public struct PersistenceRoot: Sendable {
     public let sessionsURL: URL
     public let cachesURL: URL
     public let modelsURL: URL
+    public let benchmarksURL: URL
 
     public init(rootURL: URL) {
         self.rootURL = rootURL
         self.sessionsURL = rootURL.appendingPathComponent("sessions", isDirectory: true)
         self.cachesURL = rootURL.appendingPathComponent("caches", isDirectory: true)
         self.modelsURL = rootURL.appendingPathComponent("models", isDirectory: true)
+        self.benchmarksURL = rootURL.appendingPathComponent("benchmarks", isDirectory: true)
     }
 
     public static func `default`() -> PersistenceRoot {
@@ -44,7 +46,7 @@ public struct PersistenceRoot: Sendable {
             try? fileManager.createDirectory(at: eshRoot, withIntermediateDirectories: true)
         }
 
-        for child in ["models", "sessions", "caches"] {
+        for child in ["models", "sessions", "caches", "benchmarks"] {
             let legacyChild = legacyRoot.appendingPathComponent(child, isDirectory: true)
             let eshChild = eshRoot.appendingPathComponent(child, isDirectory: true)
 

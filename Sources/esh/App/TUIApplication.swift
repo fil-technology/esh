@@ -2,44 +2,50 @@ import Foundation
 import EshCore
 
 struct TUIApplication {
-    func run(sessionName: String, sessionStore: SessionStore) async throws {
+    func run(
+        sessionName: String,
+        modelIdentifier: String? = nil,
+        sessionStore: SessionStore
+    ) async throws {
         let surface = TerminalSurface()
         var state = AppState(sessionName: sessionName)
         let root = PersistenceRoot.default()
         let modelStore = FileModelStore(root: root)
         let cacheStore = FileCacheStore(root: root)
-        let installs = try modelStore.listInstalls()
-        let install = try installs.first ?? {
-            throw StoreError.notFound("No installed model found. Run `esh model install <hf-repo-id>` first.")
-        }()
         var session = try loadOrCreateSession(
             requestedName: sessionName,
-            installID: install.id,
+            preferredModelID: modelIdentifier,
             sessionStore: sessionStore
         )
+        var install = try CommandSupport.resolveInstall(
+            identifier: modelIdentifier,
+            modelStore: modelStore,
+            preferredModelID: session.modelID
+        )
+        session.modelID = install.id
         let modelService = ModelService(
             store: modelStore,
             downloader: HuggingFaceModelDownloader(modelStore: modelStore)
         )
         let backend = MLXBackend()
-        let runtime = try await backend.loadRuntime(for: install)
+        var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
         let chatService = ChatService()
         state = makeScreenState(for: session, installID: install.id)
         state.statusText = "ready | /menu for commands"
         surface.render(state: state)
-        defer {
-            Task { await runtime.unload() }
-        }
 
         while let line = readLine() {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
-            if handleCommand(
+            if await handleCommand(
                 trimmed,
                 state: &state,
                 session: &session,
-                installID: install.id,
+                install: &install,
+                runtime: &runtime,
                 sessionStore: sessionStore,
+                modelStore: modelStore,
+                backend: backend,
                 modelService: modelService,
                 cacheStore: cacheStore,
                 surface: surface
@@ -88,18 +94,23 @@ struct TUIApplication {
             )
             surface.render(state: state)
         }
+
+        await runtime.unload()
     }
 
     private func handleCommand(
         _ command: String,
         state: inout AppState,
         session: inout ChatSession,
-        installID: String,
+        install: inout ModelInstall,
+        runtime: inout any BackendRuntime,
         sessionStore: SessionStore,
+        modelStore: FileModelStore,
+        backend: MLXBackend,
         modelService: ModelService,
         cacheStore: CacheStore,
         surface: TerminalSurface
-    ) -> Bool {
+    ) async -> Bool {
         guard command.hasPrefix("/") else { return false }
 
         if command.hasPrefix("/model inspect ") {
@@ -126,6 +137,49 @@ struct TUIApplication {
             return true
         }
 
+        if command.hasPrefix("/use-model ") {
+            let identifier = String(command.dropFirst("/use-model ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let newInstall = try CommandSupport.resolveInstall(
+                    identifier: identifier,
+                    modelStore: modelStore,
+                    preferredModelID: session.modelID
+                )
+                if newInstall.id != install.id {
+                    await runtime.unload()
+                    runtime = try await backend.loadRuntime(for: newInstall)
+                    install = newInstall
+                }
+                session.modelID = install.id
+                session.backend = .mlx
+                state.modelLabel = install.id
+                state.statusText = "using model \(install.id)"
+            } catch {
+                state.overlay = OverlayPanelState(title: "Switch Model", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "model switch failed"
+            }
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+
+        if command.hasPrefix("/search ") {
+            let query = String(command.dropFirst("/search ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowered = query.lowercased()
+            let matches = session.messages.enumerated().compactMap { index, message -> String? in
+                guard message.text.lowercased().contains(lowered) else { return nil }
+                return "#\(index + 1) \(message.role.rawValue): \(message.text)"
+            }
+            state.overlay = OverlayPanelState(
+                title: "Search Results",
+                lines: matches.isEmpty ? ["No matches for \(query)"] : matches
+            )
+            state.statusText = matches.isEmpty ? "no search matches" : "showing search results"
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+
         switch command {
         case "/menu", "/help":
             state.overlay = OverlayPanelState(
@@ -138,8 +192,11 @@ struct TUIApplication {
                     "/new [name]",
                     "/switch <name-or-uuid>",
                     "/models         Show installed models",
+                    "/use-model <id-or-repo>",
+                    "/model current",
                     "/sessions       Show saved chat sessions",
                     "/caches         Show saved cache artifacts",
+                    "/search <text>  Search the active session",
                     "/model inspect <id>",
                     "/session show <uuid>",
                     "/cache inspect <uuid>",
@@ -163,6 +220,16 @@ struct TUIApplication {
         case "/close":
             state.overlay = nil
             state.statusText = "ready | /menu for commands"
+        case "/model current":
+            state.overlay = OverlayPanelState(
+                title: "Current Model",
+                lines: [
+                    "id: \(install.id)",
+                    "source: \(install.spec.source.reference)",
+                    "path: \(install.installPath)"
+                ]
+            )
+            state.statusText = "showing current model"
         case "/save":
             do {
                 session.updatedAt = Date()
@@ -180,9 +247,9 @@ struct TUIApplication {
                     ? try nextSessionName(sessionStore: sessionStore)
                     : String(value.dropFirst("/new ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
                 session = ChatSession(name: requestedName.isEmpty ? try nextSessionName(sessionStore: sessionStore) : requestedName)
-                session.modelID = installID
+                session.modelID = install.id
                 session.backend = .mlx
-                state = makeScreenState(for: session, installID: installID, autosaveEnabled: state.autosaveEnabled)
+                state = makeScreenState(for: session, installID: install.id, autosaveEnabled: state.autosaveEnabled)
                 state.statusText = "new session"
             } catch {
                 state.overlay = OverlayPanelState(title: "New Session", lines: ["Error: \(error.localizedDescription)"])
@@ -192,15 +259,22 @@ struct TUIApplication {
             do {
                 try autosaveIfNeeded(state: state, session: session, sessionStore: sessionStore)
                 let identifier = String(value.dropFirst("/switch ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                let resolved = try resolveSession(identifier: identifier, sessionStore: sessionStore)
+                let resolved = try CommandSupport.resolveSession(identifier: identifier, sessionStore: sessionStore)
                 session = resolved
                 if session.modelID == nil {
-                    session.modelID = installID
+                    session.modelID = install.id
                 }
                 if session.backend == nil {
                     session.backend = .mlx
                 }
-                state = makeScreenState(for: session, installID: installID, autosaveEnabled: state.autosaveEnabled)
+                install = try CommandSupport.resolveInstall(
+                    identifier: nil,
+                    modelStore: modelStore,
+                    preferredModelID: session.modelID
+                )
+                await runtime.unload()
+                runtime = try await backend.loadRuntime(for: install)
+                state = makeScreenState(for: session, installID: install.id, autosaveEnabled: state.autosaveEnabled)
                 state.statusText = "switched session"
             } catch {
                 state.overlay = OverlayPanelState(title: "Switch Session", lines: ["Error: \(error.localizedDescription)"])
@@ -211,7 +285,10 @@ struct TUIApplication {
                 let installs = try modelService.list()
                 let lines = installs.isEmpty
                     ? ["No installed models."]
-                    : installs.map { "\($0.id) | \(ByteFormatting.string(for: $0.sizeBytes)) | \($0.installPath)" }
+                    : installs.map {
+                        let active = $0.id == install.id ? "*" : " "
+                        return "\(active) \($0.id) | \($0.spec.source.reference) | \(ByteFormatting.string(for: $0.sizeBytes))"
+                    }
                 state.overlay = OverlayPanelState(title: "Installed Models", lines: lines)
                 state.statusText = "showing installed models"
             } catch {
@@ -238,7 +315,7 @@ struct TUIApplication {
                 let lines = artifacts.isEmpty
                     ? ["No cache artifacts."]
                     : artifacts.map {
-                        "\($0.id.uuidString) | \($0.manifest.modelID) | \($0.manifest.cacheMode.rawValue) | \(ByteFormatting.string(for: $0.sizeBytes))"
+                        "\(CommandSupport.shortID($0.id)) | \($0.manifest.sessionName) | \($0.manifest.modelID) | \($0.manifest.cacheMode.rawValue) | \(ByteFormatting.string(for: $0.sizeBytes))"
                     }
                 state.overlay = OverlayPanelState(title: "Cache Artifacts", lines: lines)
                 state.statusText = "showing caches"
@@ -306,7 +383,7 @@ struct TUIApplication {
         sessionStore: SessionStore
     ) {
         do {
-            let session = try resolveSession(identifier: rawID, sessionStore: sessionStore)
+            let session = try CommandSupport.resolveSession(identifier: rawID, sessionStore: sessionStore)
             var lines = [
                 "id: \(session.id.uuidString)",
                 "name: \(session.name)",
@@ -323,39 +400,20 @@ struct TUIApplication {
 
     private func loadOrCreateSession(
         requestedName: String,
-        installID: String,
+        preferredModelID: String?,
         sessionStore: SessionStore
     ) throws -> ChatSession {
-        if let existing = try? resolveSession(identifier: requestedName, sessionStore: sessionStore) {
+        if let existing = try? CommandSupport.resolveSession(identifier: requestedName, sessionStore: sessionStore) {
             var session = existing
-            session.modelID = session.modelID ?? installID
+            session.modelID = session.modelID ?? preferredModelID
             session.backend = session.backend ?? .mlx
             return session
         }
 
         var session = ChatSession(name: requestedName)
-        session.modelID = installID
+        session.modelID = preferredModelID
         session.backend = .mlx
         return session
-    }
-
-    private func resolveSession(
-        identifier: String,
-        sessionStore: SessionStore
-    ) throws -> ChatSession {
-        if let id = UUID(uuidString: identifier) {
-            return try sessionStore.loadSession(id: id)
-        }
-
-        let sessions = try sessionStore.listSessions()
-        if let exact = sessions.first(where: { $0.name == identifier }) {
-            return exact
-        }
-        if let caseInsensitive = sessions.first(where: { $0.name.caseInsensitiveCompare(identifier) == .orderedSame }) {
-            return caseInsensitive
-        }
-
-        throw StoreError.notFound("Session \(identifier) was not found.")
     }
 
     private func makeScreenState(

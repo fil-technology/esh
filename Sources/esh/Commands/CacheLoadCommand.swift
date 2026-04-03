@@ -3,9 +3,9 @@ import EshCore
 
 enum CacheLoadCommand {
     static func run(arguments: [String]) async throws {
-        let artifactValue = try requiredValue(flag: "--artifact", in: arguments)
-        let message = try requiredValue(flag: "--message", in: arguments)
-        let modelID = optionalValue(flag: "--model", in: arguments)
+        let artifactValue = try CommandSupport.requiredValue(flag: "--artifact", in: arguments)
+        let message = try CommandSupport.requiredValue(flag: "--message", in: arguments)
+        let modelID = CommandSupport.optionalValue(flag: "--model", in: arguments)
 
         guard let artifactID = UUID(uuidString: artifactValue) else {
             throw StoreError.invalidManifest("Invalid artifact UUID: \(artifactValue)")
@@ -15,14 +15,20 @@ enum CacheLoadCommand {
         let modelStore = FileModelStore(root: root)
         let cacheStore = FileCacheStore(root: root)
         let sessionStore = FileSessionStore(root: root)
-        let install = try CacheBuildCommand.resolveInstall(modelID: modelID, modelStore: modelStore)
+        let artifact = try cacheStore.loadArtifact(id: artifactID).0
+        let baseSession = try sessionStore.loadSession(id: artifact.manifest.sessionID)
+        let install = try CommandSupport.resolveInstall(
+            identifier: modelID ?? artifact.manifest.modelID,
+            modelStore: modelStore,
+            preferredModelID: baseSession.modelID
+        )
         let backend = MLXBackend()
         let runtime = try await backend.loadRuntime(for: install)
         defer { Task { await runtime.unload() } }
 
         let compressor = artifactCompressor(for: artifactID, cacheStore: cacheStore)
         let service = CacheService(cacheStore: cacheStore)
-        let artifact = try await service.loadArtifactForRuntime(
+        let loadedArtifact = try await service.loadArtifactForRuntime(
             id: artifactID,
             runtime: runtime,
             install: install,
@@ -31,9 +37,9 @@ enum CacheLoadCommand {
             checker: backend.makeCompatibilityChecker(for: install)
         )
 
-        var session = try sessionStore.loadSession(id: artifact.manifest.sessionID)
+        var session = baseSession
         session.modelID = install.id
-        session.backend = .mlx
+        session.backend = BackendKind.mlx
         session.messages.append(Message(role: .user, text: message))
         session.updatedAt = Date()
         let stream = ChatService().streamReply(runtime: runtime, session: session)
@@ -46,7 +52,7 @@ enum CacheLoadCommand {
         print("")
 
         let metrics = await runtime.metrics
-        print("artifact: \(artifact.id.uuidString)")
+        print("artifact: \(loadedArtifact.id.uuidString)")
         print("reply_chars: \(reply.count)")
         print("ttft_ms: \(metrics.ttftMilliseconds.map { String(format: "%.1f", $0) } ?? "-")")
         print("tok_s: \(metrics.tokensPerSecond.map { String(format: "%.2f", $0) } ?? "-")")
@@ -60,17 +66,4 @@ enum CacheLoadCommand {
         return TurboQuantCompressor()
     }
 
-    private static func requiredValue(flag: String, in arguments: [String]) throws -> String {
-        guard let value = optionalValue(flag: flag, in: arguments) else {
-            throw StoreError.invalidManifest("Missing required flag \(flag)")
-        }
-        return value
-    }
-
-    private static func optionalValue(flag: String, in arguments: [String]) -> String? {
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
 }

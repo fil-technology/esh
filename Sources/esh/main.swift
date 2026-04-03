@@ -26,6 +26,8 @@ private struct CLI {
         let cacheStore = FileCacheStore(root: root)
 
         switch head {
+        case "benchmark":
+            try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "doctor":
             try DoctorCommand.run()
         case "model":
@@ -101,6 +103,9 @@ private struct CLI {
             case "7":
                 printUsage()
                 pauseForMenu()
+            case "8":
+                try await BenchmarkCommand.run(arguments: ["history"])
+                pauseForMenu()
             case "0", "q", "quit", "exit":
                 return
             default:
@@ -160,9 +165,15 @@ private struct CLI {
     }
 
     private func handleChat(arguments: [String], sessionStore: SessionStore) async throws {
-        let sessionName = arguments.first ?? "default"
+        let modelIdentifier = CommandSupport.optionalValue(flag: "--model", in: arguments)
+        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model"])
+        let sessionName = positional.first ?? "default"
         let app = TUIApplication()
-        try await app.run(sessionName: sessionName, sessionStore: sessionStore)
+        try await app.run(
+            sessionName: sessionName,
+            modelIdentifier: modelIdentifier,
+            sessionStore: sessionStore
+        )
     }
 
     private func printUsage() {
@@ -171,14 +182,17 @@ private struct CLI {
             esh commands:
               esh
               esh chat [session-name]
+              esh chat [session-name] --model <id-or-repo>
+              esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
+              esh benchmark history
               esh doctor
               esh model list
               esh model install <hf-repo-id>
               esh model inspect <model-id>
               esh model remove <model-id>
-              esh session [list|show <uuid>]
-              esh cache build --session <uuid> [--mode raw|turbo] [--model <id>]
-              esh cache load --artifact <uuid> --message <text> [--model <id>]
+              esh session [list|show <uuid-or-name>|grep <text>]
+              esh cache build --session <uuid-or-name> [--mode raw|turbo] [--model <id-or-repo>]
+              esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
               esh cache inspect [artifact-uuid]
             """
         )
@@ -202,6 +216,7 @@ private struct CLI {
             5. List caches
             6. Doctor
             7. Show CLI help
+            8. Benchmark history
             0. Exit
             """
         )

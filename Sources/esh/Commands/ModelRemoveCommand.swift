@@ -3,7 +3,8 @@ import EshCore
 
 enum ModelRemoveCommand {
     static func run(modelID: String, service: ModelService) throws {
-        try service.remove(id: modelID)
-        print("Removed \(modelID)")
+        let resolvedID = try ModelInspectCommand.resolveModelID(identifier: modelID, service: service)
+        try service.remove(id: resolvedID)
+        print("Removed \(resolvedID)")
     }
 }

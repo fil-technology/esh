@@ -42,16 +42,19 @@ Main commands:
 
 ```text
 esh
-esh chat [session-name]
+esh chat [session-name] [--model <id-or-repo>]
+esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
+esh benchmark history
 esh doctor
 esh model list
 esh model install <hf-repo-id>
-esh model inspect <model-id>
-esh model remove <model-id>
+esh model inspect <model-id-or-repo>
+esh model remove <model-id-or-repo>
 esh session list
-esh session show <uuid>
-esh cache build --session <uuid> [--mode raw|turbo] [--model <id>]
-esh cache load --artifact <uuid> --message <text> [--model <id>]
+esh session show <uuid-or-name>
+esh session grep <text>
+esh cache build --session <uuid-or-name> [--mode raw|turbo] [--model <id-or-repo>]
+esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
 esh cache inspect [artifact-uuid]
 ```
 
@@ -107,6 +110,7 @@ Start a named chat:
 ./esh chat default
 ./esh chat product-notes
 ./esh chat benchmark-run
+./esh chat benchmark-run --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
 
 What the TUI shows:
@@ -144,6 +148,8 @@ Show one session:
 
 ```bash
 ./esh session show D59E570E-8F33-4547-8A02-F4F73B34478B
+./esh session show model-flag-smoke
+./esh session grep hello
 ```
 
 ### From inside chat
@@ -202,11 +208,14 @@ Available TUI commands:
 /new [name]
 /switch <name-or-uuid>
 /models
+/use-model <id-or-repo>
+/model current
 /sessions
 /caches
+/search <text>
 /doctor
 /model inspect <id>
-/session show <uuid>
+/session show <uuid-or-name>
 /cache inspect <uuid>
 /exit
 ```
@@ -216,6 +225,8 @@ Typical flow:
 ```text
 /menu
 /sessions
+/model current
+/search hello
 /close
 /new scratch
 /autosave on
@@ -235,7 +246,7 @@ Cache artifacts are built from saved sessions.
 
 ```bash
 ./esh cache build --session D59E570E-8F33-4547-8A02-F4F73B34478B --mode raw
-./esh cache build --session D59E570E-8F33-4547-8A02-F4F73B34478B --mode turbo
+./esh cache build --session model-flag-smoke --mode turbo --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
 
 ### Step 3: inspect saved artifacts
@@ -251,7 +262,21 @@ Cache artifacts are built from saved sessions.
 ./esh cache load --artifact C46B9A7C-0636-4111-B300-C5A9AE1341C1 --message "Continue this chat"
 ```
 
-## 8. Example End-to-End Flow
+## 8. Benchmark Raw vs TurboQuant
+
+Run a benchmark on a saved session:
+
+```bash
+./esh benchmark --session model-flag-smoke --model mlx-community/Qwen2.5-0.5B-Instruct-4bit --message "Continue with one short sentence about local AI."
+```
+
+Show saved benchmark history:
+
+```bash
+./esh benchmark history
+```
+
+## 9. Example End-to-End Flow
 
 This is a realistic local workflow:
 
@@ -278,10 +303,11 @@ Back in CLI:
 ```bash
 ./esh session list
 ./esh cache build --session <planning-session-uuid> --mode turbo
+./esh benchmark --session <planning-session-uuid>
 ./esh cache inspect
 ```
 
-## 9. Health Checks and Troubleshooting
+## 10. Health Checks and Troubleshooting
 
 Basic environment check:
 
@@ -310,17 +336,36 @@ If you want a custom storage location:
 ESH_HOME=/path/to/esh-home ./esh chat
 ```
 
-## 10. Known Current Limitations
+## 11. Release Versioning
+
+Esh keeps its release version in:
+- `VERSION`
+- `CHANGELOG.md`
+
+Useful commands:
+
+```bash
+./scripts/release-version.sh show
+./scripts/release-version.sh tag
+./scripts/release-version.sh verify-tag v0.1.0
+```
+
+Suggested release flow:
+
+```bash
+git tag "$(./scripts/release-version.sh tag)"
+git push origin "$(./scripts/release-version.sh tag)"
+```
+
+## 12. Known Current Limitations
 
 These are intentional current boundaries, not hidden bugs:
 
 - no built-in Hugging Face search yet
-- no explicit polished `chat --model <id>` selector yet
-- some CLI commands still expect UUIDs rather than human names
 - cache artifacts are not portable across different runtimes/models
 - TUI transcript capture in logs will show ANSI redraw codes because it is a real terminal UI
 
-## 11. Good First Use Cases
+## 13. Good First Use Cases
 
 Esh is already useful for:
 - local personal assistant chat

@@ -81,6 +81,30 @@ What they do:
 - release packaging can also be started manually from GitHub Actions
 - macOS release builds upload the package as an artifact and publish the `.tar.gz` plus a SHA-256 checksum on the GitHub release
 
+## Versioning and Releases
+
+Esh uses semantic versions stored in:
+- [VERSION](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/VERSION)
+- [CHANGELOG.md](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/CHANGELOG.md)
+
+Helpful commands:
+
+```bash
+./scripts/release-version.sh show
+./scripts/release-version.sh tag
+./scripts/release-version.sh verify-tag v0.1.0
+```
+
+Suggested release flow:
+
+```bash
+./scripts/release-version.sh show
+git tag "$(./scripts/release-version.sh tag)"
+git push origin "$(./scripts/release-version.sh tag)"
+```
+
+The GitHub release workflow verifies that the pushed tag matches `VERSION`.
+
 ## Install a Model
 
 Esh currently installs models directly from a Hugging Face repo id.
@@ -100,7 +124,7 @@ Then inspect what is installed:
 
 Notes:
 - the install command takes a Hugging Face repo id
-- most other model commands use the installed model id
+- inspect/remove/chat/cache commands accept the installed model id and also the original repo id where practical
 - installed ids are normalized like `mlx-community--qwen2.5-0.5b-instruct-4bit`
 
 ## Chat
@@ -125,6 +149,7 @@ Launch or reopen a named session:
 ./esh chat default
 ./esh chat work
 ./esh chat experiments
+./esh chat work --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
 
 Inside chat, you can type normal messages and slash commands.
@@ -164,11 +189,14 @@ Useful slash commands:
 /switch my-session
 /switch <uuid>
 /models
+/use-model <id-or-repo>
+/model current
 /sessions
 /caches
+/search <text>
 /doctor
 /model inspect <id>
-/session show <uuid>
+/session show <uuid-or-name>
 /cache inspect <uuid>
 /close
 /exit
@@ -186,6 +214,8 @@ Show a specific saved session:
 
 ```bash
 ./esh session show <session-uuid>
+./esh session show default
+./esh session grep hello
 ```
 
 The chat UI shows sessions in a more human-friendly way:
@@ -270,12 +300,28 @@ Or from inside chat:
 
 ```bash
 ./esh session list
-./esh cache build --session <session-uuid> --mode raw
-./esh cache build --session <session-uuid> --mode turbo
+./esh cache build --session <session-uuid-or-name> --mode raw
+./esh cache build --session <session-uuid-or-name> --mode turbo
 ./esh cache inspect
 ```
 
-### 4. Verify environment health before debugging
+## Benchmarking
+
+Compare raw and TurboQuant cache behavior for the same session:
+
+```bash
+./esh benchmark --session model-flag-smoke --model mlx-community/Qwen2.5-0.5B-Instruct-4bit --message "Continue with one short sentence about local AI."
+./esh benchmark history
+```
+
+### 4. Compare raw vs turbo on a real saved session
+
+```bash
+./esh benchmark --session default --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
+./esh benchmark history
+```
+
+### 5. Verify environment health before debugging
 
 ```bash
 ./esh doctor
@@ -317,10 +363,8 @@ Esh also accepts legacy `LLMCACHE_*` env vars for compatibility during the renam
 
 These are the most important current caveats:
 
-- `esh chat` currently loads the first installed model rather than exposing a polished CLI `--model` selector
-- `esh cache build` currently expects a saved session UUID, not a session name
-- `esh session show` currently expects a UUID in the CLI
 - model search is not built into Esh yet; you find repo ids on Hugging Face and install by id
+- cache artifacts remain runtime/model specific and are not cross-backend portable
 - some build runs still show Swift concurrency warnings from `ProcessRunner.swift`, but the tool functions correctly
 
 ## More Detailed Guide
