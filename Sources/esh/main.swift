@@ -417,12 +417,33 @@ private struct CLI {
             return nil
         }
 
-        let picker = InteractiveListPicker()
-        let items = installs.map { install in
+        let backend = MLXBackend()
+        let compatibleInstalls = installs.compactMap { install -> (ModelInstall, String)? in
+            do {
+                if let incompatibility = try backend.validateChatModel(for: install) {
+                    _ = incompatibility
+                    return nil
+                }
+            } catch {
+                return nil
+            }
             let features = featureBadgeText(ModelFeatureClassifier.features(for: install))
+            let detail = "\(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
+            return (install, "\(install.id)  \(features)|DETAIL|\(detail)")
+        }
+
+        guard !compatibleInstalls.isEmpty else {
+            print("No installed chat-compatible models found for the current MLX runtime.")
+            pauseForMenu()
+            return nil
+        }
+
+        let picker = InteractiveListPicker()
+        let items = compatibleInstalls.map { entry in
+            let parts = entry.1.components(separatedBy: "|DETAIL|")
             return InteractiveListPicker.Item(
-                title: "\(install.id)  \(features)",
-                detail: "\(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
+                title: parts[0],
+                detail: parts[1]
             )
         }
 
@@ -435,10 +456,10 @@ private struct CLI {
             secondaryKeys: ["o"]
         ) {
         case .selected(let index):
-            return installs[index].id
+            return compatibleInstalls[index].0.id
         case .secondary("o", let index):
             try await ModelOpenCommand.run(
-                identifier: installs[index].id,
+                identifier: compatibleInstalls[index].0.id,
                 service: service,
                 catalogService: catalogService
             )

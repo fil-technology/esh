@@ -148,6 +148,11 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         if let env = ProcessInfo.processInfo.environment["ESH_PYTHON"] ?? ProcessInfo.processInfo.environment["LLMCACHE_PYTHON"] {
             return URL(fileURLWithPath: env)
         }
+        let rootURL = repositoryRootURL()
+        let venvPython = rootURL.appendingPathComponent(".venv/bin/python")
+        if FileManager.default.isExecutableFile(atPath: venvPython.path) {
+            return venvPython
+        }
         return URL(fileURLWithPath: "/usr/bin/python3")
     }
 
@@ -158,14 +163,18 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         if let env = ProcessInfo.processInfo.environment["ESH_MLX_VLM_BRIDGE"] ?? ProcessInfo.processInfo.environment["LLMCACHE_MLX_VLM_BRIDGE"] {
             return URL(fileURLWithPath: env)
         }
-        let sourceURL = URL(fileURLWithPath: #filePath)
-        let rootURL = sourceURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let rootURL = repositoryRootURL()
         return rootURL.appendingPathComponent("Tools/mlx_vlm_bridge.py")
+    }
+
+    private func repositoryRootURL() -> URL {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+        return sourceURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }
 

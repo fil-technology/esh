@@ -29,10 +29,12 @@ struct TerminalSurface {
         }
 
         output.append(contentsOf: overlayLines)
-        output.append(InputBarView.render(state: state, width: size.columns))
+        let inputLine = InputBarView.render(state: state, width: size.columns)
+        output.append(inputLine)
         output.append(FooterStatsView.renderedLine(state: state, width: size.columns))
 
-        let cursorToInputBar = "\u{001B}[1A\r\u{001B}[2C"
+        let cursorOffset = min(max(inputLine.count, 0), max(size.columns - 1, 0))
+        let cursorToInputBar = "\u{001B}[1A\r\u{001B}[\(cursorOffset)C"
         Swift.print(clearScreen + output.joined(separator: "\n") + cursorToInputBar, terminator: "")
         fflush(stdout)
     }

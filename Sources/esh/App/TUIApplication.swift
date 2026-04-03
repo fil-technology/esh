@@ -85,31 +85,51 @@ struct TUIApplication {
             )
             surface.render(state: state)
             var reply = ""
-            for try await chunk in stream {
-                reply += chunk
+            do {
+                for try await chunk in stream {
+                    reply += chunk
+                    updateStreamingAssistant(
+                        state: &state,
+                        assistantID: assistantID,
+                        text: reply,
+                        isStreaming: true
+                    )
+                    state.statusText = streamingStatusText(for: reply)
+                    surface.render(state: state)
+                }
+                session.messages.append(Message(role: .assistant, text: reply))
+                session.updatedAt = Date()
+                try autosaveIfNeeded(state: state, session: session, sessionStore: sessionStore)
+                state.metrics = await runtime.metrics
+                state.inputText = ""
+                state.streamingAssistantMessageID = nil
+                state.statusText = "ready | /menu commands | /back launcher"
                 updateStreamingAssistant(
                     state: &state,
                     assistantID: assistantID,
                     text: reply,
-                    isStreaming: true
+                    isStreaming: false
                 )
-                state.statusText = streamingStatusText(for: reply)
+                surface.render(state: state)
+            } catch {
+                state.streamingAssistantMessageID = nil
+                state.statusText = "generation failed"
+                state.overlay = OverlayPanelState(
+                    title: "Generation Failed",
+                    lines: [error.localizedDescription]
+                )
+                if reply.isEmpty {
+                    state.transcriptItems.removeAll { $0.id == assistantID }
+                } else {
+                    updateStreamingAssistant(
+                        state: &state,
+                        assistantID: assistantID,
+                        text: reply,
+                        isStreaming: false
+                    )
+                }
                 surface.render(state: state)
             }
-            session.messages.append(Message(role: .assistant, text: reply))
-            session.updatedAt = Date()
-            try autosaveIfNeeded(state: state, session: session, sessionStore: sessionStore)
-            state.metrics = await runtime.metrics
-            state.inputText = ""
-            state.streamingAssistantMessageID = nil
-            state.statusText = "ready | /menu commands | /back launcher"
-            updateStreamingAssistant(
-                state: &state,
-                assistantID: assistantID,
-                text: reply,
-                isStreaming: false
-            )
-            surface.render(state: state)
         }
 
         await runtime.unload()
@@ -184,6 +204,11 @@ struct TUIApplication {
                     modelStore: modelStore,
                     preferredModelID: session.modelID
                 )
+                if let incompatibility = try backend.validateChatModel(for: newInstall) {
+                    throw StoreError.invalidManifest(
+                        "Model \(newInstall.id) is not chat-compatible with the current MLX runtime: \(incompatibility)"
+                    )
+                }
                 if newInstall.id != install.id {
                     await runtime.unload()
                     runtime = try await backend.loadRuntime(for: newInstall)

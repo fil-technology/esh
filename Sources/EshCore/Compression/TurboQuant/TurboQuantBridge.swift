@@ -46,6 +46,12 @@ public struct TurboQuantBridge: Sendable {
             return URL(fileURLWithPath: envPath)
         }
 
+        let rootURL = repositoryRootURL()
+        let venvPython = rootURL.appendingPathComponent(".venv/bin/python")
+        if FileManager.default.isExecutableFile(atPath: venvPython.path) {
+            return venvPython
+        }
+
         return URL(fileURLWithPath: "/usr/bin/python3")
     }
 
@@ -58,17 +64,21 @@ public struct TurboQuantBridge: Sendable {
             return URL(fileURLWithPath: envPath)
         }
 
-        let sourceURL = URL(fileURLWithPath: #filePath)
-        let rootURL = sourceURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let rootURL = repositoryRootURL()
         let helperURL = rootURL.appendingPathComponent("Tools/mlx_vlm_bridge.py")
         guard FileManager.default.fileExists(atPath: helperURL.path) else {
             throw StoreError.notFound("mlx-vlm helper script not found at \(helperURL.path). Set ESH_MLX_VLM_BRIDGE to override.")
         }
         return helperURL
+    }
+
+    private func repositoryRootURL() -> URL {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+        return sourceURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }

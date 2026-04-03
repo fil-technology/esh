@@ -21,6 +21,16 @@ public struct MLXBackend: InferenceBackend, Sendable {
         return MLXRuntime(bridge: bridge, install: install)
     }
 
+    public func validateChatModel(for install: ModelInstall) throws -> String? {
+        let path = try locator.resolveModelPath(for: install)
+        let response: MLXModelValidationResponse = try bridge.run(
+            command: "mlx-validate-model",
+            request: MLXModelValidationRequest(modelPath: path.path),
+            as: MLXModelValidationResponse.self
+        )
+        return response.ok ? nil : response.reason
+    }
+
     public func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking {
         MLXCompatibilityChecker(
             install: install,
@@ -28,6 +38,15 @@ public struct MLXBackend: InferenceBackend, Sendable {
         )
     }
 
+}
+
+private struct MLXModelValidationRequest: Codable, Sendable {
+    let modelPath: String
+}
+
+private struct MLXModelValidationResponse: Codable, Sendable {
+    let ok: Bool
+    let reason: String?
 }
 
 private struct MLXCompatibilityChecker: CompatibilityChecking, Sendable {

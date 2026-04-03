@@ -392,6 +392,17 @@ def mlx_build_cache() -> None:
     _dump_json({"snapshot": snapshot, "metrics": metrics})
 
 
+def mlx_validate_model() -> None:
+    _, _, _, _, _, load = _import_mlx_lm()
+    request = _load_json()
+    try:
+        load(request["modelPath"])
+    except Exception as exc:
+        _dump_json({"ok": False, "reason": str(exc)})
+        return
+    _dump_json({"ok": True, "reason": None})
+
+
 def mlx_export_cache() -> None:
     request = _load_json()
     state_payload = _load_state_file(request["stateFilePath"])
@@ -576,6 +587,7 @@ def main() -> None:
             "turboquant-decompress",
             "mlx-build-cache",
             "mlx-generate",
+            "mlx-validate-model",
             "mlx-export-cache",
             "mlx-import-cache",
         ],
@@ -594,6 +606,8 @@ def main() -> None:
         mlx_generate()
     elif args.command == "mlx-build-cache":
         mlx_build_cache()
+    elif args.command == "mlx-validate-model":
+        mlx_validate_model()
     elif args.command == "mlx-export-cache":
         mlx_export_cache()
     else:
