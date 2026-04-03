@@ -50,9 +50,10 @@ esh chat [session-name] [--model <id-or-repo>]
 esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
 esh benchmark history
 esh doctor
+esh model recommended [--profile chat|code]
 esh model list
 esh model search <query> [--source all|local|hf] [--limit N]
-esh model install <hf-repo-id>
+esh model install <hf-repo-id-or-alias>
 esh model inspect <model-id-or-repo>
 esh model remove <model-id-or-repo>
 esh session list
@@ -68,9 +69,18 @@ Plain `esh` opens a command menu with common actions like chat, model list, inst
 ## 3. Find and Install Models
 
 Model workflow:
-1. Search local installs and/or Hugging Face from Esh.
-2. Pick a repo id you want.
-3. Install it with Esh.
+1. Start with built-in recommended models for the fastest setup.
+2. Or search local installs and Hugging Face from Esh.
+3. Install by alias or repo id.
+
+Recommended presets:
+
+```bash
+./esh model recommended
+./esh model recommended --profile chat
+./esh model install fast-chat
+./esh model install quality-code
+```
 
 Examples:
 

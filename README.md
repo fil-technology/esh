@@ -111,7 +111,17 @@ GitHub surfaces:
 
 ## Install a Model
 
-Esh currently installs models directly from a Hugging Face repo id.
+Esh now has a built-in shortlist of recommended stable models for fast first-time setup.
+
+Start there:
+
+```bash
+./esh model recommended
+./esh model recommended --profile chat
+./esh model install fast-chat
+```
+
+You can still install directly from a Hugging Face repo id too.
 
 You can search first:
 
@@ -135,7 +145,7 @@ Then inspect what is installed:
 ```
 
 Notes:
-- the install command takes a Hugging Face repo id
+- the install command accepts either a Hugging Face repo id or a built-in alias like `fast-chat`
 - inspect/remove/chat/cache commands accept the installed model id and also the original repo id where practical
 - installed ids are normalized like `mlx-community--qwen2.5-0.5b-instruct-4bit`
 

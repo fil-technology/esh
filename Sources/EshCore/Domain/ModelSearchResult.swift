@@ -16,6 +16,7 @@ public struct ModelSearchResult: Identifiable, Codable, Hashable, Sendable {
     public var tags: [String]
     public var downloads: Int?
     public var likes: Int?
+    public var updatedAt: Date?
     public var isInstalled: Bool
     public var installedModelID: String?
     public var installPath: String?
@@ -31,6 +32,7 @@ public struct ModelSearchResult: Identifiable, Codable, Hashable, Sendable {
         tags: [String] = [],
         downloads: Int? = nil,
         likes: Int? = nil,
+        updatedAt: Date? = nil,
         isInstalled: Bool = false,
         installedModelID: String? = nil,
         installPath: String? = nil
@@ -45,6 +47,7 @@ public struct ModelSearchResult: Identifiable, Codable, Hashable, Sendable {
         self.tags = tags
         self.downloads = downloads
         self.likes = likes
+        self.updatedAt = updatedAt
         self.isInstalled = isInstalled
         self.installedModelID = installedModelID
         self.installPath = installPath

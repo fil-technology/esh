@@ -22,6 +22,7 @@ private struct CLI {
         let modelStore = FileModelStore(root: root)
         let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
+        let recommendedRegistry = RecommendedModelRegistry()
         let modelCatalogService = ModelCatalogService(
             localCatalog: LocalModelCatalog(store: modelStore),
             huggingFaceCatalog: HuggingFaceModelCatalog(),
@@ -36,7 +37,7 @@ private struct CLI {
         case "doctor":
             try DoctorCommand.run()
         case "model":
-            try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
+            try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService, recommendedRegistry: recommendedRegistry)
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
@@ -57,6 +58,7 @@ private struct CLI {
         let modelStore = FileModelStore(root: root)
         let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
+        let recommendedRegistry = RecommendedModelRegistry()
         let modelCatalogService = ModelCatalogService(
             localCatalog: LocalModelCatalog(store: modelStore),
             huggingFaceCatalog: HuggingFaceModelCatalog(),
@@ -89,9 +91,12 @@ private struct CLI {
                     sessionStore: sessionStore
                 )
             case "2":
-                ModelListCommand.run(service: modelService)
+                try ModelRecommendedCommand.run(arguments: [], registry: recommendedRegistry)
                 pauseForMenu()
             case "3":
+                ModelListCommand.run(service: modelService)
+                pauseForMenu()
+            case "4":
                 guard let query = prompt("Model search query")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !query.isEmpty else {
@@ -101,29 +106,29 @@ private struct CLI {
                 }
                 try await ModelSearchCommand.run(arguments: [query], service: modelCatalogService)
                 pauseForMenu()
-            case "4":
-                guard let repoID = prompt("Hugging Face repo id")?
+            case "5":
+                guard let repoID = prompt("Repo id or recommended alias")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
                     print("Install cancelled.")
                     pauseForMenu()
                     continue
                 }
-                try await ModelInstallCommand.run(repoID: repoID, service: modelService)
-                pauseForMenu()
-            case "5":
-                try handleSession(arguments: ["list"], store: sessionStore)
+                try await ModelInstallCommand.run(identifier: repoID, service: modelService, registry: recommendedRegistry)
                 pauseForMenu()
             case "6":
-                try CacheInspectCommand.run(arguments: [], store: cacheStore)
+                try handleSession(arguments: ["list"], store: sessionStore)
                 pauseForMenu()
             case "7":
-                try DoctorCommand.run()
+                try CacheInspectCommand.run(arguments: [], store: cacheStore)
                 pauseForMenu()
             case "8":
-                printUsage()
+                try DoctorCommand.run()
                 pauseForMenu()
             case "9":
+                printUsage()
+                pauseForMenu()
+            case "10":
                 try await BenchmarkCommand.run(arguments: ["history"])
                 pauseForMenu()
             case "0", "q", "quit", "exit":
@@ -135,22 +140,24 @@ private struct CLI {
         }
     }
 
-    private func handleModel(arguments: [String], service: ModelService, catalogService: ModelCatalogService) async throws {
+    private func handleModel(arguments: [String], service: ModelService, catalogService: ModelCatalogService, recommendedRegistry: RecommendedModelRegistry) async throws {
         guard let subcommand = arguments.first else {
             ModelListCommand.run(service: service)
             return
         }
 
         switch subcommand {
+        case "recommended":
+            try ModelRecommendedCommand.run(arguments: Array(arguments.dropFirst()), registry: recommendedRegistry)
         case "list":
             ModelListCommand.run(service: service)
         case "search":
             try await ModelSearchCommand.run(arguments: Array(arguments.dropFirst()), service: catalogService)
         case "install":
             guard let repoID = arguments.dropFirst().first else {
-                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id>")
+                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias>")
             }
-            try await ModelInstallCommand.run(repoID: repoID, service: service)
+            try await ModelInstallCommand.run(identifier: repoID, service: service, registry: recommendedRegistry)
         case "inspect":
             guard let modelID = arguments.dropFirst().first else {
                 throw StoreError.invalidManifest("Usage: esh model inspect <model-id>")
@@ -208,9 +215,10 @@ private struct CLI {
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
               esh benchmark history
               esh doctor
+              esh model recommended [--profile chat|code]
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
-              esh model install <hf-repo-id>
+              esh model install <hf-repo-id-or-alias>
               esh model inspect <model-id>
               esh model remove <model-id>
               esh session [list|show <uuid-or-name>|grep <text>]
@@ -233,14 +241,15 @@ private struct CLI {
             Saved caches:     \(cacheCount)
 
             1. Chat
-            2. List models
-            3. Search models
-            4. Install model
-            5. List sessions
-            6. List caches
-            7. Doctor
-            8. Show CLI help
-            9. Benchmark history
+            2. Recommended models
+            3. List models
+            4. Search models
+            5. Install model
+            6. List sessions
+            7. List caches
+            8. Doctor
+            9. Show CLI help
+            10. Benchmark history
             0. Exit
             """
         )

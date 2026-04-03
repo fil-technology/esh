@@ -33,6 +33,7 @@ public struct LocalModelCatalog: ModelCatalog, Sendable {
                 backend: install.spec.backend,
                 sizeBytes: install.sizeBytes,
                 tags: [install.backendFormat],
+                updatedAt: install.installedAt,
                 isInstalled: true,
                 installedModelID: install.id,
                 installPath: install.installPath

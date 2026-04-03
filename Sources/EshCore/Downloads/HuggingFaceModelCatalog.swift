@@ -8,6 +8,7 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
         let downloads: Int?
         let likes: Int?
         let libraryName: String?
+        let lastModified: Date?
         let siblings: [Sibling]?
         let cardData: CardData?
 
@@ -23,9 +24,13 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
     }
 
     private let session: URLSession
+    private let decoder: JSONDecoder
 
     public init(session: URLSession = .shared) {
         self.session = session
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
     }
 
     public func search(query: String, limit: Int) async throws -> [ModelSearchResult] {
@@ -47,7 +52,7 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
             throw StoreError.invalidManifest("Failed to search Hugging Face: HTTP \(http.statusCode).")
         }
 
-        let entries = try JSONDecoder().decode([SearchEntry].self, from: data)
+        let entries = try decoder.decode([SearchEntry].self, from: data)
         return entries
             .filter { isRelevantToMLX($0) }
             .prefix(limit)
@@ -62,7 +67,8 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
                     sizeBytes: totalSize(for: entry.siblings),
                     tags: normalizedTags(for: entry),
                     downloads: entry.downloads,
-                    likes: entry.likes
+                    likes: entry.likes,
+                    updatedAt: entry.lastModified
                 )
             }
     }

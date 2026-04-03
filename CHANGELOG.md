@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-03
+
+### Added
+- `esh model recommended` with built-in stable MLX presets for fast first-time setup
+- alias-based model install, for example `esh model install fast-chat`
+
+### Changed
+- model search output now uses compact fixed-width columns with source, state, model, kind, size, downloads, and date
+
 ## [0.1.1] - 2026-04-03
 
 ### Added
