@@ -26,12 +26,7 @@ done < <(
   find "$RELEASE_ROOT" -type f -print0 |
     xargs -0 file |
     awk -F: '/Mach-O/ {print $1}' |
-    python3 - <<'PY'
-import sys
-paths = [line.strip() for line in sys.stdin if line.strip()]
-for path in sorted(paths, key=len, reverse=True):
-    print(path)
-PY
+    python3 -c 'import sys; paths=[line.strip() for line in sys.stdin if line.strip()]; [print(path) for path in sorted(paths, key=len, reverse=True)]'
 )
 
 if [[ ${#MACHO_FILES[@]} -eq 0 ]]; then
