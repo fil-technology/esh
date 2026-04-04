@@ -45,6 +45,10 @@ private struct CLI {
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "doctor":
             try DoctorCommand.run()
+        case "version":
+            print(AppVersionResolver.currentVersion() ?? "unknown")
+        case "update":
+            await showUpdateStatus()
         case "model":
             try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
         case "session":
@@ -76,6 +80,7 @@ private struct CLI {
         let cacheStore = FileCacheStore(root: root)
         let picker = InteractiveListPicker()
         var didOfferStarterInstall = false
+        let updateNotice = await ReleaseUpdateService(persistenceRoot: root).checkForUpdate()
 
         while true {
             let modelCount = (try? modelStore.listInstalls().count) ?? 0
@@ -108,7 +113,7 @@ private struct CLI {
                     sessionCount: sessionCount,
                     cacheCount: cacheCount
                 ),
-                subtitle: "Tips: Enter selects. Press n on Chat for a named session. Chat now lets you pick the model before opening.",
+                subtitle: launcherSubtitle(updateNotice: updateNotice),
                 items: menuItems,
                 primaryHint: "Enter select",
                 secondaryHints: ["n named chat"],
@@ -187,8 +192,7 @@ private struct CLI {
                     cacheStore: cacheStore
                 )
             case .selected(6):
-                try CacheInspectCommand.run(arguments: [], store: cacheStore)
-                pauseForMenu()
+                try await showCachesMenu(cacheStore: cacheStore)
             case .selected(7):
                 try DoctorCommand.run()
                 pauseForMenu()
@@ -321,6 +325,8 @@ private struct CLI {
             """
             esh commands:
               esh
+              esh version
+              esh update
               esh chat [session-name]
               esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo] [--autosave on|off]
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
@@ -339,6 +345,28 @@ private struct CLI {
               esh cache inspect [artifact-uuid]
             """
         )
+    }
+
+    private func showUpdateStatus() async {
+        let current = AppVersionResolver.currentVersion() ?? "unknown"
+        if let notice = await ReleaseUpdateService(persistenceRoot: root).checkForUpdate() {
+            print("current: \(notice.currentVersion)")
+            print("latest: \(notice.latestVersion)")
+            print("update: \(notice.upgradeCommand)")
+            return
+        }
+
+        print("current: \(current)")
+        print("status: up to date or unable to verify right now")
+        print("update: brew upgrade --cask esh")
+    }
+
+    private func launcherSubtitle(updateNotice: ReleaseUpdateNotice?) -> String {
+        let base = "Tips: Enter selects. Press n on Chat for a named session. Chat now lets you pick the model before opening."
+        guard let updateNotice else {
+            return base
+        }
+        return base + "  Update available: \(updateNotice.latestVersion). Run \(updateNotice.upgradeCommand)."
     }
 
     private func makeDefaultMenuItems(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [InteractiveListPicker.Item] {
@@ -764,6 +792,39 @@ private struct CLI {
                 arguments: [session.id.uuidString],
                 sessionStore: sessionStore
             )
+        default:
+            return
+        }
+    }
+
+    private func showCachesMenu(cacheStore: CacheStore) async throws {
+        let artifacts = try cacheStore.listArtifacts()
+        guard !artifacts.isEmpty else {
+            print("No cache artifacts.")
+            pauseForMenu()
+            return
+        }
+
+        let items = artifacts.map { artifact in
+            InteractiveListPicker.Item(
+                title: "\(CommandSupport.shortID(artifact.id))  \(artifact.manifest.modelID)",
+                detail: "\(artifact.manifest.cacheMode.rawValue) | \(ByteFormatting.string(for: artifact.sizeBytes)) | \(artifact.manifest.sessionName)"
+            )
+        }
+
+        let picker = InteractiveListPicker()
+        switch picker.pick(
+            title: "Saved Caches",
+            subtitle: "Enter inspects the selected cache artifact.",
+            items: items,
+            primaryHint: "Enter inspect cache"
+        ) {
+        case .selected(let index):
+            try CacheInspectCommand.run(
+                arguments: ["inspect", artifacts[index].id.uuidString],
+                store: cacheStore
+            )
+            pauseForMenu()
         default:
             return
         }

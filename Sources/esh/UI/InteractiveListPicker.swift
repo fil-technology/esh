@@ -132,7 +132,8 @@ struct InteractiveListPicker {
                 marker: marker,
                 title: item.title,
                 detail: item.detail,
-                width: innerWidth
+                width: innerWidth,
+                isSelected: index == selectedIndex
             )
             if index == selectedIndex {
                 lines.append("\(TerminalUIStyle.border)│ \(TerminalUIStyle.reset)\(TerminalUIStyle.selection)\(TerminalUIStyle.padVisible(content, to: innerWidth))\(TerminalUIStyle.reset)\(TerminalUIStyle.border) │\(TerminalUIStyle.reset)")
@@ -154,11 +155,19 @@ struct InteractiveListPicker {
         fflush(stdout)
     }
 
-    private func composeRow(marker: String, title: String, detail: String?, width: Int) -> String {
+    private func composeRow(
+        marker: String,
+        title: String,
+        detail: String?,
+        width: Int,
+        isSelected: Bool
+    ) -> String {
         let normalizedTitle = title.replacingOccurrences(of: "\n", with: " ")
+        let titleColor = isSelected ? TerminalUIStyle.ink : TerminalUIStyle.ink
+        let detailColor = isSelected ? TerminalUIStyle.ink : TerminalUIStyle.slate
         let prefix = "\(marker) "
         guard let detail, !detail.isEmpty else {
-            return prefix + TerminalUIStyle.truncateVisible(normalizedTitle, limit: max(width - 2, 8))
+            return prefix + TerminalUIStyle.truncateVisible("\(titleColor)\(normalizedTitle)", limit: max(width - 2, 8))
         }
 
         let normalizedDetail = detail.replacingOccurrences(of: "\n", with: " ")
@@ -167,11 +176,11 @@ struct InteractiveListPicker {
         let titleWidth = max(Int(Double(availableWidth) * 0.4), 12)
         let detailWidth = max(availableWidth - titleWidth - separator.count, 10)
         let left = TerminalUIStyle.padVisible(
-            TerminalUIStyle.truncateVisible("\(TerminalUIStyle.ink)\(normalizedTitle)\(TerminalUIStyle.reset)", limit: titleWidth),
+            TerminalUIStyle.truncateVisible("\(titleColor)\(normalizedTitle)", limit: titleWidth),
             to: titleWidth
         )
         let right = TerminalUIStyle.truncateVisible(
-            "\(TerminalUIStyle.slate)\(normalizedDetail)\(TerminalUIStyle.reset)",
+            "\(detailColor)\(normalizedDetail)",
             limit: detailWidth
         )
         return prefix + left + separator + right

@@ -21,6 +21,7 @@ mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/python" "$PAYLOAD_DIR/Tools" "$PAYLOAD_DIR/s
 esh::build_swift release
 cp "$(esh::swift_binary release)" "$ROOT_DIR/bin/esh"
 cp "$(esh::repo_root)/esh" "$ROOT_DIR/esh"
+cp "$(esh::repo_root)/VERSION" "$ROOT_DIR/VERSION"
 cp "$(esh::repo_root)/scripts/run.sh" "$PAYLOAD_DIR/scripts/run.sh"
 cp "$(esh::repo_root)/scripts/verify-env.sh" "$PAYLOAD_DIR/scripts/verify-env.sh"
 cp "$(esh::repo_root)/scripts/lib/common.sh" "$PAYLOAD_DIR/scripts/lib/common.sh"
