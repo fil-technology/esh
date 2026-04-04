@@ -23,18 +23,26 @@ enum TranscriptView {
                         lines.append("")
                     }
                     lines.append(segment.label)
-                    let wrapped = wrap(segment.text.isEmpty ? "…" : segment.text, width: max(width - 2, 20))
-                    for line in wrapped {
-                        lines.append("  \(segment.prefix)│ \(line)\(TerminalUIStyle.reset)")
+                    let rendered = MarkdownTerminalRenderer.render(
+                        segment.text.isEmpty ? "…" : segment.text,
+                        width: max(width - 4, 20),
+                        defaultTint: segment.prefix.isEmpty ? nil : segment.prefix
+                    )
+                    for line in rendered {
+                        let tint = line.tint ?? segment.prefix
+                        lines.append("  \(tint)│ \(line.text)\(TerminalUIStyle.reset)")
                     }
                 }
             } else {
                 let label = roleLabel(for: item)
                 lines.append(label)
 
-                let wrapped = wrap(item.text.isEmpty ? "…" : item.text, width: max(width - 2, 20))
-                for line in wrapped {
-                    lines.append("  \(TerminalUIStyle.blue)│\(TerminalUIStyle.reset) \(line)")
+                let rendered = MarkdownTerminalRenderer.render(
+                    item.text.isEmpty ? "…" : item.text,
+                    width: max(width - 4, 20)
+                )
+                for line in rendered {
+                    lines.append("  \(TerminalUIStyle.blue)│\(TerminalUIStyle.reset) \(line.text)")
                 }
             }
         }
@@ -120,36 +128,5 @@ enum TranscriptView {
         case .system:
             return "\(TerminalUIStyle.bold)\(TerminalUIStyle.slate)System\(TerminalUIStyle.reset)"
         }
-    }
-
-    private static func wrap(_ text: String, width: Int) -> [String] {
-        guard !text.isEmpty else { return [""] }
-
-        var result: [String] = []
-        for paragraph in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let source = paragraph.isEmpty ? "" : String(paragraph)
-            if source.isEmpty {
-                result.append("")
-                continue
-            }
-
-            var current = ""
-            for word in source.split(separator: " ", omittingEmptySubsequences: false) {
-                let token = String(word)
-                if current.isEmpty {
-                    current = token
-                } else if current.count + 1 + token.count <= width {
-                    current += " " + token
-                } else {
-                    result.append(current)
-                    current = token
-                }
-            }
-            if !current.isEmpty {
-                result.append(current)
-            }
-        }
-
-        return result
     }
 }

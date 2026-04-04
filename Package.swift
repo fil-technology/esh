@@ -27,6 +27,10 @@ let package = Package(
         .testTarget(
             name: "EshCoreTests",
             dependencies: ["EshCore"]
+        ),
+        .testTarget(
+            name: "EshUITests",
+            dependencies: ["esh"]
         )
     ]
 )
