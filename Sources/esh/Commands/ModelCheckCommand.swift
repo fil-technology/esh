@@ -105,20 +105,12 @@ enum ModelCheckCommand {
         if results.count == 1 || isatty(STDIN_FILENO) == 0 || isatty(STDOUT_FILENO) == 0 {
             return results[0].modelSource.reference
         }
-
-        print("Choose a model to check:")
-        for (offset, result) in results.enumerated() {
-            print("\(offset + 1). \(result.modelSource.reference)")
-        }
-        print("Selection [1-\(results.count), 0 to cancel]: ", terminator: "")
-        fflush(stdout)
-        guard let input = readLine(),
-              let index = Int(input.trimmingCharacters(in: .whitespacesAndNewlines)),
-              index > 0,
-              results.indices.contains(index - 1) else {
-            throw StoreError.invalidManifest("Model check cancelled.")
-        }
-        return results[index - 1].modelSource.reference
+        let selected = try ModelSearchPicker.pick(
+            title: "Choose A Model To Check",
+            subtitle: "Use ↑/↓ and Enter to choose the model to inspect before download. Esc cancels.",
+            results: results
+        )
+        return selected.modelSource.reference
     }
 
     private static func resolveBackendPreference(_ value: String) throws -> ModelCheckBackendPreference {

@@ -116,28 +116,11 @@ enum ModelInstallCommand {
         guard !results.isEmpty else {
             throw StoreError.notFound("No remote models found for \(identifier).")
         }
-
-        if isatty(STDIN_FILENO) == 0 || isatty(STDOUT_FILENO) == 0 {
-            printChoices(results)
-            throw StoreError.invalidManifest("Multiple matches found for \(identifier). Re-run with an exact repo id or a recommended alias.")
-        }
-
-        print("Choose a model to install:")
-        printChoices(results)
-        print("Selection [1-\(results.count), 0 to cancel]: ", terminator: "")
-        fflush(stdout)
-
-        guard let input = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let index = Int(input) else {
-            throw StoreError.invalidManifest("Install cancelled.")
-        }
-        if index == 0 {
-            throw StoreError.invalidManifest("Install cancelled.")
-        }
-        guard results.indices.contains(index - 1) else {
-            throw StoreError.invalidManifest("Invalid selection \(index).")
-        }
-        return results[index - 1]
+        return try ModelSearchPicker.pick(
+            title: "Choose A Model To Install",
+            subtitle: "Use ↑/↓ and Enter to choose the repo to install. Esc cancels.",
+            results: results
+        )
     }
 
     private static func handlePreflight(_ report: ModelInstallPreflightReport, repoID: String) -> Bool {
@@ -182,50 +165,4 @@ enum ModelInstallCommand {
         }
         return !report.isBlocked
     }
-
-    private static func printChoices(_ results: [ModelSearchResult]) {
-        print("no  model                              kind       date      downloads")
-        for (offset, result) in results.enumerated() {
-            let row = [
-                pad("\(offset + 1).", width: 3),
-                pad(result.displayName, width: 34),
-                pad(result.tags.first ?? result.backend?.rawValue ?? "-", width: 10),
-                pad(result.updatedAt.map(dateFormatter.string(from:)) ?? "-", width: 9),
-                result.downloads.map(compactNumber(_:)) ?? "-"
-            ].joined(separator: " ")
-            print(row)
-        }
-    }
-
-    private static func pad(_ value: String, width: Int) -> String {
-        let truncated = truncate(value, limit: width)
-        if truncated.count >= width {
-            return truncated
-        }
-        return truncated + String(repeating: " ", count: width - truncated.count)
-    }
-
-    private static func truncate(_ value: String, limit: Int) -> String {
-        guard value.count > limit else { return value }
-        guard limit > 1 else { return String(value.prefix(limit)) }
-        return String(value.prefix(limit - 1)) + "…"
-    }
-
-    private static func compactNumber(_ value: Int) -> String {
-        switch value {
-        case 1_000_000...:
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        case 1_000...:
-            return String(format: "%.1fK", Double(value) / 1_000)
-        default:
-            return "\(value)"
-        }
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM"
-        return formatter
-    }()
-
 }

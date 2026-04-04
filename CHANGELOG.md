@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-04-04
+
+### Added
+- arrow-key model disambiguation pickers for install, open, and check flows after search returns multiple matches
+
+### Changed
+- the shared model chooser now makes `Esc` cancellation explicit alongside `Enter` selection
+
 ## [0.1.19] - 2026-04-04
 
 ### Added
