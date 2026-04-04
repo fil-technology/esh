@@ -116,15 +116,19 @@ jobs:
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256
 
       - name: Check out Homebrew tap
-        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         uses: actions/checkout@v4
         with:
           repository: ${{ env.HOMEBREW_TAP_REPO }}
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ env.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
       - name: Update Homebrew formula
-        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           chmod +x ./scripts/generate-homebrew-formula.sh
           mkdir -p homebrew-tap/Formula
@@ -143,7 +147,9 @@ jobs:
           EOF
 
       - name: Publish Homebrew tap update
-        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         working-directory: homebrew-tap
         run: |
           if git diff --quiet; then
