@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MLXBackend: InferenceBackend, Sendable {
+public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendable {
     public let kind: BackendKind = .mlx
     public let runtimeVersion: String
     private let bridge: MLXBridge
@@ -31,6 +31,15 @@ public struct MLXBackend: InferenceBackend, Sendable {
         return response.ok ? nil : response.reason
     }
 
+    public func validateRemoteConfig(jsonText: String) throws -> String? {
+        let response: MLXModelValidationResponse = try bridge.run(
+            command: "mlx-validate-config",
+            request: MLXConfigValidationRequest(configJSON: jsonText),
+            as: MLXModelValidationResponse.self
+        )
+        return response.ok ? nil : response.reason
+    }
+
     public func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking {
         MLXCompatibilityChecker(
             install: install,
@@ -42,6 +51,10 @@ public struct MLXBackend: InferenceBackend, Sendable {
 
 private struct MLXModelValidationRequest: Codable, Sendable {
     let modelPath: String
+}
+
+private struct MLXConfigValidationRequest: Codable, Sendable {
+    let configJSON: String
 }
 
 private struct MLXModelValidationResponse: Codable, Sendable {

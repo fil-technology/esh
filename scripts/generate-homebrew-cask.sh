@@ -14,7 +14,7 @@ cask "esh" do
   version "${VERSION}"
   sha256 "${SHA256}"
 
-  url "https://github.com/fil-technology/esh/releases/download/v#{version}/esh-macos-#{version}.tar.gz"
+  url "https://github.com/fil-technology/esh/releases/download/v#{version}/esh-macos-#{version}.zip"
   name "Esh"
   desc "Local-first LLM tool for Apple Silicon"
   homepage "https://github.com/fil-technology/esh"
@@ -22,6 +22,6 @@ cask "esh" do
   depends_on macos: ">= :ventura"
   depends_on formula: "python"
 
-  binary "esh-macos-#{version}/esh", target: "esh"
+  binary "esh-macos-#{version}/bin/esh", target: "esh"
 end
 EOF

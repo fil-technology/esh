@@ -13,8 +13,9 @@ DIST_DIR="$(esh::repo_root)/dist"
 ROOT_DIR="$DIST_DIR/$ARTIFACT_NAME"
 PAYLOAD_DIR="$ROOT_DIR/share/esh"
 ARCHIVE_PATH="$DIST_DIR/$ARTIFACT_NAME.tar.gz"
+ZIP_PATH="$DIST_DIR/$ARTIFACT_NAME.zip"
 
-rm -rf "$ROOT_DIR" "$ARCHIVE_PATH"
+rm -rf "$ROOT_DIR" "$ARCHIVE_PATH" "$ZIP_PATH"
 mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/python" "$PAYLOAD_DIR/Tools" "$PAYLOAD_DIR/scripts/lib"
 
 esh::build_swift release
@@ -37,9 +38,12 @@ chmod +x "$ROOT_DIR/esh" "$ROOT_DIR/bin/esh" "$PAYLOAD_DIR/scripts/run.sh" "$PAY
 (
   cd "$DIST_DIR"
   tar -czf "$ARCHIVE_PATH" "$ARTIFACT_NAME"
+  ditto -c -k --keepParent "$ARTIFACT_NAME" "$ZIP_PATH"
 )
 
 echo "Packaged release at:"
 echo "  $ROOT_DIR"
 echo "Archive:"
 echo "  $ARCHIVE_PATH"
+echo "Zip archive:"
+echo "  $ZIP_PATH"

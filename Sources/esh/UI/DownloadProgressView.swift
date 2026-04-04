@@ -26,34 +26,33 @@ enum DownloadProgressView {
     }
 
     private static func formattedLine(for state: DownloadState) -> String {
-        let phase = padded("[\(state.phase.rawValue)]", width: 13)
+        let phase = padded(state.phase.rawValue.lowercased(), width: 12)
         let totalBytes = max(state.totalBytes ?? 0, 0)
         let ratio = totalBytes > 0 ? min(max(Double(state.bytesDownloaded) / Double(totalBytes), 0), 1) : nil
-        let bar = progressBar(progress: ratio, width: 18, downloadedBytes: state.bytesDownloaded)
-        let percent = ratio.map { String(format: "%5.1f%%", $0 * 100) } ?? "  -- %"
-        let downloaded = padded(ByteFormatting.string(for: state.bytesDownloaded), width: 9, alignRight: true)
-        let total = padded(state.totalBytes.map(ByteFormatting.string(for:)) ?? "?", width: 9, alignRight: true)
+        let bar = progressBar(progress: ratio, width: 24, downloadedBytes: state.bytesDownloaded)
+        let percent = ratio.map { String(format: "%3.0f%%", $0 * 100) } ?? " --%"
+        let transferred = padded(ByteFormatting.string(for: state.bytesDownloaded), width: 8, alignRight: true)
+        let total = padded(state.totalBytes.map(ByteFormatting.string(for:)) ?? "?", width: 8, alignRight: true)
         let speed = padded(state.bytesPerSecond.map { ByteFormatting.string(for: Int64($0)) + "/s" } ?? "-", width: 10, alignRight: true)
-        let eta = padded(state.etaSeconds.map { String(format: "%.0fs", $0) } ?? "-", width: 5, alignRight: true)
-        let file = truncateMiddle(state.currentFile ?? "-", limit: 26)
-        let message = state.message ?? ""
-        return "\(phase) \(bar) \(percent)  \(downloaded)/\(total)  \(speed)  eta \(eta)  \(file)  \(message)"
+        let eta = padded(state.etaSeconds.map(formatETA(_:)) ?? "-", width: 6, alignRight: true)
+        let file = truncateMiddle(state.currentFile ?? state.message ?? "model", limit: 28)
+        return "\(TerminalUIStyle.slate)\(phase)\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(file)\(TerminalUIStyle.reset)  \(percent) \(bar)  \(transferred)/\(total)  \(speed)  \(eta)"
     }
 
     private static func progressBar(progress: Double?, width: Int, downloadedBytes: Int64) -> String {
         if let progress {
             let filled = Int((progress * Double(width)).rounded(.down))
             let safeFilled = min(max(filled, 0), width)
-            return "[" + String(repeating: "=", count: safeFilled) + String(repeating: "-", count: width - safeFilled) + "]"
+            return String(repeating: "█", count: safeFilled) + String(repeating: "░", count: width - safeFilled)
         }
 
-        var cells = Array(repeating: Character("-"), count: width)
-        let pulseWidth = min(5, width)
+        var cells = Array(repeating: Character("░"), count: width)
+        let pulseWidth = min(6, width)
         let offset = Int((downloadedBytes / 65_536) % Int64(max(width - pulseWidth + 1, 1)))
         for index in offset..<(offset + pulseWidth) where cells.indices.contains(index) {
-            cells[index] = Character("=")
+            cells[index] = Character("█")
         }
-        return "[" + String(cells) + "]"
+        return String(cells)
     }
 
     private static func padded(_ value: String, width: Int, alignRight: Bool = false) -> String {
@@ -69,5 +68,13 @@ enum DownloadProgressView {
         let start = String(value.prefix(prefixCount))
         let end = String(value.suffix(suffixCount))
         return start + "…" + end
+    }
+
+    private static func formatETA(_ seconds: Double) -> String {
+        let value = Int(seconds.rounded())
+        if value >= 60 {
+            return String(format: "%dm%02ds", value / 60, value % 60)
+        }
+        return "\(value)s"
     }
 }

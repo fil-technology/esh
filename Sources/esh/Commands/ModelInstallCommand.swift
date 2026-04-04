@@ -32,21 +32,14 @@ enum ModelInstallCommand {
             print(resolutionMessage)
         }
 
-        if let incompatibility = knownChatRuntimeIncompatibility(for: repoID) {
-            throw StoreError.invalidManifest(
-                """
-                \(repoID) is not currently supported by this project's MLX chat runtime.
-                \(incompatibility)
-                Choose a different model for now.
-                """
-            )
-        }
-
-        try runResourcePreflight(
+        let preflight = try await ModelInstallPreflightService().evaluate(
             repoID: repoID,
             recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
             searchResult: selectedSearchResult
         )
+        if !handlePreflight(preflight, repoID: repoID) {
+            throw CLIHandledError()
+        }
 
         let manifest = try await service.install(repoID: repoID) { state in
             DownloadProgressView.render(state: state)
@@ -90,63 +83,47 @@ enum ModelInstallCommand {
         return results[index - 1]
     }
 
-    private static func runResourcePreflight(
-        repoID: String,
-        recommendedModel: RecommendedModel?,
-        searchResult: ModelSearchResult?
-    ) throws {
-        if let requirement = ModelMemoryAdvisor.requiredMemoryBytes(
-            recommendedModel: recommendedModel,
-            searchResult: searchResult
-        ), let memory = SystemMemory.snapshot() {
-            if memory.totalBytes < requirement {
-                throw StoreError.invalidManifest(
-                    """
-                    Not enough unified memory for \(repoID).
-                    Recommended: \(ByteFormatting.string(for: requirement))
-                    This Mac: \(ByteFormatting.string(for: memory.totalBytes)) total
-                    Choose a smaller model.
-                    """
-                )
-            }
-
-            if memory.availableBytes < requirement {
-                throw StoreError.invalidManifest(
-                    """
-                    Not enough available memory to start downloading \(repoID).
-                    Recommended free memory: \(ByteFormatting.string(for: requirement))
-                    Available now: \(ByteFormatting.string(for: memory.availableBytes))
-                    Close other apps or choose a smaller model.
-                    """
-                )
-            }
+    private static func handlePreflight(_ report: ModelInstallPreflightReport, repoID: String) -> Bool {
+        guard !report.notes.isEmpty || !report.warnings.isEmpty || !report.blockers.isEmpty else {
+            return true
         }
 
-        if let diskRequirement = ModelMemoryAdvisor.requiredDiskBytes(
-            recommendedModel: recommendedModel,
-            searchResult: searchResult
-        ), let storage = SystemStorage.snapshot(at: PersistenceRoot.default().modelsURL) {
-            if storage.availableBytes < diskRequirement {
-                throw StoreError.invalidManifest(
-                    """
-                    Not enough disk space to download \(repoID).
-                    Required free space: \(ByteFormatting.string(for: diskRequirement))
-                    Available now: \(ByteFormatting.string(for: storage.availableBytes))
-                    Free space or choose a smaller model.
-                    """
+        let detailLines = report.notes
+            + report.warnings.map { "Warning: \($0)" }
+            + report.blockers.map { "Blocked: \($0.replacingOccurrences(of: "\n", with: " "))" }
+
+        let interactive = isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+        if interactive {
+            let prompt = InteractiveChoicePrompt()
+            if report.isBlocked {
+                _ = prompt.choose(
+                    title: "Model Cannot Run Here",
+                    message: "\(repoID) is not currently installable with this machine/runtime setup.",
+                    details: detailLines,
+                    choices: [.init(key: "n", label: "Back")],
+                    footer: "enter confirm • esc cancel"
                 )
+                return false
             }
-        } else if let diskRequirement = ModelMemoryAdvisor.requiredDiskBytes(
-            recommendedModel: recommendedModel,
-            searchResult: searchResult
-        ) {
-            print(
-                """
-                Note: could not verify free disk space automatically for \(repoID).
-                Estimated required free space: \(ByteFormatting.string(for: diskRequirement))
-                """
+
+            let choice = prompt.choose(
+                title: "Ready To Install",
+                message: "Review the machine and runtime requirements before downloading \(repoID).",
+                details: detailLines,
+                choices: [
+                    .init(key: "y", label: "Install"),
+                    .init(key: "n", label: "Cancel")
+                ],
+                footer: "←/→ navigate • enter confirm • esc cancel"
             )
+            return choice == "y"
         }
+
+        print("Install preflight:")
+        for line in detailLines {
+            print("  - \(line)")
+        }
+        return !report.isBlocked
     }
 
     private static func printChoices(_ results: [ModelSearchResult]) {
@@ -194,11 +171,4 @@ enum ModelInstallCommand {
         return formatter
     }()
 
-    private static func knownChatRuntimeIncompatibility(for repoID: String) -> String? {
-        let normalized = repoID.lowercased()
-        if normalized.contains("gemma-4") {
-            return "Gemma 4 models currently fail MLX chat validation with: Model type gemma4 not supported."
-        }
-        return nil
-    }
 }

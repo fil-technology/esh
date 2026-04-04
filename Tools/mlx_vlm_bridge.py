@@ -403,6 +403,20 @@ def mlx_validate_model() -> None:
     _dump_json({"ok": True, "reason": None})
 
 
+def mlx_validate_config() -> None:
+    request = _load_json()
+    try:
+        import json as _json
+        from mlx_lm.utils import _get_classes
+
+        config = _json.loads(request["configJSON"])
+        _get_classes(config)
+    except Exception as exc:
+        _dump_json({"ok": False, "reason": str(exc)})
+        return
+    _dump_json({"ok": True, "reason": None})
+
+
 def mlx_export_cache() -> None:
     request = _load_json()
     state_payload = _load_state_file(request["stateFilePath"])
@@ -588,6 +602,7 @@ def main() -> None:
             "mlx-build-cache",
             "mlx-generate",
             "mlx-validate-model",
+            "mlx-validate-config",
             "mlx-export-cache",
             "mlx-import-cache",
         ],
@@ -608,6 +623,8 @@ def main() -> None:
         mlx_build_cache()
     elif args.command == "mlx-validate-model":
         mlx_validate_model()
+    elif args.command == "mlx-validate-config":
+        mlx_validate_config()
     elif args.command == "mlx-export-cache":
         mlx_export_cache()
     else:

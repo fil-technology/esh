@@ -70,7 +70,7 @@ esh::python_works() {
   (
     set +e
     "$python_path" -c 'import sys' >/dev/null 2>&1
-  )
+  ) 2>/dev/null
 }
 
 esh::release_python_dir() {

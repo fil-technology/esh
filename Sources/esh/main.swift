@@ -3,11 +3,16 @@ import Darwin
 import EshCore
 
 do {
+    try PackagedRuntimeBootstrap.configureEnvironmentIfNeeded()
     try await CLI().run(arguments: CommandLine.arguments)
+} catch is CLIHandledError {
+    Foundation.exit(1)
 } catch {
     fputs("error: \(error.localizedDescription)\n", stderr)
     Foundation.exit(1)
 }
+
+struct CLIHandledError: Error {}
 
 private struct CLI {
     private let root = PersistenceRoot.default()
@@ -75,6 +80,11 @@ private struct CLI {
             let modelCount = (try? modelStore.listInstalls().count) ?? 0
             let sessionCount = (try? sessionStore.listSessions().count) ?? 0
             let cacheCount = (try? cacheStore.listArtifacts().count) ?? 0
+            StartupBanner.animateIfNeeded(
+                modelCount: modelCount,
+                sessionCount: sessionCount,
+                cacheCount: cacheCount
+            )
             switch picker.pick(
                 title: StartupBanner.render(
                     modelCount: modelCount,
@@ -324,10 +334,9 @@ private struct CLI {
     }
 
     private func confirmAction(_ prompt: String) -> Bool {
-        print("\(prompt) ", terminator: "")
-        fflush(stdout)
-
-        guard isatty(STDIN_FILENO) != 0 else {
+        guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
+            print("\(prompt) ", terminator: "")
+            fflush(stdout)
             let response = readLine()?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
@@ -335,29 +344,16 @@ private struct CLI {
             return response == "y" || response == "yes"
         }
 
-        let previous = enablePauseRawMode()
-        defer { restorePauseMode(previous) }
-
-        while let byte = readPauseByte() {
-            switch byte {
-            case UInt8(ascii: "y"), UInt8(ascii: "Y"):
-                discardBufferedReturnKey()
-                print("y")
-                return true
-            case UInt8(ascii: "n"), UInt8(ascii: "N"), 27, 3:
-                discardBufferedReturnKey()
-                print("n")
-                return false
-            case 10, 13:
-                print("")
-                return false
-            default:
-                continue
-            }
-        }
-
-        print("")
-        return false
+        let promptView = InteractiveChoicePrompt()
+        return promptView.choose(
+            title: "Confirm Action",
+            message: prompt,
+            choices: [
+                .init(key: "y", label: "Yes"),
+                .init(key: "n", label: "No")
+            ],
+            footer: "←/→ navigate • enter confirm • esc cancel"
+        ) == "y"
     }
 
     private func waitForEnter() {
