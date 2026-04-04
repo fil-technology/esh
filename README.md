@@ -31,9 +31,15 @@ It does not yet do:
 
 ## Quick Start
 
-### Homebrew install
+### Install and run
 
 For end users on macOS:
+
+```bash
+brew tap fil-technology/tap && brew install esh && esh
+```
+
+If you prefer the steps split out:
 
 ```bash
 brew tap fil-technology/tap
