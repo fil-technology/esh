@@ -19,7 +19,10 @@ fi
   exit 1
 }
 
-mapfile -t MACHO_FILES < <(
+MACHO_FILES=()
+while IFS= read -r path; do
+  MACHO_FILES+=("$path")
+done < <(
   find "$RELEASE_ROOT" -type f -print0 |
     xargs -0 file |
     awk -F: '/Mach-O/ {print $1}' |
