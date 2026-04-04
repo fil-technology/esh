@@ -3,8 +3,10 @@ import Foundation
 import Darwin
 #endif
 
-struct TerminalSurface {
+final class TerminalSurface {
     private let clearScreen = "\u{001B}[2J\u{001B}[H"
+    private var lastLines: [String] = []
+    private var lastSize: (rows: Int, columns: Int)?
 
     func render(state: ChatScreenState) {
         let size = terminalSize()
@@ -33,10 +35,30 @@ struct TerminalSurface {
         output.append(inputLine)
         output.append(FooterStatsView.renderedLine(state: state, width: size.columns))
 
+        var commands = ""
+        let needsFullRedraw =
+            lastSize?.rows != size.rows ||
+            lastSize?.columns != size.columns ||
+            lastLines.count != output.count
+
+        if needsFullRedraw {
+            commands += clearScreen
+            for (index, line) in output.enumerated() {
+                commands += "\u{001B}[\(index + 1);1H\u{001B}[2K\(line)"
+            }
+        } else {
+            for (index, line) in output.enumerated() where line != lastLines[index] {
+                commands += "\u{001B}[\(index + 1);1H\u{001B}[2K\(line)"
+            }
+        }
+
         let cursorOffset = min(max(inputLine.count, 0), max(size.columns - 1, 0))
-        let cursorToInputBar = "\u{001B}[1A\r\u{001B}[\(cursorOffset)C"
-        Swift.print(clearScreen + output.joined(separator: "\n") + cursorToInputBar, terminator: "")
+        let inputRow = max(output.count - 1, 1)
+        commands += "\u{001B}[\(inputRow);1H\u{001B}[\(cursorOffset)C"
+        Swift.print(commands, terminator: "")
         fflush(stdout)
+        lastLines = output
+        lastSize = size
     }
 
     private func terminalSize() -> (rows: Int, columns: Int) {

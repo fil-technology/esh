@@ -323,6 +323,43 @@ private struct CLI {
         print("")
     }
 
+    private func confirmAction(_ prompt: String) -> Bool {
+        print("\(prompt) ", terminator: "")
+        fflush(stdout)
+
+        guard isatty(STDIN_FILENO) != 0 else {
+            let response = readLine()?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            print("")
+            return response == "y" || response == "yes"
+        }
+
+        let previous = enablePauseRawMode()
+        defer { restorePauseMode(previous) }
+
+        while let byte = readPauseByte() {
+            switch byte {
+            case UInt8(ascii: "y"), UInt8(ascii: "Y"):
+                discardBufferedReturnKey()
+                print("y")
+                return true
+            case UInt8(ascii: "n"), UInt8(ascii: "N"), 27, 3:
+                discardBufferedReturnKey()
+                print("n")
+                return false
+            case 10, 13:
+                print("")
+                return false
+            default:
+                continue
+            }
+        }
+
+        print("")
+        return false
+    }
+
     private func waitForEnter() {
         guard isatty(STDIN_FILENO) != 0 else {
             _ = readLine()
@@ -357,6 +394,10 @@ private struct CLI {
         var byte: UInt8 = 0
         let count = Darwin.read(STDIN_FILENO, &byte, 1)
         return count == 1 ? byte : nil
+    }
+
+    private func discardBufferedReturnKey() {
+        tcflush(STDIN_FILENO, TCIFLUSH)
     }
 
     private func showRecommendedModelsMenu(
@@ -418,55 +459,58 @@ private struct CLI {
         }
 
         let backend = MLXBackend()
-        let compatibleInstalls = installs.compactMap { install -> (ModelInstall, String)? in
-            do {
-                if let incompatibility = try backend.validateChatModel(for: install) {
-                    _ = incompatibility
+        let modelEntries = installs.map { install -> (install: ModelInstall, incompatibility: String?) in
+            let incompatibility = try? backend.validateChatModel(for: install)
+            return (install, incompatibility ?? nil)
+        }
+        let picker = InteractiveListPicker()
+        let items = modelEntries.map { entry in
+            let install = entry.install
+            let incompatibility = entry.incompatibility
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: install))
+            let compatibility = incompatibility == nil ? "chat-ready" : "incompatible"
+            return InteractiveListPicker.Item(
+                title: "\(install.id)  \(features)",
+                detail: "\(compatibility) | \(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
+            )
+        }
+
+        while true {
+            switch picker.pick(
+                title: "Choose Chat Model",
+                subtitle: "Enter starts chat with the selected model. Press o to open its model page or d to delete it.",
+                items: items,
+                primaryHint: "Enter start chat",
+                secondaryHints: ["o open page", "d delete"],
+                secondaryKeys: ["o", "d"]
+            ) {
+            case .selected(let index):
+                let entry = modelEntries[index]
+                if let incompatibility = entry.incompatibility {
+                    print("Model \(entry.install.id) is not chat-compatible with the current MLX runtime: \(incompatibility)")
+                    pauseForMenu()
                     return nil
                 }
-            } catch {
+                return entry.install.id
+            case .secondary("o", let index):
+                try await ModelOpenCommand.run(
+                    identifier: modelEntries[index].install.id,
+                    service: service,
+                    catalogService: catalogService
+                )
+                pauseForMenu()
+                return nil
+            case .secondary("d", let index):
+                let install = modelEntries[index].install
+                guard confirmAction("Delete \(install.id)? [y/N]") else {
+                    continue
+                }
+                try ModelRemoveCommand.run(modelID: install.id, service: service)
+                pauseForMenu()
+                return nil
+            default:
                 return nil
             }
-            let features = featureBadgeText(ModelFeatureClassifier.features(for: install))
-            let detail = "\(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
-            return (install, "\(install.id)  \(features)|DETAIL|\(detail)")
-        }
-
-        guard !compatibleInstalls.isEmpty else {
-            print("No installed chat-compatible models found for the current MLX runtime.")
-            pauseForMenu()
-            return nil
-        }
-
-        let picker = InteractiveListPicker()
-        let items = compatibleInstalls.map { entry in
-            let parts = entry.1.components(separatedBy: "|DETAIL|")
-            return InteractiveListPicker.Item(
-                title: parts[0],
-                detail: parts[1]
-            )
-        }
-
-        switch picker.pick(
-            title: "Choose Chat Model",
-            subtitle: "Enter starts chat with the selected model. Press o to open its model page.",
-            items: items,
-            primaryHint: "Enter start chat",
-            secondaryHints: ["o open page"],
-            secondaryKeys: ["o"]
-        ) {
-        case .selected(let index):
-            return compatibleInstalls[index].0.id
-        case .secondary("o", let index):
-            try await ModelOpenCommand.run(
-                identifier: compatibleInstalls[index].0.id,
-                service: service,
-                catalogService: catalogService
-            )
-            pauseForMenu()
-            return nil
-        default:
-            return nil
         }
     }
 
@@ -519,10 +563,7 @@ private struct CLI {
                 return
             case .secondary("d", let index):
                 let install = installs[index]
-                let confirmation = prompt("Delete \(install.id)? [y/N]")?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
-                guard confirmation == "y" || confirmation == "yes" else {
+                guard confirmAction("Delete \(install.id)? [y/N]") else {
                     continue
                 }
                 try ModelRemoveCommand.run(modelID: install.id, service: service)

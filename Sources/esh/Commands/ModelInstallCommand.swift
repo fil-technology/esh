@@ -32,6 +32,16 @@ enum ModelInstallCommand {
             print(resolutionMessage)
         }
 
+        if let incompatibility = knownChatRuntimeIncompatibility(for: repoID) {
+            throw StoreError.invalidManifest(
+                """
+                \(repoID) is not currently supported by this project's MLX chat runtime.
+                \(incompatibility)
+                Choose a different model for now.
+                """
+            )
+        }
+
         try runResourcePreflight(
             repoID: repoID,
             recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
@@ -183,4 +193,12 @@ enum ModelInstallCommand {
         formatter.dateFormat = "yyyy-MM"
         return formatter
     }()
+
+    private static func knownChatRuntimeIncompatibility(for repoID: String) -> String? {
+        let normalized = repoID.lowercased()
+        if normalized.contains("gemma-4") {
+            return "Gemma 4 models currently fail MLX chat validation with: Model type gemma4 not supported."
+        }
+        return nil
+    }
 }
