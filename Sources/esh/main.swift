@@ -384,7 +384,7 @@ private struct CLI {
             .init(title: "Chat", detail: "Open the interactive chat TUI"),
             .init(title: "Recommended models", detail: "Fast setup presets"),
             .init(title: "List models", detail: "\(modelCount) installed"),
-            .init(title: "Search models", detail: "Find MLX-compatible models"),
+            .init(title: "Search models", detail: "Find MLX and GGUF models"),
             .init(title: "Install model", detail: "Install by alias, repo id, or search"),
             .init(title: "List sessions", detail: "\(sessionCount) saved"),
             .init(title: "List caches", detail: "\(cacheCount) saved"),
@@ -394,14 +394,20 @@ private struct CLI {
         ]
     }
 
-    private func starterModels(service: ModelService) -> [RecommendedModel] {
-        let preferredIDs = [
-            "qwen-2-5-0-5b",
-            "llama-3-2-3b",
-            "qwen-2-5-coder-7b",
-            "mistral-small-24b",
-            "qwen-3-5-9b-optiq"
-        ]
+    private func starterModels(service: ModelService, backend: BackendKind) -> [RecommendedModel] {
+        let preferredIDs = backend == .mlx
+            ? [
+                "qwen-2-5-0-5b",
+                "llama-3-2-3b",
+                "qwen-2-5-coder-7b",
+                "mistral-small-24b",
+                "qwen-3-5-9b-optiq"
+            ]
+            : [
+                "llama-3-2-3b-gguf",
+                "qwen-2-5-coder-7b-gguf",
+                "deepseek-r1-qwen-14b-gguf"
+            ]
         return preferredIDs.compactMap { service.resolveRecommended(alias: $0) }
     }
 
@@ -534,8 +540,8 @@ private struct CLI {
                 subtitle: subtitle,
                 items: items,
                 primaryHint: models.isEmpty ? "Enter no-op" : "Enter install",
-                secondaryHints: ["m mlx", "g gguf", "o open page"],
-                secondaryKeys: ["m", "g", "o"]
+                secondaryHints: ["m mlx", "g gguf", "s search", "o open page"],
+                secondaryKeys: ["m", "g", "s", "o"]
             ) {
             case .selected(let index):
                 guard models.indices.contains(index) else {
@@ -553,6 +559,16 @@ private struct CLI {
                 selectedBackend = .mlx
             case .secondary("g", _):
                 selectedBackend = .gguf
+            case .secondary("s", _):
+                guard let query = prompt("Model search query"), !query.isEmpty else {
+                    continue
+                }
+                try await showSearchModelsMenu(
+                    query: query,
+                    service: service,
+                    catalogService: catalogService
+                )
+                return
             case .secondary("o", let index):
                 guard models.indices.contains(index) else {
                     continue
@@ -576,29 +592,30 @@ private struct CLI {
         title: String,
         subtitle: String
     ) async throws {
-        let models = starterModels(service: service)
-        guard !models.isEmpty else {
-            return
-        }
-
-        let items = models.map { model in
-            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
-            return InteractiveListPicker.Item(
-                title: "\(model.id)  \(features)",
-                detail: "\(model.tier.displayName) | \(model.quantization) | \(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
-            )
-        }
         let picker = InteractiveListPicker()
+        var selectedBackend: BackendKind = .mlx
+
         while true {
+            let models = starterModels(service: service, backend: selectedBackend)
+            let items = recommendedMenuItems(for: models, backend: selectedBackend)
+            let starterSubtitle = starterMenuSubtitle(
+                base: subtitle,
+                backend: selectedBackend,
+                isEmpty: models.isEmpty
+            )
+
             switch picker.pick(
-                title: title,
-                subtitle: subtitle,
+                title: "\(title) [\(selectedBackend.rawValue.uppercased())]",
+                subtitle: starterSubtitle,
                 items: items,
-                primaryHint: "Enter install",
-                secondaryHints: ["a all presets", "o open page"],
-                secondaryKeys: ["a", "o"]
+                primaryHint: models.isEmpty ? "Enter no-op" : "Enter install",
+                secondaryHints: ["m mlx", "g gguf", "s search", "a all presets", "o open page"],
+                secondaryKeys: ["m", "g", "s", "a", "o"]
             ) {
             case .selected(let index):
+                guard models.indices.contains(index) else {
+                    continue
+                }
                 let model = models[index]
                 try await ModelInstallCommand.run(
                     identifier: model.id,
@@ -607,6 +624,20 @@ private struct CLI {
                 )
                 pauseForMenu()
                 return
+            case .secondary("m", _):
+                selectedBackend = .mlx
+            case .secondary("g", _):
+                selectedBackend = .gguf
+            case .secondary("s", _):
+                guard let query = prompt("Model search query"), !query.isEmpty else {
+                    continue
+                }
+                try await showSearchModelsMenu(
+                    query: query,
+                    service: service,
+                    catalogService: catalogService
+                )
+                return
             case .secondary("a", _):
                 try await showRecommendedModelsMenu(
                     service: service,
@@ -614,6 +645,9 @@ private struct CLI {
                 )
                 return
             case .secondary("o", let index):
+                guard models.indices.contains(index) else {
+                    continue
+                }
                 let model = models[index]
                 try await ModelOpenCommand.run(
                     identifier: model.id,
@@ -625,6 +659,20 @@ private struct CLI {
                 return
             }
         }
+    }
+
+    private func starterMenuSubtitle(
+        base: String,
+        backend: BackendKind,
+        isEmpty: Bool
+    ) -> String {
+        let toggleHint = backend == .mlx
+            ? "Showing MLX starters. Press g to switch to GGUF."
+            : "Showing GGUF starters. Press m to switch to MLX."
+        if isEmpty {
+            return base + " " + toggleHint + " Press s to search the full catalog."
+        }
+        return base + " " + toggleHint + " Press s to search the full catalog or a for all presets."
     }
 
     private func recommendedMenuItems(
@@ -656,7 +704,7 @@ private struct CLI {
         if isEmpty {
             return base + " No presets are available in this backend yet."
         }
-        return base + " Enter installs the selected model. Press o to open the model page."
+        return base + " Enter installs the selected model. Press s to search the full catalog or o to open the model page."
     }
 
     private func pickChatModel(

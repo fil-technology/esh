@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-04-04
+
+### Changed
+- no-model onboarding now supports switching between MLX and GGUF starter presets
+- no-model onboarding and recommended presets now offer direct full-catalog search from the picker
+- launcher search copy now reflects MLX and GGUF model discovery instead of MLX-only wording
+
 ## [0.1.20] - 2026-04-04
 
 ### Added
