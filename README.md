@@ -39,6 +39,18 @@ For end users on macOS, the one-line install and run command is:
 brew tap fil-technology/tap && brew install --cask esh && esh
 ```
 
+If `brew` is not installed yet, install Homebrew first:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install and run Esh:
+
+```bash
+brew tap fil-technology/tap && brew install --cask esh && esh
+```
+
 If you prefer the steps split out:
 
 ```bash
