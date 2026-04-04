@@ -2,12 +2,12 @@ import Foundation
 
 enum OverlayPanelView {
     static func renderedLines(overlay: OverlayPanelState, availableWidth: Int) -> [String] {
-        let width = max(availableWidth, 40)
+        let width = max(min(Int(Double(availableWidth) * 0.76), availableWidth - 4), 40)
         let innerWidth = max(width - 4, 20)
-        let horizontal = "+" + String(repeating: "-", count: max(width - 2, 1)) + "+"
+        let horizontal = TerminalUIStyle.border + "╭" + String(repeating: "─", count: max(width - 2, 1)) + "╮" + TerminalUIStyle.reset
 
         var lines: [String] = [horizontal]
-        lines.append(boxed(" \(overlay.title)", width: innerWidth))
+        lines.append(boxed("\(TerminalUIStyle.bold)\(TerminalUIStyle.cyan)\(overlay.title)\(TerminalUIStyle.reset)", width: innerWidth))
         lines.append(boxed("", width: innerWidth))
 
         for line in overlay.lines {
@@ -16,13 +16,13 @@ enum OverlayPanelView {
             }
         }
 
-        lines.append(horizontal)
+        lines.append(TerminalUIStyle.border + "╰" + String(repeating: "─", count: max(width - 2, 1)) + "╯" + TerminalUIStyle.reset)
         return lines
     }
 
     private static func boxed(_ text: String, width: Int) -> String {
-        let clipped = text.count > width ? String(text.prefix(width)) : text
-        return "| " + clipped.padding(toLength: width, withPad: " ", startingAt: 0) + " |"
+        let clipped = TerminalUIStyle.truncateVisible(text, limit: width)
+        return "\(TerminalUIStyle.border)│ \(TerminalUIStyle.reset)" + TerminalUIStyle.padVisible(clipped, to: width) + "\(TerminalUIStyle.border) │\(TerminalUIStyle.reset)"
     }
 
     private static func wrap(_ text: String, width: Int) -> [String] {

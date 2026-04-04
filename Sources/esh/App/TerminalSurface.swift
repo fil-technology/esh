@@ -10,21 +10,25 @@ final class TerminalSurface {
 
     func render(state: ChatScreenState) {
         let size = terminalSize()
+        let headerLines = HeaderBarView.renderedLines(state: state, width: size.columns)
         let overlayLines = state.overlay.map {
             OverlayPanelView.renderedLines(overlay: $0, availableWidth: size.columns)
         } ?? []
         let reservedBottom = 2 + overlayLines.count
-        let transcriptHeight = max(size.rows - reservedBottom, 1)
+        let reservedTop = headerLines.count + 1
+        let transcriptHeight = max(size.rows - reservedBottom - reservedTop, 1)
 
         let transcriptLines = TranscriptView.renderedLines(
             items: state.transcriptItems,
-            availableWidth: size.columns
+            availableWidth: max(size.columns - 4, 20)
         )
         let visibleTranscript = Array(transcriptLines.suffix(transcriptHeight))
 
         var output: [String] = []
         output.reserveCapacity(size.rows)
-        output.append(contentsOf: visibleTranscript)
+        output.append(contentsOf: headerLines)
+        output.append(TerminalUIStyle.rule(width: size.columns))
+        output.append(contentsOf: visibleTranscript.map { "  " + $0 })
 
         if visibleTranscript.count < transcriptHeight {
             output.append(contentsOf: Array(repeating: "", count: transcriptHeight - visibleTranscript.count))
@@ -52,7 +56,7 @@ final class TerminalSurface {
             }
         }
 
-        let cursorOffset = min(max(inputLine.count, 0), max(size.columns - 1, 0))
+        let cursorOffset = min(max(TerminalUIStyle.visibleWidth(of: inputLine), 0), max(size.columns - 1, 0))
         let inputRow = max(output.count - 1, 1)
         commands += "\u{001B}[\(inputRow);1H\u{001B}[\(cursorOffset)C"
         Swift.print(commands, terminator: "")

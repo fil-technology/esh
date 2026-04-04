@@ -8,14 +8,17 @@ enum FooterStatsView {
         let tokPerSecond = state.metrics.tokensPerSecond.map { String(format: "%.1f", $0) } ?? "-"
         let cache = state.metrics.cacheSizeBytes.map(ByteFormatting.string(for:)) ?? "-"
 
-        let autosave = state.autosaveEnabled ? "autosave on" : "autosave off"
-        let footer = "\(state.backendLabel) | \(state.modelLabel) | \(state.cacheMode) | ctx \(ctx) | ttft \(ttft) | tok/s \(tokPerSecond) | cache \(cache) | session \(state.sessionName) | \(autosave) | \(state.statusText)"
-        return truncate(footer, width: width)
-    }
-
-    private static func truncate(_ value: String, width: Int) -> String {
-        guard value.count > width else { return value }
-        let index = value.index(value.startIndex, offsetBy: max(width - 1, 0))
-        return String(value[..<index])
+        let autosave = state.autosaveEnabled
+            ? "\(TerminalUIStyle.green)autosave on\(TerminalUIStyle.reset)"
+            : "\(TerminalUIStyle.faint)autosave off\(TerminalUIStyle.reset)"
+        let segments = [
+            "\(TerminalUIStyle.faint)ctx\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(ctx)\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.faint)ttft\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(ttft)\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.faint)tok/s\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(tokPerSecond)\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.faint)cache\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(cache)\(TerminalUIStyle.reset)",
+            autosave
+        ]
+        let footer = segments.joined(separator: "  \(TerminalUIStyle.faint)•\(TerminalUIStyle.reset)  ")
+        return TerminalUIStyle.truncateVisible(footer, limit: width)
     }
 }

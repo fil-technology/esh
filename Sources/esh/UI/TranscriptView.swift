@@ -5,8 +5,8 @@ enum TranscriptView {
         let width = max(availableWidth, 40)
         guard !items.isEmpty else {
             return [
-                "Welcome to Esh chat.",
-                "Type a message below. Use /save to persist the session or /exit to leave."
+                "\(TerminalUIStyle.ink)Welcome to Esh chat.\(TerminalUIStyle.reset)",
+                "\(TerminalUIStyle.slate)Type a message below. Use /save to persist the session or /exit to leave.\(TerminalUIStyle.reset)"
             ]
         }
 
@@ -25,16 +25,16 @@ enum TranscriptView {
                     lines.append(segment.label)
                     let wrapped = wrap(segment.text.isEmpty ? "…" : segment.text, width: max(width - 2, 20))
                     for line in wrapped {
-                        lines.append("  \(segment.prefix)\(line)\(reset)")
+                        lines.append("  \(segment.prefix)│ \(line)\(TerminalUIStyle.reset)")
                     }
                 }
             } else {
-                let label = "\(item.role.title)\(item.isStreaming ? " [streaming]" : "")"
+                let label = roleLabel(for: item)
                 lines.append(label)
 
                 let wrapped = wrap(item.text.isEmpty ? "…" : item.text, width: max(width - 2, 20))
                 for line in wrapped {
-                    lines.append("  \(line)")
+                    lines.append("  \(TerminalUIStyle.blue)│\(TerminalUIStyle.reset) \(line)")
                 }
             }
         }
@@ -53,7 +53,7 @@ enum TranscriptView {
         if parsed.reasoning == nil && parsed.answer == nil {
             return [
                 AssistantSegment(
-                    label: "Assistant\(item.isStreaming ? " [streaming]" : "")",
+                    label: "\(TerminalUIStyle.bold)\(TerminalUIStyle.violet)Assistant\(TerminalUIStyle.reset)\(item.isStreaming ? " \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)" : "")",
                     text: item.text.isEmpty ? "…" : item.text,
                     prefix: ""
                 )
@@ -63,18 +63,20 @@ enum TranscriptView {
         var segments: [AssistantSegment] = []
         if let reasoning = parsed.reasoning, !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let label = item.isStreaming && parsed.answer == nil
-                ? "Assistant Reasoning [streaming]"
-                : "Assistant Reasoning"
+                ? "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset) \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)"
+                : "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset)"
             segments.append(
                 AssistantSegment(
                     label: label,
                     text: reasoning,
-                    prefix: dim
+                    prefix: TerminalUIStyle.dim
                 )
             )
         }
         if let answer = parsed.answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let label = item.isStreaming ? "Assistant [streaming]" : "Assistant"
+            let label = item.isStreaming
+                ? "\(TerminalUIStyle.bold)\(TerminalUIStyle.violet)Assistant\(TerminalUIStyle.reset) \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)"
+                : "\(TerminalUIStyle.bold)\(TerminalUIStyle.violet)Assistant\(TerminalUIStyle.reset)"
             segments.append(
                 AssistantSegment(
                     label: label,
@@ -109,8 +111,16 @@ enum TranscriptView {
         return (reasoning.isEmpty ? nil : reasoning, nil)
     }
 
-    private static let reset = "\u{001B}[0m"
-    private static let dim = "\u{001B}[38;5;245m"
+    private static func roleLabel(for item: TranscriptItem) -> String {
+        switch item.role {
+        case .user:
+            return "\(TerminalUIStyle.bold)\(TerminalUIStyle.cyan)You\(TerminalUIStyle.reset)\(item.isStreaming ? " \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)" : "")"
+        case .assistant:
+            return "\(TerminalUIStyle.bold)\(TerminalUIStyle.violet)Assistant\(TerminalUIStyle.reset)\(item.isStreaming ? " \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)" : "")"
+        case .system:
+            return "\(TerminalUIStyle.bold)\(TerminalUIStyle.slate)System\(TerminalUIStyle.reset)"
+        }
+    }
 
     private static func wrap(_ text: String, width: Int) -> [String] {
         guard !text.isEmpty else { return [""] }
