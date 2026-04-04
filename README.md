@@ -31,6 +31,22 @@ It does not yet do:
 
 ## Quick Start
 
+### Homebrew install
+
+For end users on macOS:
+
+```bash
+brew tap fil-technology/tap
+brew install esh
+esh
+```
+
+Upgrade later with:
+
+```bash
+brew upgrade esh
+```
+
 ### Developer mode
 
 Bootstrap once:
@@ -80,6 +96,7 @@ What they do:
 - release packaging runs for tags like `v0.1.0`
 - release packaging can also be started manually from GitHub Actions
 - macOS release builds upload the package as an artifact, publish the `.tar.gz` plus a SHA-256 checksum on the GitHub release, and push the same bundle to GitHub Packages through GHCR
+- tagged releases can also update the Homebrew tap formula automatically when `HOMEBREW_TAP_TOKEN` is configured in repo secrets
 
 ## Versioning and Releases
 

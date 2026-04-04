@@ -21,6 +21,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  HOMEBREW_TAP_REPO: fil-technology/homebrew-tap
 
 jobs:
   package-macos:
@@ -68,6 +69,8 @@ jobs:
       - name: Compute release checksums
         run: |
           shasum -a 256 "dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz" > "dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256"
+          SHA256="$(awk '{print $1}' "dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256")"
+          echo "sha256=$SHA256" >> "$GITHUB_ENV"
 
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
@@ -111,3 +114,43 @@ jobs:
           files: |
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz.sha256
+
+      - name: Check out Homebrew tap
+        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        run: |
+          chmod +x ./scripts/generate-homebrew-formula.sh
+          mkdir -p homebrew-tap/Formula
+          ./scripts/generate-homebrew-formula.sh "${{ steps.version.outputs.version }}" "$SHA256" > homebrew-tap/Formula/esh.rb
+          cat > homebrew-tap/README.md <<'EOF'
+          # fil-technology/homebrew-tap
+
+          Homebrew tap for Esh.
+
+          ## Install
+
+          ```bash
+          brew tap fil-technology/tap
+          brew install esh
+          ```
+          EOF
+
+      - name: Publish Homebrew tap update
+        if: github.event_name == 'push' && secrets.HOMEBREW_TAP_TOKEN != ''
+        working-directory: homebrew-tap
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/esh.rb README.md
+          git commit -m "esh ${{ steps.version.outputs.version }}"
+          git push
