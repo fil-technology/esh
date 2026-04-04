@@ -65,6 +65,7 @@ private struct TestModelDownloader: ModelDownloader {
     func install(
         source: ModelSource,
         suggestedID: String?,
+        variant: String?,
         progress: @escaping @Sendable (DownloadState) -> Void
     ) async throws -> ModelManifest {
         throw StoreError.invalidManifest("Not used in this test.")

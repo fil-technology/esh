@@ -2,20 +2,23 @@ import Foundation
 
 public struct ModelInstallPreflightService: Sendable {
     private let session: URLSession
-    private let runtimeValidator: any RemoteModelConfigValidating
+    private let modelCheckService: ModelCheckService
 
     public init(
         session: URLSession = .shared,
-        runtimeValidator: any RemoteModelConfigValidating = MLXBackend()
+        modelCheckService: ModelCheckService? = nil
     ) {
         self.session = session
-        self.runtimeValidator = runtimeValidator
+        self.modelCheckService = modelCheckService ?? ModelCheckService(
+            metadataInspector: ModelMetadataInspector(session: session)
+        )
     }
 
     public func evaluate(
         repoID: String,
         recommendedModel: RecommendedModel?,
-        searchResult: ModelSearchResult?
+        searchResult: ModelSearchResult?,
+        variant: String? = nil
     ) async throws -> ModelInstallPreflightReport {
         var report = ModelInstallPreflightReport()
 
@@ -78,21 +81,24 @@ public struct ModelInstallPreflightService: Sendable {
         }
 
         do {
-            if let configJSON = try await fetchRemoteConfigJSON(repoID: repoID) {
-                if let incompatibility = try runtimeValidator.validateRemoteConfig(jsonText: configJSON) {
-                    report.blockers.append(
-                        """
-                        MLX runtime compatibility check failed before download.
-                        \(incompatibility)
-                        """
-                    )
-                } else {
-                    report.notes.append("MLX runtime compatibility: config check passed before download")
-                }
-            } else {
-                report.warnings.append(
-                    "Could not find a remote config.json for \(repoID), so runtime compatibility could not be verified before download."
+            let check = try await modelCheckService.evaluate(repoID: repoID, variant: variant)
+            report.notes.append("Backend check: \(check.backendLabel)")
+            report.notes.append("Compatibility verdict: \(check.verdict.rawValue)")
+            report.notes.append(contentsOf: check.notes)
+            report.warnings.append(contentsOf: check.warnings)
+
+            switch check.verdict {
+            case .unsupportedFormat, .unsupportedArchitecture, .insufficientMemory:
+                report.blockers.append(
+                    """
+                    Pre-download compatibility check failed for \(repoID).
+                    Verdict: \(check.verdict.rawValue)
+                    """
                 )
+            case .unknown where check.backend == nil:
+                report.warnings.append("Could not resolve a backend confidently before download.")
+            default:
+                break
             }
         } catch {
             report.warnings.append(
@@ -101,28 +107,5 @@ public struct ModelInstallPreflightService: Sendable {
         }
 
         return report
-    }
-
-    private func fetchRemoteConfigJSON(repoID: String) async throws -> String? {
-        var url = URL(string: "https://huggingface.co")!
-        for component in repoID.split(separator: "/").map(String.init) {
-            url.append(path: component)
-        }
-        url.append(path: "raw")
-        url.append(path: "main")
-        url.append(path: "config.json")
-
-        let (data, response) = try await session.data(from: url)
-        if let http = response as? HTTPURLResponse {
-            switch http.statusCode {
-            case 200:
-                return String(decoding: data, as: UTF8.self)
-            case 404:
-                return nil
-            default:
-                throw StoreError.invalidManifest("Failed to fetch remote config: HTTP \(http.statusCode).")
-            }
-        }
-        return String(decoding: data, as: UTF8.self)
     }
 }

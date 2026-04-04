@@ -22,6 +22,9 @@ enum CacheLoadCommand {
             modelStore: modelStore,
             preferredModelID: baseSession.modelID
         )
+        guard install.spec.backend == .mlx else {
+            throw StoreError.invalidManifest("Cache load currently supports MLX models only.")
+        }
         let backend = MLXBackend()
         let runtime = try await backend.loadRuntime(for: install)
         defer { Task { await runtime.unload() } }

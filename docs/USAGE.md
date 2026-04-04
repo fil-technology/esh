@@ -53,7 +53,8 @@ esh doctor
 esh model recommended [--profile chat|code]
 esh model list
 esh model search <query> [--source all|local|hf] [--limit N]
-esh model install <hf-repo-id-or-alias>
+esh model check <model-or-repo> [--backend mlx|gguf|auto] [--context N] [--variant <name>] [--json] [--strict] [--offline]
+esh model install <hf-repo-id-or-alias> [--variant <name>]
 esh model inspect <model-id-or-repo>
 esh model remove <model-id-or-repo>
 esh session list
@@ -95,6 +96,29 @@ Example:
 ```bash
 ./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
+
+Check before downloading:
+
+```bash
+./esh model check mlx-community/Qwen2.5-7B-Instruct-4bit --backend mlx
+./esh model check bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF --backend gguf --context 8192
+./esh model check bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF --backend gguf --variant Q4_K_M
+./esh model check mlx-community/gemma-4-27b-it-4bit --json
+```
+
+What `model check` does:
+- infers likely format, architecture, parameter size, and quantization from repo metadata
+- checks backend compatibility separately from memory fit
+- estimates a conservative local memory budget on the current Mac
+- returns a heuristic verdict like `supported_and_likely_fits` or `insufficient_memory`
+
+Notes:
+- `supported` means the backend likely understands the model format and architecture
+- `fits` means the estimated runtime memory stays under a conservative local safety budget
+- `--strict` refuses positive verdicts when core metadata stays incomplete
+- `--offline` falls back to identifier and filename heuristics only
+- `--variant` lets you target a specific repo variant, especially GGUF quant variants like `Q4_K_M`
+- initial GGUF support uses llama.cpp and is currently text-only
 
 Then:
 

@@ -40,12 +40,14 @@ struct TUIApplication {
             store: modelStore,
             downloader: HuggingFaceModelDownloader(modelStore: modelStore)
         )
-        let backend = MLXBackend()
+        let backendRegistry = InferenceBackendRegistry()
+        let backend = backendRegistry.backend(for: install)
         var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
         let chatService = ChatService()
         state = makeScreenState(
             for: session,
             installID: install.id,
+            backendLabel: runtime.backend.rawValue.uppercased(),
             cacheMode: session.cacheMode?.rawValue ?? latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
             autosaveEnabled: session.autosaveEnabled ?? false
         )
@@ -63,7 +65,7 @@ struct TUIApplication {
                 runtime: &runtime,
                 sessionStore: sessionStore,
                 modelStore: modelStore,
-                backend: backend,
+                backendRegistry: backendRegistry,
                 modelService: modelService,
                 cacheStore: cacheStore,
                 surface: surface
@@ -148,7 +150,7 @@ struct TUIApplication {
         runtime: inout any BackendRuntime,
         sessionStore: SessionStore,
         modelStore: FileModelStore,
-        backend: MLXBackend,
+        backendRegistry: InferenceBackendRegistry,
         modelService: ModelService,
         cacheStore: CacheStore,
         surface: TerminalSurface
@@ -209,19 +211,22 @@ struct TUIApplication {
                     modelStore: modelStore,
                     preferredModelID: session.modelID
                 )
-                if let incompatibility = try backend.validateChatModel(for: newInstall) {
+                let newBackend = backendRegistry.backend(for: newInstall)
+                if let mlxBackend = newBackend as? MLXBackend,
+                   let incompatibility = try mlxBackend.validateChatModel(for: newInstall) {
                     throw StoreError.invalidManifest(
                         "Model \(newInstall.id) is not chat-compatible with the current MLX runtime: \(incompatibility)"
                     )
                 }
                 if newInstall.id != install.id {
                     await runtime.unload()
-                    runtime = try await backend.loadRuntime(for: newInstall)
+                    runtime = try await newBackend.loadRuntime(for: newInstall)
                     install = newInstall
                 }
                 session.modelID = install.id
-                session.backend = .mlx
+                session.backend = install.spec.backend
                 state.modelLabel = install.id
+                state.backendLabel = runtime.backend.rawValue.uppercased()
                 state.statusText = "using model \(install.id)"
             } catch {
                 state.overlay = OverlayPanelState(title: "Switch Model", lines: ["Error: \(error.localizedDescription)"])
@@ -338,8 +343,9 @@ struct TUIApplication {
                 lines: [
                     "id: \(install.id)",
                     "source: \(install.spec.source.reference)",
+                    install.spec.variant.map { "variant: \($0)" },
                     "path: \(install.installPath)"
-                ]
+                ].compactMap { $0 }
             )
             state.statusText = "showing current model"
         case "/save":
@@ -360,12 +366,13 @@ struct TUIApplication {
                     : String(value.dropFirst("/new ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
                 session = ChatSession(name: requestedName.isEmpty ? try nextSessionName(sessionStore: sessionStore) : requestedName)
                 session.modelID = install.id
-                session.backend = .mlx
+                session.backend = install.spec.backend
                 session.cacheMode = state.cacheMode == CacheMode.turbo.rawValue ? .turbo : .raw
                 session.autosaveEnabled = state.autosaveEnabled
                 state = makeScreenState(
                     for: session,
                     installID: install.id,
+                    backendLabel: runtime.backend.rawValue.uppercased(),
                     cacheMode: session.cacheMode?.rawValue ?? "raw",
                     autosaveEnabled: state.autosaveEnabled
                 )
@@ -384,7 +391,7 @@ struct TUIApplication {
                     session.modelID = install.id
                 }
                 if session.backend == nil {
-                    session.backend = .mlx
+                    session.backend = install.spec.backend
                 }
                 install = try CommandSupport.resolveInstall(
                     identifier: nil,
@@ -392,10 +399,11 @@ struct TUIApplication {
                     preferredModelID: session.modelID
                 )
                 await runtime.unload()
-                runtime = try await backend.loadRuntime(for: install)
+                runtime = try await backendRegistry.backend(for: install).loadRuntime(for: install)
                 state = makeScreenState(
                     for: session,
                     installID: install.id,
+                    backendLabel: runtime.backend.rawValue.uppercased(),
                     cacheMode: session.cacheMode?.rawValue ?? latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
                     autosaveEnabled: session.autosaveEnabled ?? state.autosaveEnabled
                 )
@@ -487,12 +495,13 @@ struct TUIApplication {
                     "id: \(manifest.install.id)",
                     "source: \(manifest.install.spec.source.kind.rawValue)",
                     "reference: \(manifest.install.spec.source.reference)",
+                    manifest.install.spec.variant.map { "variant: \($0)" },
                     "path: \(manifest.install.installPath)",
                     "backend: \(manifest.install.spec.backend.rawValue)",
                     "size: \(ByteFormatting.string(for: manifest.install.sizeBytes))",
                     "installed_at: \(manifest.install.installedAt)",
                     "created: \(manifest.createdAt)"
-                ]
+                ].compactMap { $0 }
             )
             state.statusText = "showing model details"
         } catch {
@@ -549,12 +558,13 @@ struct TUIApplication {
     private func makeScreenState(
         for session: ChatSession,
         installID: String,
+        backendLabel: String,
         cacheMode: String = "raw",
         autosaveEnabled: Bool = false
     ) -> AppState {
         AppState(
             sessionName: session.name,
-            backendLabel: "MLX",
+            backendLabel: backendLabel,
             modelLabel: installID,
             cacheMode: cacheMode,
             metrics: .init(),

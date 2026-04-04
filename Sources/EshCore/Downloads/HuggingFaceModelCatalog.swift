@@ -36,12 +36,12 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
     public func search(query: String, limit: Int) async throws -> [ModelSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+        let expandedLimit = max(limit * 4, limit)
 
         var components = URLComponents(string: "https://huggingface.co/api/models")!
         components.queryItems = [
             .init(name: "search", value: trimmed),
-            .init(name: "apps", value: "mlx-lm"),
-            .init(name: "limit", value: String(max(1, limit))),
+            .init(name: "limit", value: String(max(1, expandedLimit))),
             .init(name: "sort", value: "downloads"),
             .init(name: "direction", value: "-1"),
             .init(name: "full", value: "true"),
@@ -55,15 +55,20 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
 
         let entries = try decoder.decode([SearchEntry].self, from: data)
         return entries
-            .prefix(limit)
-            .map { entry in
-                ModelSearchResult(
+            .compactMap { entry in
+                let filenames = (entry.siblings ?? []).map(\.rfilename)
+                let format = ModelFilenameHeuristics.inferFormat(identifier: entry.id, filenames: filenames)
+                guard shouldInclude(entry: entry, format: format) else {
+                    return nil
+                }
+                let backend = inferredBackend(for: format)
+                return ModelSearchResult(
                     id: entry.id,
                     source: .huggingFace,
                     modelSource: ModelSource(kind: .huggingFace, reference: entry.id),
                     displayName: entry.id,
                     summary: entry.cardData?.summary,
-                    backend: .mlx,
+                    backend: backend,
                     sizeBytes: totalSize(for: entry.siblings),
                     tags: normalizedTags(for: entry),
                     downloads: entry.downloads,
@@ -71,6 +76,8 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
                     updatedAt: entry.lastModified
                 )
             }
+            .prefix(limit)
+            .map { $0 }
     }
 
     private func totalSize(for siblings: [SearchEntry.Sibling]?) -> Int64? {
@@ -89,5 +96,34 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
             tags.append(license)
         }
         return Array(tags.prefix(8))
+    }
+
+    private func inferredBackend(for format: ModelFormat) -> BackendKind? {
+        switch format {
+        case .mlx:
+            .mlx
+        case .gguf:
+            .gguf
+        case .unknown:
+            nil
+        }
+    }
+
+    private func shouldInclude(entry: SearchEntry, format: ModelFormat) -> Bool {
+        if format != .unknown {
+            return true
+        }
+
+        let tags = normalizedTags(for: entry).map { $0.lowercased() }
+        if tags.contains(where: { $0.contains("gguf") || $0.contains("mlx") }) {
+            return true
+        }
+
+        if let pipelineTag = entry.pipelineTag?.lowercased(),
+           ["text-generation", "conversational"].contains(pipelineTag) {
+            return true
+        }
+
+        return false
     }
 }

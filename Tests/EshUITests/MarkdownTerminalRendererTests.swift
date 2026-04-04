@@ -61,4 +61,16 @@ struct MarkdownTerminalRendererTests {
         #expect(keywordLine?.text != TerminalUIStyle.stripANSI(from: keywordLine?.text ?? ""))
         #expect(stringLine?.text != TerminalUIStyle.stripANSI(from: stringLine?.text ?? ""))
     }
+
+    @Test
+    func startupBannerKeepsCardBordersAlignedForDoubleDigitCounts() {
+        let lines = StartupBanner.render(modelCount: 1, sessionCount: 11, cacheCount: 12)
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { $0.contains("┌") || $0.contains("│") || $0.contains("└") }
+
+        let widths = lines.map { TerminalUIStyle.visibleWidth(of: $0) }
+        #expect(!widths.isEmpty)
+        #expect(Set(widths).count == 1)
+    }
 }

@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-04-04
+
+### Added
+- `esh model check` with pre-download compatibility and fit estimates, JSON output, and conservative host-memory heuristics
+- initial GGUF support through llama.cpp, including backend routing, support checks, and explicit `--variant` handling for GGUF quant variants
+- GGUF-aware metadata inference and tests for format detection, quantization mapping, variant selection, and stable checker output
+
+### Changed
+- Hugging Face remote search now surfaces broader supported model results instead of forcing the old MLX-only app filter
+- model install can now prompt for GGUF variants when a repo exposes multiple candidate files
+- launcher and startup banner UI now size correctly for live counts and search/install flows remain usable from the interactive menu
+
 ## [0.1.5] - 2026-04-03
 
 ### Added

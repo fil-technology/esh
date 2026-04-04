@@ -179,6 +179,15 @@ Example:
 ./esh model install mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
 
+Check a model before downloading it:
+
+```bash
+./esh model check mlx-community/Qwen2.5-7B-Instruct-4bit --backend mlx
+./esh model check bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF --backend gguf --context 8192
+./esh model check bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF --backend gguf --variant Q4_K_M
+./esh model check mlx-community/gemma-4-27b-it-4bit --json
+```
+
 Then inspect what is installed:
 
 ```bash
@@ -188,6 +197,11 @@ Then inspect what is installed:
 
 Notes:
 - the install command accepts either a Hugging Face repo id or a built-in alias like `fast-chat`
+- `model check` is heuristic: it estimates likely backend support and likely fit, not a guarantee
+- `model check --backend auto` resolves the backend from repo metadata and filenames when it can
+- `model check` and `model install` accept `--variant <name>` for GGUF quant variants and other explicit repo variants
+- initial GGUF support is wired through llama.cpp and is currently text-only
+- GGUF install/runtime support is intentionally narrow in this pass: it prefers a single clear GGUF candidate and reports ambiguity instead of guessing
 - inspect/remove/chat/cache commands accept the installed model id and also the original repo id where practical
 - installed ids are normalized like `mlx-community--qwen2.5-0.5b-instruct-4bit`
 

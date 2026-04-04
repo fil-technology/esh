@@ -223,12 +223,21 @@ private struct CLI {
             ModelListCommand.run(service: service)
         case "search":
             try await ModelSearchCommand.run(arguments: Array(arguments.dropFirst()), service: catalogService)
+        case "check":
+            try await ModelCheckCommand.run(
+                arguments: Array(arguments.dropFirst()),
+                service: service,
+                catalogService: catalogService
+            )
         case "install":
-            guard let repoID = arguments.dropFirst().first else {
-                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias-or-search-term>")
+            let variant = CommandSupport.optionalValue(flag: "--variant", in: Array(arguments.dropFirst()))
+            let positional = CommandSupport.positionalArguments(in: Array(arguments.dropFirst()), knownFlags: ["--variant"])
+            guard let repoID = positional.first else {
+                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>]")
             }
             try await ModelInstallCommand.run(
                 identifier: repoID,
+                variant: variant,
                 service: service,
                 catalogService: catalogService
             )
@@ -335,7 +344,8 @@ private struct CLI {
               esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
-              esh model install <hf-repo-id-or-alias-or-search-term>
+              esh model check <model-or-repo> [--backend mlx|gguf|auto] [--context N] [--variant <name>] [--json] [--strict] [--offline]
+              esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>]
               esh model open <model-id-or-alias-or-repo-or-search-term>
               esh model inspect <model-id>
               esh model remove <model-id>

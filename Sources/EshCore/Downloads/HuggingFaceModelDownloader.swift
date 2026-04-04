@@ -43,6 +43,7 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     public func install(
         source: ModelSource,
         suggestedID: String?,
+        variant: String? = nil,
         progress: @escaping @Sendable (DownloadState) -> Void
     ) async throws -> ModelManifest {
         guard source.kind == .huggingFace else {
@@ -56,11 +57,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         let installID = suggestedID ?? sanitizedInstallID(from: source.reference)
         let installDirectory = try modelStore.prepareInstallDirectory(id: installID)
         let revision = source.revision ?? info.sha ?? "main"
-        let files = filteredFiles(from: info.siblings ?? [])
+        let modelPlan = try modelPlan(for: info.siblings ?? [], variant: variant)
         let plan = DownloadPlan(
             repoID: source.reference,
             revision: revision,
-            files: files.map { .init(path: $0.rfilename, sizeBytes: $0.size) }
+            files: modelPlan.files.map { .init(path: $0.rfilename, sizeBytes: $0.size) }
         )
 
         let downloadedFiles = try await coordinator.download(
@@ -72,20 +73,22 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         reporter.emit(DownloadState(phase: .verifying, message: "Verifying install"))
 
         let actualSize = directorySize(at: installDirectory)
-        let resolvedSize = max(actualSize, files.compactMap(\.size).reduce(0, +))
+        let resolvedSize = max(actualSize, modelPlan.files.compactMap(\.size).reduce(0, +))
 
         let install = ModelInstall(
             id: installID,
             spec: ModelSpec(
                 id: installID,
                 displayName: source.reference,
-                backend: .mlx,
+                backend: modelPlan.backend,
                 source: source,
-                localPath: installDirectory.path
+                localPath: installDirectory.path,
+                architectureFingerprint: modelPlan.architectureFingerprint,
+                variant: modelPlan.variant
             ),
             installPath: installDirectory.path,
             sizeBytes: resolvedSize,
-            backendFormat: "mlx",
+            backendFormat: modelPlan.backendFormat,
             runtimeVersion: nil
         )
         let manifest = ModelManifest(install: install, files: downloadedFiles)
@@ -108,14 +111,64 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         return try JSONDecoder().decode(ModelInfo.self, from: data)
     }
 
-    private func filteredFiles(from siblings: [ModelInfo.Sibling]) -> [ModelInfo.Sibling] {
-        siblings.filter { sibling in
+    private func modelPlan(
+        for siblings: [ModelInfo.Sibling],
+        variant: String?
+    ) throws -> (
+        backend: BackendKind,
+        backendFormat: String,
+        files: [ModelInfo.Sibling],
+        architectureFingerprint: String?,
+        variant: String?
+    ) {
+        let filenames = siblings.map(\.rfilename)
+        let format = ModelFilenameHeuristics.inferFormat(identifier: "", filenames: filenames)
+        let architecture = ModelFilenameHeuristics.inferArchitecture(
+            identifier: "",
+            configModelType: nil,
+            tags: [],
+            filenames: filenames
+        )
+
+        if format == .gguf {
+            let selection = ModelFilenameHeuristics.selectGGUFFiles(filenames, variant: variant)
+            guard selection.selected != nil else {
+                throw StoreError.invalidManifest(selection.warning ?? "Could not choose a GGUF file to install.")
+            }
+            let selectedFiles = Set(selection.related)
+            let files = siblings.filter { sibling in
+                selectedFiles.contains(sibling.rfilename) || auxiliaryFileAllowed(sibling.rfilename)
+            }
+            return (
+                backend: .gguf,
+                backendFormat: "gguf",
+                files: files,
+                architectureFingerprint: architecture == .unknown ? nil : architecture.rawValue,
+                variant: variant?.uppercased() ?? ModelFilenameHeuristics.inferQuantization(identifier: "", filenames: Array(selectedFiles), format: .gguf)
+            )
+        }
+
+        let files = siblings.filter { sibling in
             let file = sibling.rfilename.lowercased()
             return file.hasSuffix(".json")
                 || file.hasSuffix(".safetensors")
                 || file.hasSuffix(".txt")
                 || file.hasSuffix(".model")
         }
+        return (
+            backend: .mlx,
+            backendFormat: "mlx",
+            files: files,
+            architectureFingerprint: architecture == .unknown ? nil : architecture.rawValue,
+            variant: variant
+        )
+    }
+
+    private func auxiliaryFileAllowed(_ filename: String) -> Bool {
+        let file = filename.lowercased()
+        return file.hasSuffix(".json")
+            || file.hasSuffix(".txt")
+            || file.hasSuffix(".model")
     }
 
     private func sanitizedInstallID(from repoID: String) -> String {

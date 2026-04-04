@@ -5,41 +5,44 @@ import Testing
 @Suite(.serialized)
 struct ModelInstallPreflightServiceTests {
     @Test
-    func blocksUnsupportedRemoteConfigBeforeDownload() async throws {
+    func blocksUnsupportedGGUFBeforeDownload() async throws {
         TestURLProtocol.handler = { request in
-            #expect(request.url?.absoluteString == "https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit/raw/main/config.json")
-            let data = Data(#"{"model_type":"gemma4"}"#.utf8)
-            return (
-                HTTPURLResponse(url: try #require(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data
-            )
+            let url = try #require(request.url)
+            switch url.absoluteString {
+            case "https://huggingface.co/api/models/bartowski/demo-GGUF":
+                let data = Data(#"{"id":"bartowski/demo-GGUF","pipelineTag":"text-generation","tags":["multimodal"],"siblings":[{"rfilename":"demo-q4_k_m.gguf","size":4294967296}]}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            case "https://huggingface.co/bartowski/demo-GGUF/raw/main/config.json":
+                let data = Data(#"{"model_type":"qwen2"}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            default:
+                throw URLError(.badURL)
+            }
         }
 
         let service = ModelInstallPreflightService(
-            session: makeSession(),
-            runtimeValidator: MockValidator(reason: "Model type gemma4 not supported.")
+            session: makeSession()
         )
 
         let report = try await service.evaluate(
-            repoID: "mlx-community/gemma-4-e2b-it-4bit",
+            repoID: "bartowski/demo-GGUF",
             recommendedModel: nil,
             searchResult: nil
         )
 
         #expect(report.isBlocked)
-        #expect(report.blockers.joined(separator: "\n").contains("gemma4"))
+        #expect(report.blockers.joined(separator: "\n").contains("unsupported_architecture"))
     }
 
     @Test
-    func warnsWhenRemoteConfigCannotBeFetched() async throws {
+    func warnsWhenMetadataCannotBeFetched() async throws {
         TestURLProtocol.handler = { request in
             let response = HTTPURLResponse(url: try #require(request.url), statusCode: 404, httpVersion: nil, headerFields: nil)!
             return (response, Data())
         }
 
         let service = ModelInstallPreflightService(
-            session: makeSession(),
-            runtimeValidator: MockValidator(reason: nil)
+            session: makeSession()
         )
 
         let report = try await service.evaluate(
@@ -49,22 +52,14 @@ struct ModelInstallPreflightServiceTests {
         )
 
         #expect(!report.isBlocked)
-        #expect(report.warnings.count == 1)
-        #expect(report.warnings[0].contains("config.json"))
+        #expect(report.warnings.count >= 1)
+        #expect(report.warnings.joined(separator: "\n").contains("Could not verify runtime compatibility"))
     }
 
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TestURLProtocol.self]
         return URLSession(configuration: configuration)
-    }
-}
-
-private struct MockValidator: RemoteModelConfigValidating {
-    let reason: String?
-
-    func validateRemoteConfig(jsonText: String) throws -> String? {
-        reason
     }
 }
 

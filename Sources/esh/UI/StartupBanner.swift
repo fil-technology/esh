@@ -5,14 +5,7 @@ enum StartupBanner {
 
     static func render(modelCount: Int, sessionCount: Int, cacheCount: Int) -> String {
         let art = artLines(highlightStep: nil)
-
-        let card = [
-            "\(TerminalUIStyle.dim)┌──────────────────────────────────────┐\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)Local-first LLM for Apple Silicon\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.slate)MLX • TurboQuant • Sessions\(TerminalUIStyle.reset)      \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.green)models \(modelCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.amber)sessions \(sessionCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.blue)caches \(cacheCount)\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)└──────────────────────────────────────┘\(TerminalUIStyle.reset)"
-        ]
+        let card = cardLines(modelCount: modelCount, sessionCount: sessionCount, cacheCount: cacheCount)
 
         return ([""] + zip(art, card).map { "\($0)   \($1)" }).joined(separator: "\n")
     }
@@ -46,14 +39,23 @@ enum StartupBanner {
         cacheCount: Int
     ) -> String {
         let art = artLines(highlightStep: highlightStep)
-        let card = [
-            "\(TerminalUIStyle.dim)┌──────────────────────────────────────┐\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)Local-first LLM for Apple Silicon\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.slate)MLX • TurboQuant • Sessions\(TerminalUIStyle.reset)      \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.green)models \(modelCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.amber)sessions \(sessionCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.blue)caches \(cacheCount)\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.dim)└──────────────────────────────────────┘\(TerminalUIStyle.reset)"
-        ]
+        let card = cardLines(modelCount: modelCount, sessionCount: sessionCount, cacheCount: cacheCount)
         return ([""] + zip(art, card).map { "\($0)   \($1)" }).joined(separator: "\n")
+    }
+
+    private static func cardLines(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [String] {
+        let rows = [
+            "\(TerminalUIStyle.ink)Local-first LLM for Apple Silicon\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.slate)MLX • TurboQuant • Sessions\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.green)models \(modelCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.amber)sessions \(sessionCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.blue)caches \(cacheCount)\(TerminalUIStyle.reset)"
+        ]
+        let contentWidth = rows.map(TerminalUIStyle.visibleWidth(of:)).max() ?? 0
+        let top = "\(TerminalUIStyle.dim)┌\(String(repeating: "─", count: contentWidth + 2))┐\(TerminalUIStyle.reset)"
+        let body = rows.map { row in
+            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.padVisible(row, to: contentWidth)) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)"
+        }
+        let bottom = "\(TerminalUIStyle.dim)└\(String(repeating: "─", count: contentWidth + 2))┘\(TerminalUIStyle.reset)"
+        return [top] + body + [bottom]
     }
 
     private static func artLines(highlightStep: Int?) -> [String] {

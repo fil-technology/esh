@@ -8,6 +8,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
     public var localPath: String?
     public var tokenizerID: String?
     public var architectureFingerprint: String?
+    public var variant: String?
 
     public init(
         id: String,
@@ -16,7 +17,8 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         source: ModelSource,
         localPath: String? = nil,
         tokenizerID: String? = nil,
-        architectureFingerprint: String? = nil
+        architectureFingerprint: String? = nil,
+        variant: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -25,5 +27,6 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         self.localPath = localPath
         self.tokenizerID = tokenizerID
         self.architectureFingerprint = architectureFingerprint
+        self.variant = variant
     }
 }

@@ -5,6 +5,7 @@ import EshCore
 enum ModelInstallCommand {
     static func run(
         identifier: String,
+        variant: String? = nil,
         service: ModelService,
         catalogService: ModelCatalogService
     ) async throws {
@@ -32,23 +33,79 @@ enum ModelInstallCommand {
             print(resolutionMessage)
         }
 
+        let resolvedVariant = try await resolveVariantIfNeeded(
+            repoID: repoID,
+            requestedVariant: variant,
+            interactive: isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+        )
+
         let preflight = try await ModelInstallPreflightService().evaluate(
             repoID: repoID,
             recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
-            searchResult: selectedSearchResult
+            searchResult: selectedSearchResult,
+            variant: resolvedVariant
         )
         if !handlePreflight(preflight, repoID: repoID) {
             throw CLIHandledError()
         }
 
-        let manifest = try await service.install(repoID: repoID) { state in
+        let manifest = try await service.install(repoID: repoID, variant: resolvedVariant) { state in
             DownloadProgressView.render(state: state)
         }
         if let resolved {
-            print("Installed \(resolved.id) (\(manifest.install.id)) at \(manifest.install.installPath)")
+            print(installedMessage(alias: resolved.id, manifest: manifest))
         } else {
-            print("Installed \(manifest.install.id) at \(manifest.install.installPath)")
+            print(installedMessage(alias: nil, manifest: manifest))
         }
+    }
+
+    private static func installedMessage(alias: String?, manifest: ModelManifest) -> String {
+        let variantSuffix = manifest.install.spec.variant.map { " [variant \($0)]" } ?? ""
+        if let alias {
+            return "Installed \(alias) (\(manifest.install.id))\(variantSuffix) at \(manifest.install.installPath)"
+        }
+        return "Installed \(manifest.install.id)\(variantSuffix) at \(manifest.install.installPath)"
+    }
+
+    private static func resolveVariantIfNeeded(
+        repoID: String,
+        requestedVariant: String?,
+        interactive: Bool
+    ) async throws -> String? {
+        if let requestedVariant, !requestedVariant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return requestedVariant.uppercased()
+        }
+
+        let metadata = try? await ModelMetadataInspector().inspect(
+            repoID: repoID,
+            backendPreference: .auto,
+            offline: false
+        )
+        guard let metadata,
+              metadata.format == .gguf,
+              metadata.availableVariants.count > 1 else {
+            return requestedVariant
+        }
+
+        if interactive {
+            print("Choose a GGUF variant to install:")
+            for (offset, option) in metadata.availableVariants.enumerated() {
+                print("\(offset + 1). \(option)")
+            }
+            print("Selection [1-\(metadata.availableVariants.count), 0 to cancel]: ", terminator: "")
+            fflush(stdout)
+            guard let input = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let index = Int(input),
+                  index != 0,
+                  metadata.availableVariants.indices.contains(index - 1) else {
+                throw StoreError.invalidManifest("Install cancelled.")
+            }
+            return metadata.availableVariants[index - 1]
+        }
+
+        throw StoreError.invalidManifest(
+            "Multiple GGUF variants are available for \(repoID): \(metadata.availableVariants.joined(separator: ", ")). Re-run with --variant <name>."
+        )
     }
 
     private static func resolveInteractiveSearchTerm(

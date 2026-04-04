@@ -25,6 +25,9 @@ enum BenchmarkCommand {
             modelStore: modelStore,
             preferredModelID: session.modelID
         )
+        guard install.spec.backend == .mlx else {
+            throw StoreError.invalidManifest("Benchmark currently supports MLX models only. GGUF cache benchmarking is not implemented yet.")
+        }
 
         let raw = try await measure(
             session: session,

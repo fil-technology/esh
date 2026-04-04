@@ -21,6 +21,9 @@ enum CacheBuildCommand {
             modelStore: modelStore,
             preferredModelID: session.modelID
         )
+        guard install.spec.backend == .mlx else {
+            throw StoreError.invalidManifest("Cache build currently supports MLX models only.")
+        }
         let backend = MLXBackend()
         let runtime = try await backend.loadRuntime(for: install)
         defer { Task { await runtime.unload() } }

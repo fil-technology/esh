@@ -18,11 +18,13 @@ public struct ModelService: Sendable {
     public func install(
         repoID: String,
         suggestedID: String? = nil,
+        variant: String? = nil,
         progress: @escaping @Sendable (DownloadState) -> Void
     ) async throws -> ModelManifest {
         try await downloader.install(
             source: ModelSource(kind: .huggingFace, reference: repoID),
             suggestedID: suggestedID,
+            variant: variant,
             progress: progress
         )
     }
