@@ -71,6 +71,9 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
 
         reporter.emit(DownloadState(phase: .verifying, message: "Verifying install"))
 
+        let actualSize = directorySize(at: installDirectory)
+        let resolvedSize = max(actualSize, files.compactMap(\.size).reduce(0, +))
+
         let install = ModelInstall(
             id: installID,
             spec: ModelSpec(
@@ -81,7 +84,7 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 localPath: installDirectory.path
             ),
             installPath: installDirectory.path,
-            sizeBytes: files.compactMap(\.size).reduce(0, +),
+            sizeBytes: resolvedSize,
             backendFormat: "mlx",
             runtimeVersion: nil
         )
@@ -120,5 +123,26 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             .lowercased()
             .replacingOccurrences(of: "/", with: "--")
             .replacingOccurrences(of: " ", with: "-")
+    }
+
+    private func directorySize(at url: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles],
+            errorHandler: nil
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values?.isRegularFile == true, let fileSize = values?.fileSize else {
+                continue
+            }
+            total += Int64(fileSize)
+        }
+        return total
     }
 }

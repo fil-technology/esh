@@ -2,11 +2,22 @@ import Foundation
 
 enum StartupBanner {
     static func render(modelCount: Int, sessionCount: Int, cacheCount: Int) -> String {
-        [
-            "\(TerminalUIStyle.border)╭──────────────────────────────────────────────────────────────────────╮\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.border)│ \(TerminalUIStyle.bold)\(TerminalUIStyle.cyan)ESH\(TerminalUIStyle.reset)  \(TerminalUIStyle.faint)Local-first LLM workspace for Apple Silicon\(TerminalUIStyle.reset)                 \(TerminalUIStyle.border)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.border)│ \(TerminalUIStyle.pink)models \(modelCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.violet)sessions \(sessionCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.blue)caches \(cacheCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.faint)MLX • TurboQuant • Chat • Cache\(TerminalUIStyle.reset) \(TerminalUIStyle.border)│\(TerminalUIStyle.reset)",
-            "\(TerminalUIStyle.border)╰──────────────────────────────────────────────────────────────────────╯\(TerminalUIStyle.reset)"
-        ].joined(separator: "\n")
+        let art = [
+            "\(TerminalUIStyle.pink)███████╗\(TerminalUIStyle.violet)███████╗\(TerminalUIStyle.blue)██╗  ██╗\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.pink)██╔════╝\(TerminalUIStyle.violet)██╔════╝\(TerminalUIStyle.blue)██║  ██║\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.pink)█████╗  \(TerminalUIStyle.violet)███████╗\(TerminalUIStyle.blue)███████║\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.pink)██╔══╝  \(TerminalUIStyle.violet)╚════██║\(TerminalUIStyle.blue)██╔══██║\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.pink)███████╗\(TerminalUIStyle.violet)███████║\(TerminalUIStyle.blue)██║  ██║\(TerminalUIStyle.reset)"
+        ]
+
+        let card = [
+            "\(TerminalUIStyle.dim)┌──────────────────────────────────────┐\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)Local-first LLM for Apple Silicon\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.slate)MLX • TurboQuant • Sessions\(TerminalUIStyle.reset)      \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.dim)│\(TerminalUIStyle.reset) \(TerminalUIStyle.green)models \(modelCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.amber)sessions \(sessionCount)\(TerminalUIStyle.reset)  \(TerminalUIStyle.blue)caches \(cacheCount)\(TerminalUIStyle.reset) \(TerminalUIStyle.dim)│\(TerminalUIStyle.reset)",
+            "\(TerminalUIStyle.dim)└──────────────────────────────────────┘\(TerminalUIStyle.reset)"
+        ]
+
+        return zip(art, card).map { "\($0)   \($1)" }.joined(separator: "\n")
     }
 }

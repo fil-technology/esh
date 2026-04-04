@@ -22,11 +22,21 @@ enum TerminalUIStyle {
     }
 
     static func stripANSI(from value: String) -> String {
-        value.replacingOccurrences(
-            of: #"\u{001B}\[[0-9;]*m|\u{001B}\[[0-9;]*[A-Za-z]"#,
-            with: "",
-            options: .regularExpression
-        )
+        var result = ""
+        var iterator = value.makeIterator()
+        while let character = iterator.next() {
+            if character == "\u{001B}" {
+                guard iterator.next() == "[" else { continue }
+                while let next = iterator.next() {
+                    if ("@"..."~").contains(next) {
+                        break
+                    }
+                }
+                continue
+            }
+            result.append(character)
+        }
+        return result
     }
 
     static func visibleWidth(of value: String) -> Int {
