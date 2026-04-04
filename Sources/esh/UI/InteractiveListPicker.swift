@@ -116,33 +116,36 @@ struct InteractiveListPicker {
     ) {
         let clear = "\u{001B}[2J\u{001B}[H"
         let width = terminalWidth()
+        let innerWidth = max(width - 4, 30)
         var lines: [String] = title.components(separatedBy: "\n")
         if let subtitle, !subtitle.isEmpty {
-            lines.append(contentsOf: subtitle.components(separatedBy: "\n"))
+            lines.append(TerminalUIStyle.dim + subtitle + TerminalUIStyle.reset)
         }
         lines.append("")
+        lines.append(TerminalUIStyle.rule(width: width, left: "╭", right: "╮"))
 
         for (index, item) in items.enumerated() {
-            let marker = index == selectedIndex ? "›" : " "
+            let marker = index == selectedIndex ? "\(TerminalUIStyle.cyan)›\(TerminalUIStyle.reset)" : "\(TerminalUIStyle.faint)·\(TerminalUIStyle.reset)"
             let content = composeRow(
                 marker: marker,
                 title: item.title,
                 detail: item.detail,
-                width: width
+                width: innerWidth
             )
             if index == selectedIndex {
-                lines.append("\u{001B}[4;1;97;48;5;24m\(content)\u{001B}[0m")
+                lines.append("\(TerminalUIStyle.border)│ \(TerminalUIStyle.reset)\(TerminalUIStyle.selection)\(TerminalUIStyle.padVisible(content, to: innerWidth))\(TerminalUIStyle.reset)\(TerminalUIStyle.border) │\(TerminalUIStyle.reset)")
             } else {
-                lines.append(content)
+                lines.append("\(TerminalUIStyle.border)│ \(TerminalUIStyle.reset)\(TerminalUIStyle.padVisible(content, to: innerWidth))\(TerminalUIStyle.border) │\(TerminalUIStyle.reset)")
             }
         }
 
-        lines.append("")
+        lines.append(TerminalUIStyle.rule(width: width, left: "╰", right: "╯"))
         var hints = [primaryHint]
         hints.append(contentsOf: secondaryHints)
         hints.append("↑/↓ move")
         hints.append("q back")
-        lines.append(hints.joined(separator: " | "))
+        lines.append("")
+        lines.append(TerminalUIStyle.faint + hints.joined(separator: "  •  ") + TerminalUIStyle.reset)
 
         Swift.print(clear + lines.joined(separator: "\n"), terminator: "")
         fflush(stdout)
@@ -152,23 +155,23 @@ struct InteractiveListPicker {
         let normalizedTitle = title.replacingOccurrences(of: "\n", with: " ")
         let prefix = "\(marker) "
         guard let detail, !detail.isEmpty else {
-            return prefix + truncate(normalizedTitle, limit: max(width - prefix.count, 8))
+            return prefix + TerminalUIStyle.truncateVisible(normalizedTitle, limit: max(width - 2, 8))
         }
 
         let normalizedDetail = detail.replacingOccurrences(of: "\n", with: " ")
-        let separator = "  "
-        let availableWidth = max(width - prefix.count, 12)
-        let titleWidth = max(Int(Double(availableWidth) * 0.55), 12)
+        let separator = "   "
+        let availableWidth = max(width - 2, 12)
+        let titleWidth = max(Int(Double(availableWidth) * 0.4), 12)
         let detailWidth = max(availableWidth - titleWidth - separator.count, 10)
-        let left = truncate(normalizedTitle, limit: titleWidth)
-        let right = truncate(normalizedDetail, limit: detailWidth)
-        return prefix + left + separator + "\u{001B}[38;5;245m\(right)\u{001B}[0m"
-    }
-
-    private func truncate(_ value: String, limit: Int) -> String {
-        guard value.count > limit else { return value }
-        guard limit > 1 else { return String(value.prefix(limit)) }
-        return String(value.prefix(limit - 1)) + "…"
+        let left = TerminalUIStyle.padVisible(
+            TerminalUIStyle.truncateVisible("\(TerminalUIStyle.ink)\(normalizedTitle)\(TerminalUIStyle.reset)", limit: titleWidth),
+            to: titleWidth
+        )
+        let right = TerminalUIStyle.truncateVisible(
+            "\(TerminalUIStyle.slate)\(normalizedDetail)\(TerminalUIStyle.reset)",
+            limit: detailWidth
+        )
+        return prefix + left + separator + right
     }
 
     private func terminalWidth() -> Int {
