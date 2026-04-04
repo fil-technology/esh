@@ -12,6 +12,8 @@ public struct DownloadState: Codable, Hashable, Sendable {
     public var phase: Phase
     public var bytesDownloaded: Int64
     public var totalBytes: Int64?
+    public var currentFileBytesDownloaded: Int64?
+    public var currentFileTotalBytes: Int64?
     public var bytesPerSecond: Double?
     public var etaSeconds: Double?
     public var currentFile: String?
@@ -21,6 +23,8 @@ public struct DownloadState: Codable, Hashable, Sendable {
         phase: Phase,
         bytesDownloaded: Int64 = 0,
         totalBytes: Int64? = nil,
+        currentFileBytesDownloaded: Int64? = nil,
+        currentFileTotalBytes: Int64? = nil,
         bytesPerSecond: Double? = nil,
         etaSeconds: Double? = nil,
         currentFile: String? = nil,
@@ -29,6 +33,8 @@ public struct DownloadState: Codable, Hashable, Sendable {
         self.phase = phase
         self.bytesDownloaded = bytesDownloaded
         self.totalBytes = totalBytes
+        self.currentFileBytesDownloaded = currentFileBytesDownloaded
+        self.currentFileTotalBytes = currentFileTotalBytes
         self.bytesPerSecond = bytesPerSecond
         self.etaSeconds = etaSeconds
         self.currentFile = currentFile

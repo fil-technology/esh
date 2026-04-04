@@ -55,20 +55,6 @@ public struct RecommendedModelRegistry: Sendable {
 
     public static let defaultModels: [RecommendedModel] = [
         RecommendedModel(
-            id: "gemma-4-26b-a4b",
-            title: "Gemma 4 26B A4B Instruct",
-            repoID: "mlx-community/gemma-4-26b-a4b-it-4bit",
-            parameterSize: "26B (4B Active MoE)",
-            quantization: "4-bit",
-            profile: .chat,
-            tier: .good,
-            estimatedMemoryGB: 15.0,
-            totalDiskSizeGB: 14.2,
-            tags: ["moe", "agentic", "fast-multimodal"],
-            summary: "Strong general recommendation for capable Macs with fast multimodal MoE behavior.",
-            sortOrder: 0
-        ),
-        RecommendedModel(
             id: "mistral-small-24b",
             title: "Mistral Small 24B Instruct (2501)",
             repoID: "mlx-community/Mistral-Small-24B-Instruct-2501-4bit",
@@ -80,7 +66,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 13.3,
             tags: ["general-purpose", "coding", "agentic"],
             summary: "Balanced built-in default for everyday chat, coding, and agentic tasks.",
-            sortOrder: 1
+            sortOrder: 0
         ),
         RecommendedModel(
             id: "deepseek-r1-qwen-14b",
@@ -94,7 +80,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 8.3,
             tags: ["reasoning", "fast-inference", "logic"],
             summary: "Reasoning-focused sweet spot model with faster inference than larger R1 distills.",
-            sortOrder: 2
+            sortOrder: 1
         ),
         RecommendedModel(
             id: "qwen-3-5-9b-optiq",
@@ -108,7 +94,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 5.1,
             tags: ["instruction-following", "vision-language", "high-throughput"],
             summary: "High-throughput mid-size option with strong instruction following and VLM support.",
-            sortOrder: 3
+            sortOrder: 2
         ),
         RecommendedModel(
             id: "llama-3-1-8b",
@@ -122,7 +108,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.5,
             tags: ["agentic", "general-purpose", "roleplay"],
             summary: "Efficient general-purpose small model for broad local usage.",
-            sortOrder: 4
+            sortOrder: 3
         ),
         RecommendedModel(
             id: "qwen-2-5-coder-7b",
@@ -136,21 +122,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.3,
             tags: ["coding", "lightweight", "autocomplete"],
             summary: "Lightweight coding recommendation with a strong quality-to-efficiency tradeoff.",
-            sortOrder: 5
-        ),
-        RecommendedModel(
-            id: "gemma-4-e4b",
-            title: "Gemma 4 E4B Instruct",
-            repoID: "mlx-community/gemma-4-e4b-it-4bit",
-            parameterSize: "4B",
-            quantization: "4-bit",
-            profile: .chat,
-            tier: .small,
-            estimatedMemoryGB: 2.8,
-            totalDiskSizeGB: 2.5,
-            tags: ["edge-computing", "vision", "audio-processing"],
-            summary: "Compact multimodal Gemma option for edge-style and media-aware workloads.",
-            sortOrder: 6
+            sortOrder: 4
         ),
         RecommendedModel(
             id: "llama-3-2-3b",
@@ -164,21 +136,21 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 1.8,
             tags: ["fast-inference", "embedded-tasks", "summarization"],
             summary: "Very fast lightweight choice for summarization and small-device workflows.",
-            sortOrder: 7
+            sortOrder: 5
         ),
         RecommendedModel(
-            id: "gemma-4-e2b",
-            title: "Gemma 4 E2B Instruct",
-            repoID: "mlx-community/gemma-4-e2b-it-4bit",
-            parameterSize: "2B",
+            id: "qwen-2-5-0-5b",
+            title: "Qwen 2.5 0.5B Instruct",
+            repoID: "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+            parameterSize: "0.5B",
             quantization: "4-bit",
             profile: .chat,
             tier: .tiny,
-            estimatedMemoryGB: 1.6,
-            totalDiskSizeGB: 1.4,
-            tags: ["embedded-agents", "always-on", "fast-inference"],
-            summary: "Tiny always-on option for embedded agents and background assistant flows.",
-            sortOrder: 8
+            estimatedMemoryGB: 0.6,
+            totalDiskSizeGB: 0.4,
+            tags: ["starter", "always-on", "fast-inference"],
+            summary: "Tiny starter model for instant first-run chat and lightweight assistant loops.",
+            sortOrder: 6
         ),
         RecommendedModel(
             id: "qwen-3-5-0-8b-optiq",
@@ -192,35 +164,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.6,
             tags: ["background-agent", "ultra-fast", "formatting"],
             summary: "Ultra-light model for background helpers, formatting, and fast automation loops.",
-            sortOrder: 9
-        ),
-        RecommendedModel(
-            id: "gemma-4-31b",
-            title: "Gemma 4 31B Instruct",
-            repoID: "mlx-community/gemma-4-31b-it-4bit",
-            parameterSize: "31B",
-            quantization: "4-bit",
-            profile: .chat,
-            tier: .max,
-            estimatedMemoryGB: 18.5,
-            totalDiskSizeGB: 17.5,
-            tags: ["multimodal", "video-understanding", "frontier-level"],
-            summary: "Largest Gemma recommendation for frontier-style multimodal local usage.",
-            sortOrder: 10
-        ),
-        RecommendedModel(
-            id: "qwen-3-5-35b-a3b",
-            title: "Qwen 3.5 35B A3B Instruct",
-            repoID: "mlx-community/Qwen3.5-35B-A3B-Instruct-4bit",
-            parameterSize: "35B (3B Active MoE)",
-            quantization: "4-bit",
-            profile: .code,
-            tier: .max,
-            estimatedMemoryGB: 20.5,
-            totalDiskSizeGB: 19.5,
-            tags: ["coding", "reasoning", "latest-gen"],
-            summary: "High-end coding and reasoning option for Macs near the top of the supported range.",
-            sortOrder: 11
+            sortOrder: 7
         ),
         RecommendedModel(
             id: "qwen-3-5-27b-opus-distilled",
@@ -234,7 +178,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 14.8,
             tags: ["reasoning", "distilled", "chain-of-thought"],
             summary: "Large distilled reasoning preset aimed at higher-quality chain-of-thought style tasks.",
-            sortOrder: 12
+            sortOrder: 8
         ),
         RecommendedModel(
             id: "deepseek-r1-qwen-32b",
@@ -248,7 +192,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["math", "logic", "chain-of-thought"],
             summary: "Large reasoning recommendation tuned for math and logic heavy workloads.",
-            sortOrder: 13
+            sortOrder: 9
         ),
         RecommendedModel(
             id: "qwen-2-5-coder-32b",
@@ -262,7 +206,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["coding", "development", "agentic"],
             summary: "Largest built-in coding preset for advanced development and agentic tasks.",
-            sortOrder: 14
+            sortOrder: 10
         )
     ]
 }

@@ -94,6 +94,8 @@ struct InteractiveListPicker {
                 )
             case UInt8(ascii: "q"):
                 return .cancelled
+            case UInt8(ascii: "<"):
+                return .cancelled
             default:
                 guard let scalar = UnicodeScalar(Int(byte)) else { continue }
                 let character = Character(scalar)
@@ -143,7 +145,8 @@ struct InteractiveListPicker {
         var hints = [primaryHint]
         hints.append(contentsOf: secondaryHints)
         hints.append("↑/↓ move")
-        hints.append("q back")
+        hints.append("< back")
+        hints.append("esc cancel")
         lines.append("")
         lines.append(TerminalUIStyle.faint + hints.joined(separator: "  •  ") + TerminalUIStyle.reset)
 

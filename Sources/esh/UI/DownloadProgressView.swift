@@ -28,15 +28,25 @@ enum DownloadProgressView {
     private static func formattedLine(for state: DownloadState) -> String {
         let phase = padded(state.phase.rawValue.lowercased(), width: 12)
         let totalBytes = max(state.totalBytes ?? 0, 0)
-        let ratio = totalBytes > 0 ? min(max(Double(state.bytesDownloaded) / Double(totalBytes), 0), 1) : nil
+        let currentFileDownloaded = max(state.currentFileBytesDownloaded ?? state.bytesDownloaded, 0)
+        let currentFileTotal = max(state.currentFileTotalBytes ?? 0, 0)
+        let ratio: Double?
+        if totalBytes > 0 {
+            ratio = min(max(Double(state.bytesDownloaded) / Double(totalBytes), 0), 1)
+        } else if currentFileTotal > 0 {
+            ratio = min(max(Double(currentFileDownloaded) / Double(currentFileTotal), 0), 1)
+        } else {
+            ratio = nil
+        }
         let bar = progressBar(progress: ratio, width: 24, downloadedBytes: state.bytesDownloaded)
         let percent = ratio.map { String(format: "%3.0f%%", $0 * 100) } ?? " --%"
-        let transferred = padded(ByteFormatting.string(for: state.bytesDownloaded), width: 8, alignRight: true)
-        let total = padded(state.totalBytes.map(ByteFormatting.string(for:)) ?? "?", width: 8, alignRight: true)
+        let fileTransferred = padded(ByteFormatting.string(for: currentFileDownloaded), width: 8, alignRight: true)
+        let fileTotal = padded(state.currentFileTotalBytes.map(ByteFormatting.string(for:)) ?? "?", width: 8, alignRight: true)
+        let modelSummary = padded(modelSizeSummary(for: state), width: 20)
         let speed = padded(state.bytesPerSecond.map { ByteFormatting.string(for: Int64($0)) + "/s" } ?? "-", width: 10, alignRight: true)
         let eta = padded(state.etaSeconds.map(formatETA(_:)) ?? "-", width: 6, alignRight: true)
         let file = truncateMiddle(state.currentFile ?? state.message ?? "model", limit: 28)
-        return "\(TerminalUIStyle.slate)\(phase)\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(file)\(TerminalUIStyle.reset)  \(percent) \(bar)  \(transferred)/\(total)  \(speed)  \(eta)"
+        return "\(TerminalUIStyle.slate)\(phase)\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(file)\(TerminalUIStyle.reset)  \(percent) \(bar)  \(fileTransferred)/\(fileTotal)  \(modelSummary)  \(speed)  \(eta)"
     }
 
     private static func progressBar(progress: Double?, width: Int, downloadedBytes: Int64) -> String {
@@ -76,5 +86,13 @@ enum DownloadProgressView {
             return String(format: "%dm%02ds", value / 60, value % 60)
         }
         return "\(value)s"
+    }
+
+    private static func modelSizeSummary(for state: DownloadState) -> String {
+        let modelDownloaded = ByteFormatting.string(for: state.bytesDownloaded)
+        if let totalBytes = state.totalBytes {
+            return "model \(modelDownloaded)/\(ByteFormatting.string(for: totalBytes))"
+        }
+        return "model \(modelDownloaded)"
     }
 }

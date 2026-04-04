@@ -48,12 +48,15 @@ public struct DownloadCoordinator: Sendable {
 
             let downloadedBefore = ResumeSupport.existingSize(at: destinationURL)
             aggregateDownloaded += downloadedBefore
+            var currentFileTotalBytes = file.sizeBytes
 
             reporter.emit(
                 DownloadState(
                     phase: .downloading,
                     bytesDownloaded: aggregateDownloaded,
                     totalBytes: totalBytes > 0 ? totalBytes : nil,
+                    currentFileBytesDownloaded: downloadedBefore,
+                    currentFileTotalBytes: currentFileTotalBytes,
                     bytesPerSecond: nil,
                     etaSeconds: nil,
                     currentFile: file.path,
@@ -67,7 +70,8 @@ public struct DownloadCoordinator: Sendable {
                 destinationURL: destinationURL,
                 aggregateDownloaded: &aggregateDownloaded,
                 reporter: reporter,
-                totalBytes: totalBytes > 0 ? totalBytes : nil
+                totalBytes: totalBytes > 0 ? totalBytes : nil,
+                currentFileTotalBytes: &currentFileTotalBytes
             )
 
             let handle: FileHandle
@@ -105,6 +109,8 @@ public struct DownloadCoordinator: Sendable {
                         phase: .downloading,
                         bytesDownloaded: aggregateDownloaded,
                         totalBytes: totalBytes > 0 ? totalBytes : nil,
+                        currentFileBytesDownloaded: currentFileDownloaded,
+                        currentFileTotalBytes: currentFileTotalBytes,
                         bytesPerSecond: speed,
                         etaSeconds: eta,
                         currentFile: file.path,
@@ -136,7 +142,8 @@ public struct DownloadCoordinator: Sendable {
         destinationURL: URL,
         aggregateDownloaded: inout Int64,
         reporter: ProgressReporting,
-        totalBytes: Int64?
+        totalBytes: Int64?,
+        currentFileTotalBytes: inout Int64?
     ) async throws -> (bytes: URLSession.AsyncBytes, response: URLResponse) {
         let resumedBytes = ResumeSupport.existingSize(at: destinationURL)
         do {
@@ -148,6 +155,11 @@ public struct DownloadCoordinator: Sendable {
             )
             let (bytes, response) = try await session.bytes(for: request)
             try validate(response: response, file: file.path, resumeFrom: resumedBytes)
+            currentFileTotalBytes = inferCurrentFileTotalBytes(
+                fallback: currentFileTotalBytes,
+                response: response,
+                resumedBytes: resumedBytes
+            )
             return (bytes, response)
         } catch let error as StoreError {
             guard case let .invalidManifest(message) = error,
@@ -163,6 +175,8 @@ public struct DownloadCoordinator: Sendable {
                     phase: .downloading,
                     bytesDownloaded: aggregateDownloaded,
                     totalBytes: totalBytes,
+                    currentFileBytesDownloaded: 0,
+                    currentFileTotalBytes: currentFileTotalBytes,
                     bytesPerSecond: nil,
                     etaSeconds: nil,
                     currentFile: file.path,
@@ -178,8 +192,35 @@ public struct DownloadCoordinator: Sendable {
             )
             let (bytes, response) = try await session.bytes(for: request)
             try validate(response: response, file: file.path, resumeFrom: 0)
+            currentFileTotalBytes = inferCurrentFileTotalBytes(
+                fallback: currentFileTotalBytes,
+                response: response,
+                resumedBytes: 0
+            )
             return (bytes, response)
         }
+    }
+
+    private func inferCurrentFileTotalBytes(
+        fallback: Int64?,
+        response: URLResponse,
+        resumedBytes: Int64
+    ) -> Int64? {
+        if let fallback, fallback > 0 {
+            return fallback
+        }
+
+        let expected = response.expectedContentLength
+        guard expected > 0 else {
+            return fallback
+        }
+
+        if let http = response as? HTTPURLResponse,
+           http.statusCode == 206 {
+            return resumedBytes + expected
+        }
+
+        return expected
     }
 
     private func makeRequest(

@@ -13,7 +13,7 @@ struct InteractiveChoicePrompt {
         details: [String] = [],
         choices: [Choice],
         selectedIndex: Int = 0,
-        footer: String = "←/→ navigate • enter confirm • esc cancel"
+        footer: String = "←/→ navigate • enter confirm • < back • esc cancel"
     ) -> Character? {
         guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0, !choices.isEmpty else {
             return nil
@@ -52,6 +52,8 @@ struct InteractiveChoicePrompt {
                 index = max(index - 1, 0)
             case UInt8(ascii: "l"):
                 index = min(index + 1, choices.count - 1)
+            case UInt8(ascii: "<"), UInt8(ascii: "q"):
+                return nil
             default:
                 if let scalar = UnicodeScalar(Int(byte)) {
                     let character = Character(scalar)

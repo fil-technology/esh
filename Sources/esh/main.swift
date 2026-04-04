@@ -17,6 +17,11 @@ struct CLIHandledError: Error {}
 private struct CLI {
     private let root = PersistenceRoot.default()
 
+    private struct ChatLaunchSettings {
+        let cacheMode: CacheMode
+        let autosaveEnabled: Bool
+    }
+
     func run(arguments: [String]) async throws {
         let command = Array(arguments.dropFirst())
         guard let head = command.first else {
@@ -70,16 +75,28 @@ private struct CLI {
         let sessionStore = FileSessionStore(root: root)
         let cacheStore = FileCacheStore(root: root)
         let picker = InteractiveListPicker()
+        var didOfferStarterInstall = false
 
         while true {
-            let menuItems = makeDefaultMenuItems(
-                modelCount: (try? modelStore.listInstalls().count) ?? 0,
-                sessionCount: (try? sessionStore.listSessions().count) ?? 0,
-                cacheCount: (try? cacheStore.listArtifacts().count) ?? 0
-            )
             let modelCount = (try? modelStore.listInstalls().count) ?? 0
             let sessionCount = (try? sessionStore.listSessions().count) ?? 0
             let cacheCount = (try? cacheStore.listArtifacts().count) ?? 0
+            if modelCount == 0 && !didOfferStarterInstall {
+                didOfferStarterInstall = true
+                try await showStarterModelsMenu(
+                    service: modelService,
+                    catalogService: modelCatalogService,
+                    title: "No Models Installed Yet",
+                    subtitle: "Start with a small proven preset now, or press a to browse the full supported list."
+                )
+                continue
+            }
+
+            let menuItems = makeDefaultMenuItems(
+                modelCount: modelCount,
+                sessionCount: sessionCount,
+                cacheCount: cacheCount
+            )
             StartupBanner.animateIfNeeded(
                 modelCount: modelCount,
                 sessionCount: sessionCount,
@@ -104,8 +121,11 @@ private struct CLI {
                 ) else {
                     continue
                 }
+                guard let launchSettings = chooseChatLaunchSettings() else {
+                    continue
+                }
                 try await handleChat(
-                    arguments: ["--model", selectedModelID],
+                    arguments: ["--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
             case .secondary("n", 0):
@@ -120,8 +140,11 @@ private struct CLI {
                 ) else {
                     continue
                 }
+                guard let launchSettings = chooseChatLaunchSettings() else {
+                    continue
+                }
                 try await handleChat(
-                    arguments: [sessionName, "--model", selectedModelID],
+                    arguments: [sessionName, "--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
             case .selected(1):
@@ -251,7 +274,18 @@ private struct CLI {
 
     private func handleChat(arguments: [String], sessionStore: SessionStore) async throws {
         let modelIdentifier = CommandSupport.optionalValue(flag: "--model", in: arguments)
-        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model"])
+        let cacheModeValue = CommandSupport.optionalValue(flag: "--cache-mode", in: arguments)
+        let autosaveValue = CommandSupport.optionalValue(flag: "--autosave", in: arguments)
+        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model", "--cache-mode", "--autosave"])
+        let preferredCacheMode = cacheModeValue.flatMap { CacheMode(rawValue: $0.lowercased()) }
+        let preferredAutosaveEnabled = autosaveValue.map { value in
+            switch value.lowercased() {
+            case "on", "true", "yes", "1":
+                true
+            default:
+                false
+            }
+        }
         let sessionName: String
         if let explicit = positional.first {
             sessionName = explicit
@@ -264,6 +298,8 @@ private struct CLI {
         try await app.run(
             sessionName: sessionName,
             modelIdentifier: modelIdentifier,
+            preferredCacheMode: preferredCacheMode,
+            preferredAutosaveEnabled: preferredAutosaveEnabled,
             sessionStore: sessionStore
         )
     }
@@ -286,7 +322,7 @@ private struct CLI {
             esh commands:
               esh
               esh chat [session-name]
-              esh chat [session-name] --model <id-or-repo>
+              esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo] [--autosave on|off]
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
               esh benchmark history
               esh doctor
@@ -320,10 +356,58 @@ private struct CLI {
         ]
     }
 
+    private func starterModels(service: ModelService) -> [RecommendedModel] {
+        let preferredIDs = [
+            "qwen-2-5-0-5b",
+            "llama-3-2-3b",
+            "qwen-2-5-coder-7b",
+            "mistral-small-24b",
+            "qwen-3-5-9b-optiq"
+        ]
+        return preferredIDs.compactMap { service.resolveRecommended(alias: $0) }
+    }
+
     private func prompt(_ label: String) -> String? {
         print("\(label): ", terminator: "")
         fflush(stdout)
         return readLine()
+    }
+
+    private func chooseChatLaunchSettings() -> ChatLaunchSettings? {
+        guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
+            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: false)
+        }
+
+        let prompt = InteractiveChoicePrompt()
+        guard let selected = prompt.choose(
+            title: "Chat Launch Settings",
+            message: "Choose how this chat session should start.",
+            details: [
+                "Quick keeps cache mode raw and autosave off.",
+                "Turbo prefers compressed cache artifacts for this session.",
+                "Autosave writes the session automatically after each reply."
+            ],
+            choices: [
+                .init(key: "q", label: "Quick"),
+                .init(key: "a", label: "Autosave"),
+                .init(key: "t", label: "Turbo"),
+                .init(key: "b", label: "Turbo + Autosave")
+            ],
+            footer: "←/→ navigate • enter confirm • < back • esc cancel"
+        ) else {
+            return nil
+        }
+
+        switch selected {
+        case "a":
+            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: true)
+        case "t":
+            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
+        case "b":
+            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: true)
+        default:
+            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: false)
+        }
     }
 
     private func pauseForMenu() {
@@ -352,7 +436,7 @@ private struct CLI {
                 .init(key: "y", label: "Yes"),
                 .init(key: "n", label: "No")
             ],
-            footer: "←/→ navigate • enter confirm • esc cancel"
+            footer: "←/→ navigate • enter confirm • < back • esc cancel"
         ) == "y"
     }
 
@@ -443,14 +527,71 @@ private struct CLI {
         pauseForMenu()
     }
 
+    private func showStarterModelsMenu(
+        service: ModelService,
+        catalogService: ModelCatalogService,
+        title: String,
+        subtitle: String
+    ) async throws {
+        let models = starterModels(service: service)
+        guard !models.isEmpty else {
+            return
+        }
+
+        let items = models.map { model in
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
+            return InteractiveListPicker.Item(
+                title: "\(model.id)  \(features)",
+                detail: "\(model.tier.displayName) | \(model.quantization) | \(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
+            )
+        }
+        let picker = InteractiveListPicker()
+        switch picker.pick(
+            title: title,
+            subtitle: subtitle,
+            items: items,
+            primaryHint: "Enter install",
+            secondaryHints: ["a all presets", "o open page"],
+            secondaryKeys: ["a", "o"]
+        ) {
+        case .selected(let index):
+            let model = models[index]
+            try await ModelInstallCommand.run(
+                identifier: model.id,
+                service: service,
+                catalogService: catalogService
+            )
+            pauseForMenu()
+        case .secondary("a", _):
+            try await showRecommendedModelsMenu(
+                service: service,
+                catalogService: catalogService
+            )
+        case .secondary("o", let index):
+            let model = models[index]
+            try await ModelOpenCommand.run(
+                identifier: model.id,
+                service: service,
+                catalogService: catalogService
+            )
+            pauseForMenu()
+        default:
+            return
+        }
+    }
+
     private func pickChatModel(
         service: ModelService,
         catalogService: ModelCatalogService
     ) async throws -> String? {
         let installs = try service.list()
         guard !installs.isEmpty else {
-            print("No installed models.")
-            pauseForMenu()
+            try await showStarterModelsMenu(
+                service: service,
+                catalogService: catalogService,
+                title: "Chat Needs A Local Model",
+                subtitle: "Pick one supported starter model to install first, or press a to browse the full supported list."
+            )
             return nil
         }
 
@@ -552,8 +693,11 @@ private struct CLI {
                 return
             case .secondary("c", let index):
                 let install = installs[index]
+                guard let launchSettings = chooseChatLaunchSettings() else {
+                    continue
+                }
                 try await handleChat(
-                    arguments: ["--model", install.id],
+                    arguments: ["--model", install.id, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
                 return

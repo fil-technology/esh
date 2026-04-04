@@ -101,7 +101,7 @@ enum ModelInstallCommand {
                     message: "\(repoID) is not currently installable with this machine/runtime setup.",
                     details: detailLines,
                     choices: [.init(key: "n", label: "Back")],
-                    footer: "enter confirm • esc cancel"
+                    footer: "enter confirm • < back • esc cancel"
                 )
                 return false
             }
@@ -114,7 +114,7 @@ enum ModelInstallCommand {
                     .init(key: "y", label: "Install"),
                     .init(key: "n", label: "Cancel")
                 ],
-                footer: "←/→ navigate • enter confirm • esc cancel"
+                footer: "←/→ navigate • enter confirm • < back • esc cancel"
             )
             return choice == "y"
         }

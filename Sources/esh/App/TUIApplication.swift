@@ -14,6 +14,8 @@ struct TUIApplication {
     func run(
         sessionName: String,
         modelIdentifier: String? = nil,
+        preferredCacheMode: CacheMode? = nil,
+        preferredAutosaveEnabled: Bool? = nil,
         sessionStore: SessionStore
     ) async throws {
         let surface = TerminalSurface()
@@ -24,6 +26,8 @@ struct TUIApplication {
         var session = try loadOrCreateSession(
             requestedName: sessionName,
             preferredModelID: modelIdentifier,
+            preferredCacheMode: preferredCacheMode,
+            preferredAutosaveEnabled: preferredAutosaveEnabled,
             sessionStore: sessionStore
         )
         var install = try CommandSupport.resolveInstall(
@@ -42,7 +46,8 @@ struct TUIApplication {
         state = makeScreenState(
             for: session,
             installID: install.id,
-            cacheMode: latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw"
+            cacheMode: session.cacheMode?.rawValue ?? latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
+            autosaveEnabled: session.autosaveEnabled ?? false
         )
         state.statusText = "ready | /menu commands | /back launcher"
         surface.render(state: state)
@@ -254,6 +259,9 @@ struct TUIApplication {
                     "/close          Close the current panel",
                     "/save           Save the active chat session",
                     "/autosave on|off|toggle",
+                    "/cache raw|turbo",
+                    "/cache toggle",
+                    "/settings       Show current chat settings",
                     "/new [name]",
                     "/switch <name-or-uuid>",
                     "/models         Show installed models",
@@ -273,16 +281,52 @@ struct TUIApplication {
             state.statusText = "command menu open"
         case "/autosave":
             state.autosaveEnabled.toggle()
+            session.autosaveEnabled = state.autosaveEnabled
+            try? sessionStore.save(session: session)
             state.statusText = state.autosaveEnabled ? "autosave enabled" : "autosave disabled"
         case "/autosave on":
             state.autosaveEnabled = true
+            session.autosaveEnabled = true
+            try? sessionStore.save(session: session)
             state.statusText = "autosave enabled"
         case "/autosave off":
             state.autosaveEnabled = false
+            session.autosaveEnabled = false
+            try? sessionStore.save(session: session)
             state.statusText = "autosave disabled"
         case "/autosave toggle":
             state.autosaveEnabled.toggle()
+            session.autosaveEnabled = state.autosaveEnabled
+            try? sessionStore.save(session: session)
             state.statusText = state.autosaveEnabled ? "autosave enabled" : "autosave disabled"
+        case "/cache raw":
+            state.cacheMode = CacheMode.raw.rawValue
+            session.cacheMode = .raw
+            try? sessionStore.save(session: session)
+            state.statusText = "cache mode raw"
+        case "/cache turbo":
+            state.cacheMode = CacheMode.turbo.rawValue
+            session.cacheMode = .turbo
+            try? sessionStore.save(session: session)
+            state.statusText = "cache mode turbo"
+        case "/cache toggle":
+            let next: CacheMode = (session.cacheMode ?? .raw) == .raw ? .turbo : .raw
+            session.cacheMode = next
+            state.cacheMode = next.rawValue
+            try? sessionStore.save(session: session)
+            state.statusText = "cache mode \(next.rawValue)"
+        case "/settings":
+            state.overlay = OverlayPanelState(
+                title: "Chat Settings",
+                lines: [
+                    "cache mode: \(session.cacheMode?.rawValue ?? state.cacheMode)",
+                    "autosave: \((session.autosaveEnabled ?? state.autosaveEnabled) ? "on" : "off")",
+                    "",
+                    "Use /cache raw or /cache turbo",
+                    "Use /autosave on or /autosave off"
+                ]
+            )
+            state.statusText = "showing settings"
         case "/close":
             state.overlay = nil
             state.statusText = "ready | /menu commands | /back launcher"
@@ -317,10 +361,12 @@ struct TUIApplication {
                 session = ChatSession(name: requestedName.isEmpty ? try nextSessionName(sessionStore: sessionStore) : requestedName)
                 session.modelID = install.id
                 session.backend = .mlx
+                session.cacheMode = state.cacheMode == CacheMode.turbo.rawValue ? .turbo : .raw
+                session.autosaveEnabled = state.autosaveEnabled
                 state = makeScreenState(
                     for: session,
                     installID: install.id,
-                    cacheMode: "raw",
+                    cacheMode: session.cacheMode?.rawValue ?? "raw",
                     autosaveEnabled: state.autosaveEnabled
                 )
                 state.statusText = "new session"
@@ -350,8 +396,8 @@ struct TUIApplication {
                 state = makeScreenState(
                     for: session,
                     installID: install.id,
-                    cacheMode: latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
-                    autosaveEnabled: state.autosaveEnabled
+                    cacheMode: session.cacheMode?.rawValue ?? latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
+                    autosaveEnabled: session.autosaveEnabled ?? state.autosaveEnabled
                 )
                 state.statusText = "switched session"
             } catch {
@@ -479,18 +525,24 @@ struct TUIApplication {
     private func loadOrCreateSession(
         requestedName: String,
         preferredModelID: String?,
+        preferredCacheMode: CacheMode?,
+        preferredAutosaveEnabled: Bool?,
         sessionStore: SessionStore
     ) throws -> ChatSession {
         if let existing = try? CommandSupport.resolveSession(identifier: requestedName, sessionStore: sessionStore) {
             var session = existing
             session.modelID = session.modelID ?? preferredModelID
             session.backend = session.backend ?? .mlx
+            session.cacheMode = preferredCacheMode ?? session.cacheMode
+            session.autosaveEnabled = preferredAutosaveEnabled ?? session.autosaveEnabled
             return session
         }
 
         var session = ChatSession(name: requestedName)
         session.modelID = preferredModelID
         session.backend = .mlx
+        session.cacheMode = preferredCacheMode ?? .raw
+        session.autosaveEnabled = preferredAutosaveEnabled ?? false
         return session
     }
 

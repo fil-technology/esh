@@ -10,14 +10,12 @@ struct RecommendedModelRegistryTests {
         let ids = registry.list().map(\.id)
 
         #expect(ids.prefix(4).elementsEqual([
-            "gemma-4-26b-a4b",
             "mistral-small-24b",
             "deepseek-r1-qwen-14b",
-            "qwen-3-5-9b-optiq"
+            "qwen-3-5-9b-optiq",
+            "llama-3-1-8b"
         ]))
-        #expect(ids.suffix(5).elementsEqual([
-            "gemma-4-31b",
-            "qwen-3-5-35b-a3b",
+        #expect(ids.suffix(3).elementsEqual([
             "qwen-3-5-27b-opus-distilled",
             "deepseek-r1-qwen-32b",
             "qwen-2-5-coder-32b"
@@ -32,8 +30,8 @@ struct RecommendedModelRegistryTests {
         let codingIDs = registry.list(tag: "coding").map(\.id)
         let backendIDs = registry.list(backend: .mlx).map(\.id)
 
-        #expect(tierIDs == ["gemma-4-e2b", "qwen-3-5-0-8b-optiq"])
-        #expect(codingIDs == ["mistral-small-24b", "qwen-2-5-coder-7b", "qwen-3-5-35b-a3b", "qwen-2-5-coder-32b"])
+        #expect(tierIDs == ["qwen-2-5-0-5b", "qwen-3-5-0-8b-optiq"])
+        #expect(codingIDs == ["mistral-small-24b", "qwen-2-5-coder-7b", "qwen-2-5-coder-32b"])
         #expect(backendIDs.count == RecommendedModelRegistry.defaultModels.count)
     }
 
@@ -41,7 +39,7 @@ struct RecommendedModelRegistryTests {
     func resolvesAliasRepoAndRecommendedPrefix() {
         let registry = RecommendedModelRegistry()
 
-        #expect(registry.resolve(alias: "gemma-4-26b-a4b")?.repoID == "mlx-community/gemma-4-26b-a4b-it-4bit")
+        #expect(registry.resolve(alias: "qwen-2-5-0-5b")?.repoID == "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
         #expect(registry.resolve(alias: "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit")?.id == "qwen-2-5-coder-32b")
         #expect(registry.resolve(alias: "recommended:qwen-2-5-coder-7b")?.repoID == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit")
     }
@@ -59,7 +57,7 @@ struct ModelServiceRecommendedCatalogTests {
         let models = service.listRecommended(tier: .small, tag: "coding")
 
         #expect(models.map(\.id) == ["qwen-2-5-coder-7b"])
-        #expect(service.resolveRecommended(alias: "qwen-3-5-35b-a3b")?.title == "Qwen 3.5 35B A3B Instruct")
+        #expect(service.resolveRecommended(alias: "qwen-2-5-0-5b")?.title == "Qwen 2.5 0.5B Instruct")
     }
 }
 
