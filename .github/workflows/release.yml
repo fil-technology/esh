@@ -125,7 +125,7 @@ jobs:
           token: ${{ env.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update Homebrew formula
+      - name: Update Homebrew cask
         if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -133,7 +133,7 @@ jobs:
           chmod +x ./scripts/generate-homebrew-cask.sh
           mkdir -p homebrew-tap/Casks
           rm -f homebrew-tap/Formula/esh.rb
-          ./scripts/generate-homebrew-cask.sh "${{ steps.version.outputs.version }}" "$SHA256" > homebrew-tap/Casks/esh.rb
+          ./scripts/generate-homebrew-cask.sh "${{ steps.version.outputs.version }}" "$sha256" > homebrew-tap/Casks/esh.rb
           cat > homebrew-tap/README.md <<'EOF'
           # fil-technology/homebrew-tap
 

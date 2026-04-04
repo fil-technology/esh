@@ -26,7 +26,7 @@ cp "$(esh::repo_root)/scripts/lib/common.sh" "$PAYLOAD_DIR/scripts/lib/common.sh
 cp "$(esh::repo_root)/Tools/mlx_vlm_bridge.py" "$PAYLOAD_DIR/Tools/mlx_vlm_bridge.py"
 cp "$(esh::repo_root)/Tools/python-requirements.txt" "$PAYLOAD_DIR/Tools/python-requirements.txt"
 
-"$(esh::bootstrap_python)" -m venv "$ROOT_DIR/python"
+"$(esh::bootstrap_python)" -m venv --copies "$ROOT_DIR/python"
 ESH_LAYOUT_MODE="package" \
 ESH_APP_ROOT="$ROOT_DIR" \
 ESH_PAYLOAD_ROOT="$PAYLOAD_DIR" \
