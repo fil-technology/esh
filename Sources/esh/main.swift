@@ -406,9 +406,8 @@ private struct CLI {
     }
 
     private func prompt(_ label: String) -> String? {
-        print("\(label): ", terminator: "")
-        fflush(stdout)
-        return readLine()
+        InteractiveTextPrompt().capture(label: label)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func chooseChatLaunchSettings() -> ChatLaunchSettings? {
@@ -522,47 +521,53 @@ private struct CLI {
         service: ModelService,
         catalogService: ModelCatalogService
     ) async throws {
-        let models = service.listRecommended()
-        guard !models.isEmpty else {
-            print("No recommended models found.")
-            pauseForMenu()
-            return
-        }
-
-        let items = models.map { model in
-            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
-            return InteractiveListPicker.Item(
-                title: "\(model.id)  \(features)",
-                detail: "\(model.tier.displayName) | \(model.quantization) | \(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
-            )
-        }
         let picker = InteractiveListPicker()
-        switch picker.pick(
-            title: "Recommended Models",
-            subtitle: "Enter installs the selected model. Press o to open the model page.",
-            items: items,
-            primaryHint: "Enter install",
-            secondaryHints: ["o open page"],
-            secondaryKeys: ["o"]
-        ) {
-        case .selected(let index):
-            let model = models[index]
-            try await ModelInstallCommand.run(
-                identifier: model.id,
-                service: service,
-                catalogService: catalogService
-            )
-        case .secondary("o", let index):
-            let model = models[index]
-            try await ModelOpenCommand.run(
-                identifier: model.id,
-                service: service,
-                catalogService: catalogService
-            )
-        default:
-            return
+        var selectedBackend: BackendKind = .mlx
+
+        while true {
+            let models = service.listRecommended(backend: selectedBackend)
+            let items = recommendedMenuItems(for: models, backend: selectedBackend)
+            let subtitle = recommendedMenuSubtitle(for: selectedBackend, isEmpty: models.isEmpty)
+
+            switch picker.pick(
+                title: "Recommended Models [\(selectedBackend.rawValue.uppercased())]",
+                subtitle: subtitle,
+                items: items,
+                primaryHint: models.isEmpty ? "Enter no-op" : "Enter install",
+                secondaryHints: ["m mlx", "g gguf", "o open page"],
+                secondaryKeys: ["m", "g", "o"]
+            ) {
+            case .selected(let index):
+                guard models.indices.contains(index) else {
+                    continue
+                }
+                let model = models[index]
+                try await ModelInstallCommand.run(
+                    identifier: model.id,
+                    service: service,
+                    catalogService: catalogService
+                )
+                pauseForMenu()
+                return
+            case .secondary("m", _):
+                selectedBackend = .mlx
+            case .secondary("g", _):
+                selectedBackend = .gguf
+            case .secondary("o", let index):
+                guard models.indices.contains(index) else {
+                    continue
+                }
+                let model = models[index]
+                try await ModelOpenCommand.run(
+                    identifier: model.id,
+                    service: service,
+                    catalogService: catalogService
+                )
+                continue
+            default:
+                return
+            }
         }
-        pauseForMenu()
     }
 
     private func showStarterModelsMenu(
@@ -584,38 +589,74 @@ private struct CLI {
             )
         }
         let picker = InteractiveListPicker()
-        switch picker.pick(
-            title: title,
-            subtitle: subtitle,
-            items: items,
-            primaryHint: "Enter install",
-            secondaryHints: ["a all presets", "o open page"],
-            secondaryKeys: ["a", "o"]
-        ) {
-        case .selected(let index):
-            let model = models[index]
-            try await ModelInstallCommand.run(
-                identifier: model.id,
-                service: service,
-                catalogService: catalogService
-            )
-            pauseForMenu()
-        case .secondary("a", _):
-            try await showRecommendedModelsMenu(
-                service: service,
-                catalogService: catalogService
-            )
-        case .secondary("o", let index):
-            let model = models[index]
-            try await ModelOpenCommand.run(
-                identifier: model.id,
-                service: service,
-                catalogService: catalogService
-            )
-            pauseForMenu()
-        default:
-            return
+        while true {
+            switch picker.pick(
+                title: title,
+                subtitle: subtitle,
+                items: items,
+                primaryHint: "Enter install",
+                secondaryHints: ["a all presets", "o open page"],
+                secondaryKeys: ["a", "o"]
+            ) {
+            case .selected(let index):
+                let model = models[index]
+                try await ModelInstallCommand.run(
+                    identifier: model.id,
+                    service: service,
+                    catalogService: catalogService
+                )
+                pauseForMenu()
+                return
+            case .secondary("a", _):
+                try await showRecommendedModelsMenu(
+                    service: service,
+                    catalogService: catalogService
+                )
+                return
+            case .secondary("o", let index):
+                let model = models[index]
+                try await ModelOpenCommand.run(
+                    identifier: model.id,
+                    service: service,
+                    catalogService: catalogService
+                )
+                continue
+            default:
+                return
+            }
         }
+    }
+
+    private func recommendedMenuItems(
+        for models: [RecommendedModel],
+        backend: BackendKind
+    ) -> [InteractiveListPicker.Item] {
+        guard !models.isEmpty else {
+            return [
+                InteractiveListPicker.Item(
+                    title: "No \(backend.rawValue.uppercased()) presets yet",
+                    detail: "Press m for MLX or g for GGUF."
+                )
+            ]
+        }
+
+        return models.map { model in
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
+            return InteractiveListPicker.Item(
+                title: "\(model.id)  \(features)",
+                detail: "\(model.tier.displayName) | \(model.quantization) | \(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
+            )
+        }
+    }
+
+    private func recommendedMenuSubtitle(for backend: BackendKind, isEmpty: Bool) -> String {
+        let base = backend == .mlx
+            ? "Showing MLX presets. Press g to switch to GGUF."
+            : "Showing GGUF presets. Press m to switch to MLX."
+        if isEmpty {
+            return base + " No presets are available in this backend yet."
+        }
+        return base + " Enter installs the selected model. Press o to open the model page."
     }
 
     private func pickChatModel(
@@ -673,8 +714,7 @@ private struct CLI {
                     service: service,
                     catalogService: catalogService
                 )
-                pauseForMenu()
-                return nil
+                continue
             case .secondary("d", let index):
                 let install = modelEntries[index].install
                 guard confirmAction("Delete \(install.id)? [y/N]") else {
@@ -727,8 +767,7 @@ private struct CLI {
                     service: service,
                     catalogService: catalogService
                 )
-                pauseForMenu()
-                return
+                continue
             case .secondary("c", let index):
                 let install = installs[index]
                 guard let launchSettings = chooseChatLaunchSettings() else {
@@ -866,32 +905,36 @@ private struct CLI {
             )
         }
         let picker = InteractiveListPicker()
-        switch picker.pick(
-            title: "Model Search: \(query)",
-            subtitle: "Enter opens the selected model page. Press i to install it.",
-            items: items,
-            primaryHint: "Enter open page",
-            secondaryHints: ["i install"],
-            secondaryKeys: ["i"]
-        ) {
-        case .selected(let index):
-            let result = results[index]
-            try await ModelOpenCommand.run(
-                identifier: result.modelSource.reference,
-                service: service,
-                catalogService: catalogService
-            )
-        case .secondary("i", let index):
-            let result = results[index]
-            try await ModelInstallCommand.run(
-                identifier: result.modelSource.reference,
-                service: service,
-                catalogService: catalogService
-            )
-        default:
-            return
+        while true {
+            switch picker.pick(
+                title: "Model Search: \(query)",
+                subtitle: "Enter installs the selected model. Press o to open its model page.",
+                items: items,
+                primaryHint: "Enter install",
+                secondaryHints: ["o open page"],
+                secondaryKeys: ["o"]
+            ) {
+            case .selected(let index):
+                let result = results[index]
+                try await ModelInstallCommand.run(
+                    identifier: result.modelSource.reference,
+                    service: service,
+                    catalogService: catalogService
+                )
+                pauseForMenu()
+                return
+            case .secondary("o", let index):
+                let result = results[index]
+                try await ModelOpenCommand.run(
+                    identifier: result.modelSource.reference,
+                    service: service,
+                    catalogService: catalogService
+                )
+                continue
+            default:
+                return
+            }
         }
-        pauseForMenu()
     }
 
     private func compactNumber(_ value: Int) -> String {

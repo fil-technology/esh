@@ -207,6 +207,51 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["coding", "development", "agentic"],
             summary: "Largest built-in coding preset for advanced development and agentic tasks.",
             sortOrder: 10
+        ),
+        RecommendedModel(
+            id: "llama-3-2-3b-gguf",
+            title: "Llama 3.2 3B Instruct GGUF",
+            repoID: "bartowski/Llama-3.2-3B-Instruct-GGUF",
+            parameterSize: "3B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 2.2,
+            totalDiskSizeGB: 2.0,
+            tags: ["gguf", "starter", "fast-inference"],
+            summary: "GGUF starter preset for lightweight local chat through llama.cpp.",
+            backend: .gguf,
+            sortOrder: 11
+        ),
+        RecommendedModel(
+            id: "qwen-2-5-coder-7b-gguf",
+            title: "Qwen 2.5 Coder 7B Instruct GGUF",
+            repoID: "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+            parameterSize: "7B",
+            quantization: "Q4_K_M",
+            profile: .code,
+            tier: .small,
+            estimatedMemoryGB: 4.6,
+            totalDiskSizeGB: 4.3,
+            tags: ["gguf", "coding", "lightweight"],
+            summary: "GGUF coding preset with a strong quality-to-speed tradeoff.",
+            backend: .gguf,
+            sortOrder: 12
+        ),
+        RecommendedModel(
+            id: "deepseek-r1-qwen-14b-gguf",
+            title: "DeepSeek R1 Distill Qwen 14B GGUF",
+            repoID: "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF",
+            parameterSize: "14B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .good,
+            estimatedMemoryGB: 9.8,
+            totalDiskSizeGB: 7.9,
+            tags: ["gguf", "reasoning", "logic"],
+            summary: "GGUF reasoning preset for llama.cpp-backed local chat.",
+            backend: .gguf,
+            sortOrder: 13
         )
     ]
 }

@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-04-04
+
+### Added
+- backend switching between MLX and GGUF in the recommended-models picker
+- a terminal-native interactive text prompt for launcher queries so search/install prompts no longer depend on `readLine()` after raw-key menus
+
+### Changed
+- model search results now install on `Enter` and open on `o`
+- opening a model page from search, recommended presets, starter presets, chat model selection, or installed models now keeps you in the current picker instead of dropping you back to the launcher
+
 ## [0.1.18] - 2026-04-04
 
 ### Added
