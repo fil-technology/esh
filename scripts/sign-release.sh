@@ -25,8 +25,23 @@ while IFS= read -r path; do
 done < <(
   find "$RELEASE_ROOT" -type f -print0 |
     xargs -0 file |
-    awk -F: '/Mach-O/ {print $1}' |
-    python3 -c 'import sys; paths=[line.strip() for line in sys.stdin if line.strip()]; [print(path) for path in sorted(paths, key=len, reverse=True)]'
+    python3 -c '
+import sys
+
+paths = set()
+for raw in sys.stdin:
+    line = raw.strip()
+    if "Mach-O" not in line:
+        continue
+    path = line.split(":", 1)[0].strip()
+    arch_marker = " (for architecture "
+    if arch_marker in path:
+        path = path.split(arch_marker, 1)[0]
+    paths.add(path)
+
+for path in sorted(paths, key=len, reverse=True):
+    print(path)
+'
 )
 
 if [[ ${#MACHO_FILES[@]} -eq 0 ]]; then
