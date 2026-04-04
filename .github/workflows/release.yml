@@ -130,19 +130,20 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          chmod +x ./scripts/generate-homebrew-formula.sh
-          mkdir -p homebrew-tap/Formula
-          ./scripts/generate-homebrew-formula.sh "${{ steps.version.outputs.version }}" "$SHA256" > homebrew-tap/Formula/esh.rb
+          chmod +x ./scripts/generate-homebrew-cask.sh
+          mkdir -p homebrew-tap/Casks
+          rm -f homebrew-tap/Formula/esh.rb
+          ./scripts/generate-homebrew-cask.sh "${{ steps.version.outputs.version }}" "$SHA256" > homebrew-tap/Casks/esh.rb
           cat > homebrew-tap/README.md <<'EOF'
           # fil-technology/homebrew-tap
 
-          Homebrew tap for Esh.
+          Homebrew tap for Esh cask.
 
           ## Install
 
           ```bash
           brew tap fil-technology/tap
-          brew install esh
+          brew install --cask esh
           ```
           EOF
 
@@ -157,6 +158,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/esh.rb README.md
+          git add Casks/esh.rb README.md
+          git rm -f Formula/esh.rb || true
           git commit -m "esh ${{ steps.version.outputs.version }}"
           git push

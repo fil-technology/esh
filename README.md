@@ -36,21 +36,28 @@ It does not yet do:
 For end users on macOS:
 
 ```bash
-brew tap fil-technology/tap && brew install esh && esh
+brew tap fil-technology/tap && brew install --cask esh && esh
 ```
 
 If you prefer the steps split out:
 
 ```bash
 brew tap fil-technology/tap
-brew install esh
+brew install --cask esh
 esh
 ```
 
 Upgrade later with:
 
 ```bash
-brew upgrade esh
+brew upgrade --cask esh
+```
+
+If you previously tried the older formula-based install, remove it first:
+
+```bash
+brew uninstall esh
+brew install --cask esh
 ```
 
 ### Developer mode
