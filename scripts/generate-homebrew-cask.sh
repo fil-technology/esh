@@ -20,6 +20,7 @@ cask "esh" do
   homepage "https://github.com/fil-technology/esh"
 
   depends_on macos: ">= :ventura"
+  depends_on formula: "python"
 
   binary "esh-macos-#{version}/esh", target: "esh"
 end

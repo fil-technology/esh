@@ -56,12 +56,48 @@ esh::bridge_script() {
   echo "$(esh::payload_root)/Tools/mlx_vlm_bridge.py"
 }
 
-esh::dev_venv_dir() {
-  echo "$(esh::repo_root)/.venv"
+esh::package_runtime_dir() {
+  echo "${ESH_PACKAGE_RUNTIME_DIR:-$HOME/.esh/runtime/python}"
+}
+
+esh::bundled_python_dir() {
+  echo "$(esh::app_root)/python"
+}
+
+esh::python_works() {
+  local python_path="${1:-}"
+  [[ -n "$python_path" && -x "$python_path" ]] || return 1
+  (
+    set +e
+    "$python_path" -c 'import sys' >/dev/null 2>&1
+  )
 }
 
 esh::release_python_dir() {
-  echo "$(esh::app_root)/python"
+  if [[ "$ESH_LAYOUT_MODE" != "package" ]]; then
+    esh::die "Release python directory is only available from a packaged install."
+  fi
+
+  if [[ -n "${ESH_PACKAGE_PYTHON_DIR:-}" ]]; then
+    echo "$ESH_PACKAGE_PYTHON_DIR"
+    return
+  fi
+
+  local bundled_dir runtime_dir
+  bundled_dir="$(esh::bundled_python_dir)"
+  runtime_dir="$(esh::package_runtime_dir)"
+
+  if esh::python_works "$bundled_dir/bin/python3"; then
+    ESH_PACKAGE_PYTHON_DIR="$bundled_dir"
+  else
+    ESH_PACKAGE_PYTHON_DIR="$runtime_dir"
+  fi
+
+  echo "$ESH_PACKAGE_PYTHON_DIR"
+}
+
+esh::dev_venv_dir() {
+  echo "$(esh::repo_root)/.venv"
 }
 
 esh::python_executable() {
@@ -130,6 +166,20 @@ esh::install_python_deps() {
   printf '%s' "$requirements_hash" >"$stamp_file"
 }
 
+esh::ensure_external_package_runtime() {
+  local runtime_dir
+  runtime_dir="$(esh::package_runtime_dir)"
+  mkdir -p "$(dirname "$runtime_dir")"
+
+  if ! esh::python_works "$runtime_dir/bin/python3"; then
+    rm -rf "$runtime_dir"
+    "$(esh::bootstrap_python)" -m venv "$runtime_dir"
+  fi
+
+  ESH_PACKAGE_PYTHON_DIR="$runtime_dir"
+  esh::install_python_deps
+}
+
 esh::build_swift() {
   [[ "$ESH_LAYOUT_MODE" == "repo" ]] || return 0
   local configuration="${1:-debug}"
@@ -152,9 +202,14 @@ esh::ensure_dev_runtime() {
 }
 
 esh::ensure_packaged_runtime() {
-  [[ -x "$(esh::python_executable)" ]] || esh::die "Packaged Python runtime is missing."
   [[ -x "$(esh::swift_binary)" ]] || esh::die "Packaged esh binary is missing."
   [[ -f "$(esh::bridge_script)" ]] || esh::die "Packaged bridge script is missing."
+
+  if ! esh::python_works "$(esh::bundled_python_dir)/bin/python3"; then
+    esh::ensure_external_package_runtime
+  fi
+
+  [[ -x "$(esh::python_executable)" ]] || esh::die "Packaged Python runtime is missing."
   esh::export_runtime_env
 }
 
