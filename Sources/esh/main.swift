@@ -375,7 +375,7 @@ private struct CLI {
 
     private func chooseChatLaunchSettings() -> ChatLaunchSettings? {
         guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
-            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: false)
+            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
         }
 
         let prompt = InteractiveChoicePrompt()
@@ -383,7 +383,7 @@ private struct CLI {
             title: "Chat Launch Settings",
             message: "Choose how this chat session should start.",
             details: [
-                "Quick keeps cache mode raw and autosave off.",
+                "Quick starts with turbo cache mode and autosave off.",
                 "Turbo prefers compressed cache artifacts for this session.",
                 "Autosave writes the session automatically after each reply."
             ],
@@ -400,13 +400,13 @@ private struct CLI {
 
         switch selected {
         case "a":
-            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: true)
+            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: true)
         case "t":
             return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
         case "b":
             return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: true)
         default:
-            return ChatLaunchSettings(cacheMode: .raw, autosaveEnabled: false)
+            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
         }
     }
 

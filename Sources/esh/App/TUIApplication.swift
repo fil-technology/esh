@@ -541,7 +541,7 @@ struct TUIApplication {
         var session = ChatSession(name: requestedName)
         session.modelID = preferredModelID
         session.backend = .mlx
-        session.cacheMode = preferredCacheMode ?? .raw
+        session.cacheMode = preferredCacheMode ?? .turbo
         session.autosaveEnabled = preferredAutosaveEnabled ?? false
         return session
     }
