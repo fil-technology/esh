@@ -33,7 +33,11 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
                 modelID: install.id,
                 tokenizerID: install.spec.tokenizerID,
                 session: session,
-                stateFilePath: stateFileURL.path
+                stateFilePath: stateFileURL.path,
+                kvMode: session.cacheMode ?? .automatic,
+                sessionIntent: session.intent ?? .chat,
+                triattentionCalibPath: TriAttentionCalibrationLocator().calibrationURL(for: install.id).path,
+                triattentionBudget: 2048
             ),
             as: MLXPrepareResponse.self
         )
@@ -53,7 +57,11 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
                         tokenizerID: install.spec.tokenizerID,
                         session: session,
                         config: config,
-                        stateFilePath: stateFileURL.path
+                        stateFilePath: stateFileURL.path,
+                        kvMode: session.cacheMode ?? .automatic,
+                        sessionIntent: session.intent ?? .chat,
+                        triattentionCalibPath: TriAttentionCalibrationLocator().calibrationURL(for: install.id).path,
+                        triattentionBudget: 2048
                     )
                     let input = try JSONCoding.encoder.encode(request)
                     let process = Process()
@@ -185,6 +193,10 @@ private struct MLXGenerateRequest: Codable, Sendable {
     var session: ChatSession
     var config: GenerationConfig
     var stateFilePath: String
+    var kvMode: CacheMode
+    var sessionIntent: SessionIntent
+    var triattentionCalibPath: String?
+    var triattentionBudget: Int
 }
 
 private struct MLXGenerateResponse: Codable, Sendable {
@@ -204,6 +216,10 @@ private struct MLXPrepareRequest: Codable, Sendable {
     var tokenizerID: String?
     var session: ChatSession
     var stateFilePath: String
+    var kvMode: CacheMode
+    var sessionIntent: SessionIntent
+    var triattentionCalibPath: String?
+    var triattentionBudget: Int
 }
 
 private struct MLXPrepareResponse: Codable, Sendable {

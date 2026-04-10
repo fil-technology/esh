@@ -11,6 +11,9 @@ from typing import Any
 from importlib.metadata import version
 
 import numpy as np
+from pathlib import Path
+
+from triattention_runtime import calibrate_model, maybe_apply_triattention
 
 
 MLX_RESUME_OVERLAP_TOKENS = 2
@@ -63,6 +66,77 @@ def _import_mlx_lm():
             f"{exc}"
         )
     return mx, generate_step, stream_generate, KVCache, make_prompt_cache, load
+
+
+def _maybe_apply_turboquant(prompt_cache, bits: float, seed: int):
+    from mlx_lm.models.cache import CacheList, KVCache, RotatingKVCache
+
+    _, _, TurboQuantKVCache = _import_mlx_vlm()
+
+    def convert(entry):
+        if isinstance(entry, TurboQuantKVCache):
+            return entry
+        if isinstance(entry, RotatingKVCache):
+            return entry
+        if isinstance(entry, KVCache):
+            return TurboQuantKVCache.from_cache(entry, bits=bits, seed=seed)
+        if isinstance(entry, CacheList):
+            entry.caches = [convert(child) for child in entry.caches]
+            return entry
+        if isinstance(entry, list):
+            return [convert(child) for child in entry]
+        return entry
+
+    for index in range(len(prompt_cache)):
+        prompt_cache[index] = convert(prompt_cache[index])
+
+
+def _resolve_requested_kv_mode(request: dict[str, Any]) -> str:
+    requested = request.get("kvMode", "raw")
+    if requested != "auto":
+        return requested
+
+    intent = request.get("sessionIntent", "chat")
+    if intent in {"documentqa", "multimodal"}:
+        return "turbo"
+    if intent in {"code", "agentrun"}:
+        return "triattention"
+    return "raw"
+
+
+def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
+    effective_mode = _resolve_requested_kv_mode(request)
+    requested_mode = request.get("kvMode", "raw")
+    triattention_calib = request.get("triattentionCalibPath")
+    turbo_bits = float(request.get("turboBits", 3.5))
+    turbo_seed = int(request.get("turboSeed", 0))
+
+    if effective_mode == "triattention":
+        try:
+            if not triattention_calib or not Path(triattention_calib).exists():
+                raise FileNotFoundError("TriAttention calibration file not found.")
+            maybe_apply_triattention(
+                prompt_cache,
+                model,
+                triattention_calib,
+                budget=int(request.get("triattentionBudget", 2048)),
+            )
+            return "triattention"
+        except Exception:
+            if requested_mode != "auto":
+                raise
+            effective_mode = "turbo"
+
+    if effective_mode == "turbo":
+        try:
+            _maybe_apply_turboquant(prompt_cache, bits=turbo_bits, seed=turbo_seed)
+            return "turbo"
+        except Exception:
+            if requested_mode != "auto":
+                raise
+            return "raw"
+
+    return "raw"
 
 
 def _numpy_dtype(dtype: str):
@@ -174,13 +248,22 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
 
     tensors = []
     total_bytes = 0
+    can_save_prompt_cache = True
     for index, cache in enumerate(prompt_cache):
-        if not hasattr(cache, "state"):
+        keys = None
+        values = None
+        if hasattr(cache, "state"):
+            state = cache.state
+            if isinstance(state, tuple) and len(state) == 2:
+                keys, values = state
+        if (keys is None or values is None) and hasattr(cache, "dequantize"):
+            keys, values = cache.dequantize()
+            can_save_prompt_cache = False
+        if keys is None or values is None:
+            can_save_prompt_cache = False
             continue
-        state = cache.state
-        if not isinstance(state, tuple) or len(state) != 2:
-            continue
-        keys, values = state
+        if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
+            can_save_prompt_cache = False
         key_array = np.array(keys)
         value_array = np.array(values)
         total_bytes += int(key_array.nbytes + value_array.nbytes)
@@ -190,11 +273,12 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
 
     metadata = {str(k): str(v) for k, v in metadata.items()}
     metadata["raw_bytes"] = str(total_bytes)
-    with tempfile.TemporaryDirectory() as temporary_directory:
-        cache_file = f"{temporary_directory}/prompt-cache.safetensors"
-        save_prompt_cache(cache_file, prompt_cache, metadata)
-        with open(cache_file, "rb") as handle:
-            metadata["mlx_prompt_cache_safetensors_base64"] = base64.b64encode(handle.read()).decode("ascii")
+    if can_save_prompt_cache:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            cache_file = f"{temporary_directory}/prompt-cache.safetensors"
+            save_prompt_cache(cache_file, prompt_cache, metadata)
+            with open(cache_file, "rb") as handle:
+                metadata["mlx_prompt_cache_safetensors_base64"] = base64.b64encode(handle.read()).decode("ascii")
     return {
         "format": "mlx-cache-snapshot-v1",
         "metadata": metadata,
@@ -243,6 +327,7 @@ def doctor() -> None:
         import mlx  # noqa: F401
         import mlx_lm  # noqa: F401
         import mlx_vlm  # noqa: F401
+        import safetensors  # noqa: F401
     except Exception as exc:
         _fail(f"Bridge environment is not healthy: {exc}")
 
@@ -253,6 +338,7 @@ def doctor() -> None:
             "mlxLMVersion": version("mlx-lm"),
             "mlxVLMVersion": version("mlx-vlm"),
             "numpyVersion": version("numpy"),
+            "safetensorsVersion": version("safetensors"),
         }
     )
 
@@ -292,6 +378,8 @@ def mlx_generate() -> None:
         prompt_tokens = full_prompt_tokens
         prompt_cache = make_prompt_cache(model)
 
+    effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)
+
     prompt_token_count = len(prompt_tokens)
     reply_parts = []
     last_response = None
@@ -322,6 +410,7 @@ def mlx_generate() -> None:
             "message_count": len(updated_messages),
             "model_id": request["modelID"],
             "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
+            "kv_mode": effective_kv_mode,
         },
     )
     _save_state_file(
@@ -343,7 +432,7 @@ def mlx_generate() -> None:
         "cacheSizeBytes": int(snapshot["metadata"]["raw_bytes"]),
         "compressionRatio": None,
     }
-    _emit_json_line({"event": "done", "text": reply, "metrics": metrics})
+    _emit_json_line({"event": "done", "text": reply, "metrics": metrics, "kvMode": effective_kv_mode})
 
 
 def mlx_build_cache() -> None:
@@ -357,6 +446,7 @@ def mlx_build_cache() -> None:
     rendered_prompt = _render_prompt(tokenizer, messages, add_generation_prompt=False)
     prompt_tokens = _tokenize_prompt(tokenizer, rendered_prompt)
     prompt_cache = make_prompt_cache(model)
+    effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)
 
     start = time.perf_counter()
     for _ in generate_step(
@@ -375,6 +465,7 @@ def mlx_build_cache() -> None:
             "message_count": len(messages),
             "model_id": request["modelID"],
             "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
+            "kv_mode": effective_kv_mode,
         },
     )
     _save_state_file(
@@ -389,7 +480,31 @@ def mlx_build_cache() -> None:
         "cacheSizeBytes": int(snapshot["metadata"]["raw_bytes"]),
         "compressionRatio": None,
     }
-    _dump_json({"snapshot": snapshot, "metrics": metrics})
+    _dump_json({"snapshot": snapshot, "metrics": metrics, "kvMode": effective_kv_mode})
+
+
+def triattention_calibrate() -> None:
+    request = _load_json()
+    _, _, _, _, _, load = _import_mlx_lm()
+    output_path = request["outputPath"]
+    calibration_text = request.get("calibrationText")
+    calibration_file_path = request.get("calibrationFilePath")
+    if calibration_file_path:
+        with open(calibration_file_path, "r", encoding="utf-8") as handle:
+            calibration_text = handle.read()
+
+    try:
+        written_path = calibrate_model(
+            load,
+            request["modelPath"],
+            output_path,
+            calibration_text=calibration_text,
+            max_tokens=int(request.get("maxTokens", 4096)),
+        )
+    except Exception as exc:
+        _fail(f"TriAttention calibration failed: {exc}")
+
+    _dump_json({"outputPath": written_path})
 
 
 def mlx_validate_model() -> None:
@@ -605,6 +720,7 @@ def main() -> None:
             "mlx-validate-config",
             "mlx-export-cache",
             "mlx-import-cache",
+            "triattention-calibrate",
         ],
     )
     parser.add_argument("--bits", type=float, default=3.5)
@@ -627,6 +743,8 @@ def main() -> None:
         mlx_validate_config()
     elif args.command == "mlx-export-cache":
         mlx_export_cache()
+    elif args.command == "triattention-calibrate":
+        triattention_calibrate()
     else:
         mlx_import_cache()
 

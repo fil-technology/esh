@@ -1,3 +1,4 @@
 mlx==0.31.1
 mlx-lm==0.31.1
 mlx-vlm==0.4.3
+safetensors>=0.4,<1

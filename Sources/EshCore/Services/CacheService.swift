@@ -22,7 +22,8 @@ public struct CacheService: Sendable {
         session: ChatSession,
         install: ModelInstall,
         codec: CacheSnapshotCodec,
-        compressor: CacheCompressor
+        compressor: CacheCompressor,
+        artifactMode: CacheMode? = nil
     ) async throws -> CacheBuildResult {
         try await runtime.prepare(session: session)
         let snapshot = try await runtime.exportRuntimeCache()
@@ -33,10 +34,10 @@ public struct CacheService: Sendable {
             modelID: install.id,
             tokenizerID: install.spec.tokenizerID,
             architectureFingerprint: install.spec.architectureFingerprint ?? Fingerprint.sha256([install.id, install.backendFormat]),
-            runtimeVersion: install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v1",
+            runtimeVersion: install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v2",
             cacheFormatVersion: codec.formatVersion,
             compressorVersion: compressor.version,
-            cacheMode: compressor.mode,
+            cacheMode: artifactMode ?? compressor.mode,
             sessionID: session.id,
             sessionName: session.name
         )

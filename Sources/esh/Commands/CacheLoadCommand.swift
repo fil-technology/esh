@@ -62,11 +62,15 @@ enum CacheLoadCommand {
     }
 
     private static func artifactCompressor(for artifactID: UUID, cacheStore: FileCacheStore) -> CacheCompressor {
-        if let artifact = try? cacheStore.loadArtifact(id: artifactID).0,
-           artifact.manifest.cacheMode == .raw {
-            return PassthroughCompressor()
+        if let artifact = try? cacheStore.loadArtifact(id: artifactID).0 {
+            switch artifact.manifest.cacheMode {
+            case .raw, .triattention, .automatic:
+                return PassthroughCompressor()
+            case .turbo:
+                return TurboQuantCompressor()
+            }
         }
-        return TurboQuantCompressor()
+        return PassthroughCompressor()
     }
 
 }

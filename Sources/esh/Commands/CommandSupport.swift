@@ -29,6 +29,19 @@ enum CommandSupport {
         return result
     }
 
+    static func removingKnownFlags(_ flags: Set<String>, from arguments: [String]) -> [String] {
+        var result: [String] = []
+        var iterator = arguments.makeIterator()
+        while let item = iterator.next() {
+            if flags.contains(item) {
+                _ = iterator.next()
+                continue
+            }
+            result.append(item)
+        }
+        return result
+    }
+
     static func resolveSession(identifier: String, sessionStore: SessionStore) throws -> ChatSession {
         if let id = UUID(uuidString: identifier) {
             return try sessionStore.loadSession(id: id)
