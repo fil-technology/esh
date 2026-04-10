@@ -7,7 +7,7 @@ enum RunCommand {
         let store = RunStateStore()
 
         guard let subcommand = arguments.first else {
-            throw StoreError.invalidManifest("Usage: esh run start [name] | esh run status <run-id>")
+            throw StoreError.invalidManifest("Usage: esh run start [name] | esh run status <run-id> | esh run export <run-id>")
         }
 
         switch subcommand {
@@ -38,6 +38,16 @@ enum RunCommand {
             }
             if state.discoveredSymbols.isEmpty == false {
                 print("symbols_sample: \(state.discoveredSymbols.prefix(5).joined(separator: ", "))")
+            }
+        case "export":
+            let positional = CommandSupport.positionalArguments(in: Array(arguments.dropFirst()), knownFlags: [])
+            guard let runID = positional.first else {
+                throw StoreError.invalidManifest("Usage: esh run export <run-id>")
+            }
+            let trace = try store.exportTrace(runID: runID, workspaceRootURL: workspaceRootURL)
+            let data = try JSONCoding.encoder.encode(trace)
+            if let output = String(data: data, encoding: .utf8) {
+                print(output)
             }
         default:
             throw StoreError.invalidManifest("Unknown run subcommand: \(subcommand)")

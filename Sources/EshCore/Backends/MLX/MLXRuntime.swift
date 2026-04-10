@@ -26,13 +26,14 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     public var metrics: Metrics { currentMetrics }
 
     public func prepare(session: ChatSession) async throws {
+        let normalizedSession = PromptSessionNormalizer().normalized(session: session)
         let response: MLXPrepareResponse = try bridge.run(
             command: "mlx-build-cache",
             request: MLXPrepareRequest(
                 modelPath: install.installPath,
                 modelID: install.id,
                 tokenizerID: install.spec.tokenizerID,
-                session: session,
+                session: normalizedSession,
                 stateFilePath: stateFileURL.path,
                 kvMode: session.cacheMode ?? .automatic,
                 sessionIntent: session.intent ?? .chat,
@@ -51,11 +52,12 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         AsyncThrowingStream { continuation in
             Task {
                 do {
+                    let normalizedSession = PromptSessionNormalizer().normalized(session: session)
                     let request = MLXGenerateRequest(
                         modelPath: install.installPath,
                         modelID: install.id,
                         tokenizerID: install.spec.tokenizerID,
-                        session: session,
+                        session: normalizedSession,
                         config: config,
                         stateFilePath: stateFileURL.path,
                         kvMode: session.cacheMode ?? .automatic,

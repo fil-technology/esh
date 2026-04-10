@@ -372,6 +372,7 @@ private struct CLI {
               esh context query <text> [--limit N] [--run <id>]
               esh run start [name]
               esh run status <id>
+              esh run export <id>
               esh read symbol <name> [--run <id>]
               esh read references <name> [--limit N] [--run <id>]
               esh read related <name-or-path> [--limit N] [--run <id>]

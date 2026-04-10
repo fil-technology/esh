@@ -39,11 +39,29 @@ public struct RunEvent: Codable, Hashable, Sendable {
     public let timestamp: Date
     public let kind: String
     public let detail: String
+    public let attributes: [String: String]?
 
-    public init(runID: String, timestamp: Date = Date(), kind: String, detail: String) {
+    public init(
+        runID: String,
+        timestamp: Date = Date(),
+        kind: String,
+        detail: String,
+        attributes: [String: String]? = nil
+    ) {
         self.runID = runID
         self.timestamp = timestamp
         self.kind = kind
         self.detail = detail
+        self.attributes = attributes
+    }
+}
+
+public struct RunTrace: Codable, Hashable, Sendable {
+    public let state: RunState
+    public let events: [RunEvent]
+
+    public init(state: RunState, events: [RunEvent]) {
+        self.state = state
+        self.events = events
     }
 }

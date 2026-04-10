@@ -16,7 +16,15 @@ public struct RunStateStore: Sendable {
         let runID = name?.isEmpty == false ? sanitize(name!) + "-" + shortRandomID() : shortRandomID()
         let state = RunState(runID: runID, workspaceRootPath: workspaceRootURL.path)
         try save(state: state)
-        try append(event: RunEvent(runID: runID, kind: "run.created", detail: workspaceRootURL.path), workspaceRootURL: workspaceRootURL)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "run.created",
+                detail: workspaceRootURL.path,
+                attributes: ["workspace": workspaceRootURL.path]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
         return state
     }
 
@@ -41,7 +49,19 @@ public struct RunStateStore: Sendable {
         state.decisions = mergeUnique(state.decisions, with: ["query: \(query)"])
         state.updatedAt = Date()
         try save(state: state)
-        try append(event: RunEvent(runID: runID, kind: "context.query", detail: query), workspaceRootURL: workspaceRootURL)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "context.query",
+                detail: query,
+                attributes: [
+                    "query": query,
+                    "result_count": String(results.count),
+                    "top_file": results.first?.filePath ?? ""
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
     }
 
     public func recordSymbolRead(runID: String, workspaceRootURL: URL, result: SymbolReadResult) throws {
@@ -50,7 +70,20 @@ public struct RunStateStore: Sendable {
         state.discoveredSymbols = mergeUnique(state.discoveredSymbols, with: [result.symbol.name])
         state.updatedAt = Date()
         try save(state: state)
-        try append(event: RunEvent(runID: runID, kind: "read.symbol", detail: result.symbol.name), workspaceRootURL: workspaceRootURL)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "read.symbol",
+                detail: result.symbol.name,
+                attributes: [
+                    "symbol": result.symbol.name,
+                    "file": result.symbol.filePath,
+                    "line_start": String(result.symbol.lineStart),
+                    "line_end": String(result.symbol.lineEnd)
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
     }
 
     public func recordFileRead(runID: String, workspaceRootURL: URL, relativePath: String, range: SourceRange) throws {
@@ -58,7 +91,25 @@ public struct RunStateStore: Sendable {
         state.discoveredFiles = mergeUnique(state.discoveredFiles, with: [relativePath])
         state.updatedAt = Date()
         try save(state: state)
-        try append(event: RunEvent(runID: runID, kind: "read.file", detail: "\(relativePath):\(range.lineStart):\(range.lineEnd)"), workspaceRootURL: workspaceRootURL)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "read.file",
+                detail: "\(relativePath):\(range.lineStart):\(range.lineEnd)",
+                attributes: [
+                    "file": relativePath,
+                    "line_start": String(range.lineStart),
+                    "line_end": String(range.lineEnd)
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
+    public func exportTrace(runID: String, workspaceRootURL: URL) throws -> RunTrace {
+        let state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        let events = try loadEvents(runID: runID, workspaceRootURL: workspaceRootURL)
+        return RunTrace(state: state, events: events)
     }
 
     public func loadEvents(runID: String, workspaceRootURL: URL) throws -> [RunEvent] {

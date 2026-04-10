@@ -12,6 +12,11 @@ It gives you:
 
 Today, Esh is built around an MLX backend with a Swift core and CLI/TUI, plus a small Python bridge for `mlx-lm` and `mlx-vlm`.
 
+## Planning Notes
+
+Durable engineering notes live in:
+- [docs/PLANNING.md](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/docs/PLANNING.md)
+
 ## What Esh Is For
 
 Esh is designed for people who want a local chat tool that is:

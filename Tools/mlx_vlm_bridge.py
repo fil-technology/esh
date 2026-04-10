@@ -302,6 +302,22 @@ def _render_prompt(tokenizer, messages: list[dict[str, str]], add_generation_pro
     return "\n".join(rendered)
 
 
+def _normalize_prompt_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(line.rstrip(" \t") for line in text.split("\n"))
+    return text.strip()
+
+
+def _normalize_messages_for_prompt(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for message in messages:
+        content = _normalize_prompt_text(message["content"])
+        if not content:
+            continue
+        normalized.append({"role": message["role"], "content": content})
+    return normalized
+
+
 def _tokenize_prompt(tokenizer, prompt: str) -> list[int]:
     add_special_tokens = getattr(tokenizer, "bos_token", None) is None or not prompt.startswith(
         tokenizer.bos_token
@@ -352,6 +368,7 @@ def mlx_generate() -> None:
         {"role": message["role"], "content": message["text"]}
         for message in request["session"]["messages"]
     ]
+    messages = _normalize_messages_for_prompt(messages)
     full_prompt = _render_prompt(tokenizer, messages, add_generation_prompt=True)
     full_prompt_tokens = _tokenize_prompt(tokenizer, full_prompt)
     state_payload = _load_state_file(request["stateFilePath"])
@@ -443,6 +460,7 @@ def mlx_build_cache() -> None:
         {"role": message["role"], "content": message["text"]}
         for message in request["session"]["messages"]
     ]
+    messages = _normalize_messages_for_prompt(messages)
     rendered_prompt = _render_prompt(tokenizer, messages, add_generation_prompt=False)
     prompt_tokens = _tokenize_prompt(tokenizer, rendered_prompt)
     prompt_cache = make_prompt_cache(model)

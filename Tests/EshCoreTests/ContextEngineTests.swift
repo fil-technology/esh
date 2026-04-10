@@ -111,4 +111,26 @@ func runStateStorePersistsEvents() throws {
     #expect(loaded.discoveredFiles.contains("Sources/Auth.swift"))
     #expect(loaded.discoveredSymbols.contains("AuthManager.refresh"))
     #expect(events.contains(where: { $0.kind == "context.query" }))
+    #expect(events.first(where: { $0.kind == "context.query" })?.attributes?["result_count"] == "1")
+}
+
+@Test
+func runStateStoreExportsTrace() throws {
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+    let store = RunStateStore(root: PersistenceRoot(rootURL: rootURL))
+    let state = try store.createRun(workspaceRootURL: workspaceURL, name: "demo")
+    try store.recordFileRead(
+        runID: state.runID,
+        workspaceRootURL: workspaceURL,
+        relativePath: "Sources/Demo.swift",
+        range: SourceRange(lineStart: 4, lineEnd: 9)
+    )
+
+    let trace = try store.exportTrace(runID: state.runID, workspaceRootURL: workspaceURL)
+
+    #expect(trace.state.runID == state.runID)
+    #expect(trace.events.contains(where: { $0.kind == "read.file" && $0.attributes?["file"] == "Sources/Demo.swift" }))
 }
