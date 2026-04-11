@@ -56,6 +56,29 @@ esh::bridge_script() {
   echo "$(esh::payload_root)/Tools/mlx_vlm_bridge.py"
 }
 
+esh::bundled_llama_cli() {
+  echo "$(esh::app_root)/share/esh/bin/llama-cli"
+}
+
+esh::resolve_llama_cli() {
+  local candidates=()
+  [[ -n "${ESH_LLAMA_CPP_CLI:-}" ]] && candidates+=("$ESH_LLAMA_CPP_CLI")
+  [[ -n "${LLAMA_CPP_CLI:-}" ]] && candidates+=("$LLAMA_CPP_CLI")
+  candidates+=("/opt/homebrew/bin/llama-cli" "/usr/local/bin/llama-cli")
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" && -x "$candidate" ]] && { echo "$candidate"; return 0; }
+  done
+
+  if command -v llama-cli >/dev/null 2>&1; then
+    command -v llama-cli
+    return 0
+  fi
+
+  return 1
+}
+
 esh::package_runtime_dir() {
   echo "${ESH_PACKAGE_RUNTIME_DIR:-$HOME/.esh/runtime/python}"
 }

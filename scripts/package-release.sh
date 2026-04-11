@@ -23,10 +23,16 @@ cp "$(esh::swift_binary release)" "$ROOT_DIR/bin/esh"
 cp "$(esh::repo_root)/esh" "$ROOT_DIR/esh"
 cp "$(esh::repo_root)/VERSION" "$ROOT_DIR/VERSION"
 cp "$(esh::repo_root)/scripts/run.sh" "$PAYLOAD_DIR/scripts/run.sh"
+cp "$(esh::repo_root)/scripts/smoke-test-package.sh" "$PAYLOAD_DIR/scripts/smoke-test-package.sh"
 cp "$(esh::repo_root)/scripts/verify-env.sh" "$PAYLOAD_DIR/scripts/verify-env.sh"
 cp "$(esh::repo_root)/scripts/lib/common.sh" "$PAYLOAD_DIR/scripts/lib/common.sh"
 cp "$(esh::repo_root)/Tools/mlx_vlm_bridge.py" "$PAYLOAD_DIR/Tools/mlx_vlm_bridge.py"
+cp "$(esh::repo_root)/Tools/triattention_runtime.py" "$PAYLOAD_DIR/Tools/triattention_runtime.py"
 cp "$(esh::repo_root)/Tools/python-requirements.txt" "$PAYLOAD_DIR/Tools/python-requirements.txt"
+
+LLAMA_CLI_PATH="$(esh::resolve_llama_cli)" || esh::die "llama-cli is required to package GGUF support. Install llama.cpp or set ESH_LLAMA_CPP_CLI."
+mkdir -p "$PAYLOAD_DIR/bin"
+cp "$LLAMA_CLI_PATH" "$PAYLOAD_DIR/bin/llama-cli"
 
 "$(esh::bootstrap_python)" -m venv --copies "$ROOT_DIR/python"
 ESH_LAYOUT_MODE="package" \
@@ -34,7 +40,7 @@ ESH_APP_ROOT="$ROOT_DIR" \
 ESH_PAYLOAD_ROOT="$PAYLOAD_DIR" \
   esh::install_python_deps
 
-chmod +x "$ROOT_DIR/esh" "$ROOT_DIR/bin/esh" "$PAYLOAD_DIR/scripts/run.sh" "$PAYLOAD_DIR/scripts/verify-env.sh"
+chmod +x "$ROOT_DIR/esh" "$ROOT_DIR/bin/esh" "$PAYLOAD_DIR/scripts/run.sh" "$PAYLOAD_DIR/scripts/smoke-test-package.sh" "$PAYLOAD_DIR/scripts/verify-env.sh" "$PAYLOAD_DIR/bin/llama-cli"
 
 (
   cd "$DIST_DIR"

@@ -40,3 +40,37 @@ jobs:
 
       - name: Show CLI help
         run: ./esh --help
+
+  package-smoke:
+    name: Package Smoke Test
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Select Xcode with Swift 6
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "latest-stable"
+
+      - name: Install llama.cpp
+        run: brew install llama.cpp
+
+      - name: Resolve release version
+        id: version
+        run: |
+          chmod +x ./scripts/release-version.sh
+          echo "version=$(./scripts/release-version.sh show)" >> "$GITHUB_OUTPUT"
+
+      - name: Build self-contained release package
+        run: ./scripts/package-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Smoke test packaged artifact
+        run: ./scripts/smoke-test-package.sh "dist/esh-macos-${{ steps.version.outputs.version }}"

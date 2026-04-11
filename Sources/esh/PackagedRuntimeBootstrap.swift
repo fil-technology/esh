@@ -14,6 +14,8 @@ enum PackagedRuntimeBootstrap {
             return
         }
 
+        setLlamaEnvironmentIfAvailable(rootURL: rootURL)
+
         let helperURL = rootURL.appendingPathComponent("share/esh/Tools/mlx_vlm_bridge.py")
         let requirementsURL = rootURL.appendingPathComponent("share/esh/Tools/python-requirements.txt")
         guard FileManager.default.fileExists(atPath: helperURL.path),
@@ -132,5 +134,13 @@ enum PackagedRuntimeBootstrap {
         setenv("LLMCACHE_PYTHON", pythonURL.path, 1)
         setenv("ESH_MLX_VLM_BRIDGE", helperURL.path, 1)
         setenv("LLMCACHE_MLX_VLM_BRIDGE", helperURL.path, 1)
+    }
+
+    private static func setLlamaEnvironmentIfAvailable(rootURL: URL) {
+        let bundledLlamaURL = rootURL.appendingPathComponent("share/esh/bin/llama-cli")
+        guard FileManager.default.isExecutableFile(atPath: bundledLlamaURL.path) else {
+            return
+        }
+        setenv("ESH_LLAMA_CPP_CLI", bundledLlamaURL.path, 0)
     }
 }
