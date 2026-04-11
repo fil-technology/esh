@@ -17,7 +17,8 @@ public enum ProcessRunner {
         executableURL: URL,
         arguments: [String],
         environment: [String: String] = [:],
-        stdin: Data? = nil
+        stdin: Data? = nil,
+        currentDirectoryURL: URL? = nil
     ) throws -> ProcessOutput {
         final class DataSink: @unchecked Sendable {
             private let lock = NSLock()
@@ -39,6 +40,7 @@ public enum ProcessRunner {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.currentDirectoryURL = currentDirectoryURL
         if !environment.isEmpty {
             process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         }

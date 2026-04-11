@@ -57,6 +57,8 @@ private struct CLI {
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
             try await handleCache(arguments: Array(command.dropFirst()), store: cacheStore, currentDirectoryURL: currentDirectoryURL)
+        case "agent":
+            try await AgentCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "calibrate":
             try CalibrateCommand.run(arguments: Array(command.dropFirst()))
         case "context":
@@ -393,6 +395,7 @@ private struct CLI {
               esh cache build --session <uuid-or-name> [--mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--model <id-or-repo>] [--task <text>]
               esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
               esh cache inspect [artifact-uuid]
+              esh agent run <task> --model <id-or-repo> [--steps N] [--run <id-or-name>]
             """
         )
     }

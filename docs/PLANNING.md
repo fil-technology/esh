@@ -15,6 +15,131 @@ This file is the index for durable engineering notes, audits, and implementation
 4. Scenario-style agent workflow tests
 5. Thin MCP boundary design note
 
+## Autonomous Coding Agent Roadmap
+
+These are the additive phases needed to move `esh` from a context-aware local LLM CLI into a true autonomous coding agent.
+
+### Goal
+
+Make `esh` capable of handling real coding tasks end to end with:
+- planning
+- tool use
+- code reads and edits
+- build/test verification
+- resumable task state
+- bounded autonomy with explicit safety policy
+
+### Phase A: Agent Core Foundation
+
+Why it matters:
+This is the main missing layer between the current context engine and a real agent.
+
+What it needs:
+- a bounded act-observe loop
+- a first-class tool abstraction
+- structured tool calls and tool results in model conversations
+- a small safe built-in toolset for repo work
+- agent-specific run integration
+
+Status:
+- in progress
+- initial bounded agent loop and safe built-in tools should land first
+
+### Phase B: Safe Code Editing
+
+Why it matters:
+Without reliable edits, the tool can inspect code but not operate like a coding agent.
+
+What it needs:
+- patch-based file editing
+- multi-file edit support
+- write conflict handling
+- clear diff output
+- additive file-write safety boundaries
+
+Status:
+- not started
+
+### Phase C: Verification Loop
+
+Why it matters:
+Agentic coding quality depends heavily on edit-build-test-repair cycles.
+
+What it needs:
+- first-class build/test/lint tools
+- verification criteria attached to tasks
+- retry loop on failures
+- stop conditions when blocked or unstable
+
+Status:
+- not started
+
+### Phase D: Task Orchestration
+
+Why it matters:
+Longer coding tasks need durable progress state and resumability.
+
+What it needs:
+- explicit task phases
+- blocked/failed/completed transitions
+- resumable agent runs
+- compact machine-usable working memory
+- replayable tool traces
+
+Status:
+- partially started through run-state work
+- not yet agent-grade
+
+### Phase E: Agent UX
+
+Why it matters:
+A coding agent needs command surfaces that feel task-oriented, not just model-oriented.
+
+What it needs:
+- `esh agent run`
+- future `esh fix`, `esh implement`, `esh continue`, `esh verify`
+- compact run summaries and tool traces
+- safe defaults for repo-scoped work
+
+Status:
+- not started
+
+### Phase F: Retrieval and Language Precision
+
+Why it matters:
+Autonomy depends on stronger trust under ambiguous real coding tasks.
+
+What it needs:
+- broader ranking benchmarks
+- parser/language-service backed reads where needed
+- better disambiguation for broad queries
+- optional semantic retrieval only if local precision still needs it
+
+Status:
+- in progress through current context-engine work
+
+### Order Of Implementation
+
+1. Phase A: Agent core foundation
+2. Phase C: Verification loop
+3. Phase B: Safe code editing
+4. Phase D: Task orchestration
+5. Phase E: Agent UX
+6. Phase F: Retrieval and language precision
+
+### First Additive Target
+
+The first implementation target should be:
+- a bounded `esh agent run <task>` loop
+- structured tool protocol
+- safe repo tools:
+  - context planning/query
+  - surgical reads
+  - file listing/search
+  - bounded shell verification commands
+
+This gives `esh` the first real autonomous execution substrate without requiring a full IDE-like rewrite.
+
 ## Unfinished Context-Engine Phases
 
 These are the context improvements that are still not finished after the recent MVP, surgical reads, and run-state work.
