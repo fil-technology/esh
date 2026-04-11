@@ -4,9 +4,19 @@ import Darwin
 #endif
 import EshCore
 
+private enum TerminalInputAction: Sendable {
+    case scrollUp
+    case scrollDown
+    case pageUp
+    case pageDown
+    case jumpToTop
+    case jumpToBottom
+}
+
 private final class TerminalInputController: @unchecked Sendable {
     private let lock = NSLock()
     private var submittedLines: [String] = []
+    private var pendingActions: [TerminalInputAction] = []
     private var buffer = ""
     private var stopRequested = false
     private var originalTermios: termios?
@@ -42,6 +52,10 @@ private final class TerminalInputController: @unchecked Sendable {
                 switch byte {
                 case 3:
                     submit("/exit")
+                case 27:
+                    if let action = readEscapeAction() {
+                        enqueue(action)
+                    }
                 case 10:
                     if suppressLF {
                         suppressLF = false
@@ -100,6 +114,14 @@ private final class TerminalInputController: @unchecked Sendable {
         return lines
     }
 
+    func takeActions() -> [TerminalInputAction] {
+        lock.lock()
+        defer { lock.unlock() }
+        let actions = pendingActions
+        pendingActions.removeAll()
+        return actions
+    }
+
     private var isStopped: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -135,6 +157,58 @@ private final class TerminalInputController: @unchecked Sendable {
         buffer = ""
         submittedLines.append(line)
         lock.unlock()
+    }
+
+    private func enqueue(_ action: TerminalInputAction) {
+        lock.lock()
+        pendingActions.append(action)
+        lock.unlock()
+    }
+
+    private func readEscapeAction() -> TerminalInputAction? {
+        #if canImport(Darwin)
+        guard let first = readByte(timeoutMilliseconds: 5), first == 91 else {
+            return nil
+        }
+        guard let second = readByte(timeoutMilliseconds: 5) else {
+            return nil
+        }
+
+        switch second {
+        case 65:
+            return .scrollUp
+        case 66:
+            return .scrollDown
+        case 70:
+            return .jumpToBottom
+        case 72:
+            return .jumpToTop
+        case 53:
+            return readByte(timeoutMilliseconds: 5) == 126 ? .pageUp : nil
+        case 54:
+            return readByte(timeoutMilliseconds: 5) == 126 ? .pageDown : nil
+        default:
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    private func readByte(timeoutMilliseconds: Int32) -> UInt8? {
+        #if canImport(Darwin)
+        var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        guard Darwin.poll(&descriptor, 1, timeoutMilliseconds) > 0 else {
+            return nil
+        }
+        var byte: UInt8 = 0
+        guard Darwin.read(STDIN_FILENO, &byte, 1) == 1 else {
+            return nil
+        }
+        return byte
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -292,6 +366,7 @@ struct TUIApplication {
 
             state.inputText = trimmed
             state.overlay = nil
+            state.transcriptScrollOffset = 0
             session.messages.append(Message(role: .user, text: trimmed))
             session.updatedAt = Date()
             state.transcriptItems.append(TranscriptItem(role: .user, text: trimmed))
@@ -540,6 +615,9 @@ struct TUIApplication {
                     "/caches         Show saved cache artifacts",
                     "/search <text>  Search the active session",
                     "/plan <task>    Build a local context brief",
+                    "↑/↓             Scroll transcript by line",
+                    "PgUp/PgDn       Scroll transcript by page",
+                    "Home/End        Jump to top or bottom",
                     "/model open <id-or-alias>",
                     "/model inspect <id>",
                     "/session show <uuid>",
@@ -1088,12 +1166,15 @@ struct TUIApplication {
         whileStreaming: Bool
     ) {
         let newLines = inputController.takeSubmittedLines()
+        let actions = inputController.takeActions()
         if !newLines.isEmpty {
             queuedPrompts.append(contentsOf: newLines.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
         }
 
+        let scrolled = applyInputActions(actions, state: &state, surface: surface)
+
         let buffer = inputController.currentBuffer()
-        let shouldRender = state.inputText != buffer || !newLines.isEmpty
+        let shouldRender = state.inputText != buffer || !newLines.isEmpty || scrolled
         state.inputText = buffer
         if whileStreaming {
             let currentAssistant = state.transcriptItems.last(where: { $0.role == .assistant })?.text ?? ""
@@ -1115,6 +1196,11 @@ struct TUIApplication {
                 return queuedPrompts.removeFirst()
             }
 
+            let actions = inputController.takeActions()
+            if applyInputActions(actions, state: &state, surface: surface) {
+                continue
+            }
+
             let newLines = inputController.takeSubmittedLines()
             if let first = newLines.first {
                 if newLines.count > 1 {
@@ -1131,5 +1217,42 @@ struct TUIApplication {
 
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+    }
+
+    @discardableResult
+    private func applyInputActions(
+        _ actions: [TerminalInputAction],
+        state: inout AppState,
+        surface: TerminalSurface
+    ) -> Bool {
+        guard !actions.isEmpty else { return false }
+        let maxOffset = surface.maxTranscriptScrollOffset(state: state)
+        let pageSize = 10
+        var offset = min(max(state.transcriptScrollOffset, 0), maxOffset)
+
+        for action in actions {
+            switch action {
+            case .scrollUp:
+                offset = min(offset + 1, maxOffset)
+            case .scrollDown:
+                offset = max(offset - 1, 0)
+            case .pageUp:
+                offset = min(offset + pageSize, maxOffset)
+            case .pageDown:
+                offset = max(offset - pageSize, 0)
+            case .jumpToTop:
+                offset = maxOffset
+            case .jumpToBottom:
+                offset = 0
+            }
+        }
+
+        guard offset != state.transcriptScrollOffset else { return false }
+        state.transcriptScrollOffset = offset
+        state.statusText = offset == 0
+            ? "ready | /menu commands | /back launcher"
+            : "scrolling transcript | ↑/↓ line • PgUp/PgDn page • Home/End jump"
+        surface.render(state: state)
+        return true
     }
 }

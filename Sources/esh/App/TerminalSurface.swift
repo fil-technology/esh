@@ -22,7 +22,11 @@ final class TerminalSurface {
             items: state.transcriptItems,
             availableWidth: max(size.columns - 4, 20)
         )
-        let visibleTranscript = Array(transcriptLines.suffix(transcriptHeight))
+        let visibleTranscript = Self.visibleTranscriptLines(
+            transcriptLines: transcriptLines,
+            transcriptHeight: transcriptHeight,
+            scrollOffset: state.transcriptScrollOffset
+        )
 
         var output: [String] = []
         output.reserveCapacity(size.rows)
@@ -63,6 +67,49 @@ final class TerminalSurface {
         fflush(stdout)
         lastLines = output
         lastSize = size
+    }
+
+    static func visibleTranscriptLines(
+        transcriptLines: [String],
+        transcriptHeight: Int,
+        scrollOffset: Int
+    ) -> [String] {
+        guard transcriptHeight > 0 else { return [] }
+        guard transcriptLines.count > transcriptHeight else { return transcriptLines }
+
+        let maxOffset = max(transcriptLines.count - transcriptHeight, 0)
+        let clampedOffset = min(max(scrollOffset, 0), maxOffset)
+        let endIndex = max(transcriptLines.count - clampedOffset, 0)
+        let startIndex = max(endIndex - transcriptHeight, 0)
+        return Array(transcriptLines[startIndex..<endIndex])
+    }
+
+    static func maxTranscriptScrollOffset(
+        state: ChatScreenState,
+        terminalRows: Int,
+        terminalColumns: Int
+    ) -> Int {
+        let headerLines = HeaderBarView.renderedLines(state: state, width: terminalColumns)
+        let overlayLines = state.overlay.map {
+            OverlayPanelView.renderedLines(overlay: $0, availableWidth: terminalColumns)
+        } ?? []
+        let reservedBottom = 2 + overlayLines.count
+        let reservedTop = headerLines.count + 1
+        let transcriptHeight = max(terminalRows - reservedBottom - reservedTop, 1)
+        let transcriptLines = TranscriptView.renderedLines(
+            items: state.transcriptItems,
+            availableWidth: max(terminalColumns - 4, 20)
+        )
+        return max(transcriptLines.count - transcriptHeight, 0)
+    }
+
+    func maxTranscriptScrollOffset(state: ChatScreenState) -> Int {
+        let size = terminalSize()
+        return Self.maxTranscriptScrollOffset(
+            state: state,
+            terminalRows: size.rows,
+            terminalColumns: size.columns
+        )
     }
 
     private func terminalSize() -> (rows: Int, columns: Int) {
