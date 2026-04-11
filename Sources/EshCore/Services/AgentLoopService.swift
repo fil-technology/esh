@@ -38,6 +38,8 @@ public struct AgentLoopService: Sendable {
         workingSession.messages.append(Message(role: .user, text: try initialTaskPrompt(task: task, session: workingSession, workspaceRootURL: workspaceRootURL)))
 
         var steps: [AgentLoopStep] = []
+        var verificationRequired = false
+        var lastVerificationFailure: String?
 
         for index in 1...maxSteps {
             let response = try await collectReply(runtime: runtime, session: workingSession)
@@ -46,10 +48,48 @@ public struct AgentLoopService: Sendable {
             if let parsed = parser.parse(response) {
                 switch parsed {
                 case let .final(text):
+                    if verificationRequired {
+                        let retryMessage = verificationRetryMessage(lastFailure: lastVerificationFailure)
+                        if index == maxSteps {
+                            let failureSuffix = lastVerificationFailure.map { "\nLast verification failure:\n\($0)" } ?? ""
+                            return AgentLoopResult(
+                                task: task,
+                                finalResponse: "Agent stopped before successful verification.\nCandidate final response:\n\(text)\(failureSuffix)",
+                                steps: steps,
+                                runID: runID
+                            )
+                        }
+                        workingSession.messages.append(Message(role: .tool, text: retryMessage))
+                        steps.append(
+                            AgentLoopStep(
+                                index: index,
+                                assistantResponse: response,
+                                toolCall: nil,
+                                toolResult: AgentToolResult(
+                                    name: "verification",
+                                    output: "Final answer rejected because verification is still required after file edits or a failed verification step.",
+                                    isError: true
+                                )
+                            )
+                        )
+                        continue
+                    }
                     steps.append(AgentLoopStep(index: index, assistantResponse: response, toolCall: nil, toolResult: nil))
                     return AgentLoopResult(task: task, finalResponse: text, steps: steps, runID: runID)
                 case let .tool(call):
                     let result = try toolService.execute(call: call, workspaceRootURL: workspaceRootURL, runID: runID)
+                    if requiresVerification(for: call), result.isError == false {
+                        verificationRequired = true
+                    }
+                    if isVerificationTool(call.name) {
+                        if result.isError {
+                            verificationRequired = true
+                            lastVerificationFailure = result.output
+                        } else {
+                            verificationRequired = false
+                            lastVerificationFailure = nil
+                        }
+                    }
                     workingSession.messages.append(
                         Message(role: .tool, text: toolMessageText(for: result))
                     )
@@ -119,7 +159,9 @@ public struct AgentLoopService: Sendable {
         Use tools before answering when the task depends on repository facts.
         Prefer context_plan or context_query before broad file reads.
         Prefer read_symbol and read_related over reading whole files when possible.
-        Use shell only for safe verification commands.
+        After write_file or edit_file, run verify_build or verify_tests before giving a final answer.
+        If verification fails, repair the issue and verify again before finishing.
+        Use shell only for safe repo inspection commands.
 
         \(toolService.toolPrompt())
         """
@@ -128,5 +170,48 @@ public struct AgentLoopService: Sendable {
     private func toolMessageText(for result: AgentToolResult) -> String {
         let status = result.isError ? "error" : "ok"
         return "tool: \(result.name)\nstatus: \(status)\nresult:\n\(result.output)"
+    }
+
+    private func isVerificationTool(_ name: String) -> Bool {
+        ["verify_build", "verify_tests"].contains(name)
+    }
+
+    private func requiresVerification(for call: AgentToolCall) -> Bool {
+        guard ["write_file", "edit_file"].contains(call.name) else {
+            return false
+        }
+        guard let path = parsedPath(from: call.input) else {
+            return true
+        }
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let codeExtensions: Set<String> = [
+            "swift", "m", "mm", "c", "cc", "cpp", "h", "hpp",
+            "js", "jsx", "ts", "tsx",
+            "py", "rb", "go", "rs", "java", "kt", "kts", "cs", "php", "scala", "sh"
+        ]
+        return codeExtensions.contains(ext)
+    }
+
+    private func parsedPath(from input: String) -> String? {
+        for line in input.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("path:") {
+                return String(trimmed.dropFirst("path:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
+    }
+
+    private func verificationRetryMessage(lastFailure: String?) -> String {
+        var lines = [
+            "Verification is still required before you can give a final answer.",
+            "After file edits, run verify_build or verify_tests and only finish once verification succeeds."
+        ]
+        if let lastFailure, lastFailure.isEmpty == false {
+            lines.append("Last verification failure:")
+            lines.append(lastFailure)
+        }
+        lines.append("Reply with exactly one fenced tool or final block.")
+        return lines.joined(separator: "\n")
     }
 }

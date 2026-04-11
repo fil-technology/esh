@@ -127,6 +127,28 @@ func agentToolServiceRejectsPathsOutsideWorkspace() throws {
 }
 
 @Test
+func agentToolServiceRunsExplicitVerificationTools() throws {
+    let workspace = try makeSwiftPackageWorkspace(withTests: true)
+    let service = AgentToolService()
+
+    let buildResult = try service.execute(
+        call: AgentToolCall(name: "verify_build", input: ""),
+        workspaceRootURL: workspace,
+        runID: nil
+    )
+    let testResult = try service.execute(
+        call: AgentToolCall(name: "verify_tests", input: ""),
+        workspaceRootURL: workspace,
+        runID: nil
+    )
+
+    #expect(buildResult.isError == false)
+    #expect(buildResult.output.contains("command: swift build"))
+    #expect(testResult.isError == false)
+    #expect(testResult.output.contains("command: swift test"))
+}
+
+@Test
 func agentLoopServiceExecutesToolAndReturnsFinalAnswer() async throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -221,6 +243,121 @@ func agentLoopServiceCanWriteFileAndFinish() async throws {
     #expect(result.steps.first?.toolCall?.name == "write_file")
     #expect(fileText.contains("verify agent edits"))
     #expect(result.finalResponse.contains("Notes/todo.md"))
+}
+
+@Test
+func agentLoopServiceRetriesAfterFailedVerification() async throws {
+    let directory = try makeSwiftPackageWorkspace()
+
+    let runtime = FakeAgentRuntime(replies: [
+        """
+        ```tool
+        name: edit_file
+        input:
+        path: Sources/Demo/main.swift
+        start: 1
+        end: 1
+        content:
+        prin("broken")
+        ```
+        """,
+        """
+        ```tool
+        name: verify_build
+        input:
+        swift build
+        ```
+        """,
+        """
+        ```final
+        The change is done.
+        ```
+        """,
+        """
+        ```tool
+        name: edit_file
+        input:
+        path: Sources/Demo/main.swift
+        start: 1
+        end: 1
+        content:
+        print("fixed")
+        ```
+        """,
+        """
+        ```tool
+        name: verify_build
+        input:
+        swift build
+        ```
+        """,
+        """
+        ```final
+        Build now passes and the file is fixed.
+        ```
+        """
+    ])
+
+    let result = try await AgentLoopService().run(
+        task: "Break the file, verify, then fix it",
+        session: ChatSession(name: "agent-verify-test", modelID: "fake-model", backend: .mlx, cacheMode: .automatic, intent: .agentRun),
+        runtime: runtime,
+        workspaceRootURL: directory,
+        maxSteps: 8
+    )
+
+    let finalText = try String(
+        contentsOf: directory.appendingPathComponent("Sources/Demo/main.swift"),
+        encoding: .utf8
+    )
+    #expect(result.steps.count == 6)
+    #expect(result.steps[1].toolCall?.name == "verify_build")
+    #expect(result.steps[1].toolResult?.isError == true)
+    #expect(result.steps[2].toolResult?.name == "verification")
+    #expect(result.steps[4].toolCall?.name == "verify_build")
+    #expect(result.steps[4].toolResult?.isError == false)
+    #expect(finalText.contains("print(\"fixed\")"))
+    #expect(result.finalResponse.contains("Build now passes"))
+}
+
+private func makeSwiftPackageWorkspace(withTests: Bool = false) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let packageManifest = """
+    // swift-tools-version: 6.0
+    import PackageDescription
+
+    let package = Package(
+        name: "Demo",
+        targets: [
+            .executableTarget(name: "Demo")\(withTests ? ",\n            .testTarget(name: \"DemoTests\", dependencies: [\"Demo\"])" : "")
+        ]
+    )
+    """
+    try packageManifest.write(to: directory.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+
+    let sources = directory.appendingPathComponent("Sources/Demo", isDirectory: true)
+    try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+    try #"print("ok")"#
+        .write(to: sources.appendingPathComponent("main.swift"), atomically: true, encoding: .utf8)
+
+    if withTests {
+        let testsDirectory = directory.appendingPathComponent("Tests/DemoTests", isDirectory: true)
+        try FileManager.default.createDirectory(at: testsDirectory, withIntermediateDirectories: true)
+        try """
+        import XCTest
+
+        final class DemoTests: XCTestCase {
+            func testExample() {
+                XCTAssertTrue(true)
+            }
+        }
+        """.write(to: testsDirectory.appendingPathComponent("DemoTests.swift"), atomically: true, encoding: .utf8)
+    }
+
+    return directory
 }
 
 private final class FakeAgentRuntime: @unchecked Sendable, BackendRuntime {

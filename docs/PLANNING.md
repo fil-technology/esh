@@ -74,7 +74,10 @@ What it needs:
 - stop conditions when blocked or unstable
 
 Status:
-- not started
+- in progress
+- explicit `verify_build` and `verify_tests` agent tools are implemented
+- agent final answers are now gated on successful verification after file edits
+- next step is broader lint/build/test coverage and richer repair policies
 
 ### Phase D: Task Orchestration
 

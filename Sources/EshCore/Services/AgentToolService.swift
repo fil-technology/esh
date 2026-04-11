@@ -43,6 +43,8 @@ public struct AgentToolService: Sendable {
           end: 20
           content:
           replacement lines here
+        - verify_build: run a safe build verification command. Input may be blank for `swift build`.
+        - verify_tests: run a safe test verification command. Input may be blank for `swift test`.
         - list_files: list workspace files. Input may be blank or a path/text filter.
         - search_text: search workspace text with ripgrep. Input is the search pattern.
         - shell: run a safe workspace command. Allowed:
@@ -89,6 +91,10 @@ public struct AgentToolService: Sendable {
             return try writeFile(call.input, workspaceRootURL: workspaceRootURL)
         case "edit_file":
             return try editFile(call.input, workspaceRootURL: workspaceRootURL)
+        case "verify_build":
+            return try verifyBuild(call.input, workspaceRootURL: workspaceRootURL)
+        case "verify_tests":
+            return try verifyTests(call.input, workspaceRootURL: workspaceRootURL)
         case "list_files":
             return try listFiles(call.input, workspaceRootURL: workspaceRootURL)
         case "search_text":
@@ -340,6 +346,22 @@ public struct AgentToolService: Sendable {
         )
     }
 
+    private func verifyBuild(_ input: String, workspaceRootURL: URL) throws -> AgentToolResult {
+        let command = normalizedVerificationCommand(input, defaultCommand: "swift build")
+        guard isSafeVerificationCommand(command, kind: .build) else {
+            return AgentToolResult(name: "verify_build", output: "Rejected unsafe build verification command: \(command)", isError: true)
+        }
+        return try runVerificationCommand(command, toolName: "verify_build", workspaceRootURL: workspaceRootURL)
+    }
+
+    private func verifyTests(_ input: String, workspaceRootURL: URL) throws -> AgentToolResult {
+        let command = normalizedVerificationCommand(input, defaultCommand: "swift test")
+        guard isSafeVerificationCommand(command, kind: .test) else {
+            return AgentToolResult(name: "verify_tests", output: "Rejected unsafe test verification command: \(command)", isError: true)
+        }
+        return try runVerificationCommand(command, toolName: "verify_tests", workspaceRootURL: workspaceRootURL)
+    }
+
     private func parseReadFileInput(_ input: String) -> (path: String, range: SourceRange) {
         var path = input.trimmingCharacters(in: .whitespacesAndNewlines)
         var start = 1
@@ -423,6 +445,82 @@ public struct AgentToolService: Sendable {
             throw StoreError.invalidManifest("Path escapes workspace root: \(path)")
         }
         return standardized
+    }
+
+    private func normalizedVerificationCommand(_ input: String, defaultCommand: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return defaultCommand
+        }
+        return trimmed
+    }
+
+    private enum VerificationKind {
+        case build
+        case test
+    }
+
+    private func isSafeVerificationCommand(_ command: String, kind: VerificationKind) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return false }
+        let forbiddenFragments = ["&&", "||", ";", "|", ">", "<", "`", "$("]
+        guard forbiddenFragments.allSatisfy({ trimmed.contains($0) == false }) else {
+            return false
+        }
+
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        switch kind {
+        case .build:
+            let allowed: [[String]] = [
+                ["swift", "build"],
+                ["cargo", "build"],
+                ["go", "build", "./..."],
+                ["npm", "run", "build"],
+                ["npm", "run", "build", "--", "--if-present"],
+                ["pnpm", "build"],
+                ["pnpm", "run", "build"],
+                ["yarn", "build"]
+            ]
+            return allowed.contains(tokens)
+        case .test:
+            let allowed: [[String]] = [
+                ["swift", "test"],
+                ["cargo", "test"],
+                ["go", "test", "./..."],
+                ["pytest"],
+                ["pytest", "-q"],
+                ["python", "-m", "pytest"],
+                ["python", "-m", "pytest", "-q"],
+                ["npm", "test"],
+                ["pnpm", "test"],
+                ["yarn", "test"]
+            ]
+            return allowed.contains(tokens)
+        }
+    }
+
+    private func runVerificationCommand(
+        _ command: String,
+        toolName: String,
+        workspaceRootURL: URL
+    ) throws -> AgentToolResult {
+        let tokens = command.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let executable = tokens.first else {
+            return AgentToolResult(name: toolName, output: "Empty verification command.", isError: true)
+        }
+        let output = try ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: [executable] + Array(tokens.dropFirst()),
+            currentDirectoryURL: workspaceRootURL
+        )
+        let stdout = String(decoding: output.stdout, as: UTF8.self)
+        let stderr = String(decoding: output.stderr, as: UTF8.self)
+        let combined = [stdout, stderr].filter { $0.isEmpty == false }.joined(separator: "\n")
+        return AgentToolResult(
+            name: toolName,
+            output: "command: \(command)\nexit: \(output.exitCode)\n" + (combined.isEmpty ? "(no output)" : combined),
+            isError: output.exitCode != 0
+        )
     }
 
     private func isSafeShellCommand(_ command: String) -> Bool {
