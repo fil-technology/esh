@@ -396,6 +396,7 @@ private struct CLI {
               esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
               esh cache inspect [artifact-uuid]
               esh agent run <task> --model <id-or-repo> [--steps N] [--run <id-or-name>]
+              esh agent continue --run <id> --model <id-or-repo> [--steps N] [task]
             """
         )
     }

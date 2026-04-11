@@ -93,7 +93,8 @@ What it needs:
 
 Status:
 - partially started through run-state work
-- not yet agent-grade
+- now includes resumable `agent continue` run flow and persisted agent-step trace events
+- still not fully agent-grade
 
 ### Phase E: Agent UX
 

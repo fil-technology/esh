@@ -392,6 +392,37 @@ func runStateStoreExportsTrace() throws {
 }
 
 @Test
+func runStateStorePersistsAgentTaskLifecycle() throws {
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+    let store = RunStateStore(root: PersistenceRoot(rootURL: rootURL))
+    let state = try store.createRun(workspaceRootURL: workspaceURL, name: "agent")
+
+    try store.beginAgentTask(runID: state.runID, workspaceRootURL: workspaceURL, task: "Fix refresh flow")
+    try store.recordAgentStep(runID: state.runID, workspaceRootURL: workspaceURL, index: 1, toolName: "context_query", isError: false)
+    try store.finishAgentTask(
+        runID: state.runID,
+        workspaceRootURL: workspaceURL,
+        task: "Fix refresh flow",
+        finalResponse: "Completed and verified.",
+        status: "completed"
+    )
+
+    let loaded = try store.load(runID: state.runID, workspaceRootURL: workspaceURL)
+    let events = try store.loadEvents(runID: state.runID, workspaceRootURL: workspaceURL)
+
+    #expect(loaded.currentTask == nil)
+    #expect(loaded.lastTask == "Fix refresh flow")
+    #expect(loaded.lastFinalResponse == "Completed and verified.")
+    #expect(loaded.completedTasks.contains("Fix refresh flow"))
+    #expect(events.contains(where: { $0.kind == "agent.task.started" }))
+    #expect(events.contains(where: { $0.kind == "agent.step" }))
+    #expect(events.contains(where: { $0.kind == "agent.task.finished" }))
+}
+
+@Test
 func planningServiceBuildsBriefWithSnippetsAndSuggestions() throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -11,6 +11,9 @@ public struct RunState: Codable, Hashable, Sendable {
     public var decisions: [String]
     public var pendingTasks: [String]
     public var completedTasks: [String]
+    public var currentTask: String?
+    public var lastTask: String?
+    public var lastFinalResponse: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -25,6 +28,9 @@ public struct RunState: Codable, Hashable, Sendable {
         decisions: [String] = [],
         pendingTasks: [String] = [],
         completedTasks: [String] = [],
+        currentTask: String? = nil,
+        lastTask: String? = nil,
+        lastFinalResponse: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -38,6 +44,9 @@ public struct RunState: Codable, Hashable, Sendable {
         self.decisions = decisions
         self.pendingTasks = pendingTasks
         self.completedTasks = completedTasks
+        self.currentTask = currentTask
+        self.lastTask = lastTask
+        self.lastFinalResponse = lastFinalResponse
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

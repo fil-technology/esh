@@ -7,6 +7,7 @@ public struct AgentLoopService: Sendable {
     private let contextStore: ContextStore
     private let packageService: ContextPackageService
     private let planningService: ContextPlanningService
+    private let runStateStore: RunStateStore
 
     public init(
         chatService: ChatService = .init(),
@@ -14,7 +15,8 @@ public struct AgentLoopService: Sendable {
         toolService: AgentToolService = .init(),
         contextStore: ContextStore = .init(),
         packageService: ContextPackageService = .init(),
-        planningService: ContextPlanningService = .init()
+        planningService: ContextPlanningService = .init(),
+        runStateStore: RunStateStore = .init()
     ) {
         self.chatService = chatService
         self.parser = parser
@@ -22,6 +24,7 @@ public struct AgentLoopService: Sendable {
         self.contextStore = contextStore
         self.packageService = packageService
         self.planningService = planningService
+        self.runStateStore = runStateStore
     }
 
     public func run(
@@ -75,6 +78,15 @@ public struct AgentLoopService: Sendable {
                         continue
                     }
                     steps.append(AgentLoopStep(index: index, assistantResponse: response, toolCall: nil, toolResult: nil))
+                    if let runID {
+                        try? runStateStore.recordAgentStep(
+                            runID: runID,
+                            workspaceRootURL: workspaceRootURL,
+                            index: index,
+                            toolName: nil,
+                            isError: false
+                        )
+                    }
                     return AgentLoopResult(task: task, finalResponse: text, steps: steps, runID: runID)
                 case let .tool(call):
                     let result = try toolService.execute(call: call, workspaceRootURL: workspaceRootURL, runID: runID)
@@ -94,6 +106,15 @@ public struct AgentLoopService: Sendable {
                         Message(role: .tool, text: toolMessageText(for: result))
                     )
                     steps.append(AgentLoopStep(index: index, assistantResponse: response, toolCall: call, toolResult: result))
+                    if let runID {
+                        try? runStateStore.recordAgentStep(
+                            runID: runID,
+                            workspaceRootURL: workspaceRootURL,
+                            index: index,
+                            toolName: call.name,
+                            isError: result.isError
+                        )
+                    }
                     continue
                 }
             }
@@ -117,6 +138,15 @@ public struct AgentLoopService: Sendable {
             """
             workingSession.messages.append(Message(role: .tool, text: retryMessage))
             steps.append(AgentLoopStep(index: index, assistantResponse: response, toolCall: nil, toolResult: AgentToolResult(name: "format", output: "Model response did not follow the tool/final protocol.", isError: true)))
+            if let runID {
+                try? runStateStore.recordAgentStep(
+                    runID: runID,
+                    workspaceRootURL: workspaceRootURL,
+                    index: index,
+                    toolName: "format",
+                    isError: true
+                )
+            }
         }
 
         return AgentLoopResult(task: task, finalResponse: "Agent stopped without a final answer.", steps: steps, runID: runID)

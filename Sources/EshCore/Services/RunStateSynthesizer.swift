@@ -221,6 +221,15 @@ public struct RunStateSynthesizer: Sendable {
                 return RunTaskTransition(timestamp: event.timestamp, phase: "completed", detail: event.detail)
             case "run.status":
                 return RunTaskTransition(timestamp: event.timestamp, phase: "status", detail: event.detail)
+            case "agent.task.started":
+                return RunTaskTransition(timestamp: event.timestamp, phase: "agent_started", detail: event.detail)
+            case "agent.step":
+                let tool = event.attributes?["tool"].flatMap { $0.isEmpty ? nil : $0 } ?? "final"
+                let status = event.attributes?["status"] ?? "ok"
+                return RunTaskTransition(timestamp: event.timestamp, phase: "agent_step", detail: "\(tool) [\(status)]")
+            case "agent.task.finished":
+                let status = event.attributes?["status"] ?? "completed"
+                return RunTaskTransition(timestamp: event.timestamp, phase: "agent_finished", detail: "\(event.detail) [\(status)]")
             default:
                 return nil
             }

@@ -187,6 +187,79 @@ public struct RunStateStore: Sendable {
         )
     }
 
+    public func beginAgentTask(runID: String, workspaceRootURL: URL, task: String) throws {
+        var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        state.currentTask = task
+        state.lastTask = task
+        state.pendingTasks = mergeUnique(state.pendingTasks, with: [task])
+        state.updatedAt = Date()
+        try save(state: state)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "agent.task.started",
+                detail: task,
+                attributes: ["task": task]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
+    public func recordAgentStep(
+        runID: String,
+        workspaceRootURL: URL,
+        index: Int,
+        toolName: String?,
+        isError: Bool
+    ) throws {
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "agent.step",
+                detail: toolName ?? "final",
+                attributes: [
+                    "index": String(index),
+                    "tool": toolName ?? "",
+                    "status": isError ? "error" : "ok"
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
+    public func finishAgentTask(
+        runID: String,
+        workspaceRootURL: URL,
+        task: String,
+        finalResponse: String,
+        status: String
+    ) throws {
+        var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        state.currentTask = nil
+        state.lastTask = task
+        state.lastFinalResponse = finalResponse
+        if status == "completed" {
+            state.pendingTasks.removeAll { $0 == task }
+            state.completedTasks = mergeUnique(state.completedTasks, with: [task])
+        }
+        state.status = status
+        state.updatedAt = Date()
+        try save(state: state)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "agent.task.finished",
+                detail: task,
+                attributes: [
+                    "task": task,
+                    "status": status,
+                    "final_preview": String(finalResponse.prefix(160))
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
     public func updateStatus(runID: String, workspaceRootURL: URL, status: String) throws {
         var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
         state.status = status

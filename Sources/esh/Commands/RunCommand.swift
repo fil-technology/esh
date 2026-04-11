@@ -38,6 +38,15 @@ enum RunCommand {
             print("completed_tasks: \(state.completedTasks.count)")
             print("events: \(events.count)")
             print("summary: \(synthesis.summary)")
+            if let currentTask = state.currentTask, currentTask.isEmpty == false {
+                print("current_task: \(currentTask)")
+            }
+            if let lastTask = state.lastTask, lastTask.isEmpty == false {
+                print("last_task: \(lastTask)")
+            }
+            if let lastFinalResponse = state.lastFinalResponse, lastFinalResponse.isEmpty == false {
+                print("last_final_preview: \(String(lastFinalResponse.prefix(160)))")
+            }
             if let compacted = synthesis.compactedSummary {
                 print("compacted_summary: \(compacted)")
             }
