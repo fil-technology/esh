@@ -44,6 +44,10 @@ These are the context improvements that are still not finished after the recent 
 - Phase 6 foundation
   - fixture-based `context eval` retrieval harness
   - repo fixture coverage in `Tests/Fixtures/context-eval.json`
+- Phase 5 foundation
+  - reusable context packages persisted from planning briefs
+  - file-hash validation and invalidation
+  - automatic reuse in `context plan` and code-style chat briefing
 
 ### Still Unfinished
 
@@ -85,12 +89,12 @@ These are the context improvements that are still not finished after the recent 
 
 5. Cache-aware context packaging
    Why unfinished:
-   the context engine and KV/cache system are still mostly separate.
+   reusable context packaging now exists, but it is still an early bridge rather than a full cache strategy.
 
    What remains:
-   - package stable retrieved context for reuse
-   - align retrieval outputs with TurboQuant and TriAttention cache strategy
-   - avoid rebuilding expensive context unnecessarily
+   - connect context packages more directly to cache build/load flows
+   - align packaged context reuse with TurboQuant and TriAttention policy decisions
+   - expose package inspection and management more clearly in the CLI
 
 6. Retrieval evaluation harness
    Why unfinished:

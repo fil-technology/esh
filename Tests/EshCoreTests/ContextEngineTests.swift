@@ -278,3 +278,94 @@ func evaluationHarnessComputesRetrievalMetrics() {
     #expect(report.top3Hits == 2)
     #expect(report.meanReciprocalRank == 1)
 }
+
+@Test
+func contextPackageServiceReusesValidPackages() throws {
+    let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    let sourceURL = workspaceURL.appendingPathComponent("Sources/Auth/TokenManager.swift")
+    try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try """
+    struct TokenManager {
+        func refreshIfNeeded() {
+            print("refresh")
+        }
+    }
+    """.write(to: sourceURL, atomically: true, encoding: .utf8)
+
+    let index = try ContextIndexer().buildIndex(workspaceRootURL: workspaceURL)
+    let service = ContextPackageService(store: FileContextPackageStore(root: PersistenceRoot(rootURL: rootURL)))
+
+    let first = try service.resolveBrief(
+        task: "refresh auth token",
+        index: index,
+        workspaceRootURL: workspaceURL,
+        limit: 3,
+        snippetCount: 2,
+        modelID: "demo-model",
+        intent: .code,
+        cacheMode: .triattention
+    )
+    let second = try service.resolveBrief(
+        task: "refresh auth token",
+        index: index,
+        workspaceRootURL: workspaceURL,
+        limit: 3,
+        snippetCount: 2,
+        modelID: "demo-model",
+        intent: .code,
+        cacheMode: .triattention
+    )
+
+    #expect(first.reused == false)
+    #expect(second.reused == true)
+    #expect(first.package.id == second.package.id)
+}
+
+@Test
+func contextPackageServiceInvalidatesChangedFiles() throws {
+    let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    let sourceURL = workspaceURL.appendingPathComponent("Sources/Auth/TokenManager.swift")
+    try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try """
+    struct TokenManager {
+        func refreshIfNeeded() {
+            print("refresh")
+        }
+    }
+    """.write(to: sourceURL, atomically: true, encoding: .utf8)
+
+    let store = FileContextPackageStore(root: PersistenceRoot(rootURL: rootURL))
+    let service = ContextPackageService(store: store)
+    let firstIndex = try ContextIndexer().buildIndex(workspaceRootURL: workspaceURL)
+    let first = try service.resolveBrief(
+        task: "refresh auth token",
+        index: firstIndex,
+        workspaceRootURL: workspaceURL,
+        limit: 3,
+        snippetCount: 2
+    )
+
+    try """
+    struct TokenManager {
+        func refreshIfNeeded() {
+            print("refresh now")
+        }
+    }
+    """.write(to: sourceURL, atomically: true, encoding: .utf8)
+    let secondIndex = try ContextIndexer().buildIndex(workspaceRootURL: workspaceURL)
+    let second = try service.resolveBrief(
+        task: "refresh auth token",
+        index: secondIndex,
+        workspaceRootURL: workspaceURL,
+        limit: 3,
+        snippetCount: 2
+    )
+
+    #expect(first.reused == false)
+    #expect(second.reused == false)
+    #expect(first.package.id != second.package.id)
+}

@@ -62,7 +62,7 @@ enum ContextCommand {
             let index = try store.load(workspaceRootURL: workspaceRootURL)
             let task = positional.joined(separator: " ")
             let runTrace = runID.flatMap { try? RunStateStore().exportTrace(runID: $0, workspaceRootURL: workspaceRootURL) }
-            let brief = try ContextPlanningService().makeBrief(
+            let resolution = try ContextPackageService().resolveBrief(
                 task: task,
                 index: index,
                 workspaceRootURL: workspaceRootURL,
@@ -70,12 +70,15 @@ enum ContextCommand {
                 limit: limit,
                 snippetCount: snippetCount
             )
+            let brief = resolution.brief
             if let runID {
                 try? RunStateStore().recordPlan(runID: runID, workspaceRootURL: workspaceRootURL, task: task, brief: brief)
             }
             print("task: \(brief.task)")
             print("summary: \(brief.summary)")
             print("results: \(brief.rankedResults.count)")
+            print("context_package: \(resolution.package.id.uuidString)")
+            print("reused_package: \(resolution.reused ? "yes" : "no")")
             if let runSummary = brief.runSummary {
                 print("run_summary: \(runSummary.summary)")
             }

@@ -964,17 +964,20 @@ struct TUIApplication {
 
     private func contextPlanLines(task: String, workspaceRootURL: URL) throws -> [String] {
         let index = try ContextStore().load(workspaceRootURL: workspaceRootURL)
-        let brief = try ContextPlanningService().makeBrief(
+        let resolution = try ContextPackageService().resolveBrief(
             task: task,
             index: index,
             workspaceRootURL: workspaceRootURL,
             limit: 4,
             snippetCount: 2
         )
+        let brief = resolution.brief
 
         var lines = [
             "task: \(brief.task)",
-            "summary: \(brief.summary)"
+            "summary: \(brief.summary)",
+            "context package: \(resolution.package.id.uuidString)",
+            "reused: \(resolution.reused ? "yes" : "no")"
         ]
 
         if brief.rankedResults.isEmpty == false {
@@ -1008,13 +1011,21 @@ struct TUIApplication {
         }
 
         guard let index = try? ContextStore().load(workspaceRootURL: workspaceRootURL),
-              let brief = try? ContextPlanningService().makeBrief(
+              let resolution = try? ContextPackageService().resolveBrief(
                 task: latestUserText,
                 index: index,
                 workspaceRootURL: workspaceRootURL,
                 limit: 4,
-                snippetCount: 2
-              ),
+                snippetCount: 2,
+                modelID: baseSession.modelID,
+                intent: intent,
+                cacheMode: baseSession.cacheMode
+              ) else {
+            return (baseSession, false)
+        }
+
+        let brief = resolution.brief
+        guard
               brief.rankedResults.isEmpty == false || brief.snippets.isEmpty == false else {
             return (baseSession, false)
         }
