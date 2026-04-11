@@ -16,9 +16,16 @@ let package = Package(
             targets: ["esh"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.1")
+    ],
     targets: [
         .target(
-            name: "EshCore"
+            name: "EshCore",
+            dependencies: [
+                .product(name: "SwiftParser", package: "swift-syntax"),
+                .product(name: "SwiftSyntax", package: "swift-syntax")
+            ]
         ),
         .executableTarget(
             name: "esh",

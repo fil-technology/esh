@@ -24,6 +24,34 @@ func swiftExtractorFindsImportsAndSymbols() {
 }
 
 @Test
+func swiftExtractorCapturesBodyAwareRanges() {
+    let source = """
+    import Foundation
+
+    struct Planner {
+        func makePlan() {
+            let steps = ["a", "b"]
+            print(steps)
+        }
+    }
+    """
+
+    let result = SymbolExtractor().extractSymbols(
+        from: source,
+        relativePath: "Sources/Planner.swift",
+        language: "swift"
+    )
+
+    let planner = result.symbols.first(where: { $0.name == "Planner" })
+    let makePlan = result.symbols.first(where: { $0.name == "Planner.makePlan" })
+
+    #expect(planner?.lineStart == 3)
+    #expect((planner?.lineEnd ?? 0) >= 7)
+    #expect(makePlan?.lineStart == 4)
+    #expect((makePlan?.lineEnd ?? 0) >= 6)
+}
+
+@Test
 func queryEngineBoostsFileAndSymbolMatches() {
     let index = ContextIndex(
         workspaceRootPath: "/tmp/demo",

@@ -1,4 +1,6 @@
 import Foundation
+import SwiftParser
+import SwiftSyntax
 
 public struct SymbolExtractionResult: Hashable, Sendable {
     public let imports: [String]
@@ -34,6 +36,10 @@ public struct SymbolExtractor: Sendable {
     }
 
     private func extractSwift(lines: [String], relativePath: String) -> SymbolExtractionResult {
+        if let parsed = swiftParserExtraction(content: lines.joined(separator: "\n"), relativePath: relativePath) {
+            return parsed
+        }
+
         let importRegex = makeRegex(#"^\s*import\s+([A-Za-z_][A-Za-z0-9_\.]*)"#)
         let symbolRegex = makeRegex(#"^\s*(?:public|internal|private|fileprivate|open)?\s*(?:final|indirect)?\s*(actor|class|struct|enum|protocol|extension|func)\s+([A-Za-z_][A-Za-z0-9_]*)"#)
         var imports: [String] = []
@@ -71,6 +77,16 @@ public struct SymbolExtractor: Sendable {
         }
 
         return SymbolExtractionResult(imports: imports, symbols: symbols)
+    }
+
+    private func swiftParserExtraction(content: String, relativePath: String) -> SymbolExtractionResult? {
+        let sourceFile = Parser.parse(source: content)
+        let visitor = SwiftSymbolVisitor(sourceFile: sourceFile, relativePath: relativePath)
+        visitor.walk(sourceFile)
+        return SymbolExtractionResult(
+            imports: visitor.imports,
+            symbols: visitor.symbols
+        )
     }
 
     private func extractPython(lines: [String], relativePath: String) -> SymbolExtractionResult {
@@ -225,5 +241,146 @@ public struct SymbolExtractor: Sendable {
             values.append(String(text[captureRange]))
         }
         return values.isEmpty ? nil : values
+    }
+}
+
+private final class SwiftSymbolVisitor: SyntaxVisitor {
+    private let converter: SourceLocationConverter
+    private let relativePath: String
+    private var containerStack: [String] = []
+
+    var imports: [String] = []
+    var symbols: [SymbolNode] = []
+
+    init(sourceFile: SourceFileSyntax, relativePath: String) {
+        self.converter = SourceLocationConverter(fileName: relativePath, tree: sourceFile)
+        self.relativePath = relativePath
+        super.init(viewMode: .sourceAccurate)
+    }
+
+    override func visit(_ node: ImportDeclSyntax) -> SyntaxVisitorContinueKind {
+        let path = node.path.map(\.name.text).joined(separator: ".")
+        if path.isEmpty == false {
+            imports.append(path)
+        }
+        return .skipChildren
+    }
+
+    override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
+        recordType(name: node.name.text, kind: "class", startNode: node, endPosition: node.memberBlock.endPositionBeforeTrailingTrivia)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: ClassDeclSyntax) {
+        popContainer(named: node.name.text)
+    }
+
+    override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
+        recordType(name: node.name.text, kind: "struct", startNode: node, endPosition: node.memberBlock.endPositionBeforeTrailingTrivia)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: StructDeclSyntax) {
+        popContainer(named: node.name.text)
+    }
+
+    override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
+        recordType(name: node.name.text, kind: "enum", startNode: node, endPosition: node.memberBlock.endPositionBeforeTrailingTrivia)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: EnumDeclSyntax) {
+        popContainer(named: node.name.text)
+    }
+
+    override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
+        recordType(name: node.name.text, kind: "protocol", startNode: node, endPosition: node.memberBlock.endPositionBeforeTrailingTrivia)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: ProtocolDeclSyntax) {
+        popContainer(named: node.name.text)
+    }
+
+    override func visit(_ node: ActorDeclSyntax) -> SyntaxVisitorContinueKind {
+        recordType(name: node.name.text, kind: "actor", startNode: node, endPosition: node.memberBlock.endPositionBeforeTrailingTrivia)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: ActorDeclSyntax) {
+        popContainer(named: node.name.text)
+    }
+
+    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        let name = node.extendedType.trimmedDescription.replacingOccurrences(of: " ", with: "")
+        recordSymbol(
+            name: name,
+            kind: "extension",
+            startNode: node,
+            endPosition: node.memberBlock.endPositionBeforeTrailingTrivia,
+            containerName: containerStack.last
+        )
+        containerStack.append(name)
+        return .visitChildren
+    }
+
+    override func visitPost(_ node: ExtensionDeclSyntax) {
+        let name = node.extendedType.trimmedDescription.replacingOccurrences(of: " ", with: "")
+        popContainer(named: name)
+    }
+
+    override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        let endPosition = node.body?.endPositionBeforeTrailingTrivia ?? node.signature.endPositionBeforeTrailingTrivia
+        recordSymbol(
+            name: qualifiedName(for: node.name.text),
+            kind: "func",
+            startNode: node,
+            endPosition: endPosition,
+            containerName: containerStack.last
+        )
+        return .skipChildren
+    }
+
+    private func recordType(name: String, kind: String, startNode: some SyntaxProtocol, endPosition: AbsolutePosition) {
+        recordSymbol(name: name, kind: kind, startNode: startNode, endPosition: endPosition, containerName: containerStack.last)
+        containerStack.append(name)
+    }
+
+    private func recordSymbol(
+        name: String,
+        kind: String,
+        startNode: some SyntaxProtocol,
+        endPosition: AbsolutePosition,
+        containerName: String?
+    ) {
+        let start = converter.location(for: startNode.positionAfterSkippingLeadingTrivia)
+        let end = converter.location(for: endPosition)
+        let startLine = start.line
+        let endLine = max(end.line, startLine)
+        symbols.append(
+            SymbolNode(
+                name: name,
+                kind: kind,
+                filePath: relativePath,
+                lineStart: startLine,
+                lineEnd: endLine,
+                containerName: containerName
+            )
+        )
+    }
+
+    private func qualifiedName(for name: String) -> String {
+        guard let container = containerStack.last else {
+            return name
+        }
+        return "\(container).\(name)"
+    }
+
+    private func popContainer(named name: String) {
+        if containerStack.last == name {
+            containerStack.removeLast()
+        } else if let index = containerStack.lastIndex(of: name) {
+            containerStack.remove(at: index)
+        }
     }
 }
