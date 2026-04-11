@@ -80,7 +80,14 @@ enum ContextCommand {
             print("context_package: \(resolution.package.id.uuidString)")
             print("reused_package: \(resolution.reused ? "yes" : "no")")
             if let runSummary = brief.runSummary {
+                print("run_status: \(runSummary.status)")
                 print("run_summary: \(runSummary.summary)")
+                if runSummary.hypotheses.isEmpty == false {
+                    print("run_hypotheses: \(runSummary.hypotheses.joined(separator: " | "))")
+                }
+                if runSummary.findings.isEmpty == false {
+                    print("run_findings: \(runSummary.findings.joined(separator: " | "))")
+                }
             }
             if brief.rankedResults.isEmpty == false {
                 print("top_files:")

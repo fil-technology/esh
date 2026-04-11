@@ -110,6 +110,9 @@ public struct RunStateStore: Sendable {
         var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
         state.discoveredFiles = mergeUnique(state.discoveredFiles, with: brief.rankedResults.map(\.filePath))
         state.discoveredSymbols = mergeUnique(state.discoveredSymbols, with: brief.rankedResults.flatMap(\.relatedSymbols))
+        if let topFile = brief.rankedResults.first?.filePath {
+            state.hypotheses = mergeUnique(state.hypotheses, with: ["Relevant area may be \(topFile) for task: \(task)"])
+        }
         state.decisions = mergeUnique(state.decisions, with: ["plan: \(task)"])
         state.pendingTasks = mergeUnique(state.pendingTasks, with: brief.suggestedNextSteps)
         state.updatedAt = Date()
@@ -121,10 +124,80 @@ public struct RunStateStore: Sendable {
                 detail: task,
                 attributes: [
                     "task": task,
+                    "top_file": brief.rankedResults.first?.filePath ?? "",
                     "result_count": String(brief.rankedResults.count),
                     "snippet_count": String(brief.snippets.count),
                     "open_question_count": String(brief.openQuestions.count)
                 ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
+    public func recordHypothesis(runID: String, workspaceRootURL: URL, text: String) throws {
+        try recordReasoningItem(
+            runID: runID,
+            workspaceRootURL: workspaceRootURL,
+            text: text,
+            kind: "run.hypothesis",
+            mutate: { state in state.hypotheses = mergeUnique(state.hypotheses, with: [text]) }
+        )
+    }
+
+    public func recordFinding(runID: String, workspaceRootURL: URL, text: String) throws {
+        try recordReasoningItem(
+            runID: runID,
+            workspaceRootURL: workspaceRootURL,
+            text: text,
+            kind: "run.finding",
+            mutate: { state in state.findings = mergeUnique(state.findings, with: [text]) }
+        )
+    }
+
+    public func recordDecision(runID: String, workspaceRootURL: URL, text: String) throws {
+        try recordReasoningItem(
+            runID: runID,
+            workspaceRootURL: workspaceRootURL,
+            text: text,
+            kind: "run.decision",
+            mutate: { state in state.decisions = mergeUnique(state.decisions, with: [text]) }
+        )
+    }
+
+    public func recordPendingTask(runID: String, workspaceRootURL: URL, text: String) throws {
+        try recordReasoningItem(
+            runID: runID,
+            workspaceRootURL: workspaceRootURL,
+            text: text,
+            kind: "run.task.pending",
+            mutate: { state in state.pendingTasks = mergeUnique(state.pendingTasks, with: [text]) }
+        )
+    }
+
+    public func recordCompletedTask(runID: String, workspaceRootURL: URL, text: String) throws {
+        try recordReasoningItem(
+            runID: runID,
+            workspaceRootURL: workspaceRootURL,
+            text: text,
+            kind: "run.task.completed",
+            mutate: { state in
+                state.pendingTasks.removeAll { $0 == text }
+                state.completedTasks = mergeUnique(state.completedTasks, with: [text])
+            }
+        )
+    }
+
+    public func updateStatus(runID: String, workspaceRootURL: URL, status: String) throws {
+        var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        state.status = status
+        state.updatedAt = Date()
+        try save(state: state)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "run.status",
+                detail: status,
+                attributes: ["status": status]
             ),
             workspaceRootURL: workspaceRootURL
         )
@@ -193,6 +266,28 @@ public struct RunStateStore: Sendable {
 
     private func shortRandomID() -> String {
         String(UUID().uuidString.prefix(8)).lowercased()
+    }
+
+    private func recordReasoningItem(
+        runID: String,
+        workspaceRootURL: URL,
+        text: String,
+        kind: String,
+        mutate: (inout RunState) -> Void
+    ) throws {
+        var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        mutate(&state)
+        state.updatedAt = Date()
+        try save(state: state)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: kind,
+                detail: text,
+                attributes: ["text": text]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
     }
 
     private func mergeUnique(_ current: [String], with values: [String]) -> [String] {

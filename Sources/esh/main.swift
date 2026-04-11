@@ -374,6 +374,7 @@ private struct CLI {
               esh context eval <fixture.json> [--limit N]
               esh run start [name]
               esh run status <id>
+              esh run note <id> [--hypothesis <text>] [--finding <text>] [--decision <text>] [--pending <text>] [--complete <text>] [--status <value>]
               esh run export <id>
               esh read symbol <name> [--run <id>]
               esh read references <name> [--limit N] [--run <id>]

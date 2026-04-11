@@ -40,7 +40,8 @@ public struct ContextPackageService: Sendable {
             intent: intent,
             cacheMode: cacheMode
         ) {
-            return ContextPackageResolution(package: reusable, brief: reusable.brief, reused: true)
+            let refreshedBrief = planner.refreshBrief(reusable.brief, runTrace: runTrace)
+            return ContextPackageResolution(package: reusable, brief: refreshedBrief, reused: true)
         }
 
         let brief = try planner.makeBrief(

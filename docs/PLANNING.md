@@ -41,6 +41,10 @@ These are the context improvements that are still not finished after the recent 
 - Phase 4 additive synthesis
   - synthesized `run status` summaries
   - inferred open questions and next-step hints
+- Phase 4 additive reasoning state
+  - explicit run hypotheses, findings, pending tasks, completion tracking, and status updates
+  - reusable machine-readable transitions in run synthesis
+  - fresh run-aware summaries even when context packages are reused
 - Phase 6 foundation
   - fixture-based `context eval` retrieval harness
   - repo fixture coverage in `Tests/Fixtures/context-eval.json`
@@ -80,12 +84,12 @@ These are the context improvements that are still not finished after the recent 
 
 4. Shared run-state synthesis
    Why unfinished:
-   run state now exposes a synthesized summary, but it still lacks richer reasoning primitives.
+   run state now captures richer reasoning state, but longer-run synthesis is still lightweight.
 
    What remains:
-   - track explicit hypotheses, resolved findings, and task completion transitions
    - preserve higher-level summaries across longer runs
-   - turn synthesis into reusable machine-readable planning state
+   - connect reasoning state more directly to future tool-loop safeguards
+   - add stronger compaction for long multi-step investigations
 
 5. Cache-aware context packaging
    Why unfinished:

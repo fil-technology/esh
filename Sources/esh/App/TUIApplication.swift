@@ -980,6 +980,16 @@ struct TUIApplication {
             "reused: \(resolution.reused ? "yes" : "no")"
         ]
 
+        if let runSummary = brief.runSummary {
+            lines.append("run status: \(runSummary.status)")
+            if runSummary.hypotheses.isEmpty == false {
+                lines.append("hypotheses: \(runSummary.hypotheses.prefix(2).joined(separator: " | "))")
+            }
+            if runSummary.findings.isEmpty == false {
+                lines.append("findings: \(runSummary.findings.prefix(2).joined(separator: " | "))")
+            }
+        }
+
         if brief.rankedResults.isEmpty == false {
             lines.append("top files:")
             lines.append(contentsOf: brief.rankedResults.prefix(4).map {

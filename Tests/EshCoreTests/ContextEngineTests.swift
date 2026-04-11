@@ -342,6 +342,35 @@ func runStateStorePersistsEvents() throws {
 }
 
 @Test
+func runStateStorePersistsReasoningNotesAndStatus() throws {
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+    let store = RunStateStore(root: PersistenceRoot(rootURL: rootURL))
+    let state = try store.createRun(workspaceRootURL: workspaceURL, name: "notes")
+
+    try store.recordHypothesis(runID: state.runID, workspaceRootURL: workspaceURL, text: "The issue may be in ContentView")
+    try store.recordFinding(runID: state.runID, workspaceRootURL: workspaceURL, text: "The add button lives in ContentView")
+    try store.recordPendingTask(runID: state.runID, workspaceRootURL: workspaceURL, text: "Inspect ViewModel.add")
+    try store.recordCompletedTask(runID: state.runID, workspaceRootURL: workspaceURL, text: "Inspect ViewModel.add")
+    try store.updateStatus(runID: state.runID, workspaceRootURL: workspaceURL, status: "completed")
+
+    let loaded = try store.load(runID: state.runID, workspaceRootURL: workspaceURL)
+    let events = try store.loadEvents(runID: state.runID, workspaceRootURL: workspaceURL)
+
+    #expect(loaded.hypotheses.contains("The issue may be in ContentView"))
+    #expect(loaded.findings.contains("The add button lives in ContentView"))
+    #expect(loaded.pendingTasks.contains("Inspect ViewModel.add") == false)
+    #expect(loaded.completedTasks.contains("Inspect ViewModel.add"))
+    #expect(loaded.status == "completed")
+    #expect(events.contains(where: { $0.kind == "run.hypothesis" }))
+    #expect(events.contains(where: { $0.kind == "run.finding" }))
+    #expect(events.contains(where: { $0.kind == "run.task.completed" }))
+    #expect(events.contains(where: { $0.kind == "run.status" }))
+}
+
+@Test
 func runStateStoreExportsTrace() throws {
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
     let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
@@ -397,21 +426,30 @@ func runStateSynthesizerProducesSummaryAndNextStepHints() throws {
     let state = RunState(
         runID: "demo",
         workspaceRootPath: "/tmp/demo",
+        status: "in_progress",
         discoveredFiles: ["Sources/Auth.swift"],
         discoveredSymbols: ["AuthManager.refresh"],
+        hypotheses: ["Refresh likely starts in AuthManager"],
+        findings: ["AuthManager.refresh was already inspected"],
         decisions: ["plan: refresh auth"],
         pendingTasks: []
     )
     let events = [
         RunEvent(runID: "demo", kind: "context.query", detail: "refresh auth", attributes: ["result_count": "1", "top_file": "Sources/Auth.swift"]),
-        RunEvent(runID: "demo", kind: "read.symbol", detail: "AuthManager.refresh", attributes: ["symbol": "AuthManager.refresh", "file": "Sources/Auth.swift"])
+        RunEvent(runID: "demo", kind: "read.symbol", detail: "AuthManager.refresh", attributes: ["symbol": "AuthManager.refresh", "file": "Sources/Auth.swift"]),
+        RunEvent(runID: "demo", kind: "run.task.pending", detail: "Patch refresh flow"),
+        RunEvent(runID: "demo", kind: "run.status", detail: "in_progress", attributes: ["status": "in_progress"])
     ]
 
     let synthesis = RunStateSynthesizer().synthesize(state: state, events: events)
 
-    #expect(synthesis.summary.contains("covered 1 file"))
+    #expect(synthesis.status == "in_progress")
+    #expect(synthesis.summary.contains("in_progress run"))
     #expect(synthesis.discoveries.contains("file: Sources/Auth.swift"))
+    #expect(synthesis.hypotheses.contains("Refresh likely starts in AuthManager"))
+    #expect(synthesis.findings.contains("AuthManager.refresh was already inspected"))
     #expect(synthesis.suggestedNextSteps.contains(where: { $0.contains("Sources/Auth.swift") }))
+    #expect(synthesis.transitions.contains(where: { $0.phase == "pending" && $0.detail == "Patch refresh flow" }))
 }
 
 @Test
@@ -487,6 +525,65 @@ func contextPackageServiceReusesValidPackages() throws {
     #expect(first.reused == false)
     #expect(second.reused == true)
     #expect(first.package.id == second.package.id)
+}
+
+@Test
+func contextPackageReuseRefreshesRunAwareSummary() throws {
+    let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    let sourceURL = workspaceURL.appendingPathComponent("Sources/Auth/TokenManager.swift")
+    try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try """
+    struct TokenManager {
+        func refreshIfNeeded() {
+            print("refresh")
+        }
+    }
+    """.write(to: sourceURL, atomically: true, encoding: .utf8)
+
+    let index = try ContextIndexer().buildIndex(workspaceRootURL: workspaceURL)
+    let service = ContextPackageService(store: FileContextPackageStore(root: PersistenceRoot(rootURL: rootURL)))
+    let initialTrace = RunTrace(
+        state: RunState(runID: "demo", workspaceRootPath: workspaceURL.path),
+        events: [RunEvent(runID: "demo", kind: "run.created", detail: workspaceURL.path)]
+    )
+    let refreshedTrace = RunTrace(
+        state: RunState(
+            runID: "demo",
+            workspaceRootPath: workspaceURL.path,
+            hypotheses: ["Token refresh likely starts in TokenManager"],
+            findings: ["TokenManager.refreshIfNeeded was already inspected"],
+            pendingTasks: ["Patch refresh flow"]
+        ),
+        events: [
+            RunEvent(runID: "demo", kind: "run.created", detail: workspaceURL.path),
+            RunEvent(runID: "demo", kind: "run.status", detail: "in_progress", attributes: ["status": "in_progress"])
+        ]
+    )
+
+    let first = try service.resolveBrief(
+        task: "refresh auth token",
+        index: index,
+        workspaceRootURL: workspaceURL,
+        runTrace: initialTrace,
+        limit: 3,
+        snippetCount: 2
+    )
+    let second = try service.resolveBrief(
+        task: "refresh auth token",
+        index: index,
+        workspaceRootURL: workspaceURL,
+        runTrace: refreshedTrace,
+        limit: 3,
+        snippetCount: 2
+    )
+
+    #expect(first.reused == false)
+    #expect(second.reused == true)
+    #expect(second.brief.runSummary?.status == "in_progress")
+    #expect(second.brief.runSummary?.hypotheses.contains("Token refresh likely starts in TokenManager") == true)
+    #expect(second.brief.runSummary?.findings.contains("TokenManager.refreshIfNeeded was already inspected") == true)
 }
 
 @Test

@@ -79,6 +79,29 @@ public struct ContextPlanningService: Sendable {
             )
         }
 
+        return buildBrief(
+            task: task,
+            rankedResults: rankedResults,
+            snippets: snippets,
+            runTrace: runTrace
+        )
+    }
+
+    public func refreshBrief(_ brief: ContextPlanningBrief, runTrace: RunTrace?) -> ContextPlanningBrief {
+        buildBrief(
+            task: brief.task,
+            rankedResults: brief.rankedResults,
+            snippets: brief.snippets,
+            runTrace: runTrace
+        )
+    }
+
+    private func buildBrief(
+        task: String,
+        rankedResults: [RankedContextResult],
+        snippets: [ContextSnippet],
+        runTrace: RunTrace?
+    ) -> ContextPlanningBrief {
         let runSummary = runTrace.map { synthesizer.synthesize(trace: $0) }
         let openQuestions = mergeUnique(
             rankedResults.isEmpty ? ["No ranked context matched the task yet. Rebuild the index or broaden the query."] : [],
@@ -119,8 +142,15 @@ public struct ContextPlanningService: Sendable {
 
         if let runSummary = brief.runSummary {
             lines.append("Previous run summary: \(runSummary.summary)")
+            lines.append("Run status: \(runSummary.status)")
             if runSummary.discoveries.isEmpty == false {
                 lines.append("Already learned: \(runSummary.discoveries.prefix(3).joined(separator: "; "))")
+            }
+            if runSummary.hypotheses.isEmpty == false {
+                lines.append("Working hypotheses: \(runSummary.hypotheses.prefix(2).joined(separator: " | "))")
+            }
+            if runSummary.findings.isEmpty == false {
+                lines.append("Findings so far: \(runSummary.findings.prefix(2).joined(separator: " | "))")
             }
         }
 
