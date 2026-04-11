@@ -30,6 +30,14 @@ public struct SymbolExtractor: Sendable {
             return extractJavaScript(lines: lines, relativePath: relativePath)
         case "rust":
             return extractRust(lines: lines, relativePath: relativePath)
+        case "html":
+            return extractHTML(lines: lines, relativePath: relativePath)
+        case "css":
+            return extractCSS(lines: lines, relativePath: relativePath)
+        case "json":
+            return extractJSON(lines: lines, relativePath: relativePath)
+        case "markdown":
+            return extractMarkdown(lines: lines, relativePath: relativePath)
         default:
             return SymbolExtractionResult(imports: [], symbols: [])
         }
@@ -159,6 +167,101 @@ public struct SymbolExtractor: Sendable {
         return SymbolExtractionResult(imports: imports, symbols: symbols)
     }
 
+    private func extractHTML(lines: [String], relativePath: String) -> SymbolExtractionResult {
+        let assetRegex = makeRegex(#"(?:src|href)=["']([^"']+)["']"#)
+        let idRegex = makeRegex(#"id=["']([^"']+)["']"#)
+        let classRegex = makeRegex(#"class=["']([^"']+)["']"#)
+        let headingRegex = makeRegex(#"<(h[1-6])[^>]*>([^<]+)</h[1-6]>"#)
+        let titleRegex = makeRegex(#"<title[^>]*>([^<]+)</title>"#)
+        var imports: [String] = []
+        var symbols: [SymbolNode] = []
+
+        for (index, line) in lines.enumerated() {
+            if let match = firstCapture(in: line, regex: assetRegex) {
+                imports.append(match)
+            }
+            if let title = firstCapture(in: line, regex: titleRegex) {
+                symbols.append(SymbolNode(name: "title.\(normalizeSymbol(title))", kind: "title", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+            }
+            if let captures = captures(in: line, regex: headingRegex), captures.count >= 2 {
+                symbols.append(SymbolNode(name: "\(captures[0]).\(normalizeSymbol(captures[1]))", kind: captures[0], filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+            }
+            if let identifier = firstCapture(in: line, regex: idRegex) {
+                symbols.append(SymbolNode(name: "#\(identifier)", kind: "id", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+            }
+            if let classList = firstCapture(in: line, regex: classRegex) {
+                for name in classList.split(whereSeparator: \.isWhitespace).map(String.init) where name.isEmpty == false {
+                    symbols.append(SymbolNode(name: ".\(name)", kind: "class", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+                }
+            }
+        }
+
+        return SymbolExtractionResult(imports: unique(imports), symbols: unique(symbols))
+    }
+
+    private func extractCSS(lines: [String], relativePath: String) -> SymbolExtractionResult {
+        let importRegex = makeRegex(#"@import\s+(?:url\()?["']?([^"')]+)["']?\)?"#)
+        let selectorRegex = makeRegex(#"^\s*([^{]+)\{"#)
+        var imports: [String] = []
+        var symbols: [SymbolNode] = []
+
+        for (index, line) in lines.enumerated() {
+            if let match = firstCapture(in: line, regex: importRegex) {
+                imports.append(match)
+            }
+            if let selector = firstCapture(in: line, regex: selectorRegex) {
+                let cleaned = selector
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { $0.isEmpty == false }
+                for item in cleaned {
+                    symbols.append(SymbolNode(name: item, kind: "selector", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+                }
+            }
+        }
+
+        return SymbolExtractionResult(imports: unique(imports), symbols: unique(symbols))
+    }
+
+    private func extractJSON(lines: [String], relativePath: String) -> SymbolExtractionResult {
+        let keyRegex = makeRegex(#""([^"]+)"\s*:"#)
+        var symbols: [SymbolNode] = []
+
+        for (index, line) in lines.enumerated() {
+            let range = NSRange(line.startIndex..., in: line)
+            let matches = keyRegex.matches(in: line, options: [], range: range)
+            for match in matches {
+                guard match.numberOfRanges > 1,
+                      let captureRange = Range(match.range(at: 1), in: line) else {
+                    continue
+                }
+                let key = String(line[captureRange])
+                symbols.append(SymbolNode(name: key, kind: "key", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+            }
+        }
+
+        return SymbolExtractionResult(imports: [], symbols: unique(symbols))
+    }
+
+    private func extractMarkdown(lines: [String], relativePath: String) -> SymbolExtractionResult {
+        let linkRegex = makeRegex(#"\[[^\]]+\]\(([^)]+)\)"#)
+        let headingRegex = makeRegex(#"^(#+)\s+(.+)$"#)
+        var imports: [String] = []
+        var symbols: [SymbolNode] = []
+
+        for (index, line) in lines.enumerated() {
+            if let captures = captures(in: line, regex: headingRegex), captures.count >= 2 {
+                let level = captures[0].count
+                symbols.append(SymbolNode(name: "h\(level).\(normalizeSymbol(captures[1]))", kind: "heading", filePath: relativePath, lineStart: index + 1, lineEnd: index + 1, containerName: nil))
+            }
+            if let match = firstCapture(in: line, regex: linkRegex) {
+                imports.append(match)
+            }
+        }
+
+        return SymbolExtractionResult(imports: unique(imports), symbols: unique(symbols))
+    }
+
     private func symbolKind(for line: String) -> String {
         for keyword in ["actor", "class", "struct", "enum", "protocol", "extension", "func", "trait", "mod", "impl"] {
             if line.contains(keyword) {
@@ -241,6 +344,25 @@ public struct SymbolExtractor: Sendable {
             values.append(String(text[captureRange]))
         }
         return values.isEmpty ? nil : values
+    }
+
+    private func normalizeSymbol(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "&amp;", with: "and")
+            .replacingOccurrences(of: "&", with: "and")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.isEmpty == false }
+            .joined(separator: "-")
+    }
+
+    private func unique(_ values: [String]) -> [String] {
+        Array(NSOrderedSet(array: values)) as? [String] ?? values
+    }
+
+    private func unique(_ values: [SymbolNode]) -> [SymbolNode] {
+        Array(NSOrderedSet(array: values)) as? [SymbolNode] ?? values
     }
 }
 

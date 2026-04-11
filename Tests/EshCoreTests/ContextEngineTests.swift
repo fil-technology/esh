@@ -52,6 +52,96 @@ func swiftExtractorCapturesBodyAwareRanges() {
 }
 
 @Test
+func extractorSupportsWebAndContentFiles() {
+    let html = """
+    <html>
+      <head><title>Omnifood Landing</title></head>
+      <body>
+        <section id="contact" class="section hero">
+          <h2>Business Address</h2>
+          <a href="/contact.html">Contact</a>
+        </section>
+      </body>
+    </html>
+    """
+    let css = """
+    @import "base.css";
+    .section-hero {
+      color: red;
+    }
+    #contact {
+      padding: 1rem;
+    }
+    """
+    let json = """
+    {
+      "name": "omnifood",
+      "address": "Jerusalem"
+    }
+    """
+    let markdown = """
+    # Getting Started
+
+    See [contact page](./contact.md)
+    """
+
+    let extractor = SymbolExtractor()
+    let htmlResult = extractor.extractSymbols(from: html, relativePath: "index.html", language: "html")
+    let cssResult = extractor.extractSymbols(from: css, relativePath: "styles.css", language: "css")
+    let jsonResult = extractor.extractSymbols(from: json, relativePath: "site.json", language: "json")
+    let markdownResult = extractor.extractSymbols(from: markdown, relativePath: "README.md", language: "markdown")
+
+    #expect(htmlResult.symbols.contains(where: { $0.name == "#contact" && $0.kind == "id" }))
+    #expect(htmlResult.symbols.contains(where: { $0.name == ".hero" && $0.kind == "class" }))
+    #expect(htmlResult.symbols.contains(where: { $0.name.contains("business-address") }))
+    #expect(htmlResult.imports.contains("/contact.html"))
+
+    #expect(cssResult.symbols.contains(where: { $0.name == ".section-hero" && $0.kind == "selector" }))
+    #expect(cssResult.symbols.contains(where: { $0.name == "#contact" && $0.kind == "selector" }))
+    #expect(cssResult.imports.contains("base.css"))
+
+    #expect(jsonResult.symbols.contains(where: { $0.name == "name" && $0.kind == "key" }))
+    #expect(jsonResult.symbols.contains(where: { $0.name == "address" && $0.kind == "key" }))
+
+    #expect(markdownResult.symbols.contains(where: { $0.name == "h1.getting-started" && $0.kind == "heading" }))
+    #expect(markdownResult.imports.contains("./contact.md"))
+}
+
+@Test
+func indexerIncludesWebsiteFiles() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try """
+    <footer class="footer">
+      <p>Business Address</p>
+    </footer>
+    """.write(to: directory.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+    try """
+    .footer { color: red; }
+    """.write(to: directory.appendingPathComponent("styles.css"), atomically: true, encoding: .utf8)
+    try """
+    { "address": "Jerusalem" }
+    """.write(to: directory.appendingPathComponent("site.json"), atomically: true, encoding: .utf8)
+    try """
+    # Contact
+    Business address details.
+    """.write(to: directory.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+    let index = try ContextIndexer().buildIndex(workspaceRootURL: directory)
+
+    #expect(index.files.count == 4)
+    #expect(index.files.contains(where: { $0.path == "index.html" && $0.language == "html" }))
+    #expect(index.files.contains(where: { $0.path == "styles.css" && $0.language == "css" }))
+    #expect(index.files.contains(where: { $0.path == "site.json" && $0.language == "json" }))
+    #expect(index.files.contains(where: { $0.path == "README.md" && $0.language == "markdown" }))
+    #expect(index.symbols.contains(where: { $0.filePath == "index.html" }))
+    #expect(index.symbols.contains(where: { $0.filePath == "styles.css" }))
+    #expect(index.symbols.contains(where: { $0.filePath == "site.json" }))
+    #expect(index.symbols.contains(where: { $0.filePath == "README.md" }))
+}
+
+@Test
 func queryEngineBoostsFileAndSymbolMatches() {
     let index = ContextIndex(
         workspaceRootPath: "/tmp/demo",

@@ -113,6 +113,10 @@ public struct ContextIndexer: Sendable {
             file.path.hasSuffix("\(normalized).ts") ||
             file.path.hasSuffix("\(normalized).js") ||
             file.path.hasSuffix("\(normalized).rs") ||
+            file.path.hasSuffix("\(normalized).html") ||
+            file.path.hasSuffix("\(normalized).css") ||
+            file.path.hasSuffix("\(normalized).json") ||
+            file.path.hasSuffix("\(normalized).md") ||
             file.path.contains(normalized)
         }?.path
     }
@@ -129,6 +133,14 @@ public struct ContextIndexer: Sendable {
             return "typescript"
         case "rs":
             return "rust"
+        case "html", "htm":
+            return "html"
+        case "css":
+            return "css"
+        case "json":
+            return "json"
+        case "md", "markdown":
+            return "markdown"
         default:
             return nil
         }
