@@ -6,6 +6,7 @@ import Testing
 struct HuggingFaceModelCatalogTests {
     @Test
     func searchIncludesGGUFAndDoesNotForceMLXAppFilter() async throws {
+        TestHFURLProtocol.requestsHandled = 0
         TestHFURLProtocol.handler = { request in
             let url = try #require(request.url)
             #expect(url.absoluteString.contains("search=qwen"))
@@ -48,6 +49,51 @@ struct HuggingFaceModelCatalogTests {
         #expect(results.contains { $0.id == "mlx-community/Qwen2.5-7B-Instruct-4bit" && $0.backend == .mlx })
     }
 
+    @Test
+    func searchRetriesTransientServerFailure() async throws {
+        TestHFURLProtocol.requestsHandled = 0
+        TestHFURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            TestHFURLProtocol.requestsHandled += 1
+
+            if TestHFURLProtocol.requestsHandled == 1 {
+                return (
+                    HTTPURLResponse(url: url, statusCode: 503, httpVersion: nil, headerFields: nil)!,
+                    Data()
+                )
+            }
+
+            let payload = """
+            [
+              {
+                "id": "mlx-community/Qwen2.5-7B-Instruct-4bit",
+                "pipelineTag": "text-generation",
+                "tags": ["mlx"],
+                "downloads": 456,
+                "siblings": [
+                  { "rfilename": "model.safetensors", "size": 1000 },
+                  { "rfilename": "config.json", "size": 100 }
+                ]
+              }
+            ]
+            """
+            return (
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                Data(payload.utf8)
+            )
+        }
+
+        let catalog = HuggingFaceModelCatalog(
+            session: makeSession(),
+            retryPolicy: .init(requestTimeout: 5, maxAttempts: 2, baseDelayMilliseconds: 1)
+        )
+
+        let results = try await catalog.search(query: "qwen", limit: 10)
+
+        #expect(results.count == 1)
+        #expect(TestHFURLProtocol.requestsHandled == 2)
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TestHFURLProtocol.self]
@@ -56,6 +102,7 @@ struct HuggingFaceModelCatalogTests {
 }
 
 private final class TestHFURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestsHandled = 0
     nonisolated(unsafe) static var handler: @Sendable (URLRequest) throws -> (HTTPURLResponse, Data) = { _ in
         throw URLError(.badServerResponse)
     }

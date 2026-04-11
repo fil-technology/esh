@@ -10,7 +10,7 @@ public struct ModelInstallPreflightService: Sendable {
     ) {
         self.session = session
         self.modelCheckService = modelCheckService ?? ModelCheckService(
-            metadataInspector: ModelMetadataInspector(session: session)
+            metadataInspector: ModelMetadataInspector(session: session, retryPolicy: .default)
         )
     }
 

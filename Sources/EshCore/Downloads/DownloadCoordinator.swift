@@ -24,9 +24,14 @@ public struct DownloadPlan: Sendable {
 
 public struct DownloadCoordinator: Sendable {
     private let session: URLSession
+    private let retryPolicy: NetworkRetryPolicy
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        retryPolicy: NetworkRetryPolicy = .default
+    ) {
         self.session = session
+        self.retryPolicy = retryPolicy
     }
 
     public func download(
@@ -153,7 +158,11 @@ public struct DownloadCoordinator: Sendable {
                 file: file.path,
                 resumeFrom: resumedBytes
             )
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await NetworkRequestExecutor.bytes(
+                session: session,
+                request: request,
+                retryPolicy: retryPolicy
+            )
             try validate(response: response, file: file.path, resumeFrom: resumedBytes)
             currentFileTotalBytes = inferCurrentFileTotalBytes(
                 fallback: currentFileTotalBytes,
@@ -190,7 +199,11 @@ public struct DownloadCoordinator: Sendable {
                 file: file.path,
                 resumeFrom: 0
             )
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await NetworkRequestExecutor.bytes(
+                session: session,
+                request: request,
+                retryPolicy: retryPolicy
+            )
             try validate(response: response, file: file.path, resumeFrom: 0)
             currentFileTotalBytes = inferCurrentFileTotalBytes(
                 fallback: currentFileTotalBytes,
