@@ -370,6 +370,8 @@ private struct CLI {
               esh context build
               esh context status
               esh context query <text> [--limit N] [--run <id>]
+              esh context plan <task> [--limit N] [--snippets N] [--run <id>]
+              esh context eval <fixture.json> [--limit N]
               esh run start [name]
               esh run status <id>
               esh run export <id>

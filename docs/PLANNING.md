@@ -32,6 +32,15 @@ These are the context improvements that are still not finished after the recent 
   - `run start`
   - `run status`
   - `--run` logging from query and read commands
+- Phase 3 additive planner integration
+  - `context plan`
+  - in-chat `/plan`
+  - automatic local context briefs for `code`, `documentqa`, and `agentrun` chats
+- Phase 4 additive synthesis
+  - synthesized `run status` summaries
+  - inferred open questions and next-step hints
+- Phase 6 foundation
+  - fixture-based `context eval` retrieval harness
 
 ### Still Unfinished
 
@@ -55,21 +64,21 @@ These are the context improvements that are still not finished after the recent 
 
 3. Planner integration
    Why unfinished:
-   context tools exist, but the planning flow does not automatically use them.
+   the planning flow now has a local brief layer, but it is still lightweight and heuristic.
 
    What remains:
-   - use ranked context during planning by default
-   - inject surgical reads into task execution automatically
-   - convert run-state discoveries into next-step suggestions
+   - expand from brief generation into richer multi-step planning
+   - learn when to skip or widen context automatically
+   - connect planning outputs to future tool-loop execution safeguards
 
 4. Shared run-state synthesis
    Why unfinished:
-   run state is currently a ledger, not a reasoning layer.
+   run state now exposes a synthesized summary, but it still lacks richer reasoning primitives.
 
    What remains:
-   - summarize discoveries and decisions across a run
-   - track open questions, hypotheses, and resolved findings
-   - expose higher-level "what we already learned" outputs
+   - track explicit hypotheses, resolved findings, and task completion transitions
+   - preserve higher-level summaries across longer runs
+   - turn synthesis into reusable machine-readable planning state
 
 5. Cache-aware context packaging
    Why unfinished:
@@ -82,11 +91,11 @@ These are the context improvements that are still not finished after the recent 
 
 6. Retrieval evaluation harness
    Why unfinished:
-   there is no formal measurement loop for context quality yet.
+   the repo now has a fixture-based harness, but coverage is still small.
 
    What remains:
-   - benchmark query relevance and read usefulness across real repo tasks
-   - compare ranking changes with repeatable fixtures
+   - expand fixtures across real repo tasks
+   - compare ranking changes with larger repeatable suites
    - measure token savings versus answer quality
 
 7. Optional semantic retrieval layer

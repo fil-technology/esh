@@ -220,6 +220,9 @@ struct TUIApplication {
         let surface = TerminalSurface()
         var state = AppState(sessionName: sessionName)
         let root = PersistenceRoot.default()
+        let workspaceRootURL = WorkspaceContextLocator().workspaceRootURL(
+            from: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        )
         let modelStore = FileModelStore(root: root)
         let cacheStore = FileCacheStore(root: root)
         var session = try loadOrCreateSession(
@@ -277,6 +280,7 @@ struct TUIApplication {
                 backendRegistry: backendRegistry,
                 modelService: modelService,
                 cacheStore: cacheStore,
+                workspaceRootURL: workspaceRootURL,
                 surface: surface
             )
             if commandOutcome == .handled {
@@ -291,11 +295,16 @@ struct TUIApplication {
             session.messages.append(Message(role: .user, text: trimmed))
             session.updatedAt = Date()
             state.transcriptItems.append(TranscriptItem(role: .user, text: trimmed))
-            state.statusText = runtime.backend == .gguf
-                ? "loading GGUF model / waiting for first token…"
-                : "streaming…"
+            let preparedSession = enrichedSessionIfNeeded(
+                baseSession: session,
+                latestUserText: trimmed,
+                workspaceRootURL: workspaceRootURL
+            )
+            state.statusText = preparedSession.usedContextBrief
+                ? "planning with local context…"
+                : (runtime.backend == .gguf ? "loading GGUF model / waiting for first token…" : "streaming…")
             state.inputText = ""
-            let stream = chatService.streamReply(runtime: runtime, session: session)
+            let stream = chatService.streamReply(runtime: runtime, session: preparedSession.session)
             let pump = StreamPump()
             pump.start(stream: stream)
             let assistantID = UUID()
@@ -392,6 +401,7 @@ struct TUIApplication {
         backendRegistry: InferenceBackendRegistry,
         modelService: ModelService,
         cacheStore: CacheStore,
+        workspaceRootURL: URL,
         surface: TerminalSurface
     ) async -> CommandOutcome {
         guard command.hasPrefix("/") else { return .notHandled }
@@ -492,6 +502,21 @@ struct TUIApplication {
             return .handled
         }
 
+        if command.hasPrefix("/plan ") {
+            let task = String(command.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let lines = try contextPlanLines(task: task, workspaceRootURL: workspaceRootURL)
+                state.overlay = OverlayPanelState(title: "Context Plan", lines: lines)
+                state.statusText = "context plan ready"
+            } catch {
+                state.overlay = OverlayPanelState(title: "Context Plan", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "context plan failed"
+            }
+            state.inputText = ""
+            surface.render(state: state)
+            return .handled
+        }
+
         switch command {
         case "/menu", "/help":
             state.overlay = OverlayPanelState(
@@ -514,6 +539,7 @@ struct TUIApplication {
                     "/sessions       Show saved chat sessions",
                     "/caches         Show saved cache artifacts",
                     "/search <text>  Search the active session",
+                    "/plan <task>    Build a local context brief",
                     "/model open <id-or-alias>",
                     "/model inspect <id>",
                     "/session show <uuid>",
@@ -934,6 +960,74 @@ struct TUIApplication {
             state.overlay = OverlayPanelState(title: "Cache Details", lines: ["Error: \(error.localizedDescription)"])
             state.statusText = "cache inspect failed"
         }
+    }
+
+    private func contextPlanLines(task: String, workspaceRootURL: URL) throws -> [String] {
+        let index = try ContextStore().load(workspaceRootURL: workspaceRootURL)
+        let brief = try ContextPlanningService().makeBrief(
+            task: task,
+            index: index,
+            workspaceRootURL: workspaceRootURL,
+            limit: 4,
+            snippetCount: 2
+        )
+
+        var lines = [
+            "task: \(brief.task)",
+            "summary: \(brief.summary)"
+        ]
+
+        if brief.rankedResults.isEmpty == false {
+            lines.append("top files:")
+            lines.append(contentsOf: brief.rankedResults.prefix(4).map {
+                "\($0.filePath) [\(String(format: "%.1f", $0.score))] \($0.reasons.prefix(2).joined(separator: ", "))"
+            })
+        }
+
+        if brief.openQuestions.isEmpty == false {
+            lines.append("open questions:")
+            lines.append(contentsOf: brief.openQuestions.prefix(3))
+        }
+
+        if brief.suggestedNextSteps.isEmpty == false {
+            lines.append("next steps:")
+            lines.append(contentsOf: brief.suggestedNextSteps.prefix(4))
+        }
+
+        return lines
+    }
+
+    private func enrichedSessionIfNeeded(
+        baseSession: ChatSession,
+        latestUserText: String,
+        workspaceRootURL: URL
+    ) -> (session: ChatSession, usedContextBrief: Bool) {
+        guard let intent = baseSession.intent,
+              [.code, .documentQA, .agentRun].contains(intent) else {
+            return (baseSession, false)
+        }
+
+        guard let index = try? ContextStore().load(workspaceRootURL: workspaceRootURL),
+              let brief = try? ContextPlanningService().makeBrief(
+                task: latestUserText,
+                index: index,
+                workspaceRootURL: workspaceRootURL,
+                limit: 4,
+                snippetCount: 2
+              ),
+              brief.rankedResults.isEmpty == false || brief.snippets.isEmpty == false else {
+            return (baseSession, false)
+        }
+
+        var session = baseSession
+        guard let lastIndex = session.messages.indices.last else {
+            return (baseSession, false)
+        }
+        session.messages[lastIndex].text = ContextPlanningService().augmentedPrompt(
+            userPrompt: latestUserText,
+            brief: brief
+        )
+        return (session, true)
     }
 
     private func updateStreamingAssistant(

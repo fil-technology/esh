@@ -134,3 +134,86 @@ func runStateStoreExportsTrace() throws {
     #expect(trace.state.runID == state.runID)
     #expect(trace.events.contains(where: { $0.kind == "read.file" && $0.attributes?["file"] == "Sources/Demo.swift" }))
 }
+
+@Test
+func planningServiceBuildsBriefWithSnippetsAndSuggestions() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .resolvingSymlinksInPath()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let sourceURL = directory.appendingPathComponent("Sources/Auth/TokenManager.swift")
+    try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try """
+    struct TokenManager {
+        func refreshIfNeeded() {
+            print("refresh")
+        }
+    }
+    """.write(to: sourceURL, atomically: true, encoding: .utf8)
+
+    let index = try ContextIndexer().buildIndex(workspaceRootURL: directory)
+    let brief = try ContextPlanningService().makeBrief(
+        task: "refresh auth token",
+        index: index,
+        workspaceRootURL: directory,
+        limit: 3,
+        snippetCount: 2
+    )
+
+    #expect(brief.rankedResults.first?.filePath.hasSuffix("TokenManager.swift") == true)
+    #expect(brief.snippets.isEmpty == false)
+    #expect(brief.suggestedNextSteps.isEmpty == false)
+}
+
+@Test
+func runStateSynthesizerProducesSummaryAndNextStepHints() throws {
+    let state = RunState(
+        runID: "demo",
+        workspaceRootPath: "/tmp/demo",
+        discoveredFiles: ["Sources/Auth.swift"],
+        discoveredSymbols: ["AuthManager.refresh"],
+        decisions: ["plan: refresh auth"],
+        pendingTasks: []
+    )
+    let events = [
+        RunEvent(runID: "demo", kind: "context.query", detail: "refresh auth", attributes: ["result_count": "1", "top_file": "Sources/Auth.swift"]),
+        RunEvent(runID: "demo", kind: "read.symbol", detail: "AuthManager.refresh", attributes: ["symbol": "AuthManager.refresh", "file": "Sources/Auth.swift"])
+    ]
+
+    let synthesis = RunStateSynthesizer().synthesize(state: state, events: events)
+
+    #expect(synthesis.summary.contains("covered 1 file"))
+    #expect(synthesis.discoveries.contains("file: Sources/Auth.swift"))
+    #expect(synthesis.suggestedNextSteps.contains(where: { $0.contains("Sources/Auth.swift") }))
+}
+
+@Test
+func evaluationHarnessComputesRetrievalMetrics() {
+    let index = ContextIndex(
+        workspaceRootPath: "/tmp/demo",
+        builtAt: Date(),
+        files: [
+            FileNode(path: "Sources/Auth/TokenManager.swift", language: "swift", imports: [], definedSymbols: ["TokenManager", "TokenManager.refreshIfNeeded"], lastModifiedAt: Date(), contentHash: "a"),
+            FileNode(path: "Sources/UI/HeaderBarView.swift", language: "swift", imports: [], definedSymbols: ["HeaderBarView"], lastModifiedAt: Date(), contentHash: "b")
+        ],
+        symbols: [
+            SymbolNode(name: "TokenManager", kind: "class", filePath: "Sources/Auth/TokenManager.swift", lineStart: 1, lineEnd: 20, containerName: nil),
+            SymbolNode(name: "TokenManager.refreshIfNeeded", kind: "func", filePath: "Sources/Auth/TokenManager.swift", lineStart: 10, lineEnd: 18, containerName: "TokenManager"),
+            SymbolNode(name: "HeaderBarView", kind: "struct", filePath: "Sources/UI/HeaderBarView.swift", lineStart: 1, lineEnd: 20, containerName: nil)
+        ],
+        edges: []
+    )
+    let report = ContextEvaluationHarness().evaluate(
+        cases: [
+            ContextEvaluationCase(query: "refresh token auth", expectedFiles: ["Sources/Auth/TokenManager.swift"]),
+            ContextEvaluationCase(query: "header ui", expectedFiles: ["Sources/UI/HeaderBarView.swift"])
+        ],
+        index: index,
+        limit: 3
+    )
+
+    #expect(report.caseCount == 2)
+    #expect(report.top1Hits == 2)
+    #expect(report.top3Hits == 2)
+    #expect(report.meanReciprocalRank == 1)
+}

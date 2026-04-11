@@ -106,6 +106,30 @@ public struct RunStateStore: Sendable {
         )
     }
 
+    public func recordPlan(runID: String, workspaceRootURL: URL, task: String, brief: ContextPlanningBrief) throws {
+        var state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
+        state.discoveredFiles = mergeUnique(state.discoveredFiles, with: brief.rankedResults.map(\.filePath))
+        state.discoveredSymbols = mergeUnique(state.discoveredSymbols, with: brief.rankedResults.flatMap(\.relatedSymbols))
+        state.decisions = mergeUnique(state.decisions, with: ["plan: \(task)"])
+        state.pendingTasks = mergeUnique(state.pendingTasks, with: brief.suggestedNextSteps)
+        state.updatedAt = Date()
+        try save(state: state)
+        try append(
+            event: RunEvent(
+                runID: runID,
+                kind: "context.plan",
+                detail: task,
+                attributes: [
+                    "task": task,
+                    "result_count": String(brief.rankedResults.count),
+                    "snippet_count": String(brief.snippets.count),
+                    "open_question_count": String(brief.openQuestions.count)
+                ]
+            ),
+            workspaceRootURL: workspaceRootURL
+        )
+    }
+
     public func exportTrace(runID: String, workspaceRootURL: URL) throws -> RunTrace {
         let state = try load(runID: runID, workspaceRootURL: workspaceRootURL)
         let events = try loadEvents(runID: runID, workspaceRootURL: workspaceRootURL)

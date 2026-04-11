@@ -25,6 +25,7 @@ enum RunCommand {
             }
             let state = try store.load(runID: runID, workspaceRootURL: workspaceRootURL)
             let events = try store.loadEvents(runID: runID, workspaceRootURL: workspaceRootURL)
+            let synthesis = RunStateSynthesizer().synthesize(state: state, events: events)
             print("run: \(state.runID)")
             print("workspace: \(state.workspaceRootPath)")
             print("discovered_files: \(state.discoveredFiles.count)")
@@ -33,11 +34,18 @@ enum RunCommand {
             print("pending_tasks: \(state.pendingTasks.count)")
             print("completed_tasks: \(state.completedTasks.count)")
             print("events: \(events.count)")
+            print("summary: \(synthesis.summary)")
             if state.discoveredFiles.isEmpty == false {
                 print("files_sample: \(state.discoveredFiles.prefix(5).joined(separator: ", "))")
             }
             if state.discoveredSymbols.isEmpty == false {
                 print("symbols_sample: \(state.discoveredSymbols.prefix(5).joined(separator: ", "))")
+            }
+            if synthesis.openQuestions.isEmpty == false {
+                print("open_questions: \(synthesis.openQuestions.joined(separator: " | "))")
+            }
+            if synthesis.suggestedNextSteps.isEmpty == false {
+                print("next_steps: \(synthesis.suggestedNextSteps.joined(separator: " | "))")
             }
         case "export":
             let positional = CommandSupport.positionalArguments(in: Array(arguments.dropFirst()), knownFlags: [])

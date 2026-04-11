@@ -25,7 +25,7 @@ public struct ContextReadService: Sendable {
         range: SourceRange,
         workspaceRootURL: URL
     ) throws -> FileReadResult {
-        let fileURL = workspaceRootURL.appendingPathComponent(relativePath)
+        let fileURL = try resolveFileURL(relativePath, workspaceRootURL: workspaceRootURL)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
         let lines = content.components(separatedBy: .newlines)
         let startIndex = max(range.lineStart - 1, 0)
@@ -105,5 +105,34 @@ public struct ContextReadService: Sendable {
             return lhs.filePath < rhs.filePath
         }
         return lhs.name.count < rhs.name.count
+    }
+
+    private func resolveFileURL(_ relativePath: String, workspaceRootURL: URL) throws -> URL {
+        let directURL = workspaceRootURL.appendingPathComponent(relativePath)
+        if FileManager.default.fileExists(atPath: directURL.path) {
+            return directURL
+        }
+
+        let suffix = "/" + relativePath
+        let targetName = URL(fileURLWithPath: relativePath).lastPathComponent
+        guard let enumerator = FileManager.default.enumerator(
+            at: workspaceRootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw StoreError.notFound("File \(relativePath) not found in workspace \(workspaceRootURL.path).")
+        }
+
+        for case let fileURL as URL in enumerator {
+            guard let isRegular = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
+                  isRegular == true else {
+                continue
+            }
+            if fileURL.lastPathComponent == targetName || fileURL.path.hasSuffix(suffix) {
+                return fileURL
+            }
+        }
+
+        throw StoreError.notFound("File \(relativePath) not found in workspace \(workspaceRootURL.path).")
     }
 }
