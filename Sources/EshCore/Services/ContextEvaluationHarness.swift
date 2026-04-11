@@ -28,20 +28,29 @@ public struct ContextEvaluationReport: Codable, Hashable, Sendable {
     public let caseCount: Int
     public let top1Hits: Int
     public let top3Hits: Int
+    public let top5Hits: Int
+    public let missCount: Int
     public let meanReciprocalRank: Double
+    public let averageFirstRelevantRank: Double?
     public let queries: [ContextEvaluationQueryResult]
 
     public init(
         caseCount: Int,
         top1Hits: Int,
         top3Hits: Int,
+        top5Hits: Int,
+        missCount: Int,
         meanReciprocalRank: Double,
+        averageFirstRelevantRank: Double?,
         queries: [ContextEvaluationQueryResult]
     ) {
         self.caseCount = caseCount
         self.top1Hits = top1Hits
         self.top3Hits = top3Hits
+        self.top5Hits = top5Hits
+        self.missCount = missCount
         self.meanReciprocalRank = meanReciprocalRank
+        self.averageFirstRelevantRank = averageFirstRelevantRank
         self.queries = queries
     }
 }
@@ -74,17 +83,24 @@ public struct ContextEvaluationHarness: Sendable {
 
         let top1Hits = queries.filter { $0.firstRelevantRank == 1 }.count
         let top3Hits = queries.filter { ($0.firstRelevantRank ?? .max) <= 3 }.count
+        let top5Hits = queries.filter { ($0.firstRelevantRank ?? .max) <= 5 }.count
+        let missCount = queries.filter { $0.firstRelevantRank == nil }.count
         let reciprocalRanks = queries.compactMap { query -> Double? in
             guard let rank = query.firstRelevantRank else { return nil }
             return 1.0 / Double(rank)
         }
+        let averageRank = queries.compactMap(\.firstRelevantRank)
+        let averageFirstRelevantRank = averageRank.isEmpty ? nil : Double(averageRank.reduce(0, +)) / Double(averageRank.count)
         let mrr = cases.isEmpty ? 0 : reciprocalRanks.reduce(0, +) / Double(cases.count)
 
         return ContextEvaluationReport(
             caseCount: cases.count,
             top1Hits: top1Hits,
             top3Hits: top3Hits,
+            top5Hits: top5Hits,
+            missCount: missCount,
             meanReciprocalRank: mrr,
+            averageFirstRelevantRank: averageFirstRelevantRank,
             queries: queries
         )
     }

@@ -56,7 +56,7 @@ private struct CLI {
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
-            try await handleCache(arguments: Array(command.dropFirst()), store: cacheStore)
+            try await handleCache(arguments: Array(command.dropFirst()), store: cacheStore, currentDirectoryURL: currentDirectoryURL)
         case "calibrate":
             try CalibrateCommand.run(arguments: Array(command.dropFirst()))
         case "context":
@@ -292,7 +292,7 @@ private struct CLI {
         try SessionCommand.run(arguments: arguments, store: store)
     }
 
-    private func handleCache(arguments: [String], store: CacheStore) async throws {
+    private func handleCache(arguments: [String], store: CacheStore, currentDirectoryURL: URL) async throws {
         guard let subcommand = arguments.first else {
             try CacheInspectCommand.run(arguments: arguments, store: store)
             return
@@ -300,7 +300,7 @@ private struct CLI {
 
         switch subcommand {
         case "build":
-            try await CacheBuildCommand.run(arguments: Array(arguments.dropFirst()))
+            try await CacheBuildCommand.run(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "load":
             try await CacheLoadCommand.run(arguments: Array(arguments.dropFirst()))
         default:
@@ -390,7 +390,7 @@ private struct CLI {
               esh model inspect <model-id>
               esh model remove <model-id>
               esh session [list|show <uuid-or-name>|grep <text>]
-              esh cache build --session <uuid-or-name> [--mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--model <id-or-repo>]
+              esh cache build --session <uuid-or-name> [--mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--model <id-or-repo>] [--task <text>]
               esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
               esh cache inspect [artifact-uuid]
             """

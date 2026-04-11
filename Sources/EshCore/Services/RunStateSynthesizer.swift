@@ -3,7 +3,10 @@ import Foundation
 public struct RunSynthesis: Codable, Hashable, Sendable {
     public let status: String
     public let summary: String
+    public let compactedSummary: String?
     public let discoveries: [String]
+    public let focusFiles: [String]
+    public let focusSymbols: [String]
     public let hypotheses: [String]
     public let findings: [String]
     public let decisions: [String]
@@ -14,7 +17,10 @@ public struct RunSynthesis: Codable, Hashable, Sendable {
     public init(
         status: String,
         summary: String,
+        compactedSummary: String?,
         discoveries: [String],
+        focusFiles: [String],
+        focusSymbols: [String],
         hypotheses: [String],
         findings: [String],
         decisions: [String],
@@ -24,7 +30,10 @@ public struct RunSynthesis: Codable, Hashable, Sendable {
     ) {
         self.status = status
         self.summary = summary
+        self.compactedSummary = compactedSummary
         self.discoveries = discoveries
+        self.focusFiles = focusFiles
+        self.focusSymbols = focusSymbols
         self.hypotheses = hypotheses
         self.findings = findings
         self.decisions = decisions
@@ -42,17 +51,23 @@ public struct RunStateSynthesizer: Sendable {
     }
 
     public func synthesize(state: RunState, events: [RunEvent]) -> RunSynthesis {
+        let focusFiles = compactedFocusFiles(state: state, events: events)
+        let focusSymbols = compactedFocusSymbols(state: state, events: events)
         let discoveries = mergeUnique(
-            state.discoveredFiles.prefix(3).map { "file: \($0)" },
-            with: state.discoveredSymbols.prefix(3).map { "symbol: \($0)" }
+            focusFiles.prefix(3).map { "file: \($0)" },
+            with: focusSymbols.prefix(3).map { "symbol: \($0)" }
         )
-        let hypotheses = mergeUnique(
+        let hypotheses = compactedStatements(
+            mergeUnique(
             state.hypotheses,
             with: inferredHypotheses(events: events)
+            )
         )
-        let findings = mergeUnique(
+        let findings = compactedStatements(
+            mergeUnique(
             state.findings,
             with: inferredFindings(events: events)
+            )
         )
         let decisions = Array(state.decisions.suffix(5))
         let openQuestions = inferredOpenQuestions(events: events)
@@ -60,11 +75,21 @@ public struct RunStateSynthesizer: Sendable {
         let transitions = taskTransitions(events: events)
         let status = inferredStatus(state: state, events: events)
         let summary = "\(status) run with \(state.discoveredFiles.count) file\(state.discoveredFiles.count == 1 ? "" : "s"), \(state.discoveredSymbols.count) symbol\(state.discoveredSymbols.count == 1 ? "" : "s"), and \(events.count) logged step\(events.count == 1 ? "" : "s")"
+        let compactedSummary = makeCompactedSummary(
+            status: status,
+            focusFiles: focusFiles,
+            focusSymbols: focusSymbols,
+            findings: findings,
+            pendingTasks: state.pendingTasks
+        )
 
         return RunSynthesis(
             status: status,
             summary: summary,
+            compactedSummary: compactedSummary,
             discoveries: discoveries,
+            focusFiles: Array(focusFiles.prefix(4)),
+            focusSymbols: Array(focusSymbols.prefix(4)),
             hypotheses: Array(hypotheses.prefix(4)),
             findings: Array(findings.prefix(4)),
             decisions: decisions,
@@ -107,6 +132,50 @@ public struct RunStateSynthesizer: Sendable {
         }
 
         return Array(mergeUnique(findings, with: []).suffix(4))
+    }
+
+    private func compactedFocusFiles(state: RunState, events: [RunEvent]) -> [String] {
+        var ranked: [String] = state.discoveredFiles
+        for event in events.reversed() {
+            if let file = event.attributes?["file"], file.isEmpty == false {
+                ranked.insert(file, at: 0)
+            } else if let topFile = event.attributes?["top_file"], topFile.isEmpty == false {
+                ranked.insert(topFile, at: 0)
+            }
+        }
+        return compactedStatements(ranked)
+    }
+
+    private func compactedFocusSymbols(state: RunState, events: [RunEvent]) -> [String] {
+        var ranked: [String] = state.discoveredSymbols
+        for event in events.reversed() {
+            if let symbol = event.attributes?["symbol"], symbol.isEmpty == false {
+                ranked.insert(symbol, at: 0)
+            }
+        }
+        return compactedStatements(ranked)
+    }
+
+    private func compactedStatements(_ values: [String]) -> [String] {
+        var compacted: [String] = []
+        var seen = Set<String>()
+        for value in values {
+            let normalized = normalizeStatement(value)
+            guard seen.contains(normalized) == false else {
+                continue
+            }
+            compacted.append(value)
+            seen.insert(normalized)
+        }
+        return compacted
+    }
+
+    private func normalizeStatement(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #" for task: .*$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func inferredOpenQuestions(events: [RunEvent]) -> [String] {
@@ -173,6 +242,33 @@ public struct RunStateSynthesizer: Sendable {
             return state.status
         }
         return "active"
+    }
+
+    private func makeCompactedSummary(
+        status: String,
+        focusFiles: [String],
+        focusSymbols: [String],
+        findings: [String],
+        pendingTasks: [String]
+    ) -> String? {
+        guard focusFiles.isEmpty == false || focusSymbols.isEmpty == false || findings.isEmpty == false || pendingTasks.isEmpty == false else {
+            return nil
+        }
+
+        var parts: [String] = ["\(status) focus"]
+        if focusFiles.isEmpty == false {
+            parts.append("files: \(focusFiles.prefix(2).joined(separator: ", "))")
+        }
+        if focusSymbols.isEmpty == false {
+            parts.append("symbols: \(focusSymbols.prefix(2).joined(separator: ", "))")
+        }
+        if findings.isEmpty == false {
+            parts.append("findings: \(findings.prefix(1).joined(separator: ", "))")
+        }
+        if pendingTasks.isEmpty == false {
+            parts.append("pending: \(pendingTasks.count)")
+        }
+        return parts.joined(separator: " | ")
     }
 
     private func mergeUnique(_ current: [String], with values: [String]) -> [String] {

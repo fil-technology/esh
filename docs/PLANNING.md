@@ -48,16 +48,25 @@ These are the context improvements that are still not finished after the recent 
 - Phase 6 foundation
   - fixture-based `context eval` retrieval harness
   - repo fixture coverage in `Tests/Fixtures/context-eval.json`
+- Phase 6 additive coverage
+  - broader real-task retrieval fixture coverage across cache, run-state, model, and app-shell flows
+  - richer retrieval metrics (`top5`, miss count, average first relevant rank)
 - Phase 5 foundation
   - reusable context packages persisted from planning briefs
   - file-hash validation and invalidation
   - automatic reuse in `context plan` and code-style chat briefing
+- Phase 5 additive cache linkage
+  - cache artifacts can record context package identity, task fingerprint, file count, reuse status, and policy reason
+  - `cache build` can resolve a context package for a task before selecting an automatic cache mode
+  - cache inspection/load surfaces context-aware cache policy metadata
+- Phase 4 additive compaction
+  - synthesized runs now emit compacted focus files, focus symbols, and compacted summaries for longer investigations
 
 ### Still Unfinished
 
 1. Better ranking signals
    Why unfinished:
-   ranking is better now, but it is still heuristic and not parser- or behavior-aware.
+   ranking now has broader fixture coverage and stronger source-vs-doc/test/command heuristics, but it is still heuristic and not parser- or behavior-aware.
 
    What remains:
    - stronger dependency, edit-history, and task-intent weighting
@@ -93,19 +102,17 @@ These are the context improvements that are still not finished after the recent 
 
 5. Cache-aware context packaging
    Why unfinished:
-   reusable context packaging now exists, but it is still an early bridge rather than a full cache strategy.
+   reusable context packaging now reaches cache manifests and auto-mode policy, but it is still an early bridge rather than a full cache strategy.
 
    What remains:
-   - connect context packages more directly to cache build/load flows
-   - align packaged context reuse with TurboQuant and TriAttention policy decisions
+   - reuse context-aware policy during more interactive chat/cache paths, not only cache build
    - expose package inspection and management more clearly in the CLI
 
 6. Retrieval evaluation harness
    Why unfinished:
-   the repo now has a fixture-based harness, but coverage is still small.
+   the repo now has broader fixture-based coverage, but it still is not large enough to act as a full regression benchmark.
 
    What remains:
-   - expand fixtures across real repo tasks
    - compare ranking changes with larger repeatable suites
    - measure token savings versus answer quality
 

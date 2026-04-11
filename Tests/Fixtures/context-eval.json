@@ -40,5 +40,42 @@
       "Sources/EshCore/Backends/MLX/MLXRuntime.swift",
       "Sources/esh/Commands/CalibrateCommand.swift"
     ]
+  },
+  {
+    "query": "cache build load inspect artifact manifest",
+    "expectedFiles": [
+      "Sources/esh/Commands/CacheBuildCommand.swift",
+      "Sources/esh/Commands/CacheLoadCommand.swift",
+      "Sources/esh/Commands/CacheInspectCommand.swift"
+    ]
+  },
+  {
+    "query": "run note hypothesis finding pending complete status",
+    "expectedFiles": [
+      "Sources/esh/Commands/RunCommand.swift",
+      "Sources/EshCore/Services/RunStateStore.swift",
+      "Sources/EshCore/Services/RunStateSynthesizer.swift"
+    ]
+  },
+  {
+    "query": "context package reuse invalidation brief refresh",
+    "expectedFiles": [
+      "Sources/EshCore/Services/ContextPackageService.swift",
+      "Sources/EshCore/Services/ContextPlanningService.swift"
+    ]
+  },
+  {
+    "query": "chat transcript overlay footer status app shell",
+    "expectedFiles": [
+      "Sources/esh/App/TUIApplication.swift",
+      "Sources/esh/App/ChatScreenState.swift"
+    ]
+  },
+  {
+    "query": "model search recommended open inspect remove commands",
+    "expectedFiles": [
+      "Sources/esh/Commands/ModelSearchCommand.swift",
+      "Sources/esh/Commands/ModelRecommendedCommand.swift"
+    ]
   }
 ]

@@ -142,6 +142,9 @@ public struct ContextPlanningService: Sendable {
 
         if let runSummary = brief.runSummary {
             lines.append("Previous run summary: \(runSummary.summary)")
+            if let compacted = runSummary.compactedSummary {
+                lines.append("Compacted run state: \(compacted)")
+            }
             lines.append("Run status: \(runSummary.status)")
             if runSummary.discoveries.isEmpty == false {
                 lines.append("Already learned: \(runSummary.discoveries.prefix(3).joined(separator: "; "))")

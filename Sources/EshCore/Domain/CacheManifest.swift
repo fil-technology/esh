@@ -12,6 +12,12 @@ public struct CacheManifest: Codable, Hashable, Sendable {
     public var createdAt: Date
     public var sessionID: UUID
     public var sessionName: String
+    public var contextPackageID: UUID?
+    public var contextTask: String?
+    public var contextTaskFingerprint: String?
+    public var contextFileCount: Int?
+    public var contextReused: Bool?
+    public var policyReason: String?
 
     public init(
         backend: BackendKind,
@@ -24,7 +30,13 @@ public struct CacheManifest: Codable, Hashable, Sendable {
         cacheMode: CacheMode,
         createdAt: Date = Date(),
         sessionID: UUID,
-        sessionName: String
+        sessionName: String,
+        contextPackageID: UUID? = nil,
+        contextTask: String? = nil,
+        contextTaskFingerprint: String? = nil,
+        contextFileCount: Int? = nil,
+        contextReused: Bool? = nil,
+        policyReason: String? = nil
     ) {
         self.backend = backend
         self.modelID = modelID
@@ -37,5 +49,11 @@ public struct CacheManifest: Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.sessionID = sessionID
         self.sessionName = sessionName
+        self.contextPackageID = contextPackageID
+        self.contextTask = contextTask
+        self.contextTaskFingerprint = contextTaskFingerprint
+        self.contextFileCount = contextFileCount
+        self.contextReused = contextReused
+        self.policyReason = policyReason
     }
 }

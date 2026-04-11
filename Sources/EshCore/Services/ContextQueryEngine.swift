@@ -30,6 +30,9 @@ public struct ContextQueryEngine: Sendable {
             let matchedSymbolTerms = Set(terms.filter { symbolTokens.contains($0) })
             let matchedImportTerms = Set(terms.filter { importTokens.contains($0) })
             let matchedContentTerms = Set(terms.filter { contentTokens.contains($0) })
+            let queryMentionsDocs = terms.contains("doc") || terms.contains("docs") || terms.contains("readme") || terms.contains("usage")
+            let queryMentionsTests = terms.contains("test") || terms.contains("tests")
+            let queryMentionsTools = terms.contains("tool") || terms.contains("tools") || terms.contains("python") || terms.contains("bridge")
 
             for term in terms {
                 if pathLower.contains(term) {
@@ -138,11 +141,62 @@ public struct ContextQueryEngine: Sendable {
             }
 
             if file.path.hasPrefix("Sources/") {
-                score += 1.5
+                score += 2.5
                 reasons.append("source file")
-            } else if file.path.hasPrefix("Tests/"), terms.contains("test") == false, terms.contains("tests") == false {
-                score -= 2
+            } else if file.path.hasPrefix("Tests/"), queryMentionsTests == false {
+                score -= 8
                 reasons.append("test file penalty")
+            }
+
+            if file.path.hasPrefix("docs/"), queryMentionsDocs == false {
+                score -= 7
+                reasons.append("docs penalty")
+            }
+
+            if file.path.hasPrefix("Tools/"), queryMentionsTools == false {
+                score -= 2
+                reasons.append("tools penalty")
+            }
+
+            let shellIntentTerms: Set<String> = ["chat", "session", "autosave", "menu", "intent", "transcript", "overlay"]
+            if file.path.contains("/App/"),
+               matchedContentTerms.intersection(shellIntentTerms).isEmpty == false {
+                score += 6
+                reasons.append("app shell intent")
+            }
+
+            let commandIntentTerms: Set<String> = ["command", "commands", "build", "load", "inspect", "read", "query", "plan", "eval"]
+            if file.path.contains("/Commands/"),
+               matchedTerms.intersection(commandIntentTerms).isEmpty == false {
+                score += 4
+                reasons.append("command intent")
+            }
+
+            let commandBasenameTerms: Set<String> = ["build", "load", "inspect", "open", "remove", "search", "recommended", "read", "query", "plan", "eval", "run", "note"]
+            if file.path.contains("/Commands/"),
+               matchedBasenameTerms.intersection(commandBasenameTerms).isEmpty == false {
+                score += 6
+                reasons.append("command basename intent")
+            }
+
+            let serviceIntentTerms: Set<String> = ["service", "services", "read", "query", "plan", "synthesis", "cache", "install", "download"]
+            if file.path.contains("/Services/"),
+               matchedTerms.intersection(serviceIntentTerms).isEmpty == false {
+                score += 4
+                reasons.append("service intent")
+            }
+
+            let serviceBasenameTerms: Set<String> = ["cache", "install", "download", "query", "plan", "synthesis", "read", "package", "refresh"]
+            if file.path.contains("/Services/"),
+               matchedBasenameTerms.intersection(serviceBasenameTerms).isEmpty == false {
+                score += 5
+                reasons.append("service basename intent")
+            }
+
+            let cliIntentTerms: Set<String> = ["cli", "usage", "version", "update", "install", "search"]
+            if basenameLower == "main", matchedTerms.intersection(cliIntentTerms).isEmpty {
+                score -= 5
+                reasons.append("main entry penalty")
             }
 
             if basename == "Contents" && file.path.hasSuffix(".json") {

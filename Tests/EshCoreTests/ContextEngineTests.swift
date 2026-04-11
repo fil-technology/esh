@@ -445,7 +445,10 @@ func runStateSynthesizerProducesSummaryAndNextStepHints() throws {
 
     #expect(synthesis.status == "in_progress")
     #expect(synthesis.summary.contains("in_progress run"))
+    #expect(synthesis.compactedSummary?.contains("in_progress focus") == true)
     #expect(synthesis.discoveries.contains("file: Sources/Auth.swift"))
+    #expect(synthesis.focusFiles.contains("Sources/Auth.swift"))
+    #expect(synthesis.focusSymbols.contains("AuthManager.refresh"))
     #expect(synthesis.hypotheses.contains("Refresh likely starts in AuthManager"))
     #expect(synthesis.findings.contains("AuthManager.refresh was already inspected"))
     #expect(synthesis.suggestedNextSteps.contains(where: { $0.contains("Sources/Auth.swift") }))
@@ -480,7 +483,10 @@ func evaluationHarnessComputesRetrievalMetrics() {
     #expect(report.caseCount == 2)
     #expect(report.top1Hits == 2)
     #expect(report.top3Hits == 2)
+    #expect(report.top5Hits == 2)
+    #expect(report.missCount == 0)
     #expect(report.meanReciprocalRank == 1)
+    #expect(report.averageFirstRelevantRank == 1)
 }
 
 @Test

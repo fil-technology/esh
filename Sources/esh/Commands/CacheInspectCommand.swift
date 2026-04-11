@@ -31,7 +31,8 @@ enum CacheInspectCommand {
             return
         }
         for artifact in artifacts {
-            print("\(artifact.id.uuidString)\t\(artifact.manifest.modelID)\t\(artifact.manifest.cacheMode.rawValue)\t\(ByteFormatting.string(for: artifact.sizeBytes))")
+            let contextSuffix = artifact.manifest.contextTask.map { "\t\($0)" } ?? ""
+            print("\(artifact.id.uuidString)\t\(artifact.manifest.modelID)\t\(artifact.manifest.cacheMode.rawValue)\t\(ByteFormatting.string(for: artifact.sizeBytes))\(contextSuffix)")
         }
     }
 }

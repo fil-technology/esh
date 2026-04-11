@@ -38,11 +38,20 @@ enum RunCommand {
             print("completed_tasks: \(state.completedTasks.count)")
             print("events: \(events.count)")
             print("summary: \(synthesis.summary)")
+            if let compacted = synthesis.compactedSummary {
+                print("compacted_summary: \(compacted)")
+            }
             if state.discoveredFiles.isEmpty == false {
                 print("files_sample: \(state.discoveredFiles.prefix(5).joined(separator: ", "))")
             }
             if state.discoveredSymbols.isEmpty == false {
                 print("symbols_sample: \(state.discoveredSymbols.prefix(5).joined(separator: ", "))")
+            }
+            if synthesis.focusFiles.isEmpty == false {
+                print("focus_files: \(synthesis.focusFiles.joined(separator: ", "))")
+            }
+            if synthesis.focusSymbols.isEmpty == false {
+                print("focus_symbols: \(synthesis.focusSymbols.joined(separator: ", "))")
             }
             if synthesis.hypotheses.isEmpty == false {
                 print("hypotheses_sample: \(synthesis.hypotheses.joined(separator: " | "))")

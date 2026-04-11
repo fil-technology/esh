@@ -130,7 +130,12 @@ enum ContextCommand {
             print("cases: \(report.caseCount)")
             print("top1_hits: \(report.top1Hits)")
             print("top3_hits: \(report.top3Hits)")
+            print("top5_hits: \(report.top5Hits)")
+            print("misses: \(report.missCount)")
             print("mrr: \(String(format: "%.3f", report.meanReciprocalRank))")
+            if let averageRank = report.averageFirstRelevantRank {
+                print("avg_first_relevant_rank: \(String(format: "%.2f", averageRank))")
+            }
             for query in report.queries {
                 let rank = query.firstRelevantRank.map(String.init) ?? "-"
                 let top = query.returnedFiles.prefix(3).joined(separator: ", ")

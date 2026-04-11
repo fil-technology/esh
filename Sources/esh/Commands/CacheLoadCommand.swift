@@ -56,6 +56,15 @@ enum CacheLoadCommand {
 
         let metrics = await runtime.metrics
         print("artifact: \(loadedArtifact.id.uuidString)")
+        if let contextTask = loadedArtifact.manifest.contextTask {
+            print("context_task: \(contextTask)")
+        }
+        if let contextPackageID = loadedArtifact.manifest.contextPackageID {
+            print("context_package: \(contextPackageID.uuidString)")
+        }
+        if let policyReason = loadedArtifact.manifest.policyReason {
+            print("policy: \(policyReason)")
+        }
         print("reply_chars: \(reply.count)")
         print("ttft_ms: \(metrics.ttftMilliseconds.map { String(format: "%.1f", $0) } ?? "-")")
         print("tok_s: \(metrics.tokensPerSecond.map { String(format: "%.2f", $0) } ?? "-")")
