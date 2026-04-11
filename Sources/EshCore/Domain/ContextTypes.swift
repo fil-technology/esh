@@ -15,6 +15,7 @@ public struct FileNode: Codable, Hashable, Sendable {
     public let language: String?
     public let imports: [String]
     public let definedSymbols: [String]
+    public let searchTokens: [String]
     public let lastModifiedAt: Date?
     public let contentHash: String
 
@@ -23,6 +24,7 @@ public struct FileNode: Codable, Hashable, Sendable {
         language: String?,
         imports: [String],
         definedSymbols: [String],
+        searchTokens: [String] = [],
         lastModifiedAt: Date?,
         contentHash: String
     ) {
@@ -30,8 +32,30 @@ public struct FileNode: Codable, Hashable, Sendable {
         self.language = language
         self.imports = imports
         self.definedSymbols = definedSymbols
+        self.searchTokens = searchTokens
         self.lastModifiedAt = lastModifiedAt
         self.contentHash = contentHash
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case language
+        case imports
+        case definedSymbols
+        case searchTokens
+        case lastModifiedAt
+        case contentHash
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.language = try container.decodeIfPresent(String.self, forKey: .language)
+        self.imports = try container.decode([String].self, forKey: .imports)
+        self.definedSymbols = try container.decode([String].self, forKey: .definedSymbols)
+        self.searchTokens = try container.decodeIfPresent([String].self, forKey: .searchTokens) ?? []
+        self.lastModifiedAt = try container.decodeIfPresent(Date.self, forKey: .lastModifiedAt)
+        self.contentHash = try container.decode(String.self, forKey: .contentHash)
     }
 }
 

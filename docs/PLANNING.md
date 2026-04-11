@@ -23,6 +23,8 @@ These are the context improvements that are still not finished after the recent 
 
 - Phase 1: local workspace index
 - Phase 2: heuristic ranking and query
+  - path, basename, symbol, import, and content-token coverage
+  - source-vs-test bias and recent git-history weighting
 - Phase 3: surgical reads
   - `read symbol`
   - `read file --range`
@@ -41,17 +43,18 @@ These are the context improvements that are still not finished after the recent 
   - inferred open questions and next-step hints
 - Phase 6 foundation
   - fixture-based `context eval` retrieval harness
+  - repo fixture coverage in `Tests/Fixtures/context-eval.json`
 
 ### Still Unfinished
 
 1. Better ranking signals
    Why unfinished:
-   current ranking is still mostly lexical and heuristic.
+   ranking is better now, but it is still heuristic and not parser- or behavior-aware.
 
    What remains:
-   - stronger symbol, path, recency, dependency, and edit-history weighting
+   - stronger dependency, edit-history, and task-intent weighting
    - better disambiguation for broad or overloaded queries
-   - retrieval quality validation on real tasks
+   - retrieval quality validation on larger real-task suites
 
 2. Parser-backed symbol and reference accuracy
    Why unfinished:

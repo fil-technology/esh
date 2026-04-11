@@ -47,6 +47,39 @@ func queryEngineBoostsFileAndSymbolMatches() {
 }
 
 @Test
+func queryEnginePrefersOperationalReadAndChatFiles() {
+    let index = ContextIndex(
+        workspaceRootPath: "/tmp/demo",
+        builtAt: Date(),
+        files: [
+            FileNode(path: "Sources/esh/Commands/ReadCommand.swift", language: "swift", imports: ["EshCore"], definedSymbols: ["ReadCommand", "ReadCommand.run"], searchTokens: ["read", "symbol", "references", "related", "file", "range"], lastModifiedAt: Date(), contentHash: "a"),
+            FileNode(path: "Sources/EshCore/Services/ContextReadService.swift", language: "swift", imports: ["Foundation"], definedSymbols: ["ContextReadService", "ContextReadService.readSymbol", "ContextReadService.findReferences", "ContextReadService.readRelated", "ContextReadService.readFile"], searchTokens: ["read", "symbol", "references", "related", "file", "range"], lastModifiedAt: Date(), contentHash: "b"),
+            FileNode(path: "Sources/esh/App/TUIApplication.swift", language: "swift", imports: ["EshCore"], definedSymbols: ["TUIApplication", "TUIApplication.run", "TUIApplication.handleCommand"], searchTokens: ["chat", "session", "autosave", "cache", "intent", "menu", "commands"], lastModifiedAt: Date(), contentHash: "c"),
+            FileNode(path: "Sources/EshCore/Persistence/FileCacheStore.swift", language: "swift", imports: ["Foundation"], definedSymbols: ["FileCacheStore"], searchTokens: ["cache", "artifact", "payload", "manifest"], lastModifiedAt: Date(), contentHash: "d")
+        ],
+        symbols: [
+            SymbolNode(name: "ReadCommand", kind: "enum", filePath: "Sources/esh/Commands/ReadCommand.swift", lineStart: 1, lineEnd: 80, containerName: nil),
+            SymbolNode(name: "ReadCommand.run", kind: "func", filePath: "Sources/esh/Commands/ReadCommand.swift", lineStart: 2, lineEnd: 70, containerName: "ReadCommand"),
+            SymbolNode(name: "ContextReadService", kind: "struct", filePath: "Sources/EshCore/Services/ContextReadService.swift", lineStart: 1, lineEnd: 120, containerName: nil),
+            SymbolNode(name: "ContextReadService.readSymbol", kind: "func", filePath: "Sources/EshCore/Services/ContextReadService.swift", lineStart: 5, lineEnd: 20, containerName: "ContextReadService"),
+            SymbolNode(name: "ContextReadService.findReferences", kind: "func", filePath: "Sources/EshCore/Services/ContextReadService.swift", lineStart: 22, lineEnd: 48, containerName: "ContextReadService"),
+            SymbolNode(name: "ContextReadService.readRelated", kind: "func", filePath: "Sources/EshCore/Services/ContextReadService.swift", lineStart: 50, lineEnd: 75, containerName: "ContextReadService"),
+            SymbolNode(name: "ContextReadService.readFile", kind: "func", filePath: "Sources/EshCore/Services/ContextReadService.swift", lineStart: 77, lineEnd: 95, containerName: "ContextReadService"),
+            SymbolNode(name: "TUIApplication", kind: "struct", filePath: "Sources/esh/App/TUIApplication.swift", lineStart: 1, lineEnd: 250, containerName: nil),
+            SymbolNode(name: "TUIApplication.handleCommand", kind: "func", filePath: "Sources/esh/App/TUIApplication.swift", lineStart: 80, lineEnd: 220, containerName: "TUIApplication")
+        ],
+        edges: []
+    )
+
+    let readResults = ContextQueryEngine().query("read symbol references related file range", in: index, limit: 3)
+    #expect(readResults.first?.filePath == "Sources/EshCore/Services/ContextReadService.swift")
+    #expect(readResults.prefix(2).contains(where: { $0.filePath == "Sources/esh/Commands/ReadCommand.swift" }))
+
+    let chatResults = ContextQueryEngine().query("chat session autosave cache intent menu commands", in: index, limit: 3)
+    #expect(chatResults.first?.filePath == "Sources/esh/App/TUIApplication.swift")
+}
+
+@Test
 func readServiceReturnsRequestedRange() throws {
     let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

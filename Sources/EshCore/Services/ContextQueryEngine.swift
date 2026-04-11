@@ -10,6 +10,7 @@ public struct ContextQueryEngine: Sendable {
     ) -> [RankedContextResult] {
         let terms = tokenize(query)
         let changedFiles = changedFileSet(workspaceRootPath: index.workspaceRootPath)
+        let recentlyTouchedFiles = recentlyTouchedFileSet(workspaceRootPath: index.workspaceRootPath)
         let symbolGroups = Dictionary(grouping: index.symbols, by: \.filePath)
         let inboundEdges = Dictionary(grouping: index.edges, by: \.toPath)
 
@@ -17,10 +18,20 @@ public struct ContextQueryEngine: Sendable {
             var score = 0.0
             var reasons: [String] = []
             let pathLower = file.path.lowercased()
+            let pathTokens = tokenSet(from: file.path)
+            let basenameTokens = tokenSet(from: URL(fileURLWithPath: file.path).deletingPathExtension().lastPathComponent)
+            let symbolTokens = Set((symbolGroups[file.path] ?? []).flatMap { tokenSet(from: $0.name) })
+            let importTokens = Set(file.imports.flatMap { tokenSet(from: $0) })
+            let contentTokens = Set(file.searchTokens)
+            let matchedPathTerms = Set(terms.filter { pathTokens.contains($0) })
+            let matchedBasenameTerms = Set(terms.filter { basenameTokens.contains($0) })
+            let matchedSymbolTerms = Set(terms.filter { symbolTokens.contains($0) })
+            let matchedImportTerms = Set(terms.filter { importTokens.contains($0) })
+            let matchedContentTerms = Set(terms.filter { contentTokens.contains($0) })
 
             for term in terms {
                 if pathLower.contains(term) {
-                    score += pathLower.hasSuffix(term) ? 8 : 5
+                    score += pathLower.hasSuffix(term) ? 8 : 4
                     reasons.append("filename/path match: \(term)")
                 }
             }
@@ -30,13 +41,60 @@ public struct ContextQueryEngine: Sendable {
                 return terms.contains { name.contains($0) }
             }
             if relatedSymbols.isEmpty == false {
-                score += Double(relatedSymbols.count) * 7
+                score += Double(relatedSymbols.count) * 6
                 reasons.append("symbol match")
+            }
+
+            if matchedBasenameTerms.isEmpty == false {
+                score += Double(matchedBasenameTerms.count) * 8
+                reasons.append("basename token match")
+            }
+
+            if matchedPathTerms.isEmpty == false {
+                score += Double(matchedPathTerms.count) * 3
+                reasons.append("path token coverage")
+            }
+
+            if matchedSymbolTerms.isEmpty == false {
+                score += Double(matchedSymbolTerms.count) * 9
+                reasons.append("symbol token coverage")
+            }
+
+            if matchedImportTerms.isEmpty == false {
+                score += Double(matchedImportTerms.count) * 2
+                reasons.append("import token match")
+            }
+
+            if matchedContentTerms.isEmpty == false {
+                score += Double(matchedContentTerms.count) * 4
+                reasons.append("content token match")
+            }
+
+            let matchedTerms = matchedPathTerms
+                .union(matchedBasenameTerms)
+                .union(matchedSymbolTerms)
+                .union(matchedImportTerms)
+                .union(matchedContentTerms)
+            if terms.isEmpty == false {
+                let coverage = Double(matchedTerms.count) / Double(terms.count)
+                if coverage > 0 {
+                    score += coverage * 18
+                    reasons.append("term coverage")
+                }
+                if matchedTerms.count == terms.count {
+                    score += 6
+                    reasons.append("all query terms covered")
+                }
             }
 
             if changedFiles.contains(file.path) {
                 score += 3
                 reasons.append("uncommitted changes")
+            }
+
+            if recentlyTouchedFiles.contains(file.path) {
+                score += 2
+                reasons.append("recent git history")
             }
 
             if let lastModifiedAt = file.lastModifiedAt {
@@ -51,6 +109,14 @@ public struct ContextQueryEngine: Sendable {
             if adjacencyBoost > 0 {
                 score += min(adjacencyBoost, 3)
                 reasons.append("dependency adjacency")
+            }
+
+            if file.path.hasPrefix("Sources/") {
+                score += 1.5
+                reasons.append("source file")
+            } else if file.path.hasPrefix("Tests/"), terms.contains("test") == false, terms.contains("tests") == false {
+                score -= 2
+                reasons.append("test file penalty")
             }
 
             guard score > 0 else {
@@ -82,9 +148,27 @@ public struct ContextQueryEngine: Sendable {
     }
 
     private func tokenize(_ query: String) -> [String] {
-        let lowercase = query.lowercased()
-        let components = lowercase.split { $0.isWhitespace || $0.isPunctuation }
-        return components.map(String.init).filter { $0.count >= 2 }
+        tokenSet(from: query).sorted()
+    }
+
+    private func tokenSet(from text: String) -> Set<String> {
+        let separatedCamelCase = text.unicodeScalars.reduce(into: "") { partial, scalar in
+            if CharacterSet.uppercaseLetters.contains(scalar), partial.isEmpty == false {
+                partial.append(" ")
+            }
+            partial.append(Character(scalar))
+        }
+        let normalized = separatedCamelCase
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: "\\", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .lowercased()
+        let components = normalized.split { $0.isWhitespace || $0.isPunctuation }
+            .map(String.init)
+            .filter { $0.count >= 2 }
+        return Set(components)
     }
 
     private func changedFileSet(workspaceRootPath: String) -> Set<String> {
@@ -100,5 +184,20 @@ public struct ContextQueryEngine: Sendable {
             let trimmed = line.dropFirst(3)
             return trimmed.isEmpty ? nil : String(trimmed)
         })
+    }
+
+    private func recentlyTouchedFileSet(workspaceRootPath: String) -> Set<String> {
+        let output = try? ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: ["git", "-C", workspaceRootPath, "log", "--since=90.days", "--name-only", "--format="]
+        )
+        guard let output, output.exitCode == 0 else {
+            return []
+        }
+        let files = String(decoding: output.stdout, as: UTF8.self)
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { $0.isEmpty == false }
+        return Set(files)
     }
 }

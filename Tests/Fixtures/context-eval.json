@@ -1,0 +1,44 @@
+[
+  {
+    "query": "GGUF runtime package bootstrap",
+    "expectedFiles": [
+      "Sources/EshCore/Backends/GGUF/LlamaCppBackend.swift",
+      "Sources/esh/PackagedRuntimeBootstrap.swift"
+    ]
+  },
+  {
+    "query": "context query planning brief run synthesis",
+    "expectedFiles": [
+      "Sources/esh/Commands/ContextCommand.swift",
+      "Sources/EshCore/Services/RunStateStore.swift"
+    ]
+  },
+  {
+    "query": "huggingface download verification install preflight",
+    "expectedFiles": [
+      "Sources/EshCore/Downloads/HuggingFaceModelDownloader.swift",
+      "Sources/EshCore/Services/ModelInstallPreflightService.swift"
+    ]
+  },
+  {
+    "query": "read symbol references related file range",
+    "expectedFiles": [
+      "Sources/esh/Commands/ReadCommand.swift",
+      "Sources/EshCore/Services/ContextReadService.swift"
+    ]
+  },
+  {
+    "query": "chat session autosave cache intent menu commands",
+    "expectedFiles": [
+      "Sources/esh/App/TUIApplication.swift",
+      "Sources/EshCore/Domain/ChatSession.swift"
+    ]
+  },
+  {
+    "query": "triattention cache mlx runtime calibration",
+    "expectedFiles": [
+      "Sources/EshCore/Backends/MLX/MLXRuntime.swift",
+      "Sources/esh/Commands/CalibrateCommand.swift"
+    ]
+  }
+]

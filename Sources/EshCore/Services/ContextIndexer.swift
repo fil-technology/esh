@@ -29,6 +29,7 @@ public struct ContextIndexer: Sendable {
                 language: language,
                 imports: extraction.imports,
                 definedSymbols: extraction.symbols.map(\.name),
+                searchTokens: searchTokens(from: content),
                 lastModifiedAt: modifiedAt,
                 contentHash: contentHash
             )
@@ -131,5 +132,44 @@ public struct ContextIndexer: Sendable {
         default:
             return nil
         }
+    }
+
+    private func searchTokens(from content: String) -> [String] {
+        let stopWords: Set<String> = [
+            "import", "func", "struct", "class", "enum", "let", "var", "return", "public", "private",
+            "internal", "static", "self", "true", "false", "guard", "else", "case", "switch", "default",
+            "init", "extension", "throws", "async", "await", "try", "nil", "void", "line", "lines"
+        ]
+        let separatedCamelCase = content.unicodeScalars.reduce(into: "") { partial, scalar in
+            if CharacterSet.uppercaseLetters.contains(scalar), partial.isEmpty == false {
+                partial.append(" ")
+            }
+            partial.append(Character(scalar))
+        }
+        let normalized = separatedCamelCase
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: "\\", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .lowercased()
+        let tokens = normalized.split { $0.isWhitespace || $0.isPunctuation || $0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 && stopWords.contains($0) == false }
+
+        var counts: [String: Int] = [:]
+        for token in tokens {
+            counts[token, default: 0] += 1
+        }
+
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(64)
+            .map(\.key)
     }
 }
