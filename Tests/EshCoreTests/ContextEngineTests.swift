@@ -142,6 +142,51 @@ func indexerIncludesWebsiteFiles() throws {
 }
 
 @Test
+func indexerSkipsAppleAssetCatalogMetadata() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let assetDirectory = directory
+        .appendingPathComponent("DemoApp/Assets.xcassets/AppIcon.appiconset", isDirectory: true)
+    try FileManager.default.createDirectory(at: assetDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+        at: directory.appendingPathComponent("DemoApp", isDirectory: true),
+        withIntermediateDirectories: true
+    )
+
+    try """
+    import SwiftUI
+
+    struct ContentView: View {
+        var body: some View {
+            Text("Hello")
+        }
+    }
+    """.write(
+        to: directory.appendingPathComponent("DemoApp/ContentView.swift"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try """
+    {
+      "images" : [],
+      "info" : {
+        "author" : "xcode",
+        "version" : 1
+      }
+    }
+    """.write(
+        to: assetDirectory.appendingPathComponent("Contents.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let index = try ContextIndexer().buildIndex(workspaceRootURL: directory)
+
+    #expect(index.files.contains(where: { $0.path == "ContentView.swift" }))
+    #expect(index.files.contains(where: { $0.path.hasSuffix("Contents.json") }) == false)
+}
+
+@Test
 func queryEngineBoostsFileAndSymbolMatches() {
     let index = ContextIndex(
         workspaceRootPath: "/tmp/demo",
@@ -195,6 +240,37 @@ func queryEnginePrefersOperationalReadAndChatFiles() {
 
     let chatResults = ContextQueryEngine().query("chat session autosave cache intent menu commands", in: index, limit: 3)
     #expect(chatResults.first?.filePath == "Sources/esh/App/TUIApplication.swift")
+}
+
+@Test
+func queryEnginePrefersSwiftUIBehaviorFilesOverGenericModels() {
+    let index = ContextIndex(
+        workspaceRootPath: "/tmp/demo",
+        builtAt: Date(),
+        files: [
+            FileNode(path: "SimpleToDo/ContentView.swift", language: "swift", imports: ["SwiftUI"], definedSymbols: ["ContentView"], searchTokens: ["toolbar", "button", "add", "label", "navigation", "list"], lastModifiedAt: Date(), contentHash: "a"),
+            FileNode(path: "SimpleToDo/ViewModel.swift", language: "swift", imports: ["Foundation"], definedSymbols: ["ViewModel", "ViewModel.add"], searchTokens: ["items", "add", "delete", "save"], lastModifiedAt: Date(), contentHash: "b"),
+            FileNode(path: "SimpleToDo/ItemRow.swift", language: "swift", imports: ["SwiftUI"], definedSymbols: ["ItemRow"], searchTokens: ["label", "accessibility", "value", "navigation"], lastModifiedAt: Date(), contentHash: "c"),
+            FileNode(path: "SimpleToDo/ToDoItem.swift", language: "swift", imports: ["Foundation"], definedSymbols: ["ToDoItem", "ToDoItem.accessibilityValue"], searchTokens: ["accessibility", "value", "complete", "priority"], lastModifiedAt: Date(), contentHash: "d")
+        ],
+        symbols: [
+            SymbolNode(name: "ContentView", kind: "struct", filePath: "SimpleToDo/ContentView.swift", lineStart: 1, lineEnd: 60, containerName: nil),
+            SymbolNode(name: "ViewModel", kind: "class", filePath: "SimpleToDo/ViewModel.swift", lineStart: 1, lineEnd: 70, containerName: nil),
+            SymbolNode(name: "ViewModel.add", kind: "func", filePath: "SimpleToDo/ViewModel.swift", lineStart: 40, lineEnd: 50, containerName: "ViewModel"),
+            SymbolNode(name: "ItemRow", kind: "struct", filePath: "SimpleToDo/ItemRow.swift", lineStart: 1, lineEnd: 40, containerName: nil),
+            SymbolNode(name: "ToDoItem", kind: "struct", filePath: "SimpleToDo/ToDoItem.swift", lineStart: 1, lineEnd: 80, containerName: nil),
+            SymbolNode(name: "ToDoItem.accessibilityValue", kind: "func", filePath: "SimpleToDo/ToDoItem.swift", lineStart: 40, lineEnd: 60, containerName: "ToDoItem")
+        ],
+        edges: []
+    )
+
+    let addButton = ContextQueryEngine().query("where is add item button implemented", in: index, limit: 4)
+    #expect(addButton.first?.filePath == "SimpleToDo/ContentView.swift")
+
+    let accessibility = ContextQueryEngine().query("add item accessibility label location file", in: index, limit: 4)
+    #expect(accessibility.first?.filePath != "SimpleToDo/Assets.xcassets/AppIcon.appiconset/Contents.json")
+    #expect(accessibility.prefix(3).contains(where: { $0.filePath == "SimpleToDo/ItemRow.swift" }))
+    #expect(accessibility.prefix(3).contains(where: { $0.filePath == "SimpleToDo/ToDoItem.swift" }))
 }
 
 @Test

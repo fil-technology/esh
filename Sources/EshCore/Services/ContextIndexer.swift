@@ -78,12 +78,14 @@ public struct ContextIndexer: Sendable {
         }
 
         let skippedDirectoryNames: Set<String> = [".git", ".build", ".swiftpm", ".venv", "node_modules", "dist", "build"]
+        let skippedDirectorySuffixes: [String] = [".xcassets", ".appiconset", ".colorset", ".imageset"]
         var urls: [URL] = []
 
         for case let url as URL in enumerator {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
             if values.isDirectory == true {
-                if skippedDirectoryNames.contains(url.lastPathComponent) {
+                if skippedDirectoryNames.contains(url.lastPathComponent) ||
+                    skippedDirectorySuffixes.contains(where: { url.lastPathComponent.hasSuffix($0) }) {
                     enumerator.skipDescendants()
                 }
                 continue

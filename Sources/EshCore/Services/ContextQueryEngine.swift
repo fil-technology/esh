@@ -18,8 +18,10 @@ public struct ContextQueryEngine: Sendable {
             var score = 0.0
             var reasons: [String] = []
             let pathLower = file.path.lowercased()
+            let basename = URL(fileURLWithPath: file.path).deletingPathExtension().lastPathComponent
+            let basenameLower = basename.lowercased()
             let pathTokens = tokenSet(from: file.path)
-            let basenameTokens = tokenSet(from: URL(fileURLWithPath: file.path).deletingPathExtension().lastPathComponent)
+            let basenameTokens = tokenSet(from: basename)
             let symbolTokens = Set((symbolGroups[file.path] ?? []).flatMap { tokenSet(from: $0.name) })
             let importTokens = Set(file.imports.flatMap { tokenSet(from: $0) })
             let contentTokens = Set(file.searchTokens)
@@ -31,7 +33,7 @@ public struct ContextQueryEngine: Sendable {
 
             for term in terms {
                 if pathLower.contains(term) {
-                    score += pathLower.hasSuffix(term) ? 8 : 4
+                    score += pathLower.hasSuffix(term) ? 6 : 3
                     reasons.append("filename/path match: \(term)")
                 }
             }
@@ -41,7 +43,7 @@ public struct ContextQueryEngine: Sendable {
                 return terms.contains { name.contains($0) }
             }
             if relatedSymbols.isEmpty == false {
-                score += Double(relatedSymbols.count) * 6
+                score += Double(relatedSymbols.count) * 5
                 reasons.append("symbol match")
             }
 
@@ -66,8 +68,32 @@ public struct ContextQueryEngine: Sendable {
             }
 
             if matchedContentTerms.isEmpty == false {
-                score += Double(matchedContentTerms.count) * 4
+                score += Double(matchedContentTerms.count) * 7
                 reasons.append("content token match")
+            }
+
+            let uiIntentTerms: Set<String> = ["button", "toolbar", "label", "sheet", "navigation", "list", "view"]
+            let actionTerms: Set<String> = ["add", "delete", "edit", "toggle", "save", "open", "show"]
+            let matchedUIIntentTerms = Set(terms.filter { uiIntentTerms.contains($0) })
+            let matchedActionTerms = Set(terms.filter { actionTerms.contains($0) })
+
+            if file.imports.contains("SwiftUI"),
+               matchedUIIntentTerms.isEmpty == false,
+               matchedContentTerms.intersection(matchedUIIntentTerms).isEmpty == false {
+                score += Double(matchedUIIntentTerms.count) * 6
+                reasons.append("swiftui ui intent")
+            }
+
+            if file.imports.contains("SwiftUI"),
+               matchedActionTerms.isEmpty == false,
+               matchedContentTerms.intersection(matchedActionTerms).isEmpty == false {
+                score += Double(matchedActionTerms.count) * 6
+                reasons.append("swiftui action match")
+            }
+
+            if file.imports.contains("SwiftUI"), basenameLower.contains("view"), matchedUIIntentTerms.isEmpty == false {
+                score += 4
+                reasons.append("swiftui view file")
             }
 
             let matchedTerms = matchedPathTerms
@@ -119,6 +145,11 @@ public struct ContextQueryEngine: Sendable {
                 reasons.append("test file penalty")
             }
 
+            if basename == "Contents" && file.path.hasSuffix(".json") {
+                score -= 12
+                reasons.append("metadata file penalty")
+            }
+
             guard score > 0 else {
                 return nil
             }
@@ -152,6 +183,12 @@ public struct ContextQueryEngine: Sendable {
     }
 
     private func tokenSet(from text: String) -> Set<String> {
+        let stopWords: Set<String> = [
+            "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "file", "files", "for", "from",
+            "how", "i", "implemented", "in", "is", "it", "item", "items", "its", "located", "location",
+            "me", "of", "on", "or", "show", "that", "the", "their", "this", "to", "what", "where",
+            "which", "with", "you", "your"
+        ]
         let separatedCamelCase = text.unicodeScalars.reduce(into: "") { partial, scalar in
             if CharacterSet.uppercaseLetters.contains(scalar), partial.isEmpty == false {
                 partial.append(" ")
@@ -167,7 +204,7 @@ public struct ContextQueryEngine: Sendable {
             .lowercased()
         let components = normalized.split { $0.isWhitespace || $0.isPunctuation }
             .map(String.init)
-            .filter { $0.count >= 2 }
+            .filter { $0.count >= 2 && stopWords.contains($0) == false }
         return Set(components)
     }
 
