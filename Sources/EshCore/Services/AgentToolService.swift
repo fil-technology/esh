@@ -33,6 +33,16 @@ public struct AgentToolService: Sendable {
           path: relative/path.swift
           start: 1
           end: 80
+        - write_file: create a new file. Input format:
+          path: relative/path.swift
+          content:
+          file contents here
+        - edit_file: replace a line range in an existing file. Input format:
+          path: relative/path.swift
+          start: 10
+          end: 20
+          content:
+          replacement lines here
         - list_files: list workspace files. Input may be blank or a path/text filter.
         - search_text: search workspace text with ripgrep. Input is the search pattern.
         - shell: run a safe workspace command. Allowed:
@@ -75,6 +85,10 @@ public struct AgentToolService: Sendable {
             return try readRelated(call.input, workspaceRootURL: workspaceRootURL, runID: runID)
         case "read_file":
             return try readFile(call.input, workspaceRootURL: workspaceRootURL, runID: runID)
+        case "write_file":
+            return try writeFile(call.input, workspaceRootURL: workspaceRootURL)
+        case "edit_file":
+            return try editFile(call.input, workspaceRootURL: workspaceRootURL)
         case "list_files":
             return try listFiles(call.input, workspaceRootURL: workspaceRootURL)
         case "search_text":
@@ -235,6 +249,97 @@ public struct AgentToolService: Sendable {
         )
     }
 
+    private func writeFile(_ input: String, workspaceRootURL: URL) throws -> AgentToolResult {
+        let parsed = parseWriteInput(input)
+        guard parsed.path.isEmpty == false else {
+            return AgentToolResult(name: "write_file", output: "File path must not be empty.", isError: true)
+        }
+        guard parsed.content.isEmpty == false else {
+            return AgentToolResult(name: "write_file", output: "File content must not be empty.", isError: true)
+        }
+
+        let fileURL: URL
+        do {
+            fileURL = try validatedWorkspaceFileURL(for: parsed.path, workspaceRootURL: workspaceRootURL)
+        } catch {
+            return AgentToolResult(name: "write_file", output: error.localizedDescription, isError: true)
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) == false else {
+            return AgentToolResult(name: "write_file", output: "File already exists: \(parsed.path)", isError: true)
+        }
+
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try parsed.content.write(to: fileURL, atomically: true, encoding: .utf8)
+        return AgentToolResult(
+            name: "write_file",
+            output: "created: \(parsed.path)\nlines: \(parsed.content.components(separatedBy: .newlines).count)"
+        )
+    }
+
+    private func editFile(_ input: String, workspaceRootURL: URL) throws -> AgentToolResult {
+        let parsed = parseEditInput(input)
+        guard parsed.path.isEmpty == false else {
+            return AgentToolResult(name: "edit_file", output: "File path must not be empty.", isError: true)
+        }
+        guard parsed.content.isEmpty == false else {
+            return AgentToolResult(name: "edit_file", output: "Replacement content must not be empty.", isError: true)
+        }
+
+        let fileURL: URL
+        do {
+            fileURL = try validatedWorkspaceFileURL(for: parsed.path, workspaceRootURL: workspaceRootURL)
+        } catch {
+            return AgentToolResult(name: "edit_file", output: error.localizedDescription, isError: true)
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return AgentToolResult(name: "edit_file", output: "File does not exist: \(parsed.path)", isError: true)
+        }
+
+        let original = try String(contentsOf: fileURL, encoding: .utf8)
+        let hasTrailingNewline = original.hasSuffix("\n")
+        var lines = original.components(separatedBy: .newlines)
+        if hasTrailingNewline, lines.last == "" {
+            lines.removeLast()
+        }
+
+        let startIndex = parsed.start - 1
+        let endIndex = parsed.end - 1
+        guard startIndex >= 0, endIndex >= startIndex, endIndex < lines.count else {
+            return AgentToolResult(
+                name: "edit_file",
+                output: "Invalid line range \(parsed.start)-\(parsed.end) for file with \(lines.count) lines.",
+                isError: true
+            )
+        }
+
+        let oldLines = Array(lines[startIndex...endIndex])
+        let replacementLines = parsed.content.components(separatedBy: .newlines)
+        lines.replaceSubrange(startIndex...endIndex, with: replacementLines)
+        var updated = lines.joined(separator: "\n")
+        if hasTrailingNewline || updated.isEmpty == false {
+            updated += "\n"
+        }
+        try updated.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let previewOld = oldLines.prefix(3).joined(separator: "\n")
+        let previewNew = replacementLines.prefix(3).joined(separator: "\n")
+        return AgentToolResult(
+            name: "edit_file",
+            output: """
+            updated: \(parsed.path)
+            range: \(parsed.start)-\(parsed.end)
+            old:
+            \(previewOld)
+            new:
+            \(previewNew)
+            """
+        )
+    }
+
     private func parseReadFileInput(_ input: String) -> (path: String, range: SourceRange) {
         var path = input.trimmingCharacters(in: .whitespacesAndNewlines)
         var start = 1
@@ -252,6 +357,72 @@ public struct AgentToolService: Sendable {
         }
 
         return (path, SourceRange(lineStart: max(start, 1), lineEnd: max(end, start)))
+    }
+
+    private func parseWriteInput(_ input: String) -> (path: String, content: String) {
+        var path = ""
+        var contentLines: [String] = []
+        var readingContent = false
+
+        for line in input.components(separatedBy: .newlines) {
+            if readingContent {
+                contentLines.append(line)
+                continue
+            }
+
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("path:") {
+                path = String(trimmed.dropFirst("path:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if trimmed == "content:" {
+                readingContent = true
+            }
+        }
+
+        return (path, contentLines.joined(separator: "\n"))
+    }
+
+    private func parseEditInput(_ input: String) -> (path: String, start: Int, end: Int, content: String) {
+        var path = ""
+        var start = 1
+        var end = 1
+        var contentLines: [String] = []
+        var readingContent = false
+
+        for line in input.components(separatedBy: .newlines) {
+            if readingContent {
+                contentLines.append(line)
+                continue
+            }
+
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("path:") {
+                path = String(trimmed.dropFirst("path:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if trimmed.hasPrefix("start:") {
+                start = Int(String(trimmed.dropFirst("start:".count)).trimmingCharacters(in: .whitespacesAndNewlines)) ?? start
+            } else if trimmed.hasPrefix("end:") {
+                end = Int(String(trimmed.dropFirst("end:".count)).trimmingCharacters(in: .whitespacesAndNewlines)) ?? end
+            } else if trimmed == "content:" {
+                readingContent = true
+            }
+        }
+
+        return (path, max(start, 1), max(end, start), contentLines.joined(separator: "\n"))
+    }
+
+    private func validatedWorkspaceFileURL(for path: String, workspaceRootURL: URL) throws -> URL {
+        guard path.isEmpty == false else {
+            throw StoreError.invalidManifest("File path must not be empty.")
+        }
+        guard path.hasPrefix("/") == false else {
+            throw StoreError.invalidManifest("Absolute paths are not allowed: \(path)")
+        }
+        let fileURL = workspaceRootURL.appendingPathComponent(path)
+        let standardized = fileURL.standardizedFileURL
+        let root = workspaceRootURL.standardizedFileURL
+        guard standardized.path == root.path || standardized.path.hasPrefix(root.path + "/") else {
+            throw StoreError.invalidManifest("Path escapes workspace root: \(path)")
+        }
+        return standardized
     }
 
     private func isSafeShellCommand(_ command: String) -> Bool {

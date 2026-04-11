@@ -55,6 +55,78 @@ func agentToolServiceRejectsUnsafeShellCommand() throws {
 }
 
 @Test
+func agentToolServiceWritesAndEditsFilesInsideWorkspace() throws {
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    let service = AgentToolService()
+
+    let writeResult = try service.execute(
+        call: AgentToolCall(
+            name: "write_file",
+            input: """
+            path: Sources/App/Feature.swift
+            content:
+            struct Feature {
+                let enabled = true
+            }
+            """
+        ),
+        workspaceRootURL: workspace,
+        runID: nil
+    )
+
+    #expect(writeResult.isError == false)
+    #expect(writeResult.output.contains("created: Sources/App/Feature.swift"))
+
+    let editResult = try service.execute(
+        call: AgentToolCall(
+            name: "edit_file",
+            input: """
+            path: Sources/App/Feature.swift
+            start: 2
+            end: 2
+            content:
+                let enabled = false
+            """
+        ),
+        workspaceRootURL: workspace,
+        runID: nil
+    )
+
+    #expect(editResult.isError == false)
+    let fileText = try String(
+        contentsOf: workspace.appendingPathComponent("Sources/App/Feature.swift"),
+        encoding: .utf8
+    )
+    #expect(fileText.contains("let enabled = false"))
+}
+
+@Test
+func agentToolServiceRejectsPathsOutsideWorkspace() throws {
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    let service = AgentToolService()
+
+    let result = try service.execute(
+        call: AgentToolCall(
+            name: "write_file",
+            input: """
+            path: ../escape.swift
+            content:
+            print("bad")
+            """
+        ),
+        workspaceRootURL: workspace,
+        runID: nil
+    )
+
+    #expect(result.isError)
+    #expect(result.output.contains("Path escapes workspace root"))
+}
+
+@Test
 func agentLoopServiceExecutesToolAndReturnsFinalAnswer() async throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -107,6 +179,48 @@ func agentLoopServiceExecutesToolAndReturnsFinalAnswer() async throws {
     #expect(result.steps.first?.toolCall?.name == "context_query")
     #expect(result.steps.first?.toolResult?.output.contains("TokenManager.swift") == true)
     #expect(result.finalResponse.contains("TokenManager.swift"))
+}
+
+@Test
+func agentLoopServiceCanWriteFileAndFinish() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let root = PersistenceRoot(rootURL: directory.appendingPathComponent(".esh", isDirectory: true))
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let runtime = FakeAgentRuntime(replies: [
+        """
+        ```tool
+        name: write_file
+        input:
+        path: Notes/todo.md
+        content:
+        # TODO
+        - verify agent edits
+        ```
+        """,
+        """
+        ```final
+        I created Notes/todo.md with the requested checklist.
+        ```
+        """
+    ])
+
+    let result = try await AgentLoopService(
+        toolService: AgentToolService(runStateStore: RunStateStore(root: root))
+    ).run(
+        task: "Create a small TODO note",
+        session: ChatSession(name: "agent-write-test", modelID: "fake-model", backend: .mlx, cacheMode: .automatic, intent: .agentRun),
+        runtime: runtime,
+        workspaceRootURL: directory,
+        maxSteps: 4
+    )
+
+    let fileURL = directory.appendingPathComponent("Notes/todo.md")
+    let fileText = try String(contentsOf: fileURL, encoding: .utf8)
+    #expect(result.steps.first?.toolCall?.name == "write_file")
+    #expect(fileText.contains("verify agent edits"))
+    #expect(result.finalResponse.contains("Notes/todo.md"))
 }
 
 private final class FakeAgentRuntime: @unchecked Sendable, BackendRuntime {

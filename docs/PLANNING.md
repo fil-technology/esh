@@ -58,7 +58,9 @@ What it needs:
 - additive file-write safety boundaries
 
 Status:
-- not started
+- in progress
+- repo-bounded `write_file` and range-based `edit_file` tools are implemented
+- next step is stronger patch application, conflict detection, and richer diff surfacing
 
 ### Phase C: Verification Loop
 
@@ -121,8 +123,8 @@ Status:
 ### Order Of Implementation
 
 1. Phase A: Agent core foundation
-2. Phase C: Verification loop
-3. Phase B: Safe code editing
+2. Phase B: Safe code editing
+3. Phase C: Verification loop
 4. Phase D: Task orchestration
 5. Phase E: Agent UX
 6. Phase F: Retrieval and language precision
