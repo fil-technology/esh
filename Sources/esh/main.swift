@@ -43,6 +43,8 @@ private struct CLI {
         let cacheStore = FileCacheStore(root: root)
 
         switch head {
+        case "capabilities":
+            try CapabilitiesCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "benchmark":
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "doctor":
@@ -65,6 +67,8 @@ private struct CLI {
             try ContextCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "run":
             try RunCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "infer":
+            try await InferCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "read":
             try ReadCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "chat":
@@ -368,6 +372,7 @@ private struct CLI {
               esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--autosave on|off]
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
               esh benchmark history
+              esh capabilities
               esh calibrate --method triattention --model <installed-model-id> [--max-tokens N] [--calibration-file <path>]
               esh context build
               esh context status
@@ -383,6 +388,8 @@ private struct CLI {
               esh read related <name-or-path> [--limit N] [--run <id>]
               esh read file <path> --range start:end [--run <id>]
               esh doctor
+              esh infer --input <path-or->
+              esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
