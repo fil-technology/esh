@@ -5,12 +5,18 @@ Esh is a local-first LLM tool for Apple Silicon.
 It gives you:
 - local model install and management
 - interactive terminal chat
+- stable JSON commands for external callers
 - saved sessions
 - backend-native execution cache export/import
 - TurboQuant cache compression for MLX
 - self-contained release packaging
 
 Today, Esh is built around an MLX backend with a Swift core and CLI/TUI, plus a small Python bridge for `mlx-lm` and `mlx-vlm`.
+
+## Planning Notes
+
+Durable engineering notes live in:
+- [docs/PLANNING.md](/Users/sviatoslavfil/Development/Fil.Technology/Codex-based/Coding/MLX+TurboQuant/Source/docs/PLANNING.md)
 
 ## What Esh Is For
 
@@ -90,6 +96,29 @@ Then use the stable launcher:
 ```
 
 Running `./esh` with no command opens a default interactive launcher menu with the most common actions.
+
+### External callers
+
+Use `esh capabilities` to get a JSON map of supported backends, installed models, and whether each path supports direct inference, cache build, and cache load.
+
+Use `esh infer` for machine-friendly inference. It returns JSON for both MLX and GGUF models, and MLX cache load stays optional rather than being the only supported integration path.
+
+```bash
+./esh capabilities
+cat <<'JSON' | ./esh infer --input -
+{
+  "schemaVersion": "esh.infer.request.v1",
+  "model": "mlx-community--qwen2.5-0.5b-instruct-4bit",
+  "messages": [
+    { "role": "user", "text": "Say hello in one sentence." }
+  ],
+  "generation": {
+    "maxTokens": 64,
+    "temperature": 0.2
+  }
+}
+JSON
+```
 
 ### Release mode
 

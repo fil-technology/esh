@@ -10,6 +10,31 @@ public struct CacheBuildResult: Sendable {
     }
 }
 
+public struct CacheBuildContext: Sendable {
+    public let packageID: UUID
+    public let task: String
+    public let taskFingerprint: String
+    public let fileCount: Int
+    public let reused: Bool
+    public let policyReason: String?
+
+    public init(
+        packageID: UUID,
+        task: String,
+        taskFingerprint: String,
+        fileCount: Int,
+        reused: Bool,
+        policyReason: String? = nil
+    ) {
+        self.packageID = packageID
+        self.task = task
+        self.taskFingerprint = taskFingerprint
+        self.fileCount = fileCount
+        self.reused = reused
+        self.policyReason = policyReason
+    }
+}
+
 public struct CacheService: Sendable {
     private let cacheStore: CacheStore
 
@@ -22,7 +47,9 @@ public struct CacheService: Sendable {
         session: ChatSession,
         install: ModelInstall,
         codec: CacheSnapshotCodec,
-        compressor: CacheCompressor
+        compressor: CacheCompressor,
+        artifactMode: CacheMode? = nil,
+        context: CacheBuildContext? = nil
     ) async throws -> CacheBuildResult {
         try await runtime.prepare(session: session)
         let snapshot = try await runtime.exportRuntimeCache()
@@ -33,12 +60,18 @@ public struct CacheService: Sendable {
             modelID: install.id,
             tokenizerID: install.spec.tokenizerID,
             architectureFingerprint: install.spec.architectureFingerprint ?? Fingerprint.sha256([install.id, install.backendFormat]),
-            runtimeVersion: install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v1",
+            runtimeVersion: install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v2",
             cacheFormatVersion: codec.formatVersion,
             compressorVersion: compressor.version,
-            cacheMode: compressor.mode,
+            cacheMode: artifactMode ?? compressor.mode,
             sessionID: session.id,
-            sessionName: session.name
+            sessionName: session.name,
+            contextPackageID: context?.packageID,
+            contextTask: context?.task,
+            contextTaskFingerprint: context?.taskFingerprint,
+            contextFileCount: context?.fileCount,
+            contextReused: context?.reused,
+            policyReason: context?.policyReason
         )
         let artifact = CacheArtifact(
             manifest: manifest,

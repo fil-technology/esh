@@ -19,6 +19,12 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
         )
     }
 
+    public func validateChatModel(for install: ModelInstall) throws -> String? {
+        _ = try locateModelFile(for: install)
+        _ = try resolveExecutable()
+        return nil
+    }
+
     public func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking {
         LlamaCppCompatibilityChecker(install: install, runtimeVersion: runtimeVersion)
     }
@@ -47,9 +53,15 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
 
     func resolveExecutable() throws -> URL {
         let env = ProcessInfo.processInfo.environment
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let bundledCandidate = executable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("share/esh/bin/llama-cli")
         let candidates = [
             env["ESH_LLAMA_CPP_CLI"],
             env["LLAMA_CPP_CLI"],
+            bundledCandidate.path,
             "/opt/homebrew/bin/llama-cli",
             "/usr/local/bin/llama-cli"
         ].compactMap { $0 }
@@ -70,9 +82,87 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
             }
         }
 
+        if let bootstrapped = try bootstrapExecutableIfPossible() {
+            return bootstrapped
+        }
+
         throw StoreError.invalidManifest(
-            "llama.cpp runtime not found. Install `llama-cli` or set ESH_LLAMA_CPP_CLI."
+            "llama.cpp runtime not found and automatic bootstrap was unavailable. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-cli` path."
         )
+    }
+
+    private func bootstrapExecutableIfPossible() throws -> URL? {
+        guard let brewURL = resolveBrewExecutable() else {
+            return nil
+        }
+
+        if let installed = try brewManagedExecutable(using: brewURL) {
+            return installed
+        }
+
+        let installOutput = try ProcessRunner.run(
+            executableURL: brewURL,
+            arguments: ["install", "llama.cpp"],
+            environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
+        )
+        guard installOutput.exitCode == 0 else {
+            let stderr = String(decoding: installOutput.stderr, as: UTF8.self)
+            let stdout = String(decoding: installOutput.stdout, as: UTF8.self)
+            let message = stderr.isEmpty ? stdout : stderr
+            throw StoreError.invalidManifest(
+                "Automatic llama.cpp bootstrap failed: \(message.trimmingCharacters(in: .whitespacesAndNewlines))"
+            )
+        }
+
+        return try brewManagedExecutable(using: brewURL)
+    }
+
+    private func resolveBrewExecutable() -> URL? {
+        let candidates = [
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew"
+        ]
+
+        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+
+        let output = try? ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/which"),
+            arguments: ["brew"]
+        )
+        guard let output, output.exitCode == 0 else {
+            return nil
+        }
+        let path = String(decoding: output.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else {
+            return nil
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private func brewManagedExecutable(using brewURL: URL) throws -> URL? {
+        let output = try ProcessRunner.run(
+            executableURL: brewURL,
+            arguments: ["--prefix", "llama.cpp"],
+            environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
+        )
+        guard output.exitCode == 0 else {
+            return nil
+        }
+
+        let prefix = String(decoding: output.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prefix.isEmpty else {
+            return nil
+        }
+
+        let executableURL = URL(fileURLWithPath: prefix).appendingPathComponent("bin/llama-cli")
+        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
+            return nil
+        }
+        return executableURL
     }
 }
 
@@ -94,6 +184,12 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
     private let install: ModelInstall
     private let runtimeVersion: String
     private var currentMetrics: Metrics
+
+    private final class StreamState: @unchecked Sendable {
+        let lock = NSLock()
+        var stderrData = Data()
+        var sawFirstChunk = false
+    }
 
     init(
         executableURL: URL,
@@ -123,32 +219,92 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                 do {
                     let prompt = promptText(for: session)
                     let start = ContinuousClock.now
-                    let output = try ProcessRunner.run(
-                        executableURL: executableURL,
-                        arguments: [
-                            "-m", modelURL.path,
-                            "-c", "8192",
-                            "-n", String(config.maxTokens),
-                            "--temp", String(config.temperature),
-                            "--no-conversation",
-                            "--simple-io",
-                            "-p", prompt
-                        ]
-                    )
-                    guard output.exitCode == 0 else {
-                        let stderr = String(decoding: output.stderr, as: UTF8.self)
-                        throw StoreError.invalidManifest(stderr.isEmpty ? "llama.cpp generation failed." : stderr)
+                    let process = Process()
+                    process.executableURL = executableURL
+                    process.arguments = [
+                        "-m", modelURL.path,
+                        "-c", "8192",
+                        "-n", String(config.maxTokens),
+                        "--temp", String(config.temperature),
+                        "--no-conversation",
+                        "--simple-io",
+                        "-p", prompt
+                    ]
+
+                    let stdoutPipe = Pipe()
+                    let stderrPipe = Pipe()
+                    process.standardOutput = stdoutPipe
+                    process.standardError = stderrPipe
+
+                    let state = StreamState()
+
+                    stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+                        let data = handle.availableData
+                        guard !data.isEmpty else { return }
+                        let text = String(decoding: data, as: UTF8.self)
+                        state.lock.lock()
+                        let shouldRecordFirstChunk = !state.sawFirstChunk
+                        if shouldRecordFirstChunk {
+                            state.sawFirstChunk = true
+                        }
+                        state.lock.unlock()
+
+                        if shouldRecordFirstChunk {
+                            let elapsed = start.duration(to: .now)
+                            let milliseconds = Double(elapsed.components.seconds) * 1_000
+                                + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+                            self.currentMetrics = Metrics(ttftMilliseconds: milliseconds)
+                        }
+
+                        if !text.isEmpty {
+                            continuation.yield(text)
+                        }
                     }
-                    let text = String(decoding: output.stdout, as: UTF8.self)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let elapsed = start.duration(to: .now)
-                    let milliseconds = Double(elapsed.components.seconds) * 1_000
-                        + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-                    currentMetrics = Metrics(ttftMilliseconds: milliseconds)
-                    if !text.isEmpty {
-                        continuation.yield(text)
+
+                    stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+                        let data = handle.availableData
+                        guard !data.isEmpty else { return }
+                        state.lock.lock()
+                        state.stderrData.append(data)
+                        state.lock.unlock()
                     }
-                    continuation.finish()
+
+                    process.terminationHandler = { process in
+                        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+                        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+                        state.lock.lock()
+                        let stderr = state.stderrData
+                        let emittedChunk = state.sawFirstChunk
+                        state.lock.unlock()
+
+                        if process.terminationStatus == 0 {
+                            if !emittedChunk {
+                                let elapsed = start.duration(to: .now)
+                                let milliseconds = Double(elapsed.components.seconds) * 1_000
+                                    + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+                                self.currentMetrics = Metrics(ttftMilliseconds: milliseconds)
+                            }
+                            continuation.finish()
+                            return
+                        }
+
+                        let stderrText = String(decoding: stderr, as: UTF8.self)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        continuation.finish(throwing: StoreError.invalidManifest(
+                            stderrText.isEmpty ? "llama.cpp generation failed." : stderrText
+                        ))
+                    }
+
+                    continuation.onTermination = { _ in
+                        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+                        stderrPipe.fileHandleForReading.readabilityHandler = nil
+                        if process.isRunning {
+                            process.terminate()
+                        }
+                    }
+
+                    try process.run()
                 } catch {
                     continuation.finish(throwing: error)
                 }
@@ -171,7 +327,8 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
     public func unload() async {}
 
     private func promptText(for session: ChatSession) -> String {
-        let transcript = session.messages.map { message in
+        let normalizedSession = PromptSessionNormalizer().normalized(session: session)
+        let transcript = normalizedSession.messages.map { message in
             let role = message.role == .user ? "User" : "Assistant"
             return "\(role): \(message.text)"
         }.joined(separator: "\n")

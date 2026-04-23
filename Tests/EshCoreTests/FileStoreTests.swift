@@ -84,7 +84,13 @@ struct FileStoreTests {
             cacheFormatVersion: "1",
             cacheMode: .turbo,
             sessionID: UUID(),
-            sessionName: "default"
+            sessionName: "default",
+            contextPackageID: UUID(uuidString: "11111111-1111-1111-1111-111111111111"),
+            contextTask: "fix auth refresh",
+            contextTaskFingerprint: "task-fingerprint",
+            contextFileCount: 3,
+            contextReused: true,
+            policyReason: "focused code context with calibration prefers triattention"
         )
         let artifact = CacheArtifact(
             manifest: manifest,
@@ -97,6 +103,9 @@ struct FileStoreTests {
 
         #expect(loaded.0.id == artifact.id)
         #expect(String(decoding: loaded.1, as: UTF8.self) == "payload")
+        #expect(loaded.0.manifest.contextTask == "fix auth refresh")
+        #expect(loaded.0.manifest.contextFileCount == 3)
+        #expect(loaded.0.manifest.contextReused == true)
         #expect(try store.listArtifacts().count == 1)
     }
 

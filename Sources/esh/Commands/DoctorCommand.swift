@@ -28,7 +28,8 @@ enum DoctorCommand {
             "mlx: \(bridgeDoctor.mlxVersion)",
             "mlx_lm: \(bridgeDoctor.mlxLMVersion)",
             "mlx_vlm: \(bridgeDoctor.mlxVLMVersion)",
-            "numpy: \(bridgeDoctor.numpyVersion)"
+            "numpy: \(bridgeDoctor.numpyVersion)",
+            "safetensors: \(bridgeDoctor.safetensorsVersion)"
         ]
     }
 }
@@ -41,4 +42,5 @@ private struct BridgeDoctorResponse: Codable {
     var mlxLMVersion: String
     var mlxVLMVersion: String
     var numpyVersion: String
+    var safetensorsVersion: String
 }

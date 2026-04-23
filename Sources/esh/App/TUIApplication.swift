@@ -4,6 +4,278 @@ import Darwin
 #endif
 import EshCore
 
+private enum TerminalInputAction: Sendable {
+    case scrollUp
+    case scrollDown
+    case pageUp
+    case pageDown
+    case jumpToTop
+    case jumpToBottom
+}
+
+private final class TerminalInputController: @unchecked Sendable {
+    private let lock = NSLock()
+    private var submittedLines: [String] = []
+    private var pendingActions: [TerminalInputAction] = []
+    private var buffer = ""
+    private var stopRequested = false
+    private var originalTermios: termios?
+    private let queue = DispatchQueue(label: "esh.chat.input", qos: .userInitiated)
+
+    func start() {
+        #if canImport(Darwin)
+        guard isatty(STDIN_FILENO) != 0 else { return }
+        var original = termios()
+        guard tcgetattr(STDIN_FILENO, &original) == 0 else { return }
+        var raw = original
+        raw.c_lflag &= ~UInt(ECHO | ICANON)
+        raw.c_iflag &= ~UInt(IXON | ICRNL)
+        guard tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0 else { return }
+        originalTermios = original
+
+        queue.async { [self] in
+            var suppressLF = false
+            var suppressCR = false
+
+            while !isStopped {
+                var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+                let ready = Darwin.poll(&descriptor, 1, 100)
+                if ready <= 0 {
+                    continue
+                }
+
+                var byte: UInt8 = 0
+                guard Darwin.read(STDIN_FILENO, &byte, 1) == 1 else {
+                    continue
+                }
+
+                switch byte {
+                case 3:
+                    submit("/exit")
+                case 27:
+                    if let action = readEscapeAction() {
+                        enqueue(action)
+                    }
+                case 10:
+                    if suppressLF {
+                        suppressLF = false
+                        continue
+                    }
+                    suppressCR = true
+                    submitCurrentBuffer()
+                case 13:
+                    if suppressCR {
+                        suppressCR = false
+                        continue
+                    }
+                    suppressLF = true
+                    submitCurrentBuffer()
+                case 8, 127:
+                    suppressLF = false
+                    suppressCR = false
+                    deleteBackward()
+                default:
+                    suppressLF = false
+                    suppressCR = false
+                    guard let scalar = UnicodeScalar(Int(byte)),
+                          !CharacterSet.controlCharacters.contains(scalar) else {
+                        continue
+                    }
+                    append(Character(scalar))
+                }
+            }
+        }
+        #endif
+    }
+
+    func stop() {
+        lock.lock()
+        stopRequested = true
+        lock.unlock()
+
+        #if canImport(Darwin)
+        if var original = originalTermios {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original)
+        }
+        #endif
+    }
+
+    func currentBuffer() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer
+    }
+
+    func takeSubmittedLines() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        let lines = submittedLines
+        submittedLines.removeAll()
+        return lines
+    }
+
+    func takeActions() -> [TerminalInputAction] {
+        lock.lock()
+        defer { lock.unlock() }
+        let actions = pendingActions
+        pendingActions.removeAll()
+        return actions
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopRequested
+    }
+
+    private func append(_ character: Character) {
+        lock.lock()
+        buffer.append(character)
+        lock.unlock()
+    }
+
+    private func deleteBackward() {
+        lock.lock()
+        if !buffer.isEmpty {
+            buffer.removeLast()
+        }
+        lock.unlock()
+    }
+
+    private func submitCurrentBuffer() {
+        lock.lock()
+        let line = buffer
+        buffer = ""
+        if !line.isEmpty {
+            submittedLines.append(line)
+        }
+        lock.unlock()
+    }
+
+    private func submit(_ line: String) {
+        lock.lock()
+        buffer = ""
+        submittedLines.append(line)
+        lock.unlock()
+    }
+
+    private func enqueue(_ action: TerminalInputAction) {
+        lock.lock()
+        pendingActions.append(action)
+        lock.unlock()
+    }
+
+    private func readEscapeAction() -> TerminalInputAction? {
+        #if canImport(Darwin)
+        guard let first = readByte(timeoutMilliseconds: 5), first == 91 else {
+            return nil
+        }
+        guard let second = readByte(timeoutMilliseconds: 5) else {
+            return nil
+        }
+
+        switch second {
+        case 65:
+            return .scrollUp
+        case 66:
+            return .scrollDown
+        case 70:
+            return .jumpToBottom
+        case 72:
+            return .jumpToTop
+        case 53:
+            return readByte(timeoutMilliseconds: 5) == 126 ? .pageUp : nil
+        case 54:
+            return readByte(timeoutMilliseconds: 5) == 126 ? .pageDown : nil
+        default:
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    private func readByte(timeoutMilliseconds: Int32) -> UInt8? {
+        #if canImport(Darwin)
+        var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        guard Darwin.poll(&descriptor, 1, timeoutMilliseconds) > 0 else {
+            return nil
+        }
+        var byte: UInt8 = 0
+        guard Darwin.read(STDIN_FILENO, &byte, 1) == 1 else {
+            return nil
+        }
+        return byte
+        #else
+        return nil
+        #endif
+    }
+}
+
+private final class StreamPump: @unchecked Sendable {
+    private actor State {
+        var pendingChunks: [String] = []
+        var completionError: Error?
+        var finished = false
+
+        func append(_ chunk: String) {
+            pendingChunks.append(chunk)
+        }
+
+        func markFinished() {
+            finished = true
+        }
+
+        func markFailed(_ error: Error) {
+            completionError = error
+            finished = true
+        }
+
+        func takeChunks() -> [String] {
+            let chunks = pendingChunks
+            pendingChunks.removeAll()
+            return chunks
+        }
+
+        func takeError() -> Error? {
+            let error = completionError
+            completionError = nil
+            return error
+        }
+
+        func isFinished() -> Bool {
+            finished && pendingChunks.isEmpty && completionError == nil
+        }
+    }
+
+    private let state = State()
+
+    func start(stream: AsyncThrowingStream<String, Error>) {
+        Task {
+            do {
+                for try await chunk in stream {
+                    await state.append(chunk)
+                }
+                await state.markFinished()
+            } catch {
+                await state.markFailed(error)
+            }
+        }
+    }
+
+    func takeChunks() async -> [String] {
+        await state.takeChunks()
+    }
+
+    func takeError() async -> Error? {
+        await state.takeError()
+    }
+
+    func isFinished() async -> Bool {
+        await state.isFinished()
+    }
+}
+
 struct TUIApplication {
     private enum CommandOutcome {
         case notHandled
@@ -15,18 +287,23 @@ struct TUIApplication {
         sessionName: String,
         modelIdentifier: String? = nil,
         preferredCacheMode: CacheMode? = nil,
+        preferredIntent: SessionIntent? = nil,
         preferredAutosaveEnabled: Bool? = nil,
         sessionStore: SessionStore
     ) async throws {
         let surface = TerminalSurface()
         var state = AppState(sessionName: sessionName)
         let root = PersistenceRoot.default()
+        let workspaceRootURL = WorkspaceContextLocator().workspaceRootURL(
+            from: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        )
         let modelStore = FileModelStore(root: root)
         let cacheStore = FileCacheStore(root: root)
         var session = try loadOrCreateSession(
             requestedName: sessionName,
             preferredModelID: modelIdentifier,
             preferredCacheMode: preferredCacheMode,
+            preferredIntent: preferredIntent,
             preferredAutosaveEnabled: preferredAutosaveEnabled,
             sessionStore: sessionStore
         )
@@ -44,6 +321,9 @@ struct TUIApplication {
         let backend = backendRegistry.backend(for: install)
         var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
         let chatService = ChatService()
+        let inputController = TerminalInputController()
+        inputController.start()
+        defer { inputController.stop() }
         state = makeScreenState(
             for: session,
             installID: install.id,
@@ -53,8 +333,14 @@ struct TUIApplication {
         )
         state.statusText = "ready | /menu commands | /back launcher"
         surface.render(state: state)
+        var queuedPrompts: [String] = []
 
-        while let line = readInputLine(state: &state, surface: surface) {
+        while let line = try await nextInputLine(
+            state: &state,
+            surface: surface,
+            inputController: inputController,
+            queuedPrompts: &queuedPrompts
+        ) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
             let commandOutcome = await handleCommand(
@@ -68,6 +354,7 @@ struct TUIApplication {
                 backendRegistry: backendRegistry,
                 modelService: modelService,
                 cacheStore: cacheStore,
+                workspaceRootURL: workspaceRootURL,
                 surface: surface
             )
             if commandOutcome == .handled {
@@ -79,12 +366,22 @@ struct TUIApplication {
 
             state.inputText = trimmed
             state.overlay = nil
+            state.transcriptScrollOffset = 0
             session.messages.append(Message(role: .user, text: trimmed))
             session.updatedAt = Date()
             state.transcriptItems.append(TranscriptItem(role: .user, text: trimmed))
-            state.statusText = "streaming…"
+            let preparedSession = enrichedSessionIfNeeded(
+                baseSession: session,
+                latestUserText: trimmed,
+                workspaceRootURL: workspaceRootURL
+            )
+            state.statusText = preparedSession.usedContextBrief
+                ? "planning with local context…"
+                : (runtime.backend == .gguf ? "loading GGUF model / waiting for first token…" : "streaming…")
             state.inputText = ""
-            let stream = chatService.streamReply(runtime: runtime, session: session)
+            let stream = chatService.streamReply(runtime: runtime, session: preparedSession.session)
+            let pump = StreamPump()
+            pump.start(stream: stream)
             let assistantID = UUID()
             state.streamingAssistantMessageID = assistantID
             state.transcriptItems.append(
@@ -93,24 +390,47 @@ struct TUIApplication {
             surface.render(state: state)
             var reply = ""
             do {
-                for try await chunk in stream {
-                    reply += chunk
-                    updateStreamingAssistant(
+                while true {
+                    updateQueuedPrompts(
+                        queuedPrompts: &queuedPrompts,
                         state: &state,
-                        assistantID: assistantID,
-                        text: reply,
-                        isStreaming: true
+                        surface: surface,
+                        inputController: inputController,
+                        whileStreaming: true
                     )
-                    state.statusText = streamingStatusText(for: reply)
-                    surface.render(state: state)
+
+                    let chunks = await pump.takeChunks()
+                    if !chunks.isEmpty {
+                        reply += chunks.joined()
+                        updateStreamingAssistant(
+                            state: &state,
+                            assistantID: assistantID,
+                            text: reply,
+                            isStreaming: true
+                        )
+                        state.statusText = streamingStatusText(for: reply, queuedCount: queuedPrompts.count)
+                        surface.render(state: state)
+                    }
+
+                    if let error = await pump.takeError() {
+                        throw error
+                    }
+
+                    if await pump.isFinished() {
+                        break
+                    }
+
+                    try await Task.sleep(nanoseconds: 50_000_000)
                 }
                 session.messages.append(Message(role: .assistant, text: reply))
                 session.updatedAt = Date()
                 try autosaveIfNeeded(state: state, session: session, sessionStore: sessionStore)
                 state.metrics = await runtime.metrics
-                state.inputText = ""
+                state.inputText = inputController.currentBuffer()
                 state.streamingAssistantMessageID = nil
-                state.statusText = "ready | /menu commands | /back launcher"
+                state.statusText = queuedPrompts.isEmpty
+                    ? "ready | /menu commands | /back launcher"
+                    : "ready | \(queuedPrompts.count) queued"
                 updateStreamingAssistant(
                     state: &state,
                     assistantID: assistantID,
@@ -120,7 +440,9 @@ struct TUIApplication {
                 surface.render(state: state)
             } catch {
                 state.streamingAssistantMessageID = nil
-                state.statusText = "generation failed"
+                state.statusText = queuedPrompts.isEmpty
+                    ? "generation failed"
+                    : "generation failed | \(queuedPrompts.count) queued"
                 state.overlay = OverlayPanelState(
                     title: "Generation Failed",
                     lines: [error.localizedDescription]
@@ -135,6 +457,7 @@ struct TUIApplication {
                         isStreaming: false
                     )
                 }
+                state.inputText = inputController.currentBuffer()
                 surface.render(state: state)
             }
         }
@@ -153,6 +476,7 @@ struct TUIApplication {
         backendRegistry: InferenceBackendRegistry,
         modelService: ModelService,
         cacheStore: CacheStore,
+        workspaceRootURL: URL,
         surface: TerminalSurface
     ) async -> CommandOutcome {
         guard command.hasPrefix("/") else { return .notHandled }
@@ -212,10 +536,9 @@ struct TUIApplication {
                     preferredModelID: session.modelID
                 )
                 let newBackend = backendRegistry.backend(for: newInstall)
-                if let mlxBackend = newBackend as? MLXBackend,
-                   let incompatibility = try mlxBackend.validateChatModel(for: newInstall) {
+                if let incompatibility = ChatModelValidator(backendRegistry: backendRegistry).incompatibilityReason(for: newInstall) {
                     throw StoreError.invalidManifest(
-                        "Model \(newInstall.id) is not chat-compatible with the current MLX runtime: \(incompatibility)"
+                        "Model \(newInstall.id) is not chat-compatible with the current \(newInstall.spec.backend.rawValue.uppercased()) runtime: \(incompatibility)"
                     )
                 }
                 if newInstall.id != install.id {
@@ -254,6 +577,21 @@ struct TUIApplication {
             return .handled
         }
 
+        if command.hasPrefix("/plan ") {
+            let task = String(command.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let lines = try contextPlanLines(task: task, workspaceRootURL: workspaceRootURL)
+                state.overlay = OverlayPanelState(title: "Context Plan", lines: lines)
+                state.statusText = "context plan ready"
+            } catch {
+                state.overlay = OverlayPanelState(title: "Context Plan", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "context plan failed"
+            }
+            state.inputText = ""
+            surface.render(state: state)
+            return .handled
+        }
+
         switch command {
         case "/menu", "/help":
             state.overlay = OverlayPanelState(
@@ -264,8 +602,9 @@ struct TUIApplication {
                     "/close          Close the current panel",
                     "/save           Save the active chat session",
                     "/autosave on|off|toggle",
-                    "/cache raw|turbo",
+                    "/cache raw|turbo|triattention|auto",
                     "/cache toggle",
+                    "/intent chat|code|documentqa|agentrun|multimodal",
                     "/settings       Show current chat settings",
                     "/new [name]",
                     "/switch <name-or-uuid>",
@@ -275,6 +614,10 @@ struct TUIApplication {
                     "/sessions       Show saved chat sessions",
                     "/caches         Show saved cache artifacts",
                     "/search <text>  Search the active session",
+                    "/plan <task>    Build a local context brief",
+                    "↑/↓             Scroll transcript by line",
+                    "PgUp/PgDn       Scroll transcript by page",
+                    "Home/End        Jump to top or bottom",
                     "/model open <id-or-alias>",
                     "/model inspect <id>",
                     "/session show <uuid>",
@@ -314,20 +657,55 @@ struct TUIApplication {
             session.cacheMode = .turbo
             try? sessionStore.save(session: session)
             state.statusText = "cache mode turbo"
+        case "/cache triattention":
+            state.cacheMode = CacheMode.triattention.rawValue
+            session.cacheMode = .triattention
+            try? sessionStore.save(session: session)
+            state.statusText = "cache mode triattention"
+        case "/cache auto":
+            state.cacheMode = CacheMode.automatic.rawValue
+            session.cacheMode = .automatic
+            try? sessionStore.save(session: session)
+            state.statusText = "cache mode auto"
         case "/cache toggle":
-            let next: CacheMode = (session.cacheMode ?? .raw) == .raw ? .turbo : .raw
+            let cycle: [CacheMode] = [.raw, .turbo, .triattention, .automatic]
+            let current = session.cacheMode ?? .automatic
+            let nextIndex = ((cycle.firstIndex(of: current) ?? 0) + 1) % cycle.count
+            let next = cycle[nextIndex]
             session.cacheMode = next
             state.cacheMode = next.rawValue
             try? sessionStore.save(session: session)
             state.statusText = "cache mode \(next.rawValue)"
+        case "/intent chat":
+            session.intent = .chat
+            try? sessionStore.save(session: session)
+            state.statusText = "intent chat"
+        case "/intent code":
+            session.intent = .code
+            try? sessionStore.save(session: session)
+            state.statusText = "intent code"
+        case "/intent documentqa":
+            session.intent = .documentQA
+            try? sessionStore.save(session: session)
+            state.statusText = "intent documentqa"
+        case "/intent agentrun":
+            session.intent = .agentRun
+            try? sessionStore.save(session: session)
+            state.statusText = "intent agentrun"
+        case "/intent multimodal":
+            session.intent = .multimodal
+            try? sessionStore.save(session: session)
+            state.statusText = "intent multimodal"
         case "/settings":
             state.overlay = OverlayPanelState(
                 title: "Chat Settings",
                 lines: [
                     "cache mode: \(session.cacheMode?.rawValue ?? state.cacheMode)",
+                    "intent: \(session.intent?.rawValue ?? SessionIntent.chat.rawValue)",
                     "autosave: \((session.autosaveEnabled ?? state.autosaveEnabled) ? "on" : "off")",
                     "",
-                    "Use /cache raw or /cache turbo",
+                    "Use /cache raw, /cache turbo, /cache triattention, or /cache auto",
+                    "Use /intent chat, /intent code, /intent documentqa, /intent agentrun, or /intent multimodal",
                     "Use /autosave on or /autosave off"
                 ]
             )
@@ -367,7 +745,8 @@ struct TUIApplication {
                 session = ChatSession(name: requestedName.isEmpty ? try nextSessionName(sessionStore: sessionStore) : requestedName)
                 session.modelID = install.id
                 session.backend = install.spec.backend
-                session.cacheMode = state.cacheMode == CacheMode.turbo.rawValue ? .turbo : .raw
+                session.cacheMode = CacheMode(rawValue: state.cacheMode) ?? .automatic
+                session.intent = session.intent ?? .chat
                 session.autosaveEnabled = state.autosaveEnabled
                 state = makeScreenState(
                     for: session,
@@ -392,6 +771,9 @@ struct TUIApplication {
                 }
                 if session.backend == nil {
                     session.backend = install.spec.backend
+                }
+                if session.intent == nil {
+                    session.intent = .chat
                 }
                 install = try CommandSupport.resolveInstall(
                     identifier: nil,
@@ -535,6 +917,7 @@ struct TUIApplication {
         requestedName: String,
         preferredModelID: String?,
         preferredCacheMode: CacheMode?,
+        preferredIntent: SessionIntent?,
         preferredAutosaveEnabled: Bool?,
         sessionStore: SessionStore
     ) throws -> ChatSession {
@@ -543,6 +926,7 @@ struct TUIApplication {
             session.modelID = session.modelID ?? preferredModelID
             session.backend = session.backend ?? .mlx
             session.cacheMode = preferredCacheMode ?? session.cacheMode
+            session.intent = preferredIntent ?? session.intent
             session.autosaveEnabled = preferredAutosaveEnabled ?? session.autosaveEnabled
             return session
         }
@@ -550,7 +934,8 @@ struct TUIApplication {
         var session = ChatSession(name: requestedName)
         session.modelID = preferredModelID
         session.backend = .mlx
-        session.cacheMode = preferredCacheMode ?? .turbo
+        session.cacheMode = preferredCacheMode ?? .automatic
+        session.intent = preferredIntent ?? .chat
         session.autosaveEnabled = preferredAutosaveEnabled ?? false
         return session
     }
@@ -655,6 +1040,95 @@ struct TUIApplication {
         }
     }
 
+    private func contextPlanLines(task: String, workspaceRootURL: URL) throws -> [String] {
+        let index = try ContextStore().load(workspaceRootURL: workspaceRootURL)
+        let resolution = try ContextPackageService().resolveBrief(
+            task: task,
+            index: index,
+            workspaceRootURL: workspaceRootURL,
+            limit: 4,
+            snippetCount: 2
+        )
+        let brief = resolution.brief
+
+        var lines = [
+            "task: \(brief.task)",
+            "summary: \(brief.summary)",
+            "context package: \(resolution.package.id.uuidString)",
+            "reused: \(resolution.reused ? "yes" : "no")"
+        ]
+
+        if let runSummary = brief.runSummary {
+            lines.append("run status: \(runSummary.status)")
+            if runSummary.hypotheses.isEmpty == false {
+                lines.append("hypotheses: \(runSummary.hypotheses.prefix(2).joined(separator: " | "))")
+            }
+            if runSummary.findings.isEmpty == false {
+                lines.append("findings: \(runSummary.findings.prefix(2).joined(separator: " | "))")
+            }
+        }
+
+        if brief.rankedResults.isEmpty == false {
+            lines.append("top files:")
+            lines.append(contentsOf: brief.rankedResults.prefix(4).map {
+                "\($0.filePath) [\(String(format: "%.1f", $0.score))] \($0.reasons.prefix(2).joined(separator: ", "))"
+            })
+        }
+
+        if brief.openQuestions.isEmpty == false {
+            lines.append("open questions:")
+            lines.append(contentsOf: brief.openQuestions.prefix(3))
+        }
+
+        if brief.suggestedNextSteps.isEmpty == false {
+            lines.append("next steps:")
+            lines.append(contentsOf: brief.suggestedNextSteps.prefix(4))
+        }
+
+        return lines
+    }
+
+    private func enrichedSessionIfNeeded(
+        baseSession: ChatSession,
+        latestUserText: String,
+        workspaceRootURL: URL
+    ) -> (session: ChatSession, usedContextBrief: Bool) {
+        guard let intent = baseSession.intent,
+              [.code, .documentQA, .agentRun].contains(intent) else {
+            return (baseSession, false)
+        }
+
+        guard let index = try? ContextStore().load(workspaceRootURL: workspaceRootURL),
+              let resolution = try? ContextPackageService().resolveBrief(
+                task: latestUserText,
+                index: index,
+                workspaceRootURL: workspaceRootURL,
+                limit: 4,
+                snippetCount: 2,
+                modelID: baseSession.modelID,
+                intent: intent,
+                cacheMode: baseSession.cacheMode
+              ) else {
+            return (baseSession, false)
+        }
+
+        let brief = resolution.brief
+        guard
+              brief.rankedResults.isEmpty == false || brief.snippets.isEmpty == false else {
+            return (baseSession, false)
+        }
+
+        var session = baseSession
+        guard let lastIndex = session.messages.indices.last else {
+            return (baseSession, false)
+        }
+        session.messages[lastIndex].text = ContextPlanningService().augmentedPrompt(
+            userPrompt: latestUserText,
+            brief: brief
+        )
+        return (session, true)
+    }
+
     private func updateStreamingAssistant(
         state: inout AppState,
         assistantID: UUID,
@@ -668,76 +1142,117 @@ struct TUIApplication {
         state.transcriptItems[index].isStreaming = isStreaming
     }
 
-    private func streamingStatusText(for text: String) -> String {
+    private func streamingStatusText(for text: String, queuedCount: Int = 0) -> String {
         let source = text.lowercased()
-        if source.contains("<think>") && !source.contains("</think>") {
-            return "reasoning…"
+        let base: String
+        if source.isEmpty {
+            base = "loading model / waiting for first token…"
+        } else if source.contains("<think>") && !source.contains("</think>") {
+            base = "reasoning…"
+        } else {
+            base = "streaming…"
         }
-        return "streaming…"
+        if queuedCount > 0 {
+            return "\(base) | \(queuedCount) queued"
+        }
+        return base
     }
 
-    private func readInputLine(state: inout AppState, surface: TerminalSurface) -> String? {
-        #if canImport(Darwin)
-        guard isatty(STDIN_FILENO) != 0 else {
-            fflush(stdout)
-            return Swift.readLine()
+    private func updateQueuedPrompts(
+        queuedPrompts: inout [String],
+        state: inout AppState,
+        surface: TerminalSurface,
+        inputController: TerminalInputController,
+        whileStreaming: Bool
+    ) {
+        let newLines = inputController.takeSubmittedLines()
+        let actions = inputController.takeActions()
+        if !newLines.isEmpty {
+            queuedPrompts.append(contentsOf: newLines.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
         }
 
-        var original = termios()
-        guard tcgetattr(STDIN_FILENO, &original) == 0 else {
-            fflush(stdout)
-            return Swift.readLine()
-        }
+        let scrolled = applyInputActions(actions, state: &state, surface: surface)
 
-        var raw = original
-        raw.c_lflag &= ~UInt(ECHO | ICANON)
-        raw.c_iflag &= ~UInt(IXON | ICRNL)
-        guard tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0 else {
-            fflush(stdout)
-            return Swift.readLine()
+        let buffer = inputController.currentBuffer()
+        let shouldRender = state.inputText != buffer || !newLines.isEmpty || scrolled
+        state.inputText = buffer
+        if whileStreaming {
+            let currentAssistant = state.transcriptItems.last(where: { $0.role == .assistant })?.text ?? ""
+            state.statusText = streamingStatusText(for: currentAssistant, queuedCount: queuedPrompts.count)
         }
-
-        defer {
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original)
-            state.inputText = ""
+        if shouldRender {
             surface.render(state: state)
         }
+    }
 
-        state.inputText = ""
-        surface.render(state: state)
-
-        var buffer = ""
+    private func nextInputLine(
+        state: inout AppState,
+        surface: TerminalSurface,
+        inputController: TerminalInputController,
+        queuedPrompts: inout [String]
+    ) async throws -> String? {
         while true {
-            var byte: UInt8 = 0
-            let count = Darwin.read(STDIN_FILENO, &byte, 1)
-            if count != 1 {
-                return nil
+            if !queuedPrompts.isEmpty {
+                return queuedPrompts.removeFirst()
             }
 
-            switch byte {
-            case 3:
-                return "/exit"
-            case 10, 13:
-                return buffer
-            case 8, 127:
-                if !buffer.isEmpty {
-                    buffer.removeLast()
-                    state.inputText = buffer
-                    surface.render(state: state)
+            let actions = inputController.takeActions()
+            if applyInputActions(actions, state: &state, surface: surface) {
+                continue
+            }
+
+            let newLines = inputController.takeSubmittedLines()
+            if let first = newLines.first {
+                if newLines.count > 1 {
+                    queuedPrompts.append(contentsOf: newLines.dropFirst())
                 }
-            default:
-                guard let scalar = UnicodeScalar(Int(byte)),
-                      !CharacterSet.controlCharacters.contains(scalar) else {
-                    continue
-                }
-                buffer.append(Character(scalar))
+                return first
+            }
+
+            let buffer = inputController.currentBuffer()
+            if state.inputText != buffer {
                 state.inputText = buffer
                 surface.render(state: state)
             }
+
+            try await Task.sleep(nanoseconds: 50_000_000)
         }
-        #else
-        fflush(stdout)
-        return Swift.readLine()
-        #endif
+    }
+
+    @discardableResult
+    private func applyInputActions(
+        _ actions: [TerminalInputAction],
+        state: inout AppState,
+        surface: TerminalSurface
+    ) -> Bool {
+        guard !actions.isEmpty else { return false }
+        let maxOffset = surface.maxTranscriptScrollOffset(state: state)
+        let pageSize = 10
+        var offset = min(max(state.transcriptScrollOffset, 0), maxOffset)
+
+        for action in actions {
+            switch action {
+            case .scrollUp:
+                offset = min(offset + 1, maxOffset)
+            case .scrollDown:
+                offset = max(offset - 1, 0)
+            case .pageUp:
+                offset = min(offset + pageSize, maxOffset)
+            case .pageDown:
+                offset = max(offset - pageSize, 0)
+            case .jumpToTop:
+                offset = maxOffset
+            case .jumpToBottom:
+                offset = 0
+            }
+        }
+
+        guard offset != state.transcriptScrollOffset else { return false }
+        state.transcriptScrollOffset = offset
+        state.statusText = offset == 0
+            ? "ready | /menu commands | /back launcher"
+            : "scrolling transcript | ↑/↓ line • PgUp/PgDn page • Home/End jump"
+        surface.render(state: state)
+        return true
     }
 }

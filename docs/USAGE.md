@@ -49,7 +49,10 @@ esh
 esh chat [session-name] [--model <id-or-repo>]
 esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
 esh benchmark history
+esh capabilities
 esh doctor
+esh infer --input <path-or->
+esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
 esh model recommended [--profile chat|code]
 esh model list
 esh model search <query> [--source all|local|hf] [--limit N]
@@ -66,6 +69,41 @@ esh cache inspect [artifact-uuid]
 ```
 
 Plain `esh` opens a command menu with common actions like chat, model list, install model, sessions, caches, and doctor.
+
+## 2a. External JSON Commands
+
+Use these when another tool needs a stable machine-facing contract instead of human-readable text.
+
+Inspect available integrations and installed-model support:
+
+```bash
+./esh capabilities
+```
+
+Run inference with JSON input from stdin or a file:
+
+```bash
+cat <<'JSON' | ./esh infer --input -
+{
+  "schemaVersion": "esh.infer.request.v1",
+  "model": "mlx-community--qwen2.5-0.5b-instruct-4bit",
+  "messages": [
+    { "role": "system", "text": "Answer briefly." },
+    { "role": "user", "text": "Say hello." }
+  ],
+  "generation": {
+    "maxTokens": 64,
+    "temperature": 0.2
+  }
+}
+JSON
+```
+
+Notes:
+- `esh infer` always returns JSON using `esh.infer.response.v1`
+- direct inference works for both MLX and GGUF installs
+- `cacheArtifactID` is optional and keeps MLX cache-load as an extra capability, not the only integration path
+- `esh capabilities` reports which backends and installed models support direct inference versus cache build/load
 
 ## 3. Find and Install Models
 

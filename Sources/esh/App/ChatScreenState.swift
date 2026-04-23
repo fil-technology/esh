@@ -56,6 +56,7 @@ struct ChatScreenState: Sendable {
     var statusText: String
     var inputText: String
     var transcriptItems: [TranscriptItem]
+    var transcriptScrollOffset: Int
     var streamingAssistantMessageID: UUID?
     var overlay: OverlayPanelState?
     var autosaveEnabled: Bool
@@ -69,6 +70,7 @@ struct ChatScreenState: Sendable {
         statusText: String = "ready",
         inputText: String = "",
         transcriptItems: [TranscriptItem] = [],
+        transcriptScrollOffset: Int = 0,
         streamingAssistantMessageID: UUID? = nil,
         overlay: OverlayPanelState? = nil,
         autosaveEnabled: Bool = false
@@ -81,6 +83,7 @@ struct ChatScreenState: Sendable {
         self.statusText = statusText
         self.inputText = inputText
         self.transcriptItems = transcriptItems
+        self.transcriptScrollOffset = transcriptScrollOffset
         self.streamingAssistantMessageID = streamingAssistantMessageID
         self.overlay = overlay
         self.autosaveEnabled = autosaveEnabled

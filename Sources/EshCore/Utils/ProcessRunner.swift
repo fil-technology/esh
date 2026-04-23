@@ -17,11 +17,30 @@ public enum ProcessRunner {
         executableURL: URL,
         arguments: [String],
         environment: [String: String] = [:],
-        stdin: Data? = nil
+        stdin: Data? = nil,
+        currentDirectoryURL: URL? = nil
     ) throws -> ProcessOutput {
+        final class DataSink: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = Data()
+
+            func store(_ newValue: Data) {
+                lock.lock()
+                value = newValue
+                lock.unlock()
+            }
+
+            func load() -> Data {
+                lock.lock()
+                defer { lock.unlock() }
+                return value
+            }
+        }
+
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.currentDirectoryURL = currentDirectoryURL
         if !environment.isEmpty {
             process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         }
@@ -32,18 +51,18 @@ public enum ProcessRunner {
         process.standardError = stderrPipe
 
         let group = DispatchGroup()
-        var stdoutData = Data()
-        var stderrData = Data()
+        let stdoutData = DataSink()
+        let stderrData = DataSink()
 
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            stdoutData.store(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
             group.leave()
         }
 
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrData.store(stderrPipe.fileHandleForReading.readDataToEndOfFile())
             group.leave()
         }
 
@@ -60,8 +79,8 @@ public enum ProcessRunner {
         process.waitUntilExit()
         group.wait()
         return ProcessOutput(
-            stdout: stdoutData,
-            stderr: stderrData,
+            stdout: stdoutData.load(),
+            stderr: stderrData.load(),
             exitCode: process.terminationStatus
         )
     }

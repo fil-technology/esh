@@ -25,9 +25,14 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
 
     private let session: URLSession
     private let decoder: JSONDecoder
+    private let retryPolicy: NetworkRetryPolicy
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        retryPolicy: NetworkRetryPolicy = .default
+    ) {
         self.session = session
+        self.retryPolicy = retryPolicy
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
@@ -48,7 +53,12 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
             .init(name: "cardData", value: "true")
         ]
 
-        let (data, response) = try await session.data(from: components.url!)
+        let request = URLRequest(url: components.url!)
+        let (data, response) = try await NetworkRequestExecutor.data(
+            session: session,
+            request: request,
+            retryPolicy: retryPolicy
+        )
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw StoreError.invalidManifest("Failed to search Hugging Face: HTTP \(http.statusCode).")
         }

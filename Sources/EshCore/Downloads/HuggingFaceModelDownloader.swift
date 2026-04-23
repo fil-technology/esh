@@ -29,15 +29,18 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     private let modelStore: ModelStore
     private let coordinator: DownloadCoordinator
     private let session: URLSession
+    private let retryPolicy: NetworkRetryPolicy
 
     public init(
         modelStore: ModelStore,
         coordinator: DownloadCoordinator = .init(),
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        retryPolicy: NetworkRetryPolicy = .default
     ) {
         self.modelStore = modelStore
         self.coordinator = coordinator
         self.session = session
+        self.retryPolicy = retryPolicy
     }
 
     public func install(
@@ -58,17 +61,32 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         let installDirectory = try modelStore.prepareInstallDirectory(id: installID)
         let revision = source.revision ?? info.sha ?? "main"
         let modelPlan = try modelPlan(for: info.siblings ?? [], variant: variant)
+        guard modelPlan.files.isEmpty == false else {
+            throw StoreError.invalidManifest("No downloadable files were found for \(source.reference).")
+        }
         let plan = DownloadPlan(
             repoID: source.reference,
             revision: revision,
             files: modelPlan.files.map { .init(path: $0.rfilename, sizeBytes: $0.size) }
         )
 
-        let downloadedFiles = try await coordinator.download(
-            plan: plan,
-            into: installDirectory,
-            reporter: reporter
-        )
+        let downloadedFiles: [String]
+        do {
+            downloadedFiles = try await coordinator.download(
+                plan: plan,
+                into: installDirectory,
+                reporter: reporter
+            )
+            try verifyInstall(
+                files: modelPlan.files,
+                downloadedFiles: downloadedFiles,
+                installDirectory: installDirectory,
+                backend: modelPlan.backend
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: installDirectory)
+            throw error
+        }
 
         reporter.emit(DownloadState(phase: .verifying, message: "Verifying install"))
 
@@ -104,11 +122,57 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             throw URLError(.badURL)
         }
 
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await NetworkRequestExecutor.data(
+            session: session,
+            request: URLRequest(url: url),
+            retryPolicy: retryPolicy
+        )
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw StoreError.invalidManifest("Failed to resolve model \(repoID): HTTP \(http.statusCode).")
         }
         return try JSONDecoder().decode(ModelInfo.self, from: data)
+    }
+
+    private func verifyInstall(
+        files: [ModelInfo.Sibling],
+        downloadedFiles: [String],
+        installDirectory: URL,
+        backend: BackendKind
+    ) throws {
+        let expectedFiles = Set(files.map(\.rfilename))
+        let actualFiles = Set(downloadedFiles)
+        guard expectedFiles == actualFiles else {
+            throw StoreError.invalidManifest("Install verification failed because the downloaded file list did not match the planned file list.")
+        }
+
+        for file in files {
+            let fileURL = installDirectory.appendingPathComponent(file.rfilename)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw StoreError.invalidManifest("Install verification failed because \(file.rfilename) is missing.")
+            }
+
+            if let expectedSize = file.size {
+                let actualSize = ResumeSupport.existingSize(at: fileURL)
+                guard actualSize == expectedSize else {
+                    throw StoreError.invalidManifest(
+                        "Install verification failed for \(file.rfilename): expected \(expectedSize) bytes, found \(actualSize)."
+                    )
+                }
+            }
+        }
+
+        switch backend {
+        case .mlx:
+            guard files.contains(where: { $0.rfilename.lowercased().hasSuffix(".safetensors") }) else {
+                throw StoreError.invalidManifest("Install verification failed because no MLX weight files were downloaded.")
+            }
+        case .gguf:
+            guard files.contains(where: { $0.rfilename.lowercased().hasSuffix(".gguf") }) else {
+                throw StoreError.invalidManifest("Install verification failed because no GGUF file was downloaded.")
+            }
+        case .onnx:
+            break
+        }
     }
 
     private func modelPlan(

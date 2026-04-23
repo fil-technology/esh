@@ -16,9 +16,11 @@ struct CLIHandledError: Error {}
 
 private struct CLI {
     private let root = PersistenceRoot.default()
+    private let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 
     private struct ChatLaunchSettings {
         let cacheMode: CacheMode
+        let intent: SessionIntent
         let autosaveEnabled: Bool
     }
 
@@ -41,6 +43,8 @@ private struct CLI {
         let cacheStore = FileCacheStore(root: root)
 
         switch head {
+        case "capabilities":
+            try CapabilitiesCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "benchmark":
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "doctor":
@@ -54,7 +58,19 @@ private struct CLI {
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
-            try await handleCache(arguments: Array(command.dropFirst()), store: cacheStore)
+            try await handleCache(arguments: Array(command.dropFirst()), store: cacheStore, currentDirectoryURL: currentDirectoryURL)
+        case "agent":
+            try await AgentCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "calibrate":
+            try CalibrateCommand.run(arguments: Array(command.dropFirst()))
+        case "context":
+            try ContextCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "run":
+            try RunCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "infer":
+            try await InferCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "read":
+            try ReadCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "chat":
             try await handleChat(arguments: Array(command.dropFirst()), sessionStore: sessionStore)
         default:
@@ -88,9 +104,19 @@ private struct CLI {
             let cacheCount = (try? cacheStore.listArtifacts().count) ?? 0
             if modelCount == 0 && !didOfferStarterInstall {
                 didOfferStarterInstall = true
+                StartupBanner.animateIfNeeded(
+                    modelCount: modelCount,
+                    sessionCount: sessionCount,
+                    cacheCount: cacheCount
+                )
                 try await showStarterModelsMenu(
                     service: modelService,
                     catalogService: modelCatalogService,
+                    header: StartupBanner.render(
+                        modelCount: modelCount,
+                        sessionCount: sessionCount,
+                        cacheCount: cacheCount
+                    ),
                     title: "No Models Installed Yet",
                     subtitle: "Start with a small proven preset now, or press a to browse the full supported list."
                 )
@@ -129,8 +155,9 @@ private struct CLI {
                 guard let launchSettings = chooseChatLaunchSettings() else {
                     continue
                 }
+                printBusy("Opening chat with \(selectedModelID)…")
                 try await handleChat(
-                    arguments: ["--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
+                    arguments: ["--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--intent", launchSettings.intent.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
             case .secondary("n", 0):
@@ -148,8 +175,9 @@ private struct CLI {
                 guard let launchSettings = chooseChatLaunchSettings() else {
                     continue
                 }
+                printBusy("Opening chat with \(selectedModelID)…")
                 try await handleChat(
-                    arguments: [sessionName, "--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
+                    arguments: [sessionName, "--model", selectedModelID, "--cache-mode", launchSettings.cacheMode.rawValue, "--intent", launchSettings.intent.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
             case .selected(1):
@@ -180,6 +208,7 @@ private struct CLI {
                       !repoID.isEmpty else {
                     continue
                 }
+                printBusy("Preparing install for \(repoID)…")
                 try await ModelInstallCommand.run(
                     identifier: repoID,
                     service: modelService,
@@ -269,7 +298,7 @@ private struct CLI {
         try SessionCommand.run(arguments: arguments, store: store)
     }
 
-    private func handleCache(arguments: [String], store: CacheStore) async throws {
+    private func handleCache(arguments: [String], store: CacheStore, currentDirectoryURL: URL) async throws {
         guard let subcommand = arguments.first else {
             try CacheInspectCommand.run(arguments: arguments, store: store)
             return
@@ -277,7 +306,7 @@ private struct CLI {
 
         switch subcommand {
         case "build":
-            try await CacheBuildCommand.run(arguments: Array(arguments.dropFirst()))
+            try await CacheBuildCommand.run(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "load":
             try await CacheLoadCommand.run(arguments: Array(arguments.dropFirst()))
         default:
@@ -288,9 +317,11 @@ private struct CLI {
     private func handleChat(arguments: [String], sessionStore: SessionStore) async throws {
         let modelIdentifier = CommandSupport.optionalValue(flag: "--model", in: arguments)
         let cacheModeValue = CommandSupport.optionalValue(flag: "--cache-mode", in: arguments)
+        let intentValue = CommandSupport.optionalValue(flag: "--intent", in: arguments)
         let autosaveValue = CommandSupport.optionalValue(flag: "--autosave", in: arguments)
-        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model", "--cache-mode", "--autosave"])
+        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model", "--cache-mode", "--intent", "--autosave"])
         let preferredCacheMode = cacheModeValue.flatMap { CacheMode(rawValue: $0.lowercased()) }
+        let preferredIntent = intentValue.flatMap { SessionIntent(rawValue: $0.lowercased()) }
         let preferredAutosaveEnabled = autosaveValue.map { value in
             switch value.lowercased() {
             case "on", "true", "yes", "1":
@@ -312,6 +343,7 @@ private struct CLI {
             sessionName: sessionName,
             modelIdentifier: modelIdentifier,
             preferredCacheMode: preferredCacheMode,
+            preferredIntent: preferredIntent,
             preferredAutosaveEnabled: preferredAutosaveEnabled,
             sessionStore: sessionStore
         )
@@ -337,10 +369,27 @@ private struct CLI {
               esh version
               esh update
               esh chat [session-name]
-              esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo] [--autosave on|off]
+              esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--autosave on|off]
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
               esh benchmark history
+              esh capabilities
+              esh calibrate --method triattention --model <installed-model-id> [--max-tokens N] [--calibration-file <path>]
+              esh context build
+              esh context status
+              esh context query <text> [--limit N] [--run <id>]
+              esh context plan <task> [--limit N] [--snippets N] [--run <id>]
+              esh context eval <fixture.json> [--limit N]
+              esh run start [name]
+              esh run status <id>
+              esh run note <id> [--hypothesis <text>] [--finding <text>] [--decision <text>] [--pending <text>] [--complete <text>] [--status <value>]
+              esh run export <id>
+              esh read symbol <name> [--run <id>]
+              esh read references <name> [--limit N] [--run <id>]
+              esh read related <name-or-path> [--limit N] [--run <id>]
+              esh read file <path> --range start:end [--run <id>]
               esh doctor
+              esh infer --input <path-or->
+              esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
               esh model list
               esh model search <query> [--source all|local|hf] [--limit N]
@@ -350,9 +399,11 @@ private struct CLI {
               esh model inspect <model-id>
               esh model remove <model-id>
               esh session [list|show <uuid-or-name>|grep <text>]
-              esh cache build --session <uuid-or-name> [--mode raw|turbo] [--model <id-or-repo>]
+              esh cache build --session <uuid-or-name> [--mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--model <id-or-repo>] [--task <text>]
               esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
               esh cache inspect [artifact-uuid]
+              esh agent run <task> --model <id-or-repo> [--steps N] [--run <id-or-name>]
+              esh agent continue --run <id> --model <id-or-repo> [--steps N] [task]
             """
         )
     }
@@ -418,7 +469,7 @@ private struct CLI {
 
     private func chooseChatLaunchSettings() -> ChatLaunchSettings? {
         guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
-            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
+            return ChatLaunchSettings(cacheMode: .automatic, intent: .chat, autosaveEnabled: false)
         }
 
         let prompt = InteractiveChoicePrompt()
@@ -426,15 +477,15 @@ private struct CLI {
             title: "Chat Launch Settings",
             message: "Choose how this chat session should start.",
             details: [
-                "Quick starts with turbo cache mode and autosave off.",
-                "Turbo prefers compressed cache artifacts for this session.",
+                "Quick starts with automatic KV mode and autosave off.",
+                "Automatic prefers TriAttention for code and TurboQuant for retrieval-style work.",
                 "Autosave writes the session automatically after each reply."
             ],
             choices: [
                 .init(key: "q", label: "Quick"),
                 .init(key: "a", label: "Autosave"),
-                .init(key: "t", label: "Turbo"),
-                .init(key: "b", label: "Turbo + Autosave")
+                .init(key: "c", label: "Code"),
+                .init(key: "d", label: "Doc QA")
             ],
             footer: "←/→ navigate • enter confirm • < back • esc cancel"
         ) else {
@@ -443,13 +494,13 @@ private struct CLI {
 
         switch selected {
         case "a":
-            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: true)
-        case "t":
-            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
-        case "b":
-            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: true)
+            return ChatLaunchSettings(cacheMode: .automatic, intent: .chat, autosaveEnabled: true)
+        case "c":
+            return ChatLaunchSettings(cacheMode: .automatic, intent: .code, autosaveEnabled: false)
+        case "d":
+            return ChatLaunchSettings(cacheMode: .automatic, intent: .documentQA, autosaveEnabled: false)
         default:
-            return ChatLaunchSettings(cacheMode: .turbo, autosaveEnabled: false)
+            return ChatLaunchSettings(cacheMode: .automatic, intent: .chat, autosaveEnabled: false)
         }
     }
 
@@ -544,10 +595,19 @@ private struct CLI {
                 secondaryKeys: ["m", "g", "s", "o"]
             ) {
             case .selected(let index):
-                guard models.indices.contains(index) else {
+                if index == 0 {
+                    selectedBackend = .mlx
                     continue
                 }
-                let model = models[index]
+                if index == 1 {
+                    selectedBackend = .gguf
+                    continue
+                }
+                let modelIndex = index - 2
+                guard models.indices.contains(modelIndex) else {
+                    continue
+                }
+                let model = models[modelIndex]
                 try await ModelInstallCommand.run(
                     identifier: model.id,
                     service: service,
@@ -570,10 +630,11 @@ private struct CLI {
                 )
                 return
             case .secondary("o", let index):
-                guard models.indices.contains(index) else {
+                let modelIndex = index - 2
+                guard models.indices.contains(modelIndex) else {
                     continue
                 }
-                let model = models[index]
+                let model = models[modelIndex]
                 try await ModelOpenCommand.run(
                     identifier: model.id,
                     service: service,
@@ -589,6 +650,7 @@ private struct CLI {
     private func showStarterModelsMenu(
         service: ModelService,
         catalogService: ModelCatalogService,
+        header: String? = nil,
         title: String,
         subtitle: String
     ) async throws {
@@ -597,7 +659,7 @@ private struct CLI {
 
         while true {
             let models = starterModels(service: service, backend: selectedBackend)
-            let items = recommendedMenuItems(for: models, backend: selectedBackend)
+            let items = starterMenuItems(for: models, backend: selectedBackend)
             let starterSubtitle = starterMenuSubtitle(
                 base: subtitle,
                 backend: selectedBackend,
@@ -605,7 +667,11 @@ private struct CLI {
             )
 
             switch picker.pick(
-                title: "\(title) [\(selectedBackend.rawValue.uppercased())]",
+                title: starterMenuTitle(
+                    header: header,
+                    title: title,
+                    backend: selectedBackend
+                ),
                 subtitle: starterSubtitle,
                 items: items,
                 primaryHint: models.isEmpty ? "Enter no-op" : "Enter install",
@@ -613,17 +679,51 @@ private struct CLI {
                 secondaryKeys: ["m", "g", "s", "a", "o"]
             ) {
             case .selected(let index):
-                guard models.indices.contains(index) else {
+                if index == 0 {
+                    selectedBackend = .mlx
                     continue
                 }
-                let model = models[index]
-                try await ModelInstallCommand.run(
-                    identifier: model.id,
-                    service: service,
-                    catalogService: catalogService
-                )
-                pauseForMenu()
-                return
+                if index == 1 {
+                    selectedBackend = .gguf
+                    continue
+                }
+
+                let modelStartIndex = 2
+                let searchIndex = modelStartIndex + models.count
+                let browseIndex = searchIndex + 1
+                let modelIndex = index - modelStartIndex
+
+                if models.indices.contains(modelIndex) {
+                    let model = models[modelIndex]
+                    try await ModelInstallCommand.run(
+                        identifier: model.id,
+                        service: service,
+                        catalogService: catalogService
+                    )
+                    pauseForMenu()
+                    return
+                }
+
+                if index == searchIndex {
+                    guard let query = prompt("Model search query"), !query.isEmpty else {
+                        continue
+                    }
+                    try await showSearchModelsMenu(
+                        query: query,
+                        service: service,
+                        catalogService: catalogService
+                    )
+                    return
+                }
+
+                if index == browseIndex {
+                    try await showRecommendedModelsMenu(
+                        service: service,
+                        catalogService: catalogService
+                    )
+                    return
+                }
+                continue
             case .secondary("m", _):
                 selectedBackend = .mlx
             case .secondary("g", _):
@@ -645,10 +745,11 @@ private struct CLI {
                 )
                 return
             case .secondary("o", let index):
-                guard models.indices.contains(index) else {
+                let modelIndex = index - 2
+                guard models.indices.contains(modelIndex) else {
                     continue
                 }
-                let model = models[index]
+                let model = models[modelIndex]
                 try await ModelOpenCommand.run(
                     identifier: model.id,
                     service: service,
@@ -661,14 +762,51 @@ private struct CLI {
         }
     }
 
+    private func starterMenuItems(
+        for models: [RecommendedModel],
+        backend: BackendKind
+    ) -> [InteractiveListPicker.Item] {
+        let backendItems = backendSwitcherItems(selectedBackend: backend)
+        let modelItems = models.map { model in
+            let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
+            return InteractiveListPicker.Item(
+                title: "\(model.id)  \(features)",
+                detail: "\(model.tier.displayName) | \(model.quantization) | \(model.memoryHint) | \(model.sizeHint) | \(model.repoID)"
+            )
+        }
+
+        return backendItems + modelItems + [
+            InteractiveListPicker.Item(
+                title: "Search Other Models",
+                detail: "Search the full MLX and GGUF catalog before installing"
+            ),
+            InteractiveListPicker.Item(
+                title: "Browse All Presets",
+                detail: "Open the full recommended preset list with backend switching"
+            )
+        ]
+    }
+
+    private func starterMenuTitle(
+        header: String?,
+        title: String,
+        backend: BackendKind
+    ) -> String {
+        let menuTitle = "\(title) [\(backend.rawValue.uppercased())]"
+        guard let header, !header.isEmpty else {
+            return menuTitle
+        }
+        return header + "\n\n" + menuTitle
+    }
+
     private func starterMenuSubtitle(
         base: String,
         backend: BackendKind,
         isEmpty: Bool
     ) -> String {
         let toggleHint = backend == .mlx
-            ? "Showing MLX starters. Press g to switch to GGUF."
-            : "Showing GGUF starters. Press m to switch to MLX."
+            ? "Showing MLX starters. Select MLX or GGUF at the top to switch backends."
+            : "Showing GGUF starters. Select MLX or GGUF at the top to switch backends."
         if isEmpty {
             return base + " " + toggleHint + " Press s to search the full catalog."
         }
@@ -679,16 +817,17 @@ private struct CLI {
         for models: [RecommendedModel],
         backend: BackendKind
     ) -> [InteractiveListPicker.Item] {
+        let backendItems = backendSwitcherItems(selectedBackend: backend)
         guard !models.isEmpty else {
-            return [
+            return backendItems + [
                 InteractiveListPicker.Item(
                     title: "No \(backend.rawValue.uppercased()) presets yet",
-                    detail: "Press m for MLX or g for GGUF."
+                    detail: "Select MLX or GGUF above to switch preset groups."
                 )
             ]
         }
 
-        return models.map { model in
+        return backendItems + models.map { model in
             let features = featureBadgeText(ModelFeatureClassifier.features(for: model))
             return InteractiveListPicker.Item(
                 title: "\(model.id)  \(features)",
@@ -697,10 +836,27 @@ private struct CLI {
         }
     }
 
+    private func backendSwitcherItems(selectedBackend: BackendKind) -> [InteractiveListPicker.Item] {
+        [
+            InteractiveListPicker.Item(
+                title: selectedBackend == .mlx ? "[x] MLX Presets" : "[ ] MLX Presets",
+                detail: selectedBackend == .mlx
+                    ? "Active backend for this list"
+                    : "Switch to MLX preset recommendations"
+            ),
+            InteractiveListPicker.Item(
+                title: selectedBackend == .gguf ? "[x] GGUF Presets" : "[ ] GGUF Presets",
+                detail: selectedBackend == .gguf
+                    ? "Active backend for this list"
+                    : "Switch to GGUF llama.cpp recommendations"
+            )
+        ]
+    }
+
     private func recommendedMenuSubtitle(for backend: BackendKind, isEmpty: Bool) -> String {
         let base = backend == .mlx
-            ? "Showing MLX presets. Press g to switch to GGUF."
-            : "Showing GGUF presets. Press m to switch to MLX."
+            ? "Showing MLX presets. Select MLX or GGUF at the top to switch backends."
+            : "Showing GGUF presets. Select MLX or GGUF at the top to switch backends."
         if isEmpty {
             return base + " No presets are available in this backend yet."
         }
@@ -722,49 +878,43 @@ private struct CLI {
             return nil
         }
 
-        let backend = MLXBackend()
-        let modelEntries = installs.map { install -> (install: ModelInstall, incompatibility: String?) in
-            let incompatibility = try? backend.validateChatModel(for: install)
-            return (install, incompatibility ?? nil)
-        }
+        let chatValidator = ChatModelValidator()
         let picker = InteractiveListPicker()
-        let items = modelEntries.map { entry in
-            let install = entry.install
-            let incompatibility = entry.incompatibility
+        let items = installs.map { install in
             let features = featureBadgeText(ModelFeatureClassifier.features(for: install))
-            let compatibility = incompatibility == nil ? "chat-ready" : "incompatible"
             return InteractiveListPicker.Item(
                 title: "\(install.id)  \(features)",
-                detail: "\(compatibility) | \(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
+                detail: "\(install.spec.backend.rawValue) | \(ByteFormatting.string(for: install.sizeBytes)) | \(install.installPath)"
             )
         }
 
         while true {
             switch picker.pick(
                 title: "Choose Chat Model",
-                subtitle: "Enter starts chat with the selected model. Press o to open its model page or d to delete it.",
+                subtitle: "Enter starts chat with the selected model. Press o to open its model page or d to delete it. Compatibility is checked after selection.",
                 items: items,
                 primaryHint: "Enter start chat",
                 secondaryHints: ["o open page", "d delete"],
                 secondaryKeys: ["o", "d"]
             ) {
             case .selected(let index):
-                let entry = modelEntries[index]
-                if let incompatibility = entry.incompatibility {
-                    print("Model \(entry.install.id) is not chat-compatible with the current MLX runtime: \(incompatibility)")
+                let install = installs[index]
+                printBusy("Checking \(install.id) runtime…")
+                if let incompatibility = chatValidator.incompatibilityReason(for: install) {
+                    print("Model \(install.id) is not chat-compatible with the current \(install.spec.backend.rawValue.uppercased()) runtime: \(incompatibility)")
                     pauseForMenu()
                     return nil
                 }
-                return entry.install.id
+                return install.id
             case .secondary("o", let index):
                 try await ModelOpenCommand.run(
-                    identifier: modelEntries[index].install.id,
+                    identifier: installs[index].id,
                     service: service,
                     catalogService: catalogService
                 )
                 continue
             case .secondary("d", let index):
-                let install = modelEntries[index].install
+                let install = installs[index]
                 guard confirmAction("Delete \(install.id)? [y/N]") else {
                     continue
                 }
@@ -783,6 +933,7 @@ private struct CLI {
         sessionStore: SessionStore
     ) async throws {
         let picker = InteractiveListPicker()
+        let chatValidator = ChatModelValidator()
 
         while true {
             let installs = try service.list()
@@ -818,11 +969,18 @@ private struct CLI {
                 continue
             case .secondary("c", let index):
                 let install = installs[index]
+                printBusy("Checking \(install.id) runtime…")
+                if let incompatibility = chatValidator.incompatibilityReason(for: install) {
+                    print("Model \(install.id) is not chat-compatible with the current \(install.spec.backend.rawValue.uppercased()) runtime: \(incompatibility)")
+                    pauseForMenu()
+                    continue
+                }
                 guard let launchSettings = chooseChatLaunchSettings() else {
                     continue
                 }
+                printBusy("Opening chat with \(install.id)…")
                 try await handleChat(
-                    arguments: ["--model", install.id, "--cache-mode", launchSettings.cacheMode.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
+                    arguments: ["--model", install.id, "--cache-mode", launchSettings.cacheMode.rawValue, "--intent", launchSettings.intent.rawValue, "--autosave", launchSettings.autosaveEnabled ? "on" : "off"],
                     sessionStore: sessionStore
                 )
                 return
@@ -932,6 +1090,7 @@ private struct CLI {
         service: ModelService,
         catalogService: ModelCatalogService
     ) async throws {
+        printBusy("Searching models for \"\(query)\"…")
         let results = try await catalogService.search(query: query, sourceFilter: .all, limit: 10)
         guard !results.isEmpty else {
             print("No models found for \"\(query)\".")
@@ -994,6 +1153,11 @@ private struct CLI {
         default:
             return "\(value)"
         }
+    }
+
+    private func printBusy(_ message: String) {
+        print("\u{001B}[2J\u{001B}[H\(message)")
+        fflush(stdout)
     }
 
     private var menuDateFormatter: DateFormatter {

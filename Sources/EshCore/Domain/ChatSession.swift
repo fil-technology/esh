@@ -6,6 +6,7 @@ public struct ChatSession: Identifiable, Codable, Hashable, Sendable {
     public var modelID: String?
     public var backend: BackendKind?
     public var cacheMode: CacheMode?
+    public var intent: SessionIntent?
     public var autosaveEnabled: Bool?
     public var messages: [Message]
     public var createdAt: Date
@@ -17,6 +18,7 @@ public struct ChatSession: Identifiable, Codable, Hashable, Sendable {
         modelID: String? = nil,
         backend: BackendKind? = nil,
         cacheMode: CacheMode? = nil,
+        intent: SessionIntent? = nil,
         autosaveEnabled: Bool? = nil,
         messages: [Message] = [],
         createdAt: Date = Date(),
@@ -27,6 +29,7 @@ public struct ChatSession: Identifiable, Codable, Hashable, Sendable {
         self.modelID = modelID
         self.backend = backend
         self.cacheMode = cacheMode
+        self.intent = intent
         self.autosaveEnabled = autosaveEnabled
         self.messages = messages
         self.createdAt = createdAt

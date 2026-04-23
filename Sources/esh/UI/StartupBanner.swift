@@ -7,7 +7,7 @@ enum StartupBanner {
         let art = artLines(highlightStep: nil)
         let card = cardLines(modelCount: modelCount, sessionCount: sessionCount, cacheCount: cacheCount)
 
-        return ([""] + zip(art, card).map { "\($0)   \($1)" }).joined(separator: "\n")
+        return zip(art, card).map { "\($0)   \($1)" }.joined(separator: "\n")
     }
 
     static func animateIfNeeded(modelCount: Int, sessionCount: Int, cacheCount: Int) {
@@ -40,7 +40,7 @@ enum StartupBanner {
     ) -> String {
         let art = artLines(highlightStep: highlightStep)
         let card = cardLines(modelCount: modelCount, sessionCount: sessionCount, cacheCount: cacheCount)
-        return ([""] + zip(art, card).map { "\($0)   \($1)" }).joined(separator: "\n")
+        return zip(art, card).map { "\($0)   \($1)" }.joined(separator: "\n")
     }
 
     private static func cardLines(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [String] {

@@ -56,17 +56,30 @@ enum CacheLoadCommand {
 
         let metrics = await runtime.metrics
         print("artifact: \(loadedArtifact.id.uuidString)")
+        if let contextTask = loadedArtifact.manifest.contextTask {
+            print("context_task: \(contextTask)")
+        }
+        if let contextPackageID = loadedArtifact.manifest.contextPackageID {
+            print("context_package: \(contextPackageID.uuidString)")
+        }
+        if let policyReason = loadedArtifact.manifest.policyReason {
+            print("policy: \(policyReason)")
+        }
         print("reply_chars: \(reply.count)")
         print("ttft_ms: \(metrics.ttftMilliseconds.map { String(format: "%.1f", $0) } ?? "-")")
         print("tok_s: \(metrics.tokensPerSecond.map { String(format: "%.2f", $0) } ?? "-")")
     }
 
     private static func artifactCompressor(for artifactID: UUID, cacheStore: FileCacheStore) -> CacheCompressor {
-        if let artifact = try? cacheStore.loadArtifact(id: artifactID).0,
-           artifact.manifest.cacheMode == .raw {
-            return PassthroughCompressor()
+        if let artifact = try? cacheStore.loadArtifact(id: artifactID).0 {
+            switch artifact.manifest.cacheMode {
+            case .raw, .triattention, .automatic:
+                return PassthroughCompressor()
+            case .turbo:
+                return TurboQuantCompressor()
+            }
         }
-        return TurboQuantCompressor()
+        return PassthroughCompressor()
     }
 
 }

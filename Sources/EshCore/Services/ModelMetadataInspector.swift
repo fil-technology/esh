@@ -14,9 +14,14 @@ public struct ModelMetadataInspector: Sendable {
     }
 
     private let session: URLSession
+    private let retryPolicy: NetworkRetryPolicy
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        retryPolicy: NetworkRetryPolicy = .default
+    ) {
         self.session = session
+        self.retryPolicy = retryPolicy
     }
 
     public func inspect(
@@ -123,7 +128,11 @@ public struct ModelMetadataInspector: Sendable {
             throw URLError(.badURL)
         }
 
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await NetworkRequestExecutor.data(
+            session: session,
+            request: URLRequest(url: url),
+            retryPolicy: retryPolicy
+        )
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw StoreError.invalidManifest("Failed to fetch model metadata: HTTP \(http.statusCode).")
         }
@@ -139,7 +148,11 @@ public struct ModelMetadataInspector: Sendable {
         url.append(path: "main")
         url.append(path: "config.json")
 
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await NetworkRequestExecutor.data(
+            session: session,
+            request: URLRequest(url: url),
+            retryPolicy: retryPolicy
+        )
         if let http = response as? HTTPURLResponse {
             switch http.statusCode {
             case 200:

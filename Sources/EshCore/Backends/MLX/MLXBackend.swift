@@ -7,7 +7,7 @@ public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendabl
     private let locator: MLXModelLocator
 
     public init(
-        runtimeVersion: String = "mlx-vlm-0.4.3+mlx-lm-bridge-v1",
+        runtimeVersion: String = "mlx-vlm-0.4.3+mlx-lm-bridge-v2",
         bridge: MLXBridge = .init(),
         locator: MLXModelLocator = .init()
     ) {

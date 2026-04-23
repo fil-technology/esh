@@ -26,14 +26,19 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     public var metrics: Metrics { currentMetrics }
 
     public func prepare(session: ChatSession) async throws {
+        let normalizedSession = PromptSessionNormalizer().normalized(session: session)
         let response: MLXPrepareResponse = try bridge.run(
             command: "mlx-build-cache",
             request: MLXPrepareRequest(
                 modelPath: install.installPath,
                 modelID: install.id,
                 tokenizerID: install.spec.tokenizerID,
-                session: session,
-                stateFilePath: stateFileURL.path
+                session: normalizedSession,
+                stateFilePath: stateFileURL.path,
+                kvMode: session.cacheMode ?? .automatic,
+                sessionIntent: session.intent ?? .chat,
+                triattentionCalibPath: TriAttentionCalibrationLocator().calibrationURL(for: install.id).path,
+                triattentionBudget: 2048
             ),
             as: MLXPrepareResponse.self
         )
@@ -47,13 +52,18 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         AsyncThrowingStream { continuation in
             Task {
                 do {
+                    let normalizedSession = PromptSessionNormalizer().normalized(session: session)
                     let request = MLXGenerateRequest(
                         modelPath: install.installPath,
                         modelID: install.id,
                         tokenizerID: install.spec.tokenizerID,
-                        session: session,
+                        session: normalizedSession,
                         config: config,
-                        stateFilePath: stateFileURL.path
+                        stateFilePath: stateFileURL.path,
+                        kvMode: session.cacheMode ?? .automatic,
+                        sessionIntent: session.intent ?? .chat,
+                        triattentionCalibPath: TriAttentionCalibrationLocator().calibrationURL(for: install.id).path,
+                        triattentionBudget: 2048
                     )
                     let input = try JSONCoding.encoder.encode(request)
                     let process = Process()
@@ -185,6 +195,10 @@ private struct MLXGenerateRequest: Codable, Sendable {
     var session: ChatSession
     var config: GenerationConfig
     var stateFilePath: String
+    var kvMode: CacheMode
+    var sessionIntent: SessionIntent
+    var triattentionCalibPath: String?
+    var triattentionBudget: Int
 }
 
 private struct MLXGenerateResponse: Codable, Sendable {
@@ -204,6 +218,10 @@ private struct MLXPrepareRequest: Codable, Sendable {
     var tokenizerID: String?
     var session: ChatSession
     var stateFilePath: String
+    var kvMode: CacheMode
+    var sessionIntent: SessionIntent
+    var triattentionCalibPath: String?
+    var triattentionBudget: Int
 }
 
 private struct MLXPrepareResponse: Codable, Sendable {

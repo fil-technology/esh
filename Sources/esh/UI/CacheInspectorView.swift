@@ -12,6 +12,21 @@ enum CacheInspectorView {
         print("compressor: \(artifact.manifest.compressorVersion ?? "-")")
         print("created: \(artifact.manifest.createdAt)")
         print("size: \(ByteFormatting.string(for: artifact.sizeBytes))")
+        if let contextPackageID = artifact.manifest.contextPackageID {
+            print("context package: \(contextPackageID.uuidString)")
+        }
+        if let contextTask = artifact.manifest.contextTask {
+            print("context task: \(contextTask)")
+        }
+        if let contextFileCount = artifact.manifest.contextFileCount {
+            print("context files: \(contextFileCount)")
+        }
+        if let contextReused = artifact.manifest.contextReused {
+            print("context reused: \(contextReused ? "yes" : "no")")
+        }
+        if let policyReason = artifact.manifest.policyReason {
+            print("policy: \(policyReason)")
+        }
         if let snapshotSize = artifact.snapshotSizeBytes {
             print("snapshot size: \(ByteFormatting.string(for: snapshotSize))")
         }

@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-04-11
+
+### Added
+- bounded autonomous agent mode can now create files, edit line ranges, and run explicit build/test verification steps
+- agent runs now support resumption with `esh agent continue --run <id> --model <id-or-repo>` using compact continuation memory from persisted run state
+- terminal chat now supports transcript scrolling for long responses with line, page, and jump navigation
+
+### Changed
+- agent final answers are now gated on successful verification after code edits, with repair-and-retry behavior after failed verification
+- run state now records agent task lifecycle and per-step trace events for clearer status inspection and continuation
+
 ## [0.1.21] - 2026-04-04
 
 ### Changed

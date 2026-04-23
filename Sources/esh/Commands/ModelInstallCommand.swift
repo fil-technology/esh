@@ -88,19 +88,10 @@ enum ModelInstallCommand {
         }
 
         if interactive {
-            print("Choose a GGUF variant to install:")
-            for (offset, option) in metadata.availableVariants.enumerated() {
-                print("\(offset + 1). \(option)")
-            }
-            print("Selection [1-\(metadata.availableVariants.count), 0 to cancel]: ", terminator: "")
-            fflush(stdout)
-            guard let input = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  let index = Int(input),
-                  index != 0,
-                  metadata.availableVariants.indices.contains(index - 1) else {
-                throw StoreError.invalidManifest("Install cancelled.")
-            }
-            return metadata.availableVariants[index - 1]
+            return try await GGUFVariantPicker.pick(
+                repoID: repoID,
+                metadata: metadata
+            )
         }
 
         throw StoreError.invalidManifest(
@@ -145,23 +136,14 @@ enum ModelInstallCommand {
                 )
                 return false
             }
-
-            let choice = prompt.choose(
-                title: "Ready To Install",
-                message: "Review the machine and runtime requirements before downloading \(repoID).",
-                details: detailLines,
-                choices: [
-                    .init(key: "y", label: "Install"),
-                    .init(key: "n", label: "Cancel")
-                ],
-                footer: "←/→ navigate • enter confirm • < back • esc cancel"
-            )
-            return choice == "y"
         }
 
-        print("Install preflight:")
-        for line in detailLines {
-            print("  - \(line)")
+        let nonBlockingLines = report.notes + report.warnings.map { "Warning: \($0)" }
+        if !nonBlockingLines.isEmpty {
+            print("Installing \(repoID)")
+            for line in nonBlockingLines {
+                print("  - \(line)")
+            }
         }
         return !report.isBlocked
     }
