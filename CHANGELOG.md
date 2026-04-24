@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-04-24
+
+### Added
+- expanded recommended model presets with additional Qwen, DeepSeek, Phi, Gemma, and GGUF options
+- catalog coverage for the new recommended model aliases and backend-specific ordering
+
 ## [0.1.23] - 2026-04-24
 
 ### Added
