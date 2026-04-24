@@ -43,6 +43,9 @@ jobs:
         with:
           xcode-version: "latest-stable"
 
+      - name: Install llama.cpp
+        run: brew install llama.cpp
+
       - name: Resolve release version
         id: version
         run: |
