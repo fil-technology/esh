@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-04-24
+
+### Added
+- optional multi-model routing configuration with router, main, coding, embedding, and fallback model roles
+- `esh routing` commands for status, enable/disable, role assignment, mode selection, and local routing tests
+- routed `esh infer` and `esh chat --routing` execution with deterministic router JSON validation
+- safe workspace-bounded `read_file` tool handling for routed filesystem requests
+
+### Changed
+- routed inference falls back to the main model when the router is unavailable, emits invalid JSON, has low confidence, or proposes an invalid tool call
+- `parallel` routing mode is accepted as configuration and currently runs through the sequential fallback path
+
 ## [0.1.22] - 2026-04-11
 
 ### Added
