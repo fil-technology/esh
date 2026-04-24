@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-04-24
+
+### Fixed
+- MLX chat cache export now handles bfloat16 prompt-cache tensors without failing generation.
+
 ## [0.1.26] - 2026-04-24
 
 ### Fixed

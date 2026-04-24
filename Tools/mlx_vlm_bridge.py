@@ -154,6 +154,23 @@ def _numpy_dtype(dtype: str):
     return mapping[normalized]
 
 
+def _normalized_dtype_name(dtype: Any) -> str:
+    return str(dtype).split(".")[-1].lower()
+
+
+def _mlx_dtype(dtype: str):
+    import mlx.core as mx
+
+    return getattr(mx, dtype)
+
+
+def _snapshot_numpy_array(value: Any) -> np.ndarray:
+    dtype_name = _normalized_dtype_name(getattr(value, "dtype", ""))
+    if dtype_name == "bfloat16" and hasattr(value, "astype"):
+        return np.asarray(value.astype(_mlx_dtype("float32")))
+    return np.asarray(value)
+
+
 def _decode_tensor(tensor: dict[str, Any]) -> np.ndarray:
     raw = base64.b64decode(tensor["data"])
     dtype = _numpy_dtype(tensor["dtype"])
@@ -264,8 +281,8 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
             continue
         if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
             can_save_prompt_cache = False
-        key_array = np.array(keys)
-        value_array = np.array(values)
+        key_array = _snapshot_numpy_array(keys)
+        value_array = _snapshot_numpy_array(values)
         total_bytes += int(key_array.nbytes + value_array.nbytes)
         prefix = f"layer{index}"
         tensors.append(_encode_tensor(f"{prefix}.keys", key_array))
