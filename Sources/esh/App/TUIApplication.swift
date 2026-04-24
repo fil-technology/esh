@@ -289,6 +289,8 @@ struct TUIApplication {
         preferredCacheMode: CacheMode? = nil,
         preferredIntent: SessionIntent? = nil,
         preferredAutosaveEnabled: Bool? = nil,
+        routingEnabled: Bool = false,
+        routingMode: String? = nil,
         sessionStore: SessionStore
     ) async throws {
         let surface = TerminalSurface()
@@ -331,7 +333,9 @@ struct TUIApplication {
             cacheMode: session.cacheMode?.rawValue ?? latestCacheMode(for: session, cacheStore: cacheStore) ?? "raw",
             autosaveEnabled: session.autosaveEnabled ?? false
         )
-        state.statusText = "ready | /menu commands | /back launcher"
+        state.statusText = routingEnabled
+            ? "ready | routing \(routingMode ?? "sequential") | /menu commands | /back launcher"
+            : "ready | /menu commands | /back launcher"
         surface.render(state: state)
         var queuedPrompts: [String] = []
 
@@ -375,6 +379,54 @@ struct TUIApplication {
                 latestUserText: trimmed,
                 workspaceRootURL: workspaceRootURL
             )
+            if routingEnabled {
+                state.statusText = "routing…"
+                state.inputText = ""
+                let assistantID = UUID()
+                state.streamingAssistantMessageID = assistantID
+                state.transcriptItems.append(
+                    TranscriptItem(id: assistantID, role: .assistant, text: "", isStreaming: true)
+                )
+                surface.render(state: state)
+
+                do {
+                    let routingResponse = try await routedReply(
+                        preparedSession: preparedSession.session,
+                        install: install,
+                        routingMode: routingMode,
+                        root: root,
+                        workspaceRootURL: workspaceRootURL
+                    )
+                    let reply = routingResponse.outputText
+                    session.messages.append(Message(role: .assistant, text: reply))
+                    session.updatedAt = Date()
+                    try autosaveIfNeeded(state: state, session: session, sessionStore: sessionStore)
+                    state.metrics = routingResponse.metrics
+                    state.inputText = inputController.currentBuffer()
+                    state.streamingAssistantMessageID = nil
+                    state.statusText = routedStatusText(response: routingResponse, queuedCount: queuedPrompts.count)
+                    updateStreamingAssistant(
+                        state: &state,
+                        assistantID: assistantID,
+                        text: reply,
+                        isStreaming: false
+                    )
+                    surface.render(state: state)
+                } catch {
+                    state.streamingAssistantMessageID = nil
+                    state.statusText = queuedPrompts.isEmpty
+                        ? "routing failed"
+                        : "routing failed | \(queuedPrompts.count) queued"
+                    state.overlay = OverlayPanelState(
+                        title: "Routing Failed",
+                        lines: [error.localizedDescription]
+                    )
+                    state.transcriptItems.removeAll { $0.id == assistantID }
+                    state.inputText = inputController.currentBuffer()
+                    surface.render(state: state)
+                }
+                continue
+            }
             state.statusText = preparedSession.usedContextBrief
                 ? "planning with local context…"
                 : (runtime.backend == .gguf ? "loading GGUF model / waiting for first token…" : "streaming…")
@@ -978,6 +1030,59 @@ struct TUIApplication {
     ) throws {
         guard state.autosaveEnabled else { return }
         try sessionStore.save(session: session)
+    }
+
+    private func routedReply(
+        preparedSession: ChatSession,
+        install: ModelInstall,
+        routingMode: String?,
+        root: PersistenceRoot,
+        workspaceRootURL: URL
+    ) async throws -> ExternalInferenceResponse {
+        var routing = (try? RoutingConfigurationStore(root: root).load()) ?? RoutingConfiguration()
+        routing.enabled = true
+        if let routingMode {
+            guard let parsed = RoutingMode(rawValue: routingMode.lowercased()) else {
+                throw StoreError.invalidManifest("Invalid routing mode: \(routingMode)")
+            }
+            routing.mode = parsed
+            routing.enabled = parsed != .disabled
+        } else if routing.mode == .disabled {
+            routing.mode = .sequential
+        }
+        routing.mainModel = routing.mainModel ?? install.id
+
+        let request = ExternalInferenceRequest(
+            model: install.id,
+            cacheMode: preparedSession.cacheMode,
+            intent: preparedSession.intent,
+            messages: preparedSession.messages.map {
+                ExternalInferenceMessage(role: $0.role, text: $0.text)
+            },
+            generation: GenerationConfig(temperature: routing.mainTemperature),
+            routing: routing
+        )
+        let service = ExternalInferenceService(
+            modelStore: FileModelStore(root: root),
+            sessionStore: FileSessionStore(root: root),
+            cacheStore: FileCacheStore(root: root),
+            workspaceRootURL: workspaceRootURL
+        )
+        return try await service.infer(request: request)
+    }
+
+    private func routedStatusText(response: ExternalInferenceResponse, queuedCount: Int) -> String {
+        var parts = ["routed"]
+        if let selected = response.routing?.selectedModel {
+            parts.append(selected)
+        }
+        if let action = response.routing?.decision?.action.rawValue {
+            parts.append(action)
+        }
+        if queuedCount > 0 {
+            parts.append("\(queuedCount) queued")
+        }
+        return parts.joined(separator: " | ")
     }
 
     private func nextSessionName(sessionStore: SessionStore) throws -> String {

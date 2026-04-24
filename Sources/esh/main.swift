@@ -67,6 +67,8 @@ private struct CLI {
             try ContextCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "run":
             try RunCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "routing":
+            try await RoutingCommand.run(arguments: Array(command.dropFirst()), root: root, currentDirectoryURL: currentDirectoryURL)
         case "infer":
             try await InferCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "read":
@@ -319,7 +321,10 @@ private struct CLI {
         let cacheModeValue = CommandSupport.optionalValue(flag: "--cache-mode", in: arguments)
         let intentValue = CommandSupport.optionalValue(flag: "--intent", in: arguments)
         let autosaveValue = CommandSupport.optionalValue(flag: "--autosave", in: arguments)
-        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model", "--cache-mode", "--intent", "--autosave"])
+        let routingEnabled = arguments.contains("--routing")
+        let routingMode = CommandSupport.optionalValue(flag: "--routing-mode", in: arguments)
+        let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: ["--model", "--cache-mode", "--intent", "--autosave", "--routing-mode", "--router"])
+            .filter { !$0.hasPrefix("--") }
         let preferredCacheMode = cacheModeValue.flatMap { CacheMode(rawValue: $0.lowercased()) }
         let preferredIntent = intentValue.flatMap { SessionIntent(rawValue: $0.lowercased()) }
         let preferredAutosaveEnabled = autosaveValue.map { value in
@@ -345,6 +350,8 @@ private struct CLI {
             preferredCacheMode: preferredCacheMode,
             preferredIntent: preferredIntent,
             preferredAutosaveEnabled: preferredAutosaveEnabled,
+            routingEnabled: routingEnabled || routingMode != nil,
+            routingMode: routingMode,
             sessionStore: sessionStore
         )
     }
@@ -383,6 +390,13 @@ private struct CLI {
               esh run status <id>
               esh run note <id> [--hypothesis <text>] [--finding <text>] [--decision <text>] [--pending <text>] [--complete <text>] [--status <value>]
               esh run export <id>
+              esh routing status
+              esh routing enable|disable
+              esh routing set-mode disabled|single|sequential|parallel
+              esh routing set-router <model-id>
+              esh routing set-main <model-id>
+              esh routing set-coding <model-id>
+              esh routing test <prompt>
               esh read symbol <name> [--run <id>]
               esh read references <name> [--limit N] [--run <id>]
               esh read related <name-or-path> [--limit N] [--run <id>]
