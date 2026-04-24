@@ -10,10 +10,10 @@ struct RecommendedModelRegistryTests {
         let ids = registry.list().map(\.id)
 
         #expect(ids.prefix(4).elementsEqual([
+            "qwen-3-5-9b",
             "mistral-small-24b",
             "deepseek-r1-qwen-14b",
-            "qwen-3-5-9b-optiq",
-            "deepseek-r1-qwen-14b-gguf"
+            "deepseek-r1-qwen-7b"
         ]))
         #expect(ids.suffix(3).elementsEqual([
             "qwen-3-5-27b-opus-distilled",
@@ -31,10 +31,18 @@ struct RecommendedModelRegistryTests {
         let backendIDs = registry.list(backend: .mlx).map(\.id)
         let ggufIDs = registry.list(backend: .gguf).map(\.id)
 
-        #expect(tierIDs == ["qwen-2-5-0-5b", "qwen-3-5-0-8b-optiq"])
+        #expect(tierIDs == ["qwen-2-5-0-5b", "qwen-3-5-0-8b-optiq", "qwen-3-5-0-8b", "gemma-4-e2b-it"])
         #expect(codingIDs == ["mistral-small-24b", "qwen-2-5-coder-7b", "qwen-2-5-coder-7b-gguf", "qwen-2-5-coder-32b"])
-        #expect(backendIDs.count == 11)
-        #expect(ggufIDs == ["deepseek-r1-qwen-14b-gguf", "llama-3-2-3b-gguf", "qwen-2-5-coder-7b-gguf"])
+        #expect(backendIDs.count == 19)
+        #expect(ggufIDs == [
+            "qwen-3-5-9b-gguf",
+            "deepseek-r1-qwen-14b-gguf",
+            "llama-3-2-3b-gguf",
+            "qwen-2-5-coder-7b-gguf",
+            "deepseek-r1-qwen-7b-gguf",
+            "phi-4-mini-reasoning-gguf",
+            "phi-3-5-mini-instruct-gguf"
+        ])
     }
 
     @Test
@@ -44,6 +52,8 @@ struct RecommendedModelRegistryTests {
         #expect(registry.resolve(alias: "qwen-2-5-0-5b")?.repoID == "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
         #expect(registry.resolve(alias: "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit")?.id == "qwen-2-5-coder-32b")
         #expect(registry.resolve(alias: "recommended:qwen-2-5-coder-7b")?.repoID == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit")
+        #expect(registry.resolve(alias: "qwen-3-5-9b")?.repoID == "mlx-community/Qwen3.5-9B-MLX-4bit")
+        #expect(registry.resolve(alias: "bartowski/Qwen_Qwen3.5-9B-GGUF")?.id == "qwen-3-5-9b-gguf")
     }
 }
 
@@ -60,8 +70,17 @@ struct ModelServiceRecommendedCatalogTests {
         let ggufModels = service.listRecommended(backend: .gguf)
 
         #expect(models.map(\.id) == ["qwen-2-5-coder-7b", "qwen-2-5-coder-7b-gguf"])
-        #expect(ggufModels.map(\.id) == ["deepseek-r1-qwen-14b-gguf", "llama-3-2-3b-gguf", "qwen-2-5-coder-7b-gguf"])
+        #expect(ggufModels.map(\.id) == [
+            "qwen-3-5-9b-gguf",
+            "deepseek-r1-qwen-14b-gguf",
+            "llama-3-2-3b-gguf",
+            "qwen-2-5-coder-7b-gguf",
+            "deepseek-r1-qwen-7b-gguf",
+            "phi-4-mini-reasoning-gguf",
+            "phi-3-5-mini-instruct-gguf"
+        ])
         #expect(service.resolveRecommended(alias: "qwen-2-5-0-5b")?.title == "Qwen 2.5 0.5B Instruct")
+        #expect(service.resolveRecommended(alias: "qwen-3-5-9b")?.title == "Qwen 3.5 9B")
     }
 }
 

@@ -55,6 +55,20 @@ public struct RecommendedModelRegistry: Sendable {
 
     public static let defaultModels: [RecommendedModel] = [
         RecommendedModel(
+            id: "qwen-3-5-9b",
+            title: "Qwen 3.5 9B",
+            repoID: "mlx-community/Qwen3.5-9B-MLX-4bit",
+            parameterSize: "9B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .good,
+            estimatedMemoryGB: 5.6,
+            totalDiskSizeGB: 5.2,
+            tags: ["default", "balanced", "general-purpose"],
+            summary: "Balanced first-choice local assistant for everyday chat, drafting, and research.",
+            sortOrder: 0
+        ),
+        RecommendedModel(
             id: "mistral-small-24b",
             title: "Mistral Small 24B Instruct (2501)",
             repoID: "mlx-community/Mistral-Small-24B-Instruct-2501-4bit",
@@ -66,7 +80,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 13.3,
             tags: ["general-purpose", "coding", "agentic"],
             summary: "Balanced built-in default for everyday chat, coding, and agentic tasks.",
-            sortOrder: 0
+            sortOrder: 1
         ),
         RecommendedModel(
             id: "deepseek-r1-qwen-14b",
@@ -80,7 +94,21 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 8.3,
             tags: ["reasoning", "fast-inference", "logic"],
             summary: "Reasoning-focused sweet spot model with faster inference than larger R1 distills.",
-            sortOrder: 1
+            sortOrder: 2
+        ),
+        RecommendedModel(
+            id: "deepseek-r1-qwen-7b",
+            title: "DeepSeek R1 Distill Qwen 7B",
+            repoID: "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit",
+            parameterSize: "7B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .good,
+            estimatedMemoryGB: 4.8,
+            totalDiskSizeGB: 4.4,
+            tags: ["reasoning", "compact", "logic"],
+            summary: "Smaller reasoning-focused preset for deliberate math, logic, and structured problem solving.",
+            sortOrder: 3
         ),
         RecommendedModel(
             id: "qwen-3-5-9b-optiq",
@@ -94,7 +122,21 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 5.1,
             tags: ["instruction-following", "vision-language", "high-throughput"],
             summary: "High-throughput mid-size option with strong instruction following and VLM support.",
-            sortOrder: 2
+            sortOrder: 4
+        ),
+        RecommendedModel(
+            id: "phi-4-mini-reasoning",
+            title: "Phi-4 Mini Reasoning",
+            repoID: "mlx-community/Phi-4-mini-reasoning-4bit",
+            parameterSize: "4B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 3.2,
+            totalDiskSizeGB: 2.9,
+            tags: ["reasoning", "small", "structured-output"],
+            summary: "Compact reasoning helper for logic-heavy prompts, structured outputs, and short code bursts.",
+            sortOrder: 5
         ),
         RecommendedModel(
             id: "llama-3-1-8b",
@@ -108,7 +150,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.5,
             tags: ["agentic", "general-purpose", "roleplay"],
             summary: "Efficient general-purpose small model for broad local usage.",
-            sortOrder: 3
+            sortOrder: 6
         ),
         RecommendedModel(
             id: "qwen-2-5-coder-7b",
@@ -122,7 +164,49 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.3,
             tags: ["coding", "lightweight", "autocomplete"],
             summary: "Lightweight coding recommendation with a strong quality-to-efficiency tradeoff.",
-            sortOrder: 4
+            sortOrder: 7
+        ),
+        RecommendedModel(
+            id: "phi-3-5-mini-instruct",
+            title: "Phi 3.5 Mini Instruct",
+            repoID: "mlx-community/Phi-3.5-mini-instruct-4bit",
+            parameterSize: "3.8B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 2.8,
+            totalDiskSizeGB: 2.5,
+            tags: ["compact", "general-purpose", "helper"],
+            summary: "Lean helper preset for lightweight drafting, Q&A, and quick tool-oriented turns.",
+            sortOrder: 8
+        ),
+        RecommendedModel(
+            id: "qwen-3-5-2b",
+            title: "Qwen 3.5 2B",
+            repoID: "mlx-community/Qwen3.5-2B-MLX-4bit",
+            parameterSize: "2B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 1.7,
+            totalDiskSizeGB: 1.3,
+            tags: ["fast-inference", "lightweight", "general-purpose"],
+            summary: "Fast small generalist when you want noticeably better quality than tiny models without much extra cost.",
+            sortOrder: 9
+        ),
+        RecommendedModel(
+            id: "gemma-4-e4b-it",
+            title: "Gemma 4 E4B-it",
+            repoID: "mlx-community/gemma-4-e4b-it-4bit",
+            parameterSize: "4B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 3.4,
+            totalDiskSizeGB: 3.0,
+            tags: ["gemma", "compact", "general-purpose"],
+            summary: "Compact Gemma preset with a useful balance for chat, drafting, and quick research loops.",
+            sortOrder: 10
         ),
         RecommendedModel(
             id: "llama-3-2-3b",
@@ -136,7 +220,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 1.8,
             tags: ["fast-inference", "embedded-tasks", "summarization"],
             summary: "Very fast lightweight choice for summarization and small-device workflows.",
-            sortOrder: 5
+            sortOrder: 11
         ),
         RecommendedModel(
             id: "qwen-2-5-0-5b",
@@ -150,7 +234,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.4,
             tags: ["starter", "always-on", "fast-inference"],
             summary: "Tiny starter model for instant first-run chat and lightweight assistant loops.",
-            sortOrder: 6
+            sortOrder: 12
         ),
         RecommendedModel(
             id: "qwen-3-5-0-8b-optiq",
@@ -164,7 +248,35 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.6,
             tags: ["background-agent", "ultra-fast", "formatting"],
             summary: "Ultra-light model for background helpers, formatting, and fast automation loops.",
-            sortOrder: 7
+            sortOrder: 13
+        ),
+        RecommendedModel(
+            id: "qwen-3-5-0-8b",
+            title: "Qwen 3.5 0.8B",
+            repoID: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            parameterSize: "0.8B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .tiny,
+            estimatedMemoryGB: 0.9,
+            totalDiskSizeGB: 0.7,
+            tags: ["tiny", "ultra-fast", "helper"],
+            summary: "Tiny helper preset for ultra-fast chat, formatting, and background assistant tasks.",
+            sortOrder: 14
+        ),
+        RecommendedModel(
+            id: "gemma-4-e2b-it",
+            title: "Gemma 4 E2B-it",
+            repoID: "mlx-community/gemma-4-e2b-it-4bit",
+            parameterSize: "2B",
+            quantization: "4-bit",
+            profile: .chat,
+            tier: .tiny,
+            estimatedMemoryGB: 1.6,
+            totalDiskSizeGB: 1.2,
+            tags: ["tiny", "gemma", "helper"],
+            summary: "Small Gemma helper for lightweight chat and short drafting turns on tighter memory budgets.",
+            sortOrder: 15
         ),
         RecommendedModel(
             id: "qwen-3-5-27b-opus-distilled",
@@ -178,7 +290,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 14.8,
             tags: ["reasoning", "distilled", "chain-of-thought"],
             summary: "Large distilled reasoning preset aimed at higher-quality chain-of-thought style tasks.",
-            sortOrder: 8
+            sortOrder: 16
         ),
         RecommendedModel(
             id: "deepseek-r1-qwen-32b",
@@ -192,7 +304,7 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["math", "logic", "chain-of-thought"],
             summary: "Large reasoning recommendation tuned for math and logic heavy workloads.",
-            sortOrder: 9
+            sortOrder: 17
         ),
         RecommendedModel(
             id: "qwen-2-5-coder-32b",
@@ -206,7 +318,22 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["coding", "development", "agentic"],
             summary: "Largest built-in coding preset for advanced development and agentic tasks.",
-            sortOrder: 10
+            sortOrder: 18
+        ),
+        RecommendedModel(
+            id: "qwen-3-5-9b-gguf",
+            title: "Qwen 3.5 9B GGUF",
+            repoID: "bartowski/Qwen_Qwen3.5-9B-GGUF",
+            parameterSize: "9B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .good,
+            estimatedMemoryGB: 6.2,
+            totalDiskSizeGB: 5.5,
+            tags: ["gguf", "default", "balanced"],
+            summary: "GGUF fallback for a strong all-around local assistant through llama.cpp.",
+            backend: .gguf,
+            sortOrder: 19
         ),
         RecommendedModel(
             id: "llama-3-2-3b-gguf",
@@ -221,7 +348,7 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "starter", "fast-inference"],
             summary: "GGUF starter preset for lightweight local chat through llama.cpp.",
             backend: .gguf,
-            sortOrder: 11
+            sortOrder: 20
         ),
         RecommendedModel(
             id: "qwen-2-5-coder-7b-gguf",
@@ -236,7 +363,7 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "coding", "lightweight"],
             summary: "GGUF coding preset with a strong quality-to-speed tradeoff.",
             backend: .gguf,
-            sortOrder: 12
+            sortOrder: 21
         ),
         RecommendedModel(
             id: "deepseek-r1-qwen-14b-gguf",
@@ -251,7 +378,52 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "reasoning", "logic"],
             summary: "GGUF reasoning preset for llama.cpp-backed local chat.",
             backend: .gguf,
-            sortOrder: 13
+            sortOrder: 22
+        ),
+        RecommendedModel(
+            id: "deepseek-r1-qwen-7b-gguf",
+            title: "DeepSeek R1 Distill Qwen 7B GGUF",
+            repoID: "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF",
+            parameterSize: "7B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 5.0,
+            totalDiskSizeGB: 4.6,
+            tags: ["gguf", "reasoning", "compact"],
+            summary: "Compact GGUF reasoning preset when you want a smaller deliberate model through llama.cpp.",
+            backend: .gguf,
+            sortOrder: 23
+        ),
+        RecommendedModel(
+            id: "phi-4-mini-reasoning-gguf",
+            title: "Phi 4 Mini Reasoning GGUF",
+            repoID: "unsloth/Phi-4-mini-reasoning-GGUF",
+            parameterSize: "4B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 3.4,
+            totalDiskSizeGB: 3.1,
+            tags: ["gguf", "reasoning", "small"],
+            summary: "Compact GGUF reasoning helper for logic-heavy prompts and structured outputs.",
+            backend: .gguf,
+            sortOrder: 24
+        ),
+        RecommendedModel(
+            id: "phi-3-5-mini-instruct-gguf",
+            title: "Phi 3.5 Mini Instruct GGUF",
+            repoID: "bartowski/Phi-3.5-mini-instruct-GGUF",
+            parameterSize: "3.8B",
+            quantization: "Q4_K_M",
+            profile: .chat,
+            tier: .small,
+            estimatedMemoryGB: 3.0,
+            totalDiskSizeGB: 2.7,
+            tags: ["gguf", "compact", "helper"],
+            summary: "Lean GGUF helper preset for lightweight drafting, Q&A, and quick tool-oriented turns.",
+            backend: .gguf,
+            sortOrder: 25
         )
     ]
 }
