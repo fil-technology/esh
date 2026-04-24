@@ -209,6 +209,53 @@ esh::build_swift() {
   swift build -c "$configuration" --product esh --package-path "$(esh::repo_root)"
 }
 
+esh::find_mlx_shader_root() {
+  [[ "$ESH_LAYOUT_MODE" == "repo" ]] || esh::die "MLX shader sources are only available from a source checkout."
+
+  local repo_root candidate
+  repo_root="$(esh::repo_root)"
+  for candidate in \
+    "$repo_root/.build/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal" \
+    "$repo_root/.build/checkouts/mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels"
+  do
+    if [[ -d "$candidate" ]] && find "$candidate" -name '*.metal' -type f -print -quit | grep -q .; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+esh::build_mlx_metallib() {
+  [[ "$ESH_LAYOUT_MODE" == "repo" ]] || esh::die "MLX Metal runtime library can only be built from a source checkout."
+
+  local output_path="${1:-}"
+  [[ -n "$output_path" ]] || esh::die "Usage: esh::build_mlx_metallib <output-path>"
+
+  local shader_root module_cache xcrun_path
+  shader_root="$(esh::find_mlx_shader_root)" || esh::die "mlx-swift shader sources were not found under .build/checkouts. Run swift package resolve first."
+  module_cache="$(esh::repo_root)/.build/clang-module-cache"
+  mkdir -p "$(dirname "$output_path")" "$module_cache"
+
+  xcrun_path="$(command -v xcrun)" || esh::die "xcrun is required to build the MLX Metal runtime library."
+
+  local metal_files=()
+  while IFS= read -r -d '' file; do
+    metal_files+=("$file")
+  done < <(find "$shader_root" -name '*.metal' -type f -print0 | sort -z)
+
+  [[ "${#metal_files[@]}" -gt 0 ]] || esh::die "No MLX Metal shader files were found at $shader_root."
+
+  "$xcrun_path" metal \
+    -std=metal3.1 \
+    "-fmodules-cache-path=$module_cache" \
+    -I "$shader_root" \
+    -I "$(dirname "$shader_root")" \
+    -o "$output_path" \
+    "${metal_files[@]}"
+}
+
 esh::export_runtime_env() {
   export ESH_PYTHON="$(esh::python_executable)"
   export ESH_MLX_VLM_BRIDGE="$(esh::bridge_script)"

@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-04-24
+
+### Fixed
+- macOS release packages now include the MLX Metal runtime library required by `esh audio speak`
+- package smoke tests now fail when the bundled MLX Metal runtime library is missing
+
 ## [0.1.25] - 2026-04-24
 
 ### Added

@@ -20,6 +20,7 @@ mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/python" "$PAYLOAD_DIR/Tools" "$PAYLOAD_DIR/s
 
 esh::build_swift release
 cp "$(esh::swift_binary release)" "$ROOT_DIR/bin/esh"
+esh::build_mlx_metallib "$ROOT_DIR/bin/mlx.metallib"
 cp "$(esh::repo_root)/esh" "$ROOT_DIR/esh"
 cp "$(esh::repo_root)/VERSION" "$ROOT_DIR/VERSION"
 cp "$(esh::repo_root)/scripts/run.sh" "$PAYLOAD_DIR/scripts/run.sh"
