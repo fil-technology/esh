@@ -221,6 +221,8 @@ Then inspect what is installed:
 
 ```bash
 ./esh model list
+./esh model list --task audio
+./esh model list --capability tts
 ./esh model inspect mlx-community--qwen2.5-0.5b-instruct-4bit
 ```
 
@@ -233,6 +235,25 @@ Notes:
 - GGUF install/runtime support is intentionally narrow in this pass: it prefers a single clear GGUF candidate and reports ambiguity instead of guessing
 - inspect/remove/chat/cache commands accept the installed model id and also the original repo id where practical
 - installed ids are normalized like `mlx-community--qwen2.5-0.5b-instruct-4bit`
+
+## Audio
+
+List MLX text-to-speech models exposed through TTSMLX:
+
+```bash
+./esh audio models
+```
+
+The interactive launcher (`./esh`) also has an **Audio** entry for generating WAV files through the same MLX TTS path.
+
+Generate a WAV file with an MLX TTS model:
+
+```bash
+./esh audio speak "Hello from esh" --model pocket-tts --voice alba --out hello.wav
+./esh audio speak "Hello from esh" --model Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit --play
+```
+
+The first run downloads the selected TTS model into `.esh/tts-models`. Speech-to-text is still a planned backend slice; `audio transcribe` currently reports that STT is not wired yet.
 
 ## Chat
 

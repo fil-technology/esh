@@ -18,7 +18,8 @@ public struct ModelInstallPreflightService: Sendable {
         repoID: String,
         recommendedModel: RecommendedModel?,
         searchResult: ModelSearchResult?,
-        variant: String? = nil
+        variant: String? = nil,
+        forceUnsupportedRuntime: Bool = false
     ) async throws -> ModelInstallPreflightReport {
         var report = ModelInstallPreflightReport()
 
@@ -89,12 +90,18 @@ public struct ModelInstallPreflightService: Sendable {
 
             switch check.verdict {
             case .unsupportedFormat, .unsupportedArchitecture, .insufficientMemory:
-                report.blockers.append(
-                    """
-                    Pre-download compatibility check failed for \(repoID).
-                    Verdict: \(check.verdict.rawValue)
-                    """
-                )
+                let message = """
+                Pre-download compatibility check failed for \(repoID).
+                Verdict: \(check.verdict.rawValue)
+                """
+                if forceUnsupportedRuntime {
+                    report.warnings.append(
+                        "Force install requested; proceeding despite runtime compatibility verdict \(check.verdict.rawValue)."
+                    )
+                    report.notes.append(message)
+                } else {
+                    report.blockers.append(message)
+                }
             case .unknown where check.backend == nil:
                 report.warnings.append("Could not resolve a backend confidently before download.")
             default:

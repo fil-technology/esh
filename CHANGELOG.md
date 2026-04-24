@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-04-24
+
+### Added
+- `esh audio` commands for listing MLX TTS models and generating WAV speech through TTSMLX
+- an interactive Audio launcher entry for choosing a TTS model, voice, language, profile, and output path
+- model task, modality, and capability metadata, including `esh model list --task` and `--capability` filters
+
+### Changed
+- model install preflight can proceed past unsupported runtime verdicts when `--force` is used
+- generated `.esh` model and audio cache data is ignored by Git
+
 ## [0.1.24] - 2026-04-24
 
 ### Added

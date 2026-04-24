@@ -17,7 +17,8 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.1")
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.1"),
+        .package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.3.3")
     ],
     targets: [
         .target(
@@ -29,7 +30,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "esh",
-            dependencies: ["EshCore"]
+            dependencies: [
+                "EshCore",
+                .product(name: "TTSMLX", package: "TTSMLX")
+            ]
         ),
         .testTarget(
             name: "EshCoreTests",

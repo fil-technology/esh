@@ -35,6 +35,38 @@ struct ModelInstallPreflightServiceTests {
     }
 
     @Test
+    func forceAllowsUnsupportedRuntimeVerdictBeforeDownload() async throws {
+        TestURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            switch url.absoluteString {
+            case "https://huggingface.co/api/models/bartowski/demo-GGUF":
+                let data = Data(#"{"id":"bartowski/demo-GGUF","pipelineTag":"text-generation","tags":["multimodal"],"siblings":[{"rfilename":"demo-q4_k_m.gguf","size":4294967296}]}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            case "https://huggingface.co/bartowski/demo-GGUF/raw/main/config.json":
+                let data = Data(#"{"model_type":"qwen2"}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let service = ModelInstallPreflightService(
+            session: makeSession()
+        )
+
+        let report = try await service.evaluate(
+            repoID: "bartowski/demo-GGUF",
+            recommendedModel: nil,
+            searchResult: nil,
+            forceUnsupportedRuntime: true
+        )
+
+        #expect(!report.isBlocked)
+        #expect(report.notes.joined(separator: "\n").contains("unsupported_architecture"))
+        #expect(report.warnings.joined(separator: "\n").contains("Force install requested"))
+    }
+
+    @Test
     func warnsWhenMetadataCannotBeFetched() async throws {
         TestURLProtocol.handler = { request in
             let response = HTTPURLResponse(url: try #require(request.url), statusCode: 404, httpVersion: nil, headerFields: nil)!

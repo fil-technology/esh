@@ -102,7 +102,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 source: source,
                 localPath: installDirectory.path,
                 architectureFingerprint: modelPlan.architectureFingerprint,
-                variant: modelPlan.variant
+                variant: modelPlan.variant,
+                task: modelPlan.task,
+                inputModalities: modelPlan.inputModalities,
+                outputModalities: modelPlan.outputModalities,
+                capabilities: modelPlan.capabilities
             ),
             installPath: installDirectory.path,
             sizeBytes: resolvedSize,
@@ -183,7 +187,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         backendFormat: String,
         files: [ModelInfo.Sibling],
         architectureFingerprint: String?,
-        variant: String?
+        variant: String?,
+        task: ModelTask,
+        inputModalities: [ModelModality],
+        outputModalities: [ModelModality],
+        capabilities: ModelCapabilities
     ) {
         let filenames = siblings.map(\.rfilename)
         let format = ModelFilenameHeuristics.inferFormat(identifier: "", filenames: filenames)
@@ -208,7 +216,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 backendFormat: "gguf",
                 files: files,
                 architectureFingerprint: architecture == .unknown ? nil : architecture.rawValue,
-                variant: variant?.uppercased() ?? ModelFilenameHeuristics.inferQuantization(identifier: "", filenames: Array(selectedFiles), format: .gguf)
+                variant: variant?.uppercased() ?? ModelFilenameHeuristics.inferQuantization(identifier: "", filenames: Array(selectedFiles), format: .gguf),
+                task: .text,
+                inputModalities: [.text],
+                outputModalities: [.text],
+                capabilities: .textGeneration
             )
         }
 
@@ -224,7 +236,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             backendFormat: "mlx",
             files: files,
             architectureFingerprint: architecture == .unknown ? nil : architecture.rawValue,
-            variant: variant
+            variant: variant,
+            task: .text,
+            inputModalities: [.text],
+            outputModalities: [.text],
+            capabilities: .textGeneration
         )
     }
 

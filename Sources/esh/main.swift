@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import TTSMLX
 
 do {
     try PackagedRuntimeBootstrap.configureEnvironmentIfNeeded()
@@ -55,6 +56,8 @@ private struct CLI {
             await showUpdateStatus()
         case "model":
             try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
+        case "audio":
+            try await AudioCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
@@ -183,17 +186,19 @@ private struct CLI {
                     sessionStore: sessionStore
                 )
             case .selected(1):
+                try await showAudioMenu()
+            case .selected(2):
                 try await showRecommendedModelsMenu(
                     service: modelService,
                     catalogService: modelCatalogService
                 )
-            case .selected(2):
+            case .selected(3):
                 try await showInstalledModelsMenu(
                     service: modelService,
                     catalogService: modelCatalogService,
                     sessionStore: sessionStore
                 )
-            case .selected(3):
+            case .selected(4):
                 guard let query = prompt("Model search query")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !query.isEmpty else {
@@ -204,7 +209,7 @@ private struct CLI {
                     service: modelService,
                     catalogService: modelCatalogService
                 )
-            case .selected(4):
+            case .selected(5):
                 guard let repoID = prompt("Repo id, alias, or search term")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
@@ -217,20 +222,20 @@ private struct CLI {
                     catalogService: modelCatalogService
                 )
                 pauseForMenu()
-            case .selected(5):
+            case .selected(6):
                 try await showSessionsMenu(
                     sessionStore: sessionStore,
                     cacheStore: cacheStore
                 )
-            case .selected(6):
-                try await showCachesMenu(cacheStore: cacheStore)
             case .selected(7):
+                try await showCachesMenu(cacheStore: cacheStore)
+            case .selected(8):
                 try DoctorCommand.run()
                 pauseForMenu()
-            case .selected(8):
+            case .selected(9):
                 printUsage()
                 pauseForMenu()
-            case .selected(9):
+            case .selected(10):
                 try await BenchmarkCommand.run(arguments: ["history"])
                 pauseForMenu()
             case .cancelled:
@@ -243,7 +248,7 @@ private struct CLI {
 
     private func handleModel(arguments: [String], service: ModelService, catalogService: ModelCatalogService) async throws {
         guard let subcommand = arguments.first else {
-            ModelListCommand.run(service: service)
+            try ModelListCommand.run(service: service)
             return
         }
 
@@ -251,7 +256,7 @@ private struct CLI {
         case "recommended":
             try ModelRecommendedCommand.run(arguments: Array(arguments.dropFirst()), service: service)
         case "list":
-            ModelListCommand.run(service: service)
+            try ModelListCommand.run(arguments: Array(arguments.dropFirst()), service: service)
         case "search":
             try await ModelSearchCommand.run(arguments: Array(arguments.dropFirst()), service: catalogService)
         case "check":
@@ -261,14 +266,20 @@ private struct CLI {
                 catalogService: catalogService
             )
         case "install":
-            let variant = CommandSupport.optionalValue(flag: "--variant", in: Array(arguments.dropFirst()))
-            let positional = CommandSupport.positionalArguments(in: Array(arguments.dropFirst()), knownFlags: ["--variant"])
+            let remaining = Array(arguments.dropFirst())
+            let variant = CommandSupport.optionalValue(flag: "--variant", in: remaining)
+            let forceUnsupportedRuntime = remaining.contains("--force")
+            let positional = CommandSupport.positionalArguments(
+                in: remaining.filter { $0 != "--force" },
+                knownFlags: ["--variant"]
+            )
             guard let repoID = positional.first else {
-                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>]")
+                throw StoreError.invalidManifest("Usage: esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>] [--force]")
             }
             try await ModelInstallCommand.run(
                 identifier: repoID,
                 variant: variant,
+                forceUnsupportedRuntime: forceUnsupportedRuntime,
                 service: service,
                 catalogService: catalogService
             )
@@ -404,11 +415,13 @@ private struct CLI {
               esh doctor
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
+              esh audio models
+              esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
               esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
-              esh model list
+              esh model list [--task text|audio|vision|embedding|reranker|tool|multimodal] [--capability chat|tts|stt|image-understanding|embedding|rerank|tool-calling]
               esh model search <query> [--source all|local|hf] [--limit N]
               esh model check <model-or-repo> [--backend mlx|gguf|auto] [--context N] [--variant <name>] [--json] [--strict] [--offline]
-              esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>]
+              esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>] [--force]
               esh model open <model-id-or-alias-or-repo-or-search-term>
               esh model inspect <model-id>
               esh model remove <model-id>
@@ -447,6 +460,7 @@ private struct CLI {
     private func makeDefaultMenuItems(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [InteractiveListPicker.Item] {
         [
             .init(title: "Chat", detail: "Open the interactive chat TUI"),
+            .init(title: "Audio", detail: "Generate WAV speech with MLX TTS"),
             .init(title: "Recommended models", detail: "Fast setup presets"),
             .init(title: "List models", detail: "\(modelCount) installed"),
             .init(title: "Search models", detail: "Find MLX and GGUF models"),
@@ -515,6 +529,179 @@ private struct CLI {
             return ChatLaunchSettings(cacheMode: .automatic, intent: .documentQA, autosaveEnabled: false)
         default:
             return ChatLaunchSettings(cacheMode: .automatic, intent: .chat, autosaveEnabled: false)
+        }
+    }
+
+    private func showAudioMenu() async throws {
+        let picker = InteractiveListPicker()
+
+        while true {
+            switch picker.pick(
+                title: "Audio",
+                subtitle: "Generate speech locally with MLX TTS models.",
+                items: [
+                    .init(title: "Generate speech", detail: "Create a WAV file from text"),
+                    .init(title: "TTS model catalog", detail: "\(TTSMLX.supportedModels.count) MLX models")
+                ],
+                primaryHint: "Enter select"
+            ) {
+            case .selected(0):
+                try await showAudioSpeakFlow()
+                pauseForMenu()
+            case .selected(1):
+                try await AudioCommand.run(arguments: ["models"], currentDirectoryURL: currentDirectoryURL)
+                pauseForMenu()
+            default:
+                return
+            }
+        }
+    }
+
+    private func showAudioSpeakFlow() async throws {
+        guard let model = try pickTTSModel() else {
+            return
+        }
+        let voice = pickTTSVoice(for: model)
+        let language = pickTTSLanguage(for: model)
+        let profile = pickTTSProfile(defaultProfile: model.capabilities.defaultGenerationProfile)
+
+        guard let text = prompt("Text to speak"), !text.isEmpty else {
+            return
+        }
+
+        guard let outputPath = prompt("Output path (blank for .esh/audio timestamp)") else {
+            return
+        }
+        let shouldPlay = confirmAction("Play audio after generation? [y/N]")
+
+        var arguments = ["speak", text, "--model", model.id, "--profile", profile.rawValue]
+        if let voice {
+            arguments.append(contentsOf: ["--voice", voice.identifier])
+        }
+        if let language {
+            arguments.append(contentsOf: ["--language", language.identifier])
+        }
+        let trimmedOutputPath = outputPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedOutputPath.isEmpty {
+            let outputURL = resolveMenuPath(trimmedOutputPath)
+            if FileManager.default.fileExists(atPath: outputURL.path) {
+                guard confirmAction("Overwrite \(outputURL.lastPathComponent)? [y/N]") else {
+                    return
+                }
+                arguments.append("--force")
+            }
+            arguments.append(contentsOf: ["--out", trimmedOutputPath])
+        }
+        if shouldPlay {
+            arguments.append("--play")
+        }
+
+        printBusy("Generating audio with \(model.displayName)…")
+        try await AudioCommand.run(arguments: arguments, currentDirectoryURL: currentDirectoryURL)
+    }
+
+    private func resolveMenuPath(_ path: String) -> URL {
+        let expanded = (path as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded)
+        }
+        return currentDirectoryURL.appendingPathComponent(expanded)
+    }
+
+    private func pickTTSModel() throws -> TTSModelDescriptor? {
+        let models = TTSMLX.supportedModels
+        guard !models.isEmpty else {
+            throw StoreError.notFound("TTSMLX did not report any supported MLX TTS models.")
+        }
+
+        let picker = InteractiveListPicker()
+        let items = models.map { model in
+            InteractiveListPicker.Item(
+                title: model.displayName,
+                detail: model.id
+            )
+        }
+
+        switch picker.pick(
+            title: "Choose TTS Model",
+            subtitle: "These are the MLX models currently validated by TTSMLX.",
+            items: items,
+            primaryHint: "Enter choose"
+        ) {
+        case .selected(let index):
+            return models[index]
+        default:
+            return nil
+        }
+    }
+
+    private func pickTTSVoice(for model: TTSModelDescriptor) -> TTSVoice? {
+        guard !model.suggestedVoices.isEmpty else {
+            return nil
+        }
+
+        let picker = InteractiveListPicker()
+        let voices = model.suggestedVoices
+        let items = [InteractiveListPicker.Item(title: "Default voice", detail: "Let the model choose")]
+            + voices.map { InteractiveListPicker.Item(title: $0.identifier) }
+
+        switch picker.pick(
+            title: "Choose Voice",
+            subtitle: model.displayName,
+            items: items,
+            primaryHint: "Enter choose"
+        ) {
+        case .selected(0):
+            return nil
+        case .selected(let index):
+            return voices[index - 1]
+        default:
+            return nil
+        }
+    }
+
+    private func pickTTSLanguage(for model: TTSModelDescriptor) -> TTSLanguage? {
+        guard model.supportedLanguages.count > 1 else {
+            return model.supportedLanguages.first
+        }
+
+        let picker = InteractiveListPicker()
+        let languages = model.supportedLanguages
+        let items = languages.map { InteractiveListPicker.Item(title: $0.identifier) }
+
+        switch picker.pick(
+            title: "Choose Language",
+            subtitle: model.displayName,
+            items: items,
+            primaryHint: "Enter choose"
+        ) {
+        case .selected(let index):
+            return languages[index]
+        default:
+            return nil
+        }
+    }
+
+    private func pickTTSProfile(defaultProfile: TTSGenerationProfile) -> TTSGenerationProfile {
+        let profiles = TTSGenerationProfile.allCases
+        let picker = InteractiveListPicker()
+        let items = profiles.map { profile in
+            InteractiveListPicker.Item(
+                title: profile.title,
+                detail: profile == defaultProfile ? "model default" : nil
+            )
+        }
+
+        switch picker.pick(
+            title: "Generation Profile",
+            subtitle: "Fast is quicker; high quality can take longer.",
+            items: items,
+            primaryHint: "Enter choose"
+        ) {
+        case .selected(let index):
+            return profiles[index]
+        default:
+            return defaultProfile
         }
     }
 

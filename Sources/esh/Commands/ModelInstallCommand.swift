@@ -6,6 +6,7 @@ enum ModelInstallCommand {
     static func run(
         identifier: String,
         variant: String? = nil,
+        forceUnsupportedRuntime: Bool = false,
         service: ModelService,
         catalogService: ModelCatalogService
     ) async throws {
@@ -43,7 +44,8 @@ enum ModelInstallCommand {
             repoID: repoID,
             recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
             searchResult: selectedSearchResult,
-            variant: resolvedVariant
+            variant: resolvedVariant,
+            forceUnsupportedRuntime: forceUnsupportedRuntime
         )
         if !handlePreflight(preflight, repoID: repoID) {
             throw CLIHandledError()
