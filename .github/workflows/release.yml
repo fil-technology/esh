@@ -70,7 +70,7 @@ jobs:
         run: ./scripts/package-release.sh "${{ steps.version.outputs.version }}"
 
       - name: Smoke test packaged artifact
-        run: ./scripts/smoke-test-package.sh "dist/esh-macos-${{ steps.version.outputs.version }}"
+        run: bash ./scripts/smoke-test-package.sh "dist/esh-macos-${{ steps.version.outputs.version }}"
 
       - name: Require Apple signing secrets
         if: github.event_name == 'push' || inputs.publish_release
