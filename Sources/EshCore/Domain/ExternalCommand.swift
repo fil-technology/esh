@@ -120,6 +120,7 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
     public var intent: SessionIntent?
     public var messages: [ExternalInferenceMessage]
     public var generation: GenerationConfig
+    public var routing: RoutingConfiguration?
 
     public init(
         schemaVersion: String = ExternalInferenceRequest.schemaVersion,
@@ -129,7 +130,8 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         cacheMode: CacheMode? = nil,
         intent: SessionIntent? = nil,
         messages: [ExternalInferenceMessage],
-        generation: GenerationConfig = .init()
+        generation: GenerationConfig = .init(),
+        routing: RoutingConfiguration? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.model = model
@@ -139,6 +141,7 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.intent = intent
         self.messages = messages
         self.generation = generation
+        self.routing = routing
     }
 }
 
@@ -163,6 +166,7 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
     public var integration: ExternalInferenceIntegration
     public var outputText: String
     public var metrics: Metrics
+    public var routing: RoutingTrace?
 
     public init(
         schemaVersion: String = ExternalInferenceResponse.schemaVersion,
@@ -170,7 +174,8 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         backend: BackendKind,
         integration: ExternalInferenceIntegration,
         outputText: String,
-        metrics: Metrics
+        metrics: Metrics,
+        routing: RoutingTrace? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -178,5 +183,6 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         self.integration = integration
         self.outputText = outputText
         self.metrics = metrics
+        self.routing = routing
     }
 }
