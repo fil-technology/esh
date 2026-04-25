@@ -1,7 +1,6 @@
 import Foundation
 import Darwin
 import EshCore
-import TTSMLX
 
 enum ServeCommand {
     private static let usage = "Usage: esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]"
@@ -22,7 +21,7 @@ enum ServeCommand {
             sessionStore: FileSessionStore(root: root),
             cacheStore: FileCacheStore(root: root),
             toolVersion: toolVersion,
-            audioModels: ttsModels
+            audioModels: OpenAICompatibleAudioCatalog.ttsModels
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
@@ -59,20 +58,6 @@ enum ServeCommand {
         return nil
     }
 
-    private static func ttsModels() throws -> [OpenAIAudioModel] {
-        TTSMLX.supportedModels.map { model in
-            OpenAIAudioModel(
-                id: model.id,
-                displayName: model.displayName,
-                voices: model.suggestedVoices.map { voice in
-                    OpenAIAudioModel.Voice(id: voice.identifier, displayName: voice.identifier)
-                },
-                languages: model.supportedLanguages.map { language in
-                    OpenAIAudioModel.Language(id: language.identifier, displayName: language.identifier)
-                }
-            )
-        }
-    }
 }
 
 private final class SignalHandler {

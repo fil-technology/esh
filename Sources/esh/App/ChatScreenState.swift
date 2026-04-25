@@ -60,6 +60,8 @@ struct ChatScreenState: Sendable {
     var streamingAssistantMessageID: UUID?
     var overlay: OverlayPanelState?
     var autosaveEnabled: Bool
+    var openAIServerEnabled: Bool
+    var openAIServerAddress: String?
 
     init(
         sessionName: String,
@@ -73,7 +75,9 @@ struct ChatScreenState: Sendable {
         transcriptScrollOffset: Int = 0,
         streamingAssistantMessageID: UUID? = nil,
         overlay: OverlayPanelState? = nil,
-        autosaveEnabled: Bool = false
+        autosaveEnabled: Bool = false,
+        openAIServerEnabled: Bool = false,
+        openAIServerAddress: String? = nil
     ) {
         self.sessionName = sessionName
         self.backendLabel = backendLabel
@@ -87,5 +91,7 @@ struct ChatScreenState: Sendable {
         self.streamingAssistantMessageID = streamingAssistantMessageID
         self.overlay = overlay
         self.autosaveEnabled = autosaveEnabled
+        self.openAIServerEnabled = openAIServerEnabled
+        self.openAIServerAddress = openAIServerAddress
     }
 }

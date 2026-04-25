@@ -133,7 +133,8 @@ private struct CLI {
             let menuItems = makeDefaultMenuItems(
                 modelCount: modelCount,
                 sessionCount: sessionCount,
-                cacheCount: cacheCount
+                cacheCount: cacheCount,
+                openAIServerURL: OpenAICompatibleServerController.shared.baseURL
             )
             StartupBanner.animateIfNeeded(
                 modelCount: modelCount,
@@ -188,19 +189,22 @@ private struct CLI {
                     sessionStore: sessionStore
                 )
             case .selected(1):
-                try await showAudioMenu()
+                try toggleOpenAIServerFromLauncher()
+                pauseForMenu()
             case .selected(2):
+                try await showAudioMenu()
+            case .selected(3):
                 try await showRecommendedModelsMenu(
                     service: modelService,
                     catalogService: modelCatalogService
                 )
-            case .selected(3):
+            case .selected(4):
                 try await showInstalledModelsMenu(
                     service: modelService,
                     catalogService: modelCatalogService,
                     sessionStore: sessionStore
                 )
-            case .selected(4):
+            case .selected(5):
                 guard let query = prompt("Model search query")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !query.isEmpty else {
@@ -211,7 +215,7 @@ private struct CLI {
                     service: modelService,
                     catalogService: modelCatalogService
                 )
-            case .selected(5):
+            case .selected(6):
                 guard let repoID = prompt("Repo id, alias, or search term")?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                       !repoID.isEmpty else {
@@ -224,20 +228,20 @@ private struct CLI {
                     catalogService: modelCatalogService
                 )
                 pauseForMenu()
-            case .selected(6):
+            case .selected(7):
                 try await showSessionsMenu(
                     sessionStore: sessionStore,
                     cacheStore: cacheStore
                 )
-            case .selected(7):
-                try await showCachesMenu(cacheStore: cacheStore)
             case .selected(8):
+                try await showCachesMenu(cacheStore: cacheStore)
+            case .selected(9):
                 try DoctorCommand.run()
                 pauseForMenu()
-            case .selected(9):
+            case .selected(10):
                 printUsage()
                 pauseForMenu()
-            case .selected(10):
+            case .selected(11):
                 try await BenchmarkCommand.run(arguments: ["history"])
                 pauseForMenu()
             case .cancelled:
@@ -460,9 +464,10 @@ private struct CLI {
         return base + "  Update available: \(updateNotice.latestVersion). Run \(updateNotice.upgradeCommand)."
     }
 
-    private func makeDefaultMenuItems(modelCount: Int, sessionCount: Int, cacheCount: Int) -> [InteractiveListPicker.Item] {
+    private func makeDefaultMenuItems(modelCount: Int, sessionCount: Int, cacheCount: Int, openAIServerURL: String?) -> [InteractiveListPicker.Item] {
         [
             .init(title: "Chat", detail: "Open the interactive chat TUI"),
+            .init(title: "OpenAI server", detail: openAIServerURL.map { "On \($0)" } ?? "Off; toggle local API"),
             .init(title: "Audio", detail: "Generate WAV speech with MLX TTS"),
             .init(title: "Recommended models", detail: "Fast setup presets"),
             .init(title: "List models", detail: "\(modelCount) installed"),
@@ -474,6 +479,20 @@ private struct CLI {
             .init(title: "Show CLI help", detail: "Print all commands"),
             .init(title: "Benchmark history", detail: "Past raw vs turbo runs")
         ]
+    }
+
+    private func toggleOpenAIServerFromLauncher() throws {
+        let running = try OpenAICompatibleServerController.shared.toggle(
+            root: root,
+            toolVersion: AppVersionResolver.currentVersion()
+        )
+        if running, let baseURL = OpenAICompatibleServerController.shared.baseURL {
+            print("OpenAI server on: \(baseURL)")
+            print("Models: \(baseURL)/v1/models")
+            print("Audio models: \(baseURL)/v1/audio/models")
+        } else {
+            print("OpenAI server off")
+        }
     }
 
     private func starterModels(service: ModelService, backend: BackendKind) -> [RecommendedModel] {

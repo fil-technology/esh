@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-04-25
+
+### Added
+- TUI launcher now exposes an OpenAI server toggle with live on/off state.
+- Chat TUI now shows OpenAI server state in the header and supports `/serve toggle|start|stop|status`.
+
 ## [0.1.28] - 2026-04-25
 
 ### Added

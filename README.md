@@ -151,6 +151,8 @@ Notes:
 - `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
 - set `ESH_API_KEY` or pass `--api-key <token>` to require `Authorization: Bearer <token>`
 
+In the interactive TUI (`./esh`), select **OpenAI server** to toggle the same local API while the TUI process stays open. In chat, use `/serve toggle`, `/serve start`, `/serve stop`, or `/serve status`; the header shows whether the local API is on.
+
 ### Release mode
 
 Build a self-contained release bundle:

@@ -336,6 +336,7 @@ struct TUIApplication {
         state.statusText = routingEnabled
             ? "ready | routing \(routingMode ?? "sequential") | /menu commands | /back launcher"
             : "ready | /menu commands | /back launcher"
+        refreshOpenAIServerStatus(state: &state)
         surface.render(state: state)
         var queuedPrompts: [String] = []
 
@@ -359,6 +360,8 @@ struct TUIApplication {
                 modelService: modelService,
                 cacheStore: cacheStore,
                 workspaceRootURL: workspaceRootURL,
+                root: root,
+                toolVersion: AppVersionResolver.currentVersion(),
                 surface: surface
             )
             if commandOutcome == .handled {
@@ -527,9 +530,11 @@ struct TUIApplication {
         modelStore: FileModelStore,
         backendRegistry: InferenceBackendRegistry,
         modelService: ModelService,
-        cacheStore: CacheStore,
-        workspaceRootURL: URL,
-        surface: TerminalSurface
+                cacheStore: CacheStore,
+                workspaceRootURL: URL,
+                root: PersistenceRoot,
+                toolVersion: String?,
+                surface: TerminalSurface
     ) async -> CommandOutcome {
         guard command.hasPrefix("/") else { return .notHandled }
 
@@ -654,6 +659,7 @@ struct TUIApplication {
                     "/close          Close the current panel",
                     "/save           Save the active chat session",
                     "/autosave on|off|toggle",
+                    "/serve toggle|start|stop|status",
                     "/cache raw|turbo|triattention|auto",
                     "/cache toggle",
                     "/intent chat|code|documentqa|agentrun|multimodal",
@@ -679,6 +685,32 @@ struct TUIApplication {
                 ]
             )
             state.statusText = "command menu open"
+        case "/serve", "/serve toggle":
+            do {
+                let running = try OpenAICompatibleServerController.shared.toggle(root: root, toolVersion: toolVersion)
+                refreshOpenAIServerStatus(state: &state)
+                state.statusText = running ? "openai server on" : "openai server off"
+            } catch {
+                state.overlay = OverlayPanelState(title: "OpenAI Server", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "openai server failed"
+            }
+        case "/serve start":
+            do {
+                try OpenAICompatibleServerController.shared.start(root: root, toolVersion: toolVersion)
+                refreshOpenAIServerStatus(state: &state)
+                state.statusText = "openai server on"
+            } catch {
+                state.overlay = OverlayPanelState(title: "OpenAI Server", lines: ["Error: \(error.localizedDescription)"])
+                state.statusText = "openai server failed"
+            }
+        case "/serve stop":
+            OpenAICompatibleServerController.shared.stop()
+            refreshOpenAIServerStatus(state: &state)
+            state.statusText = "openai server off"
+        case "/serve status":
+            refreshOpenAIServerStatus(state: &state)
+            state.overlay = openAIServerStatusOverlay()
+            state.statusText = "openai server status"
         case "/autosave":
             state.autosaveEnabled.toggle()
             session.autosaveEnabled = state.autosaveEnabled
@@ -911,9 +943,42 @@ struct TUIApplication {
             state.statusText = "unknown command"
         }
 
+        refreshOpenAIServerStatus(state: &state)
         state.inputText = ""
         surface.render(state: state)
         return .handled
+    }
+
+    private func refreshOpenAIServerStatus(state: inout AppState) {
+        let controller = OpenAICompatibleServerController.shared
+        state.openAIServerEnabled = controller.isRunning
+        state.openAIServerAddress = controller.baseURL
+    }
+
+    private func openAIServerStatusOverlay() -> OverlayPanelState {
+        let controller = OpenAICompatibleServerController.shared
+        guard let baseURL = controller.baseURL else {
+            return OverlayPanelState(
+                title: "OpenAI Server",
+                lines: [
+                    "status: off",
+                    "toggle: /serve toggle",
+                    "cli: esh serve --host 127.0.0.1 --port 11434"
+                ]
+            )
+        }
+        return OverlayPanelState(
+            title: "OpenAI Server",
+            lines: [
+                "status: on",
+                "base_url: \(baseURL)",
+                "models: GET /v1/models",
+                "audio: GET /v1/audio/models",
+                "chat: POST /v1/chat/completions",
+                "responses: POST /v1/responses",
+                "toggle: /serve toggle"
+            ]
+        )
     }
 
     private func showModelDetails(

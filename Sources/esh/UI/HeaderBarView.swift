@@ -19,7 +19,10 @@ enum HeaderBarView {
             "\(TerminalUIStyle.faint)cache\(TerminalUIStyle.reset) \(TerminalUIStyle.blue)\(state.cacheMode)\(TerminalUIStyle.reset)",
             state.autosaveEnabled
                 ? "\(TerminalUIStyle.green)autosave on\(TerminalUIStyle.reset)"
-                : "\(TerminalUIStyle.faint)autosave off\(TerminalUIStyle.reset)"
+                : "\(TerminalUIStyle.faint)autosave off\(TerminalUIStyle.reset)",
+            state.openAIServerEnabled
+                ? "\(TerminalUIStyle.green)openai \(state.openAIServerAddress ?? "on")\(TerminalUIStyle.reset)"
+                : "\(TerminalUIStyle.faint)openai off\(TerminalUIStyle.reset)"
         ].joined(separator: "  \(TerminalUIStyle.faint)•\(TerminalUIStyle.reset)  ")
 
         return [
