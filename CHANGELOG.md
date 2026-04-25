@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-04-25
+
+### Fixed
+- Debug SwiftPM builds no longer emit stale clang module-cache warnings.
+
 ## [0.1.31] - 2026-04-25
 
 ### Fixed

@@ -1,6 +1,10 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
+let quietDebugSwiftSettings: [SwiftSetting] = [
+    .unsafeFlags(["-gnone"], .when(configuration: .debug))
+]
+
 let package = Package(
     name: "Esh",
     platforms: [
@@ -27,22 +31,26 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftParser", package: "swift-syntax"),
                 .product(name: "SwiftSyntax", package: "swift-syntax")
-            ]
+            ],
+            swiftSettings: quietDebugSwiftSettings
         ),
         .executableTarget(
             name: "esh",
             dependencies: [
                 "EshCore",
                 .product(name: "TTSMLX", package: "TTSMLX")
-            ]
+            ],
+            swiftSettings: quietDebugSwiftSettings
         ),
         .testTarget(
             name: "EshCoreTests",
-            dependencies: ["EshCore"]
+            dependencies: ["EshCore"],
+            swiftSettings: quietDebugSwiftSettings
         ),
         .testTarget(
             name: "EshUITests",
-            dependencies: ["esh"]
+            dependencies: ["esh"],
+            swiftSettings: quietDebugSwiftSettings
         )
     ]
 )
