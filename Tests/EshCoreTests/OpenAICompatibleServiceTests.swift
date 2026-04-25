@@ -225,15 +225,15 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
-    func handlerRejectsUnsupportedStreamingRequests() async throws {
+    func handlerStreamsChatCompletions() async throws {
         let handler = OpenAICompatibleHTTPHandler(
             service: OpenAICompatibleService(
-                infer: { _ in
+                infer: { externalRequest in
                     ExternalInferenceResponse(
-                        modelID: "demo-model",
+                        modelID: externalRequest.model ?? "demo-model",
                         backend: .mlx,
                         integration: .init(mode: "direct"),
-                        outputText: "unused",
+                        outputText: "stream reply",
                         metrics: .init()
                     )
                 },
@@ -253,9 +253,50 @@ struct OpenAICompatibleServiceTests {
             """.utf8
         )
         let response = try await handler.handle(.init(method: "POST", path: "/v1/chat/completions", headers: ["content-type": "application/json"], body: requestBody))
-        let payload = try JSONCoding.decoder.decode(OpenAIErrorResponse.self, from: response.body)
+        let body = try #require(String(data: response.body, encoding: .utf8))
 
-        #expect(response.statusCode == 400)
-        #expect(payload.error.message.contains("stream"))
+        #expect(response.statusCode == 200)
+        #expect(response.headers["content-type"]?.contains("text/event-stream") == true)
+        #expect(body.contains(#""object":"chat.completion.chunk""#))
+        #expect(body.contains(#""content":"stream "#))
+        #expect(body.contains(#""finish_reason":"stop""#))
+        #expect(body.contains("data: [DONE]"))
+    }
+
+    @Test
+    func handlerStreamsResponses() async throws {
+        let handler = OpenAICompatibleHTTPHandler(
+            service: OpenAICompatibleService(
+                infer: { externalRequest in
+                    ExternalInferenceResponse(
+                        modelID: externalRequest.model ?? "demo-model",
+                        backend: .mlx,
+                        integration: .init(mode: "direct"),
+                        outputText: "response stream reply",
+                        metrics: .init()
+                    )
+                },
+                installedModels: { [] }
+            )
+        )
+
+        let requestBody = Data(
+            """
+            {
+              "model": "demo-model",
+              "input": "hi",
+              "stream": true
+            }
+            """.utf8
+        )
+        let response = try await handler.handle(.init(method: "POST", path: "/v1/responses", headers: ["content-type": "application/json"], body: requestBody))
+        let body = try #require(String(data: response.body, encoding: .utf8))
+
+        #expect(response.statusCode == 200)
+        #expect(response.headers["content-type"]?.contains("text/event-stream") == true)
+        #expect(body.contains("event: response.created"))
+        #expect(body.contains("event: response.output_text.delta"))
+        #expect(body.contains("event: response.completed"))
+        #expect(body.contains("data: [DONE]"))
     }
 }

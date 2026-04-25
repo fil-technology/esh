@@ -187,6 +187,31 @@ public struct OpenAIChatCompletionsResponse: Codable, Hashable, Sendable {
     }
 }
 
+public struct OpenAIChatCompletionsStreamResponse: Codable, Hashable, Sendable {
+    public var id: String
+    public var object: String
+    public var created: Int
+    public var model: String
+    public var choices: [Choice]
+
+    public struct Choice: Codable, Hashable, Sendable {
+        public var index: Int
+        public var delta: Delta
+        public var finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case index
+            case delta
+            case finishReason = "finish_reason"
+        }
+    }
+
+    public struct Delta: Codable, Hashable, Sendable {
+        public var role: String?
+        public var content: String?
+    }
+}
+
 public struct OpenAIResponsesResponse: Codable, Hashable, Sendable {
     public var id: String
     public var object: String
@@ -215,6 +240,26 @@ public struct OpenAIResponsesResponse: Codable, Hashable, Sendable {
         public var type: String
         public var text: String
         public var annotations: [String]
+    }
+}
+
+public struct OpenAIResponsesStreamEvent: Codable, Hashable, Sendable {
+    public var type: String
+    public var sequenceNumber: Int?
+    public var itemID: String?
+    public var outputIndex: Int?
+    public var contentIndex: Int?
+    public var delta: String?
+    public var response: OpenAIResponsesResponse?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case sequenceNumber = "sequence_number"
+        case itemID = "item_id"
+        case outputIndex = "output_index"
+        case contentIndex = "content_index"
+        case delta
+        case response
     }
 }
 
@@ -431,7 +476,9 @@ public struct OpenAICompatibleService: Sendable {
 
     public func chatCompletions(_ request: OpenAIChatCompletionsRequest) async throws -> OpenAIChatCompletionsResponse {
         if request.stream == true {
-            throw OpenAICompatibleError.unsupported("`stream` is not supported yet.")
+            var nonStreamingRequest = request
+            nonStreamingRequest.stream = false
+            return try await chatCompletions(nonStreamingRequest)
         }
         let messages = try request.messages.map(externalMessage(from:))
         let external = ExternalInferenceRequest(
@@ -458,9 +505,69 @@ public struct OpenAICompatibleService: Sendable {
         )
     }
 
+    public func chatCompletionsStream(_ request: OpenAIChatCompletionsRequest) async throws -> Data {
+        var nonStreamingRequest = request
+        nonStreamingRequest.stream = false
+        let response = try await chatCompletions(nonStreamingRequest)
+        let streamID = response.id
+        let created = response.created
+        let model = response.model
+        let text = response.choices.first?.message.content ?? ""
+        let chunks = streamingTextChunks(text)
+        var events = Data()
+
+        events.appendSSE(
+            try encodedStreamPayload(
+                OpenAIChatCompletionsStreamResponse(
+                    id: streamID,
+                    object: "chat.completion.chunk",
+                    created: created,
+                    model: model,
+                    choices: [
+                        .init(index: 0, delta: .init(role: "assistant", content: ""), finishReason: nil)
+                    ]
+                )
+            )
+        )
+
+        for chunk in chunks {
+            events.appendSSE(
+                try encodedStreamPayload(
+                    OpenAIChatCompletionsStreamResponse(
+                        id: streamID,
+                        object: "chat.completion.chunk",
+                        created: created,
+                        model: model,
+                        choices: [
+                            .init(index: 0, delta: .init(role: nil, content: chunk), finishReason: nil)
+                        ]
+                    )
+                )
+            )
+        }
+
+        events.appendSSE(
+            try encodedStreamPayload(
+                OpenAIChatCompletionsStreamResponse(
+                    id: streamID,
+                    object: "chat.completion.chunk",
+                    created: created,
+                    model: model,
+                    choices: [
+                        .init(index: 0, delta: .init(role: nil, content: nil), finishReason: "stop")
+                    ]
+                )
+            )
+        )
+        events.append(Data("data: [DONE]\n\n".utf8))
+        return events
+    }
+
     public func responses(_ request: OpenAIResponsesRequest) async throws -> OpenAIResponsesResponse {
         if request.stream == true {
-            throw OpenAICompatibleError.unsupported("`stream` is not supported yet.")
+            var nonStreamingRequest = request
+            nonStreamingRequest.stream = false
+            return try await responses(nonStreamingRequest)
         }
 
         var messages: [ExternalInferenceMessage] = []
@@ -501,6 +608,78 @@ public struct OpenAICompatibleService: Sendable {
             ],
             outputText: response.outputText
         )
+    }
+
+    public func responsesStream(_ request: OpenAIResponsesRequest) async throws -> Data {
+        var nonStreamingRequest = request
+        nonStreamingRequest.stream = false
+        let response = try await responses(nonStreamingRequest)
+        let text = response.outputText
+        var events = Data()
+        var sequence = 0
+
+        func appendEvent(_ name: String, _ event: OpenAIResponsesStreamEvent) throws {
+            events.append(Data("event: \(name)\n".utf8))
+            events.appendSSE(try encodedStreamPayload(event))
+        }
+
+        try appendEvent(
+            "response.created",
+            .init(
+                type: "response.created",
+                sequenceNumber: sequence,
+                itemID: nil,
+                outputIndex: nil,
+                contentIndex: nil,
+                delta: nil,
+                response: response
+            )
+        )
+        sequence += 1
+
+        for chunk in streamingTextChunks(text) {
+            try appendEvent(
+                "response.output_text.delta",
+                .init(
+                    type: "response.output_text.delta",
+                    sequenceNumber: sequence,
+                    itemID: response.output.first?.id,
+                    outputIndex: 0,
+                    contentIndex: 0,
+                    delta: chunk,
+                    response: nil
+                )
+            )
+            sequence += 1
+        }
+
+        try appendEvent(
+            "response.output_text.done",
+            .init(
+                type: "response.output_text.done",
+                sequenceNumber: sequence,
+                itemID: response.output.first?.id,
+                outputIndex: 0,
+                contentIndex: 0,
+                delta: text,
+                response: nil
+            )
+        )
+        sequence += 1
+        try appendEvent(
+            "response.completed",
+            .init(
+                type: "response.completed",
+                sequenceNumber: sequence,
+                itemID: nil,
+                outputIndex: nil,
+                contentIndex: nil,
+                delta: nil,
+                response: response
+            )
+        )
+        events.append(Data("data: [DONE]\n\n".utf8))
+        return events
     }
 
     public func models() throws -> OpenAIModelsResponse {
@@ -564,5 +743,38 @@ public struct OpenAICompatibleService: Sendable {
 
     private func identifier(prefix: String) -> String {
         "\(prefix)_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+    }
+
+    private func streamingTextChunks(_ text: String) -> [String] {
+        guard text.isEmpty == false else { return [] }
+        var chunks: [String] = []
+        var current = ""
+        for character in text {
+            current.append(character)
+            if current.count >= 24 || character.isWhitespace {
+                chunks.append(current)
+                current = ""
+            }
+        }
+        if current.isEmpty == false {
+            chunks.append(current)
+        }
+        return chunks
+    }
+
+    private func encodedStreamPayload<T: Encodable>(_ payload: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(payload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw OpenAICompatibleError.invalidRequest("Could not encode streaming payload.")
+        }
+        return text
+    }
+}
+
+private extension Data {
+    mutating func appendSSE(_ payload: String) {
+        append(Data("data: \(payload)\n\n".utf8))
     }
 }

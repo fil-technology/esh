@@ -61,12 +61,22 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 return try jsonResponse(statusCode: 200, payload: service.ollamaTags())
             case ("POST", "/v1/chat/completions"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: request.body)
-                let response = try await service.chatCompletions(decoded)
-                return try jsonResponse(statusCode: 200, payload: response)
+                if decoded.stream == true {
+                    let body = try await service.chatCompletionsStream(decoded)
+                    return streamResponse(body: body)
+                } else {
+                    let response = try await service.chatCompletions(decoded)
+                    return try jsonResponse(statusCode: 200, payload: response)
+                }
             case ("POST", "/v1/responses"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIResponsesRequest.self, from: request.body)
-                let response = try await service.responses(decoded)
-                return try jsonResponse(statusCode: 200, payload: response)
+                if decoded.stream == true {
+                    let body = try await service.responsesStream(decoded)
+                    return streamResponse(body: body)
+                } else {
+                    let response = try await service.responses(decoded)
+                    return try jsonResponse(statusCode: 200, payload: response)
+                }
             case ("GET", _), ("POST", _):
                 throw OpenAICompatibleError.notFound("No route for \(request.method.uppercased()) \(request.path)")
             default:
@@ -105,6 +115,14 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
         )
     }
 
+    private func streamResponse(body: Data) -> OpenAICompatibleHTTPResponse {
+        OpenAICompatibleHTTPResponse(
+            statusCode: 200,
+            headers: streamHeaders(contentLength: body.count),
+            body: body
+        )
+    }
+
     private func emptyResponse(statusCode: Int) -> OpenAICompatibleHTTPResponse {
         OpenAICompatibleHTTPResponse(
             statusCode: statusCode,
@@ -125,6 +143,18 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             "access-control-allow-headers": "authorization,content-type",
             "content-type": "application/json; charset=utf-8",
             "content-length": String(contentLength)
+        ]
+    }
+
+    private func streamHeaders(contentLength: Int) -> [String: String] {
+        [
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET,POST,OPTIONS",
+            "access-control-allow-headers": "authorization,content-type",
+            "cache-control": "no-cache",
+            "content-type": "text/event-stream; charset=utf-8",
+            "content-length": String(contentLength),
+            "x-accel-buffering": "no"
         ]
     }
 
