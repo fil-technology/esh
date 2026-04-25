@@ -963,7 +963,7 @@ struct TUIApplication {
                 lines: [
                     "status: off",
                     "toggle: /serve toggle",
-                    "cli: esh serve --host 127.0.0.1 --port 11434"
+                    "cli: esh serve --host 127.0.0.1 --port \(ServeCommand.defaultPort)"
                 ]
             )
         }

@@ -123,10 +123,10 @@ JSON
 Use `esh serve` to expose a local OpenAI-compatible HTTP surface for editors, scripts, and desktop apps.
 
 ```bash
-./esh serve --host 127.0.0.1 --port 11434
-curl http://127.0.0.1:11434/v1/models
-curl http://127.0.0.1:11434/v1/audio/models
-curl http://127.0.0.1:11434/v1/chat/completions \
+./esh serve --host 127.0.0.1 --port 11435
+curl http://127.0.0.1:11435/v1/models
+curl http://127.0.0.1:11435/v1/audio/models
+curl http://127.0.0.1:11435/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "mlx-community--qwen2.5-0.5b-instruct-4bit",
@@ -139,7 +139,9 @@ curl http://127.0.0.1:11434/v1/chat/completions \
 Supported routes in v1:
 - `GET /health`
 - `GET /v1/models`
+- `GET /v1/tools`
 - `GET /v1/audio/models`
+- `GET /api/tags`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 
@@ -147,8 +149,9 @@ Notes:
 - unsupported request fields are ignored when safe
 - `stream` is not supported yet
 - text inputs are supported for chat/responses in v1
-- `/v1/models` includes installed text models and MLX TTS models; audio entries include `modality: "audio"` and `tts` capability metadata
+- `/v1/models` includes installed text models only for strict OpenAI-compatible clients such as Xcode
 - `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
+- `/v1/tools` advertises request-side tool support and `/api/tags` provides an Ollama-compatible model list for local-provider probes
 - set `ESH_API_KEY` or pass `--api-key <token>` to require `Authorization: Bearer <token>`
 
 In the interactive TUI (`./esh`), select **OpenAI server** to toggle the same local API while the TUI process stays open. In chat, use `/serve toggle`, `/serve start`, `/serve stop`, or `/serve status`; the header shows whether the local API is on.

@@ -7,7 +7,7 @@ final class OpenAICompatibleServerController: @unchecked Sendable {
     private let lock = NSLock()
     private var server: OpenAICompatibleLocalServer?
     private var activeHost = "127.0.0.1"
-    private var activePort: UInt16 = 11434
+    private var activePort: UInt16 = ServeCommand.defaultPort
 
     var isRunning: Bool {
         lock.lock()
@@ -26,7 +26,7 @@ final class OpenAICompatibleServerController: @unchecked Sendable {
         root: PersistenceRoot,
         toolVersion: String?,
         host: String = "127.0.0.1",
-        port: UInt16 = 11434,
+        port: UInt16 = ServeCommand.defaultPort,
         apiKey: String? = nil
     ) throws {
         lock.lock()

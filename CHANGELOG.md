@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-04-25
+
+### Fixed
+- Xcode local model provider compatibility by keeping `/v1/models` text-only and adding local-provider probes.
+
+### Added
+- OpenAI-compatible server now exposes `/v1/tools`, `/api/tags`, root health, query-safe routing, CORS headers, and port `11435` defaults for Xcode.
+
 ## [0.1.30] - 2026-04-25
 
 ### Fixed

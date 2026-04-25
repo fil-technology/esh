@@ -142,10 +142,20 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
         let body = Data(data[bodyStart..<(bodyStart + contentLength)])
         return OpenAICompatibleHTTPRequest(
             method: String(requestLineParts[0]),
-            path: String(requestLineParts[1]),
+            path: normalizedRequestPath(String(requestLineParts[1])),
             headers: headers,
             body: body
         )
+    }
+
+    private func normalizedRequestPath(_ path: String) -> String {
+        guard let url = URL(string: path), url.path.isEmpty == false else {
+            return path
+        }
+        if let query = url.query, query.isEmpty == false {
+            return "\(url.path)?\(query)"
+        }
+        return url.path
     }
 
     private func serialize(response: OpenAICompatibleHTTPResponse) -> Data {

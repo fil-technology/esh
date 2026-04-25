@@ -227,17 +227,72 @@ public struct OpenAIModelsResponse: Codable, Hashable, Sendable {
         public var object: String
         public var created: Int
         public var ownedBy: String
-        public var modality: String?
-        public var capabilities: [String]?
 
         enum CodingKeys: String, CodingKey {
             case id
             case object
             case created
             case ownedBy = "owned_by"
-            case modality
-            case capabilities
         }
+    }
+}
+
+public struct OllamaTagsResponse: Codable, Hashable, Sendable {
+    public var models: [Model]
+
+    public struct Model: Codable, Hashable, Sendable {
+        public var name: String
+        public var model: String
+        public var modifiedAt: String
+        public var size: Int
+        public var digest: String
+        public var details: Details
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case model
+            case modifiedAt = "modified_at"
+            case size
+            case digest
+            case details
+        }
+    }
+
+    public struct Details: Codable, Hashable, Sendable {
+        public var format: String
+        public var family: String
+        public var parameterSize: String
+        public var quantizationLevel: String
+
+        enum CodingKeys: String, CodingKey {
+            case format
+            case family
+            case parameterSize = "parameter_size"
+            case quantizationLevel = "quantization_level"
+        }
+    }
+}
+
+public struct OpenAIToolsResponse: Codable, Hashable, Sendable {
+    public var object: String
+    public var data: [Tool]
+    public var supportsRequestTools: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case data
+        case supportsRequestTools = "supports_request_tools"
+    }
+
+    public struct Tool: Codable, Hashable, Sendable {
+        public var type: String
+        public var function: Function
+    }
+
+    public struct Function: Codable, Hashable, Sendable {
+        public var name: String
+        public var description: String
+        public var parameters: [String: String]
     }
 }
 
@@ -456,30 +511,41 @@ public struct OpenAICompatibleService: Sendable {
                     id: $0.id,
                     object: "model",
                     created: 0,
-                    ownedBy: "esh",
-                    modality: "text",
-                    capabilities: ["chat", "responses"]
+                    ownedBy: "esh"
                 )
             }
-        let audioModels = try audioModelsClosure()
-            .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
-            .map {
-                OpenAIModelsResponse.Model(
-                    id: $0.id,
-                    object: $0.object,
-                    created: $0.created,
-                    ownedBy: $0.ownedBy,
-                    modality: "audio",
-                    capabilities: $0.capabilities
-                )
-            }
-        return OpenAIModelsResponse(object: "list", data: textModels + audioModels)
+        return OpenAIModelsResponse(object: "list", data: textModels)
     }
 
     public func audioModels() throws -> OpenAIAudioModelsResponse {
         let models = try audioModelsClosure()
             .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
         return OpenAIAudioModelsResponse(object: "list", data: models)
+    }
+
+    public func ollamaTags() throws -> OllamaTagsResponse {
+        let models = try installedModelsClosure()
+            .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
+            .map { model in
+                OllamaTagsResponse.Model(
+                    name: model.id,
+                    model: model.id,
+                    modifiedAt: "1970-01-01T00:00:00Z",
+                    size: 0,
+                    digest: model.id,
+                    details: .init(
+                        format: model.backend.rawValue,
+                        family: "esh",
+                        parameterSize: "unknown",
+                        quantizationLevel: model.variant ?? "unknown"
+                    )
+                )
+            }
+        return OllamaTagsResponse(models: models)
+    }
+
+    public func tools() -> OpenAIToolsResponse {
+        OpenAIToolsResponse(object: "list", data: [], supportsRequestTools: true)
     }
 
     private func externalMessage(from message: OpenAIInputMessage) throws -> ExternalInferenceMessage {

@@ -3,6 +3,7 @@ import Darwin
 import EshCore
 
 enum ServeCommand {
+    static let defaultPort: UInt16 = 11435
     private static let usage = "Usage: esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]"
 
     static func run(arguments: [String], root: PersistenceRoot, toolVersion: String?) async throws {
@@ -30,7 +31,7 @@ enum ServeCommand {
         let redactedAuth = apiKey == nil ? "disabled" : "enabled"
         print("esh OpenAI-compatible server listening on http://\(host):\(port)")
         print("auth: \(redactedAuth)")
-        print("routes: GET /health, GET /v1/models, GET /v1/audio/models, POST /v1/chat/completions, POST /v1/responses")
+        print("routes: GET /health, GET /v1/models, GET /v1/tools, GET /v1/audio/models, GET /api/tags, POST /v1/chat/completions, POST /v1/responses")
         print("press Ctrl+C to stop")
 
         let signalHandler = SignalHandler()
@@ -40,7 +41,7 @@ enum ServeCommand {
 
     private static func resolvePort(arguments: [String]) throws -> UInt16 {
         guard let rawPort = CommandSupport.optionalValue(flag: "--port", in: arguments) else {
-            return 11434
+            return defaultPort
         }
         guard let parsed = UInt16(rawPort), parsed > 0 else {
             throw StoreError.invalidManifest("Invalid port `\(rawPort)`. " + usage)

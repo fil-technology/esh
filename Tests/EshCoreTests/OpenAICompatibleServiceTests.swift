@@ -187,14 +187,26 @@ struct OpenAICompatibleServiceTests {
         let models = try await handler.handle(.init(method: "GET", path: "/v1/models", headers: [:], body: Data()))
         let modelsPayload = try JSONCoding.decoder.decode(OpenAIModelsResponse.self, from: models.body)
         #expect(models.statusCode == 200)
-        #expect(modelsPayload.data.map(\.id) == ["a-model", "b-model", "voice-model"])
-        #expect(modelsPayload.data.last?.modality == "audio")
+        #expect(modelsPayload.data.map(\.id) == ["a-model", "b-model"])
+
+        let queryModels = try await handler.handle(.init(method: "GET", path: "/v1/models?source=xcode", headers: [:], body: Data()))
+        #expect(queryModels.statusCode == 200)
 
         let audioModels = try await handler.handle(.init(method: "GET", path: "/v1/audio/models", headers: [:], body: Data()))
         let audioPayload = try JSONCoding.decoder.decode(OpenAIAudioModelsResponse.self, from: audioModels.body)
         #expect(audioModels.statusCode == 200)
         #expect(audioPayload.data.first?.voices.first?.id == "alba")
         #expect(audioPayload.data.first?.languages.first?.id == "en")
+
+        let tools = try await handler.handle(.init(method: "GET", path: "/v1/tools", headers: [:], body: Data()))
+        let toolsPayload = try JSONCoding.decoder.decode(OpenAIToolsResponse.self, from: tools.body)
+        #expect(tools.statusCode == 200)
+        #expect(toolsPayload.supportsRequestTools)
+
+        let tags = try await handler.handle(.init(method: "GET", path: "/api/tags", headers: [:], body: Data()))
+        let tagsPayload = try JSONCoding.decoder.decode(OllamaTagsResponse.self, from: tags.body)
+        #expect(tags.statusCode == 200)
+        #expect(tagsPayload.models.map(\.name) == ["a-model", "b-model"])
 
         let chatRequestBody = Data(
             """
