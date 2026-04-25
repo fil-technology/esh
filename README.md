@@ -120,6 +120,37 @@ cat <<'JSON' | ./esh infer --input -
 JSON
 ```
 
+Use `esh serve` to expose a local OpenAI-compatible HTTP surface for editors, scripts, and desktop apps.
+
+```bash
+./esh serve --host 127.0.0.1 --port 11434
+curl http://127.0.0.1:11434/v1/models
+curl http://127.0.0.1:11434/v1/audio/models
+curl http://127.0.0.1:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "mlx-community--qwen2.5-0.5b-instruct-4bit",
+    "messages": [
+      { "role": "user", "content": "Say hello in one sentence." }
+    ]
+  }'
+```
+
+Supported routes in v1:
+- `GET /health`
+- `GET /v1/models`
+- `GET /v1/audio/models`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+
+Notes:
+- unsupported request fields are ignored when safe
+- `stream` is not supported yet
+- text inputs are supported for chat/responses in v1
+- `/v1/models` includes installed text models and MLX TTS models; audio entries include `modality: "audio"` and `tts` capability metadata
+- `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
+- set `ESH_API_KEY` or pass `--api-key <token>` to require `Authorization: Bearer <token>`
+
 ### Release mode
 
 Build a self-contained release bundle:

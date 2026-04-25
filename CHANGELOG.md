@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-04-25
+
+### Added
+- `esh serve` exposes an OpenAI-compatible local HTTP server for model listing, chat completions, and responses.
+- OpenAI-compatible model discovery now includes MLX TTS audio models plus `/v1/audio/models` voice/language metadata for external agents.
+
 ## [0.1.27] - 2026-04-24
 
 ### Fixed
