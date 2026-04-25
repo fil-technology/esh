@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-04-25
+
+### Fixed
+- SwiftPM build no longer reports unhandled `mlx-audio-swift` README files.
+
 ## [0.1.29] - 2026-04-25
 
 ### Added

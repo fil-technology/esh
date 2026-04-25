@@ -18,7 +18,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.1"),
-        .package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.3.3")
+        .package(url: "https://github.com/fil-technology/TTSMLX.git", from: "0.3.3"),
+        .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", revision: "c96fe7b8577fb1db5a9987a6582e706acb388a8e")
     ],
     targets: [
         .target(
