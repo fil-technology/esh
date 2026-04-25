@@ -13,6 +13,7 @@ enum ServeCommand {
             throw StoreError.invalidManifest(usage)
         }
 
+        let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let host = CommandSupport.optionalValue(flag: "--host", in: arguments) ?? "127.0.0.1"
         let port = try resolvePort(arguments: arguments)
         let apiKey = resolveAPIKey(arguments: arguments)
@@ -22,7 +23,10 @@ enum ServeCommand {
             sessionStore: FileSessionStore(root: root),
             cacheStore: FileCacheStore(root: root),
             toolVersion: toolVersion,
-            audioModels: OpenAICompatibleAudioCatalog.ttsModels
+            audioModels: OpenAICompatibleAudioCatalog.ttsModels,
+            speech: { request in
+                try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
+            }
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
@@ -31,7 +35,7 @@ enum ServeCommand {
         let redactedAuth = apiKey == nil ? "disabled" : "enabled"
         print("esh OpenAI-compatible server listening on http://\(host):\(port)")
         print("auth: \(redactedAuth)")
-        print("routes: GET /health, GET /v1/models, GET /v1/tools, GET /v1/audio/models, GET /api/tags, POST /v1/chat/completions, POST /v1/responses")
+        print("routes: GET /health, GET /v1/models, GET /v1/tools, GET /v1/audio/models, GET /api/tags, POST /v1/audio/speech, POST /v1/chat/completions, POST /v1/responses")
         print("press Ctrl+C to stop")
 
         let signalHandler = SignalHandler()

@@ -48,13 +48,26 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                     statusCode: 200,
                     payload: [
                         "status": "ok",
-                        "routes": "/v1/models,/v1/chat/completions,/v1/responses,/v1/tools,/v1/audio/models,/api/tags"
+                        "routes": "/v1/models,/v1/chat/completions,/v1/responses,/v1/tools,/v1/audio/models,/v1/audio/speech,/api/tags"
                     ]
                 )
             case ("GET", "/v1/models"):
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):
                 return try jsonResponse(statusCode: 200, payload: service.audioModels())
+            case ("POST", "/v1/audio/speech"):
+                let decoded = try JSONCoding.decoder.decode(OpenAIAudioSpeechRequest.self, from: request.body)
+                let response = try await service.audioSpeech(decoded)
+                return binaryResponse(
+                    statusCode: 200,
+                    contentType: response.contentType,
+                    filename: response.filename,
+                    body: response.audioData,
+                    extraHeaders: [
+                        "x-esh-audio-model": response.modelID,
+                        "x-esh-audio-sample-rate": "\(response.sampleRate)"
+                    ]
+                )
             case ("GET", "/v1/tools"):
                 return try jsonResponse(statusCode: 200, payload: service.tools())
             case ("GET", "/api/tags"):
@@ -121,6 +134,27 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             headers: streamHeaders(contentLength: body.count),
             body: body
         )
+    }
+
+    private func binaryResponse(
+        statusCode: Int,
+        contentType: String,
+        filename: String,
+        body: Data,
+        extraHeaders: [String: String] = [:]
+    ) -> OpenAICompatibleHTTPResponse {
+        var headers = [
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET,POST,OPTIONS",
+            "access-control-allow-headers": "authorization,content-type",
+            "content-type": contentType,
+            "content-length": String(body.count),
+            "content-disposition": #"attachment; filename="\#(filename)""#
+        ]
+        for (key, value) in extraHeaders {
+            headers[key] = value
+        }
+        return OpenAICompatibleHTTPResponse(statusCode: statusCode, headers: headers, body: body)
     }
 
     private func emptyResponse(statusCode: Int) -> OpenAICompatibleHTTPResponse {

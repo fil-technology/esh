@@ -490,6 +490,7 @@ private struct CLI {
             print("OpenAI server on: \(baseURL)")
             print("Models: \(baseURL)/v1/models")
             print("Audio models: \(baseURL)/v1/audio/models")
+            print("Audio speech: \(baseURL)/v1/audio/speech")
         } else {
             print("OpenAI server off")
         }

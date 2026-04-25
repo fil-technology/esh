@@ -974,6 +974,7 @@ struct TUIApplication {
                 "base_url: \(baseURL)",
                 "models: GET /v1/models",
                 "audio: GET /v1/audio/models",
+                "speech: POST /v1/audio/speech",
                 "chat: POST /v1/chat/completions",
                 "responses: POST /v1/responses",
                 "toggle: /serve toggle"

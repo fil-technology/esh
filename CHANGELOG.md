@@ -6,6 +6,9 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- OpenAI-compatible audio speech generation at `POST /v1/audio/speech`, including direct WAV responses for terminal-driven agents and the TUI-hosted local API.
+
 ## [0.1.32] - 2026-04-25
 
 ### Fixed

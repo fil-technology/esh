@@ -126,6 +126,14 @@ Use `esh serve` to expose a local OpenAI-compatible HTTP surface for editors, sc
 ./esh serve --host 127.0.0.1 --port 11435
 curl http://127.0.0.1:11435/v1/models
 curl http://127.0.0.1:11435/v1/audio/models
+curl http://127.0.0.1:11435/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "pocket-tts",
+    "input": "Hello from esh",
+    "voice": "alba"
+  }' \
+  --output hello.wav
 curl http://127.0.0.1:11435/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
@@ -142,6 +150,7 @@ Supported routes in v1:
 - `GET /v1/tools`
 - `GET /v1/audio/models`
 - `GET /api/tags`
+- `POST /v1/audio/speech`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 
@@ -151,6 +160,7 @@ Notes:
 - text inputs are supported for chat/responses in v1
 - `/v1/models` includes installed text models only for strict OpenAI-compatible clients such as Xcode
 - `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
+- `/v1/audio/speech` generates WAV audio and returns the bytes directly so terminal-driven agents can save or forward the file without shared filesystem access
 - `/v1/tools` advertises request-side tool support and `/api/tags` provides an Ollama-compatible model list for local-provider probes
 - set `ESH_API_KEY` or pass `--api-key <token>` to require `Authorization: Bearer <token>`
 

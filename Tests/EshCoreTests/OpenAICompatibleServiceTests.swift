@@ -16,6 +16,18 @@ struct OpenAICompatibleServiceTests {
         }
     }
 
+    actor SpeechRequestCapture {
+        private var request: OpenAIAudioSpeechRequest?
+
+        func store(_ request: OpenAIAudioSpeechRequest) {
+            self.request = request
+        }
+
+        func load() -> OpenAIAudioSpeechRequest? {
+            request
+        }
+    }
+
     @Test
     func chatCompletionsMapsMessagesAndFormatsResponse() async throws {
         let requestData = Data(
@@ -109,6 +121,57 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
+    func audioSpeechMapsInputAndReturnsGeneratedAudio() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "voice-model",
+              "input": "Hello from esh",
+              "voice": "alba",
+              "language": "en",
+              "temperature": 0.3,
+              "top_p": 0.8,
+              "max_tokens": 128
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(OpenAIAudioSpeechRequest.self, from: requestData)
+
+        let capture = SpeechRequestCapture()
+        let service = OpenAICompatibleService(
+            infer: { _ in
+                throw OpenAICompatibleError.invalidRequest("Unexpected text inference.")
+            },
+            installedModels: { [] },
+            speech: { speechRequest in
+                await capture.store(speechRequest)
+                return OpenAIAudioSpeechResponse(
+                    audioData: Data("RIFFdemo".utf8),
+                    contentType: "audio/wav",
+                    filename: "speech.wav",
+                    modelID: speechRequest.model ?? "voice-model",
+                    sampleRate: 24_000
+                )
+            }
+        )
+
+        let response = try await service.audioSpeech(request)
+        let captured = try #require(await capture.load())
+
+        #expect(captured.model == "voice-model")
+        #expect(captured.input == "Hello from esh")
+        #expect(captured.voice == "alba")
+        #expect(captured.language == "en")
+        #expect(captured.temperature == 0.3)
+        #expect(captured.topP == 0.8)
+        #expect(captured.maxTokens == 128)
+        #expect(response.audioData == Data("RIFFdemo".utf8))
+        #expect(response.contentType == "audio/wav")
+        #expect(response.filename == "speech.wav")
+        #expect(response.sampleRate == 24_000)
+    }
+
+    @Test
     func chatCompletionsIgnoresUnsupportedContentPartsWhenTextIsPresent() async throws {
         let requestData = Data(
             """
@@ -177,6 +240,15 @@ struct OpenAICompatibleServiceTests {
                             languages: [.init(id: "en")]
                         )
                     ]
+                },
+                speech: { speechRequest in
+                    OpenAIAudioSpeechResponse(
+                        audioData: Data("RIFFroute".utf8),
+                        contentType: "audio/wav",
+                        filename: "\(speechRequest.voice ?? "speech").wav",
+                        modelID: speechRequest.model ?? "voice-model",
+                        sampleRate: 24_000
+                    )
                 }
             )
         )
@@ -197,6 +269,23 @@ struct OpenAICompatibleServiceTests {
         #expect(audioModels.statusCode == 200)
         #expect(audioPayload.data.first?.voices.first?.id == "alba")
         #expect(audioPayload.data.first?.languages.first?.id == "en")
+
+        let speechRequestBody = Data(
+            """
+            {
+              "model": "voice-model",
+              "input": "hello",
+              "voice": "alba"
+            }
+            """.utf8
+        )
+        let speech = try await handler.handle(.init(method: "POST", path: "/v1/audio/speech", headers: ["content-type": "application/json"], body: speechRequestBody))
+        #expect(speech.statusCode == 200)
+        #expect(speech.body == Data("RIFFroute".utf8))
+        #expect(speech.headers["content-type"] == "audio/wav")
+        #expect(speech.headers["content-disposition"] == #"attachment; filename="alba.wav""#)
+        #expect(speech.headers["x-esh-audio-model"] == "voice-model")
+        #expect(speech.headers["x-esh-audio-sample-rate"] == "24000")
 
         let tools = try await handler.handle(.init(method: "GET", path: "/v1/tools", headers: [:], body: Data()))
         let toolsPayload = try JSONCoding.decoder.decode(OpenAIToolsResponse.self, from: tools.body)

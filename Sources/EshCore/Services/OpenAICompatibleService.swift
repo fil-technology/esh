@@ -346,6 +346,50 @@ public struct OpenAIAudioModelsResponse: Codable, Hashable, Sendable {
     public var data: [OpenAIAudioModel]
 }
 
+public struct OpenAIAudioSpeechRequest: Codable, Hashable, Sendable {
+    public var model: String?
+    public var input: String
+    public var voice: String?
+    public var language: String?
+    public var responseFormat: String?
+    public var maxTokens: Int?
+    public var temperature: Double?
+    public var topP: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case input
+        case voice
+        case language
+        case responseFormat = "response_format"
+        case maxTokens = "max_tokens"
+        case temperature
+        case topP = "top_p"
+    }
+}
+
+public struct OpenAIAudioSpeechResponse: Hashable, Sendable {
+    public var audioData: Data
+    public var contentType: String
+    public var filename: String
+    public var modelID: String
+    public var sampleRate: Int
+
+    public init(
+        audioData: Data,
+        contentType: String = "audio/wav",
+        filename: String,
+        modelID: String,
+        sampleRate: Int
+    ) {
+        self.audioData = audioData
+        self.contentType = contentType
+        self.filename = filename
+        self.modelID = modelID
+        self.sampleRate = sampleRate
+    }
+}
+
 public struct OpenAIAudioModel: Codable, Hashable, Sendable {
     public var id: String
     public var object: String
@@ -435,15 +479,20 @@ public struct OpenAICompatibleService: Sendable {
     private let inferClosure: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse
     private let installedModelsClosure: @Sendable () throws -> [ExternalInstalledModelCapability]
     private let audioModelsClosure: @Sendable () throws -> [OpenAIAudioModel]
+    private let speechClosure: @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
         installedModels: @escaping @Sendable () throws -> [ExternalInstalledModelCapability],
-        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] }
+        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
+        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
+            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
+        }
     ) {
         self.inferClosure = infer
         self.installedModelsClosure = installedModels
         self.audioModelsClosure = audioModels
+        self.speechClosure = speech
     }
 
     public init(
@@ -453,7 +502,10 @@ public struct OpenAICompatibleService: Sendable {
         toolVersion: String? = nil,
         registry: InferenceBackendRegistry = .init(),
         workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
-        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] }
+        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
+        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
+            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
+        }
     ) {
         let inference = ExternalInferenceService(
             modelStore: modelStore,
@@ -470,7 +522,8 @@ public struct OpenAICompatibleService: Sendable {
             installedModels: {
                 try capabilities.describe(toolVersion: toolVersion).installedModels
             },
-            audioModels: audioModels
+            audioModels: audioModels,
+            speech: speech
         )
     }
 
@@ -700,6 +753,24 @@ public struct OpenAICompatibleService: Sendable {
         let models = try audioModelsClosure()
             .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
         return OpenAIAudioModelsResponse(object: "list", data: models)
+    }
+
+    public func audioSpeech(_ request: OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse {
+        let trimmedInput = request.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedInput.isEmpty == false else {
+            throw OpenAICompatibleError.invalidRequest("Audio input must not be empty.")
+        }
+
+        if let responseFormat = request.responseFormat?.trimmingCharacters(in: .whitespacesAndNewlines),
+           responseFormat.isEmpty == false,
+           responseFormat.localizedCaseInsensitiveCompare("wav") != .orderedSame {
+            throw OpenAICompatibleError.unsupported("Only wav response_format is supported.")
+        }
+
+        var normalized = request
+        normalized.input = trimmedInput
+        normalized.responseFormat = "wav"
+        return try await speechClosure(normalized)
     }
 
     public func ollamaTags() throws -> OllamaTagsResponse {
