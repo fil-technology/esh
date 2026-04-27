@@ -41,7 +41,7 @@ public struct ExternalIntegrationService: Sendable {
         integrationID: String,
         modelID: String,
         baseURL: String,
-        apiKey: String,
+        apiKey: String?,
         workspaceRootURL: URL?,
         passthroughArguments: [String]
     ) throws -> ExternalIntegrationLaunchPlan {
@@ -56,12 +56,16 @@ public struct ExternalIntegrationService: Sendable {
                 arguments: ["--model", modelID] + passthroughArguments,
                 environment: [
                     "ANTHROPIC_BASE_URL": baseURL,
-                    "ANTHROPIC_AUTH_TOKEN": apiKey,
+                    "ANTHROPIC_AUTH_TOKEN": apiKey ?? "esh-local",
                     "ANTHROPIC_CUSTOM_MODEL_OPTION": modelID,
                     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Esh local model"
                 ]
             )
         case .codex:
+            var environment: [String: String] = [:]
+            if let apiKey {
+                environment["OPENAI_API_KEY"] = apiKey
+            }
             return ExternalIntegrationLaunchPlan(
                 integrationID: descriptor.id,
                 executableName: descriptor.executableName,
@@ -69,21 +73,26 @@ public struct ExternalIntegrationService: Sendable {
                 arguments: codexArguments(
                     modelID: modelID,
                     baseURL: baseURL,
+                    requiresAPIKey: apiKey != nil,
                     passthroughArguments: passthroughArguments
                 ),
-                environment: [
-                    "OPENAI_API_KEY": apiKey
-                ],
+                environment: environment,
                 configurationFileContents: codexConfiguration(
                     modelID: modelID,
                     baseURL: baseURL,
+                    requiresAPIKey: apiKey != nil,
                     workspaceRootURL: workspaceRootURL
                 )
             )
         }
     }
 
-    private func codexConfiguration(modelID: String, baseURL: String, workspaceRootURL: URL?) -> String {
+    private func codexConfiguration(
+        modelID: String,
+        baseURL: String,
+        requiresAPIKey: Bool,
+        workspaceRootURL: URL?
+    ) -> String {
         var lines: [String] = [
             "[profiles.\(Self.codexProfileName)]",
             "forced_login_method = \"api\"",
@@ -94,9 +103,11 @@ public struct ExternalIntegrationService: Sendable {
             "[model_providers.\(Self.codexProviderName)]",
             "name = \"Esh\"",
             "base_url = \"\(baseURL)\"",
-            "env_key = \"OPENAI_API_KEY\"",
             "wire_api = \"responses\""
         ]
+        if requiresAPIKey {
+            lines.insert("env_key = \"OPENAI_API_KEY\"", at: lines.count - 1)
+        }
         if let workspaceRootURL {
             lines.append("")
             lines.append("[projects.\"\(workspaceRootURL.path)\"]")
@@ -109,11 +120,13 @@ public struct ExternalIntegrationService: Sendable {
         existingConfiguration: String,
         modelID: String,
         baseURL: String,
+        requiresAPIKey: Bool = false,
         workspaceRootURL: URL?
     ) -> String {
         let replacement = codexConfiguration(
             modelID: modelID,
             baseURL: baseURL,
+            requiresAPIKey: requiresAPIKey,
             workspaceRootURL: workspaceRootURL
         )
         var sectionNames: Set<String> = [
@@ -192,9 +205,17 @@ public struct ExternalIntegrationService: Sendable {
         return object
     }
 
-    private func codexArguments(modelID: String, baseURL: String, passthroughArguments: [String]) -> [String] {
-        [
-            "-c", #"model_providers.esh={name="Esh",base_url="\#(baseURL)",env_key="OPENAI_API_KEY",wire_api="responses"}"#,
+    private func codexArguments(
+        modelID: String,
+        baseURL: String,
+        requiresAPIKey: Bool,
+        passthroughArguments: [String]
+    ) -> [String] {
+        let providerConfig = requiresAPIKey
+            ? #"model_providers.esh={name="Esh",base_url="\#(baseURL)",env_key="OPENAI_API_KEY",wire_api="responses"}"#
+            : #"model_providers.esh={name="Esh",base_url="\#(baseURL)",wire_api="responses"}"#
+        return [
+            "-c", providerConfig,
             "-c", #"model_provider="esh""#,
             "-c", #"model="\#(modelID)""#
         ] + passthroughArguments

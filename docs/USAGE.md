@@ -89,7 +89,7 @@ Launch supported external coding agents against local Esh-served models:
 ./esh integrations configure codex --model <installed-model-id>
 ./esh integrations configure claude --model <installed-model-id>
 ./esh serve --host 127.0.0.1 --port 11435
-OPENAI_API_KEY=esh-local codex --profile esh-launch
+codex --profile esh-launch
 ./esh launch codex --model <installed-model-id>
 ./esh launch codex --model <installed-model-id> -- exec --ephemeral "Summarize this repository"
 ./esh launch claude --model <installed-model-id>

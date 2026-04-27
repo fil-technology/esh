@@ -87,7 +87,10 @@ enum IntegrationsCommand {
             identifier: CommandSupport.optionalValue(flag: "--model", in: launchArguments),
             modelStore: modelStore
         )
-        let apiKey = resolveAPIKey(arguments: launchArguments)
+        let apiKey = resolveAPIKey(
+            arguments: launchArguments,
+            defaultValue: descriptor.id == .claude ? defaultAPIKey : nil
+        )
         let host = CommandSupport.optionalValue(flag: "--host", in: launchArguments) ?? "127.0.0.1"
         let workspaceRootURL = WorkspaceContextLocator(root: root).workspaceRootURL(
             from: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
@@ -165,7 +168,10 @@ enum IntegrationsCommand {
             modelStore: modelStore
         )
         let host = CommandSupport.optionalValue(flag: "--host", in: configureArguments) ?? "127.0.0.1"
-        let apiKey = resolveAPIKey(arguments: configureArguments)
+        let apiKey = resolveAPIKey(
+            arguments: configureArguments,
+            defaultValue: descriptor.id == .claude ? defaultAPIKey : nil
+        )
 
         switch descriptor.id {
         case .codex:
@@ -186,14 +192,18 @@ enum IntegrationsCommand {
                 existingConfiguration: existing,
                 modelID: install.id,
                 baseURL: baseURL,
+                requiresAPIKey: apiKey != nil,
                 workspaceRootURL: workspaceRootURL
             )
             try merged.write(to: configURL, atomically: true, encoding: .utf8)
 
             print("Configured Codex profile `\(ExternalIntegrationService.codexProfileName)` at \(configURL.path)")
             print("Start Esh with: esh serve --host \(host) --port \(port)")
-            let keyHint = apiKey == defaultAPIKey ? "OPENAI_API_KEY=\(defaultAPIKey) " : "OPENAI_API_KEY=<your-api-key> "
-            print("Run Codex with: \(keyHint)codex --profile \(ExternalIntegrationService.codexProfileName)")
+            if apiKey == nil {
+                print("Run Codex with: codex --profile \(ExternalIntegrationService.codexProfileName)")
+            } else {
+                print("Run Codex with: OPENAI_API_KEY=<your-api-key> codex --profile \(ExternalIntegrationService.codexProfileName)")
+            }
         case .claude:
             let port = try resolvePort(arguments: configureArguments, defaultPort: defaultAnthropicPort)
             let baseURL = "http://\(host):\(port)"
@@ -205,7 +215,7 @@ enum IntegrationsCommand {
                 existingSettings: existing,
                 modelID: install.id,
                 baseURL: baseURL,
-                apiKey: apiKey
+                apiKey: apiKey ?? defaultAPIKey
             )
             try merged.write(to: settingsURL, atomically: true, encoding: .utf8)
 
@@ -234,14 +244,14 @@ enum IntegrationsCommand {
         return port
     }
 
-    private static func resolveAPIKey(arguments: [String]) -> String {
+    private static func resolveAPIKey(arguments: [String], defaultValue: String?) -> String? {
         if let apiKey = CommandSupport.optionalValue(flag: "--api-key", in: arguments), apiKey.isEmpty == false {
             return apiKey
         }
         if let apiKey = ProcessInfo.processInfo.environment["ESH_API_KEY"], apiKey.isEmpty == false {
             return apiKey
         }
-        return defaultAPIKey
+        return defaultValue
     }
 
     private static func makeServer(
@@ -250,7 +260,7 @@ enum IntegrationsCommand {
         toolVersion: String?,
         host: String,
         port: UInt16,
-        apiKey: String
+        apiKey: String?
     ) throws -> OpenAICompatibleLocalServer {
         switch descriptor.serverProtocol {
         case .openAICompatible:

@@ -51,6 +51,26 @@ struct ExternalIntegrationServiceTests {
     }
 
     @Test
+    func codexLaunchPlanDoesNotRequireAPIKeyByDefault() throws {
+        let service = ExternalIntegrationService()
+
+        let plan = try service.launchPlan(
+            integrationID: "codex",
+            modelID: "mlx-demo",
+            baseURL: "http://127.0.0.1:11435/v1",
+            apiKey: nil,
+            workspaceRootURL: nil,
+            passthroughArguments: []
+        )
+
+        #expect(plan.environment["OPENAI_API_KEY"] == nil)
+        #expect(plan.arguments.first(where: { $0.contains("model_providers.esh") })?.contains("env_key") == false)
+        #expect(plan.arguments.contains("model=\"mlx-demo\""))
+        let config = try #require(plan.configurationFileContents)
+        #expect(config.contains("env_key") == false)
+    }
+
+    @Test
     func mergedCodexConfigurationReplacesExistingEshLaunchSections() {
         let service = ExternalIntegrationService()
         let existing = """
@@ -82,7 +102,7 @@ struct ExternalIntegrationServiceTests {
         #expect(merged.contains("model = \"mlx-demo\""))
         #expect(merged.contains("[model_providers.esh-launch]"))
         #expect(merged.contains("base_url = \"http://127.0.0.1:11435/v1\""))
-        #expect(merged.contains("env_key = \"OPENAI_API_KEY\""))
+        #expect(merged.contains("env_key = \"OPENAI_API_KEY\"") == false)
         #expect(merged.contains("wire_api = \"responses\""))
         #expect(merged.contains("old") == false)
         #expect(merged.contains("9999") == false)

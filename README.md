@@ -184,7 +184,7 @@ Launch Codex CLI against Esh’s OpenAI-compatible local server:
 
 ```bash
 ./esh serve --host 127.0.0.1 --port 11435
-OPENAI_API_KEY=esh-local codex --profile esh-launch
+codex --profile esh-launch
 ./esh launch codex --model mlx-community--qwen2.5-0.5b-instruct-4bit
 ./esh launch codex --model mlx-community--qwen2.5-0.5b-instruct-4bit -- exec --ephemeral "Summarize this repository"
 ```
@@ -199,8 +199,8 @@ Launch Claude Code against Esh’s Anthropic-compatible local server:
 Notes:
 - `codex` is wired through Esh’s local `Responses` API surface
 - `claude` is wired through Esh’s local Anthropic `Messages` API surface
-- `esh serve` is unauthenticated by default for local Codex profiles; pass `--api-key <token>` only when you also configure Codex to send that token
-- `esh launch codex` and `esh launch claude` start a private local server and inject the matching token automatically; persistent `configure` writes Codex/Claude settings for manual launches
+- Codex profiles omit `env_key` by default so `codex --profile esh-launch` works without an `OPENAI_API_KEY`; pass `--api-key <token>` only when you also run Codex with `OPENAI_API_KEY=<token>`
+- `esh launch claude` starts a local Anthropic-compatible server and injects the matching Claude Code auth env automatically; persistent `configure` writes Codex/Claude settings for manual launches
 
 ### Release mode
 
