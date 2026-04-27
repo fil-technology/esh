@@ -77,6 +77,42 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
+    func chatCompletionsMapsDeveloperRoleToSystem() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "demo-model",
+              "messages": [
+                { "role": "developer", "content": "You are terse." },
+                { "role": "user", "content": "Say hi" }
+              ]
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: requestData)
+
+        let capture = RequestCapture()
+        let service = OpenAICompatibleService(
+            infer: { externalRequest in
+                await capture.store(externalRequest)
+                return ExternalInferenceResponse(
+                    modelID: externalRequest.model ?? "demo-model",
+                    backend: .mlx,
+                    integration: .init(mode: "direct"),
+                    outputText: "Hi",
+                    metrics: .init()
+                )
+            },
+            installedModels: { [] }
+        )
+
+        _ = try await service.chatCompletions(request)
+        let externalRequest = try #require(await capture.load())
+        #expect(externalRequest.messages.map(\.role) == [.system, .user])
+        #expect(externalRequest.messages.map(\.text) == ["You are terse.", "Say hi"])
+    }
+
+    @Test
     func responsesMapsStringInputAndFormatsResponse() async throws {
         let requestData = Data(
             """
@@ -260,6 +296,9 @@ struct OpenAICompatibleServiceTests {
         let modelsPayload = try JSONCoding.decoder.decode(OpenAIModelsResponse.self, from: models.body)
         #expect(models.statusCode == 200)
         #expect(modelsPayload.data.map(\.id) == ["a-model", "b-model"])
+        #expect(modelsPayload.models.map(\.id) == ["a-model", "b-model"])
+        #expect(modelsPayload.models.map(\.slug) == ["a-model", "b-model"])
+        #expect(modelsPayload.models.map(\.displayName) == ["a-model", "b-model"])
 
         let queryModels = try await handler.handle(.init(method: "GET", path: "/v1/models?source=xcode", headers: [:], body: Data()))
         #expect(queryModels.statusCode == 200)

@@ -8,13 +8,21 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
     }
 
     private let listener: NWListener
-    private let handler: OpenAICompatibleHTTPHandler
+    private let handler: @Sendable (OpenAICompatibleHTTPRequest) async throws -> OpenAICompatibleHTTPResponse
     private let hostMode: HostMode
     public let host: String
     public let port: UInt16
     private let queue = DispatchQueue(label: "esh.openai-server")
 
-    public init(host: String, port: UInt16, handler: OpenAICompatibleHTTPHandler) throws {
+    public convenience init(host: String, port: UInt16, handler: OpenAICompatibleHTTPHandler) throws {
+        try self.init(host: host, port: port, handler: handler.handle)
+    }
+
+    public init(
+        host: String,
+        port: UInt16,
+        handler: @escaping @Sendable (OpenAICompatibleHTTPRequest) async throws -> OpenAICompatibleHTTPResponse
+    ) throws {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw OpenAICompatibleError.invalidRequest("Invalid port: \(port)")
         }
@@ -71,7 +79,7 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
             do {
                 if let request = try self.parseRequest(from: accumulated) {
                     Task {
-                        let response = (try? await self.handler.handle(request)) ?? OpenAICompatibleHTTPResponse(
+                        let response = (try? await self.handler(request)) ?? OpenAICompatibleHTTPResponse(
                             statusCode: 500,
                             headers: ["content-type": "application/json; charset=utf-8"],
                             body: Data(#"{"error":{"message":"Internal server error","type":"server_error"}}"#.utf8)

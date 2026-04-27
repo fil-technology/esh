@@ -57,9 +57,6 @@ enum ServeCommand {
         if let apiKey = CommandSupport.optionalValue(flag: "--api-key", in: arguments), apiKey.isEmpty == false {
             return apiKey
         }
-        if let envValue = ProcessInfo.processInfo.environment["ESH_API_KEY"], envValue.isEmpty == false {
-            return envValue
-        }
         return nil
     }
 
