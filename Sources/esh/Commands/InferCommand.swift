@@ -31,6 +31,11 @@ enum InferCommand {
             "--artifact",
             "--max-tokens",
             "--temperature",
+            "--top-p",
+            "--top-k",
+            "--min-p",
+            "--repetition-penalty",
+            "--seed",
             "--cache-mode",
             "--intent",
             "--session-name",
@@ -46,7 +51,7 @@ enum InferCommand {
         let message = CommandSupport.optionalValue(flag: "--message", in: arguments) ?? positionalMessage
         guard let message, message.isEmpty == false else {
             throw StoreError.invalidManifest(
-                "Usage: esh infer --input <path-or-> | esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]"
+                "Usage: esh infer --input <path-or-> | esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]"
             )
         }
 
@@ -64,6 +69,11 @@ enum InferCommand {
         let fallbackModel = CommandSupport.optionalValue(flag: "--fallback-model", in: arguments)
         let maxTokens = Int(CommandSupport.optionalValue(flag: "--max-tokens", in: arguments) ?? "") ?? GenerationConfig().maxTokens
         let temperature = Double(CommandSupport.optionalValue(flag: "--temperature", in: arguments) ?? "") ?? GenerationConfig().temperature
+        let topP = try optionalDouble(flag: "--top-p", in: arguments)
+        let topK = try optionalInt(flag: "--top-k", in: arguments)
+        let minP = try optionalDouble(flag: "--min-p", in: arguments)
+        let repetitionPenalty = try optionalDouble(flag: "--repetition-penalty", in: arguments)
+        let seed = try optionalUInt64(flag: "--seed", in: arguments)
 
         let cacheArtifactID: UUID?
         if let artifactValue {
@@ -117,9 +127,41 @@ enum InferCommand {
             cacheMode: cacheMode,
             intent: intent,
             messages: messages,
-            generation: GenerationConfig(maxTokens: maxTokens, temperature: temperature),
+            generation: GenerationConfig(
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: topP,
+                topK: topK,
+                minP: minP,
+                repetitionPenalty: repetitionPenalty,
+                seed: seed
+            ),
             routing: routing
         )
+    }
+
+    private static func optionalDouble(flag: String, in arguments: [String]) throws -> Double? {
+        guard let value = CommandSupport.optionalValue(flag: flag, in: arguments) else { return nil }
+        guard let parsed = Double(value) else {
+            throw StoreError.invalidManifest("Invalid \(flag) value: \(value)")
+        }
+        return parsed
+    }
+
+    private static func optionalInt(flag: String, in arguments: [String]) throws -> Int? {
+        guard let value = CommandSupport.optionalValue(flag: flag, in: arguments) else { return nil }
+        guard let parsed = Int(value) else {
+            throw StoreError.invalidManifest("Invalid \(flag) value: \(value)")
+        }
+        return parsed
+    }
+
+    private static func optionalUInt64(flag: String, in arguments: [String]) throws -> UInt64? {
+        guard let value = CommandSupport.optionalValue(flag: flag, in: arguments) else { return nil }
+        guard let parsed = UInt64(value) else {
+            throw StoreError.invalidManifest("Invalid \(flag) value: \(value)")
+        }
+        return parsed
     }
 
     private static func resolveRoutingConfiguration(

@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-04-29
+
+### Added
+- Runtime generation controls for chat, `esh infer`, OpenAI-compatible requests, Anthropic-compatible requests, MLX, and GGUF backends.
+- Chat commands for inspecting and changing generation options while a session is running.
+
+### Fixed
+- OpenAI and Anthropic local compatibility now tolerates non-text content parts instead of rejecting requests that include image or unsupported parts.
+- Packaged smoke tests now skip MLX doctor failures only when the current macOS session cannot expose a Metal GPU.
+
 ## [0.1.33] - 2026-04-25
 
 ### Added

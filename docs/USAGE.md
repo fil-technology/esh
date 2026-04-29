@@ -25,9 +25,12 @@ Running `./esh` with no arguments opens the default interactive launcher menu.
 
 ```bash
 ./scripts/package-release.sh
+./dist/esh-macos-<version>/share/esh/scripts/smoke-test-package.sh ./dist/esh-macos-<version>
 ./dist/esh-macos-<version>/esh doctor
 ./dist/esh-macos-<version>/esh chat
 ```
+
+The package smoke test validates the packaged launcher and runtime layout. In headless or sandboxed macOS sessions where MLX cannot see a Metal GPU, the doctor check is reported as skipped while the non-GPU package checks still run.
 
 The packaged release includes:
 - `esh` launcher
@@ -419,6 +422,8 @@ Runtime validation script:
 ```bash
 ./scripts/verify-env.sh
 ```
+
+`verify-env.sh` prints the resolved runtime layout. Use `./esh doctor` when you also want the Python MLX bridge imports checked.
 
 If chat does not start:
 - run `./esh doctor`

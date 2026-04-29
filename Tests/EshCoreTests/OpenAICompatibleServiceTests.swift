@@ -39,6 +39,11 @@ struct OpenAICompatibleServiceTests {
                 { "role": "user", "content": "Hello there" }
               ],
               "temperature": 0.2,
+              "top_p": 0.9,
+              "top_k": 40,
+              "min_p": 0.05,
+              "repetition_penalty": 1.1,
+              "seed": 123,
               "max_completion_tokens": 64,
               "metadata": { "screen": "xcode" }
             }
@@ -69,6 +74,11 @@ struct OpenAICompatibleServiceTests {
         #expect(externalRequest.messages.map(\.text) == ["Be concise.", "Hello there"])
         #expect(externalRequest.generation.maxTokens == 64)
         #expect(externalRequest.generation.temperature == 0.2)
+        #expect(externalRequest.generation.topP == 0.9)
+        #expect(externalRequest.generation.topK == 40)
+        #expect(externalRequest.generation.minP == 0.05)
+        #expect(externalRequest.generation.repetitionPenalty == 1.1)
+        #expect(externalRequest.generation.seed == 123)
         #expect(response.object == "chat.completion")
         #expect(response.model == "demo-model")
         #expect(response.choices.count == 1)
@@ -121,6 +131,11 @@ struct OpenAICompatibleServiceTests {
               "input": "Explain caching in one sentence.",
               "max_output_tokens": 32,
               "temperature": 0.1,
+              "top_p": 0.8,
+              "top_k": 20,
+              "min_p": 0.02,
+              "repetition_penalty": 1.05,
+              "seed": 456,
               "reasoning": { "effort": "medium" }
             }
             """.utf8
@@ -150,6 +165,11 @@ struct OpenAICompatibleServiceTests {
         #expect(externalRequest.messages.first?.text == "Explain caching in one sentence.")
         #expect(externalRequest.generation.maxTokens == 32)
         #expect(externalRequest.generation.temperature == 0.1)
+        #expect(externalRequest.generation.topP == 0.8)
+        #expect(externalRequest.generation.topK == 20)
+        #expect(externalRequest.generation.minP == 0.02)
+        #expect(externalRequest.generation.repetitionPenalty == 1.05)
+        #expect(externalRequest.generation.seed == 456)
         #expect(response.object == "response")
         #expect(response.model == "demo-model")
         #expect(response.outputText == "Caching reuses prepared state to reduce repeated work.")
@@ -246,6 +266,51 @@ struct OpenAICompatibleServiceTests {
         _ = try await service.chatCompletions(request)
         let externalRequest = try #require(await capture.load())
         #expect(externalRequest.messages.first?.text == "Describe this setup.")
+    }
+
+    @Test
+    func chatCompletionsAcceptsOutputTextAndEmptyUnsupportedParts() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "demo-model",
+              "messages": [
+                {
+                  "role": "assistant",
+                  "content": [
+                    { "type": "output_text", "text": "Prior answer." }
+                  ]
+                },
+                {
+                  "role": "user",
+                  "content": [
+                    { "type": "input_image", "image_url": "file:///tmp/example.png" }
+                  ]
+                }
+              ]
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: requestData)
+
+        let capture = RequestCapture()
+        let service = OpenAICompatibleService(
+            infer: { externalRequest in
+                await capture.store(externalRequest)
+                return ExternalInferenceResponse(
+                    modelID: "demo-model",
+                    backend: .mlx,
+                    integration: .init(mode: "direct"),
+                    outputText: "done",
+                    metrics: .init()
+                )
+            },
+            installedModels: { [] }
+        )
+
+        _ = try await service.chatCompletions(request)
+        let externalRequest = try #require(await capture.load())
+        #expect(externalRequest.messages.map(\.text) == ["Prior answer.", ""])
     }
 
     @Test

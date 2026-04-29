@@ -14,5 +14,3 @@ echo "payload_root: $(esh::payload_root)"
 echo "python: $ESH_PYTHON"
 echo "bridge: $ESH_MLX_VLM_BRIDGE"
 echo "binary: $(esh::swift_binary "$CONFIGURATION")"
-
-"$(esh::swift_binary "$CONFIGURATION")" doctor

@@ -208,6 +208,7 @@ Build a self-contained release bundle:
 
 ```bash
 ./scripts/package-release.sh
+./dist/esh-macos-<version>/share/esh/scripts/smoke-test-package.sh ./dist/esh-macos-<version>
 ```
 
 Run the packaged tool:
@@ -216,6 +217,8 @@ Run the packaged tool:
 ./dist/esh-macos-<version>/esh doctor
 ./dist/esh-macos-<version>/esh chat
 ```
+
+The package smoke test verifies the launcher, packaged runtime paths, recommended model catalog, and empty install store. If the current macOS session cannot expose a Metal GPU to MLX, it reports that condition and continues after the rest of the package checks pass.
 
 ## GitHub CI/CD
 

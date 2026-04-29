@@ -6,6 +6,8 @@ public struct AnthropicMessagesRequest: Codable, Hashable, Sendable {
     public var messages: [AnthropicInputMessage]
     public var maxTokens: Int
     public var temperature: Double?
+    public var topP: Double?
+    public var topK: Int?
     public var stream: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -14,6 +16,8 @@ public struct AnthropicMessagesRequest: Codable, Hashable, Sendable {
         case messages
         case maxTokens = "max_tokens"
         case temperature
+        case topP = "top_p"
+        case topK = "top_k"
         case stream
     }
 
@@ -23,6 +27,8 @@ public struct AnthropicMessagesRequest: Codable, Hashable, Sendable {
         messages: [AnthropicInputMessage],
         maxTokens: Int,
         temperature: Double? = nil,
+        topP: Double? = nil,
+        topK: Int? = nil,
         stream: Bool? = nil
     ) {
         self.model = model
@@ -30,6 +36,8 @@ public struct AnthropicMessagesRequest: Codable, Hashable, Sendable {
         self.messages = messages
         self.maxTokens = maxTokens
         self.temperature = temperature
+        self.topP = topP
+        self.topK = topK
         self.stream = stream
     }
 }
@@ -75,9 +83,6 @@ public enum AnthropicContentContainer: Codable, Hashable, Sendable {
             let texts = parts.compactMap { part -> String? in
                 guard part.type == "text" else { return nil }
                 return part.text
-            }
-            guard texts.isEmpty == false else {
-                throw OpenAICompatibleError.unsupported("Only text Anthropic content is supported in v1.")
             }
             return texts.joined()
         }
@@ -314,7 +319,9 @@ public struct AnthropicCompatibleService: Sendable {
             messages: messages,
             generation: GenerationConfig(
                 maxTokens: request.maxTokens,
-                temperature: request.temperature ?? GenerationConfig().temperature
+                temperature: request.temperature ?? GenerationConfig().temperature,
+                topP: request.topP,
+                topK: request.topK
             )
         )
     }

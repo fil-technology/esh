@@ -27,16 +27,26 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
     public var model: String?
     public var messages: [OpenAIInputMessage]
     public var temperature: Double?
+    public var topP: Double?
+    public var topK: Int?
+    public var minP: Double?
+    public var repetitionPenalty: Double?
     public var maxTokens: Int?
     public var maxCompletionTokens: Int?
+    public var seed: UInt64?
     public var stream: Bool?
 
     enum CodingKeys: String, CodingKey {
         case model
         case messages
         case temperature
+        case topP = "top_p"
+        case topK = "top_k"
+        case minP = "min_p"
+        case repetitionPenalty = "repetition_penalty"
         case maxTokens = "max_tokens"
         case maxCompletionTokens = "max_completion_tokens"
+        case seed
         case stream
     }
 }
@@ -46,7 +56,12 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
     public var input: OpenAIResponsesInput
     public var instructions: String?
     public var temperature: Double?
+    public var topP: Double?
+    public var topK: Int?
+    public var minP: Double?
+    public var repetitionPenalty: Double?
     public var maxOutputTokens: Int?
+    public var seed: UInt64?
     public var stream: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -54,7 +69,12 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
         case input
         case instructions
         case temperature
+        case topP = "top_p"
+        case topK = "top_k"
+        case minP = "min_p"
+        case repetitionPenalty = "repetition_penalty"
         case maxOutputTokens = "max_output_tokens"
+        case seed
         case stream
     }
 }
@@ -122,9 +142,6 @@ public enum OpenAIInputContent: Codable, Hashable, Sendable {
                 }
                 return text
             }
-            guard texts.isEmpty == false else {
-                throw OpenAICompatibleError.unsupported("Only text content parts are supported in v1.")
-            }
             return texts.joined()
         }
     }
@@ -143,7 +160,7 @@ public enum OpenAIInputContentPart: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(String.self, forKey: .type)
         switch type {
-        case "text", "input_text":
+        case "text", "input_text", "output_text":
             self = .text(try container.decode(String.self, forKey: .text))
         default:
             self = .unsupported
@@ -726,7 +743,12 @@ public struct OpenAICompatibleService: Sendable {
             messages: messages,
             generation: GenerationConfig(
                 maxTokens: request.maxCompletionTokens ?? request.maxTokens ?? GenerationConfig().maxTokens,
-                temperature: request.temperature ?? GenerationConfig().temperature
+                temperature: request.temperature ?? GenerationConfig().temperature,
+                topP: request.topP,
+                topK: request.topK,
+                minP: request.minP,
+                repetitionPenalty: request.repetitionPenalty,
+                seed: request.seed
             )
         )
         let response = try await inferClosure(external)
@@ -826,7 +848,12 @@ public struct OpenAICompatibleService: Sendable {
             messages: messages,
             generation: GenerationConfig(
                 maxTokens: request.maxOutputTokens ?? GenerationConfig().maxTokens,
-                temperature: request.temperature ?? GenerationConfig().temperature
+                temperature: request.temperature ?? GenerationConfig().temperature,
+                topP: request.topP,
+                topK: request.topK,
+                minP: request.minP,
+                repetitionPenalty: request.repetitionPenalty,
+                seed: request.seed
             )
         )
         let response = try await inferClosure(external)

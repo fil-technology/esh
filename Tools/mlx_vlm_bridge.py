@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import inspect
 import json
 import sys
 import tempfile
@@ -66,6 +67,100 @@ def _import_mlx_lm():
             f"{exc}"
         )
     return mx, generate_step, stream_generate, KVCache, make_prompt_cache, load
+
+
+def _supported_kwargs(function: Any, values: dict[str, Any]) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        return {}
+
+    parameters = signature.parameters
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return {key: value for key, value in values.items() if value is not None}
+    return {
+        key: value
+        for key, value in values.items()
+        if value is not None and key in parameters
+    }
+
+
+def _temperature_kwarg_name(function: Any) -> str:
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return "temp"
+    if "temp" in parameters:
+        return "temp"
+    if "temperature" in parameters:
+        return "temperature"
+    return "temp"
+
+
+def _make_mlx_sampler(config: dict[str, Any]):
+    try:
+        from mlx_lm.sample_utils import make_sampler
+    except Exception:
+        return None
+
+    values = {
+        "top_p": config.get("topP"),
+        "top_k": config.get("topK"),
+        "min_p": config.get("minP"),
+    }
+    values[_temperature_kwarg_name(make_sampler)] = config.get("temperature")
+    kwargs = _supported_kwargs(make_sampler, values)
+    if not kwargs:
+        return None
+    return make_sampler(**kwargs)
+
+
+def _make_mlx_logits_processors(config: dict[str, Any]):
+    repetition_penalty = config.get("repetitionPenalty")
+    if repetition_penalty is None:
+        return None
+
+    try:
+        from mlx_lm.sample_utils import make_logits_processors
+    except Exception:
+        return None
+
+    kwargs = _supported_kwargs(
+        make_logits_processors,
+        {"repetition_penalty": repetition_penalty},
+    )
+    if not kwargs:
+        return None
+    return make_logits_processors(**kwargs)
+
+
+def _mlx_stream_generation_kwargs(stream_generate: Any, mx: Any, config: dict[str, Any]) -> dict[str, Any]:
+    seed = config.get("seed")
+    if seed is not None and hasattr(mx, "random") and hasattr(mx.random, "seed"):
+        mx.random.seed(int(seed))
+
+    sampler = _make_mlx_sampler(config)
+    logits_processors = _make_mlx_logits_processors(config)
+    kwargs = _supported_kwargs(
+        stream_generate,
+        {
+            _temperature_kwarg_name(stream_generate): config.get("temperature"),
+            "top_p": config.get("topP"),
+            "top_k": config.get("topK"),
+            "min_p": config.get("minP"),
+            "sampler": sampler,
+            "logits_processors": logits_processors,
+        },
+    )
+    if "sampler" in kwargs:
+        kwargs.pop("temp", None)
+        kwargs.pop("temperature", None)
+        kwargs.pop("top_p", None)
+        kwargs.pop("top_k", None)
+        kwargs.pop("min_p", None)
+    if "logits_processors" in kwargs and kwargs["logits_processors"] is None:
+        kwargs.pop("logits_processors", None)
+    return kwargs
 
 
 def _maybe_apply_turboquant(prompt_cache, bits: float, seed: int):
@@ -424,6 +519,7 @@ def mlx_generate() -> None:
         prompt=prompt_tokens,
         max_tokens=request["config"]["maxTokens"],
         prompt_cache=prompt_cache,
+        **_mlx_stream_generation_kwargs(stream_generate, mx, request["config"]),
     ):
         last_response = response
         if response.text:

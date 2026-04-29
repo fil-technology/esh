@@ -24,6 +24,9 @@ struct AnthropicCompatibleServiceTests {
               "model": "demo-model",
               "system": "Be concise.",
               "max_tokens": 64,
+              "temperature": 0.3,
+              "top_p": 0.95,
+              "top_k": 40,
               "messages": [
                 {
                   "role": "user",
@@ -57,6 +60,9 @@ struct AnthropicCompatibleServiceTests {
 
         #expect(external.model == "demo-model")
         #expect(external.generation.maxTokens == 64)
+        #expect(external.generation.temperature == 0.3)
+        #expect(external.generation.topP == 0.95)
+        #expect(external.generation.topK == 40)
         #expect(external.messages.map(\.role) == [.system, .user])
         #expect(external.messages.map(\.text) == ["Be concise.", "Explain local inference."])
         #expect(response.type == "message")
@@ -95,6 +101,46 @@ struct AnthropicCompatibleServiceTests {
         #expect(text.contains("event: content_block_stop"))
         #expect(text.contains("event: message_delta"))
         #expect(text.contains("event: message_stop"))
+    }
+
+    @Test
+    func messagesIgnoresNonTextContentParts() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "demo-model",
+              "max_tokens": 32,
+              "messages": [
+                {
+                  "role": "user",
+                  "content": [
+                    { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AA==" } }
+                  ]
+                }
+              ]
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(AnthropicMessagesRequest.self, from: requestData)
+
+        let capture = RequestCapture()
+        let service = AnthropicCompatibleService(
+            infer: { externalRequest in
+                await capture.store(externalRequest)
+                return ExternalInferenceResponse(
+                    modelID: "demo-model",
+                    backend: .mlx,
+                    integration: .init(mode: "direct"),
+                    outputText: "done",
+                    metrics: .init()
+                )
+            },
+            installedModels: { [] }
+        )
+
+        _ = try await service.messages(request)
+        let external = try #require(await capture.load())
+        #expect(external.messages.map(\.text) == [""])
     }
 
     @Test

@@ -43,7 +43,19 @@ echo "smoke: package environment"
 "$VERIFY_ENV"
 
 echo "smoke: package doctor"
-"$LAUNCHER" doctor
+DOCTOR_OUTPUT="$("$LAUNCHER" doctor 2>&1)" || {
+  if [[ "$DOCTOR_OUTPUT" == *"libmlx.dylib"* && "$DOCTOR_OUTPUT" == *"objectAtIndex"* ]]; then
+    echo "$DOCTOR_OUTPUT" >&2
+    echo "warning: package doctor skipped because MLX could not see a Metal GPU device in this environment." >&2
+    DOCTOR_OUTPUT=""
+  else
+    echo "$DOCTOR_OUTPUT" >&2
+    exit 1
+  fi
+}
+if [[ -n "${DOCTOR_OUTPUT:-}" ]]; then
+  echo "$DOCTOR_OUTPUT"
+fi
 
 echo "smoke: recommended models"
 "$LAUNCHER" model recommended --profile chat

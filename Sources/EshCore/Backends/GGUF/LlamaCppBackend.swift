@@ -221,7 +221,7 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                     let start = ContinuousClock.now
                     let process = Process()
                     process.executableURL = executableURL
-                    process.arguments = [
+                    var arguments = [
                         "-m", modelURL.path,
                         "-c", "8192",
                         "-n", String(config.maxTokens),
@@ -230,6 +230,22 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                         "--simple-io",
                         "-p", prompt
                     ]
+                    if let topP = config.topP {
+                        arguments.append(contentsOf: ["--top-p", String(topP)])
+                    }
+                    if let topK = config.topK {
+                        arguments.append(contentsOf: ["--top-k", String(topK)])
+                    }
+                    if let minP = config.minP {
+                        arguments.append(contentsOf: ["--min-p", String(minP)])
+                    }
+                    if let repetitionPenalty = config.repetitionPenalty {
+                        arguments.append(contentsOf: ["--repeat-penalty", String(repetitionPenalty)])
+                    }
+                    if let seed = config.seed {
+                        arguments.append(contentsOf: ["--seed", String(seed)])
+                    }
+                    process.arguments = arguments
 
                     let stdoutPipe = Pipe()
                     let stderrPipe = Pipe()

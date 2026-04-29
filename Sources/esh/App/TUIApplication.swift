@@ -339,6 +339,7 @@ struct TUIApplication {
         refreshOpenAIServerStatus(state: &state)
         surface.render(state: state)
         var queuedPrompts: [String] = []
+        var generationConfig = GenerationConfig()
 
         while let line = try await nextInputLine(
             state: &state,
@@ -362,7 +363,8 @@ struct TUIApplication {
                 workspaceRootURL: workspaceRootURL,
                 root: root,
                 toolVersion: AppVersionResolver.currentVersion(),
-                surface: surface
+                surface: surface,
+                generationConfig: &generationConfig
             )
             if commandOutcome == .handled {
                 continue
@@ -398,7 +400,8 @@ struct TUIApplication {
                         install: install,
                         routingMode: routingMode,
                         root: root,
-                        workspaceRootURL: workspaceRootURL
+                        workspaceRootURL: workspaceRootURL,
+                        generationConfig: generationConfig
                     )
                     let reply = routingResponse.outputText
                     session.messages.append(Message(role: .assistant, text: reply))
@@ -434,7 +437,7 @@ struct TUIApplication {
                 ? "planning with local context…"
                 : (runtime.backend == .gguf ? "loading GGUF model / waiting for first token…" : "streaming…")
             state.inputText = ""
-            let stream = chatService.streamReply(runtime: runtime, session: preparedSession.session)
+            let stream = chatService.streamReply(runtime: runtime, session: preparedSession.session, config: generationConfig)
             let pump = StreamPump()
             pump.start(stream: stream)
             let assistantID = UUID()
@@ -534,7 +537,8 @@ struct TUIApplication {
                 workspaceRootURL: URL,
                 root: PersistenceRoot,
                 toolVersion: String?,
-                surface: TerminalSurface
+                surface: TerminalSurface,
+                generationConfig: inout GenerationConfig
     ) async -> CommandOutcome {
         guard command.hasPrefix("/") else { return .notHandled }
 
@@ -649,6 +653,10 @@ struct TUIApplication {
             return .handled
         }
 
+        if handleGenerationOptionCommand(command, state: &state, generationConfig: &generationConfig, surface: surface) {
+            return .handled
+        }
+
         switch command {
         case "/menu", "/help":
             state.overlay = OverlayPanelState(
@@ -663,6 +671,14 @@ struct TUIApplication {
                     "/cache raw|turbo|triattention|auto",
                     "/cache toggle",
                     "/intent chat|code|documentqa|agentrun|multimodal",
+                    "/options        Show generation options",
+                    "/options reset  Reset generation options",
+                    "/temperature <value>",
+                    "/top-p <value>",
+                    "/top-k <value>",
+                    "/min-p <value>",
+                    "/repetition-penalty <value>",
+                    "/seed <value|off>",
                     "/settings       Show current chat settings",
                     "/new [name]",
                     "/switch <name-or-uuid>",
@@ -787,9 +803,11 @@ struct TUIApplication {
                     "cache mode: \(session.cacheMode?.rawValue ?? state.cacheMode)",
                     "intent: \(session.intent?.rawValue ?? SessionIntent.chat.rawValue)",
                     "autosave: \((session.autosaveEnabled ?? state.autosaveEnabled) ? "on" : "off")",
+                    "generation: \(generationOptionSummary(generationConfig))",
                     "",
                     "Use /cache raw, /cache turbo, /cache triattention, or /cache auto",
                     "Use /intent chat, /intent code, /intent documentqa, /intent agentrun, or /intent multimodal",
+                    "Use /options to inspect generation options",
                     "Use /autosave on or /autosave off"
                 ]
             )
@@ -1089,6 +1107,181 @@ struct TUIApplication {
         }
     }
 
+    private func handleGenerationOptionCommand(
+        _ command: String,
+        state: inout AppState,
+        generationConfig: inout GenerationConfig,
+        surface: TerminalSurface
+    ) -> Bool {
+        func finish(_ status: String, lines: [String]? = nil) -> Bool {
+            if let lines {
+                state.overlay = OverlayPanelState(title: "Generation Options", lines: lines)
+            }
+            state.statusText = status
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+
+        if command == "/options" {
+            return finish("showing generation options", lines: generationOptionLines(generationConfig))
+        }
+        if command == "/options reset" {
+            generationConfig = GenerationConfig()
+            return finish("generation options reset", lines: generationOptionLines(generationConfig))
+        }
+        if command.hasPrefix("/temperature ") {
+            return setDoubleOption(
+                command,
+                prefix: "/temperature ",
+                label: "temperature",
+                state: &state,
+                surface: surface
+            ) { generationConfig.temperature = $0 }
+        }
+        if command.hasPrefix("/top-p ") {
+            return setOptionalDoubleOption(
+                command,
+                prefix: "/top-p ",
+                label: "top_p",
+                state: &state,
+                surface: surface
+            ) { generationConfig.topP = $0 }
+        }
+        if command.hasPrefix("/top-k ") {
+            return setOptionalIntOption(
+                command,
+                prefix: "/top-k ",
+                label: "top_k",
+                state: &state,
+                surface: surface
+            ) { generationConfig.topK = $0 }
+        }
+        if command.hasPrefix("/min-p ") {
+            return setOptionalDoubleOption(
+                command,
+                prefix: "/min-p ",
+                label: "min_p",
+                state: &state,
+                surface: surface
+            ) { generationConfig.minP = $0 }
+        }
+        if command.hasPrefix("/repetition-penalty ") {
+            return setOptionalDoubleOption(
+                command,
+                prefix: "/repetition-penalty ",
+                label: "repetition_penalty",
+                state: &state,
+                surface: surface
+            ) { generationConfig.repetitionPenalty = $0 }
+        }
+        if command.hasPrefix("/seed ") {
+            let value = String(command.dropFirst("/seed ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if ["off", "default", "nil"].contains(value.lowercased()) {
+                generationConfig.seed = nil
+                return finish("seed cleared")
+            }
+            guard let parsed = UInt64(value) else {
+                state.overlay = OverlayPanelState(title: "Generation Options", lines: ["Invalid seed: \(value)"])
+                state.statusText = "invalid seed"
+                state.inputText = ""
+                surface.render(state: state)
+                return true
+            }
+            generationConfig.seed = parsed
+            return finish("seed \(parsed)")
+        }
+        return false
+    }
+
+    private func setDoubleOption(
+        _ command: String,
+        prefix: String,
+        label: String,
+        state: inout AppState,
+        surface: TerminalSurface,
+        update: (Double) -> Void
+    ) -> Bool {
+        let value = String(command.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(value) else {
+            state.overlay = OverlayPanelState(title: "Generation Options", lines: ["Invalid \(label): \(value)"])
+            state.statusText = "invalid \(label)"
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+        update(parsed)
+        state.statusText = "\(label) \(parsed)"
+        state.inputText = ""
+        surface.render(state: state)
+        return true
+    }
+
+    private func setOptionalDoubleOption(
+        _ command: String,
+        prefix: String,
+        label: String,
+        state: inout AppState,
+        surface: TerminalSurface,
+        update: (Double?) -> Void
+    ) -> Bool {
+        let value = String(command.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["off", "default", "nil"].contains(value.lowercased()) {
+            update(nil)
+            state.statusText = "\(label) default"
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+        return setDoubleOption(command, prefix: prefix, label: label, state: &state, surface: surface) { update($0) }
+    }
+
+    private func setOptionalIntOption(
+        _ command: String,
+        prefix: String,
+        label: String,
+        state: inout AppState,
+        surface: TerminalSurface,
+        update: (Int?) -> Void
+    ) -> Bool {
+        let value = String(command.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["off", "default", "nil"].contains(value.lowercased()) {
+            update(nil)
+            state.statusText = "\(label) default"
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+        guard let parsed = Int(value) else {
+            state.overlay = OverlayPanelState(title: "Generation Options", lines: ["Invalid \(label): \(value)"])
+            state.statusText = "invalid \(label)"
+            state.inputText = ""
+            surface.render(state: state)
+            return true
+        }
+        update(parsed)
+        state.statusText = "\(label) \(parsed)"
+        state.inputText = ""
+        surface.render(state: state)
+        return true
+    }
+
+    private func generationOptionLines(_ config: GenerationConfig) -> [String] {
+        [
+            "max_tokens: \(config.maxTokens)",
+            "temperature: \(config.temperature)",
+            "top_p: \(config.topP.map { String($0) } ?? "default")",
+            "top_k: \(config.topK.map { String($0) } ?? "default")",
+            "min_p: \(config.minP.map { String($0) } ?? "default")",
+            "repetition_penalty: \(config.repetitionPenalty.map { String($0) } ?? "default")",
+            "seed: \(config.seed.map { String($0) } ?? "default")"
+        ]
+    }
+
+    private func generationOptionSummary(_ config: GenerationConfig) -> String {
+        generationOptionLines(config).joined(separator: " | ")
+    }
+
     private func autosaveIfNeeded(
         state: AppState,
         session: ChatSession,
@@ -1103,7 +1296,8 @@ struct TUIApplication {
         install: ModelInstall,
         routingMode: String?,
         root: PersistenceRoot,
-        workspaceRootURL: URL
+        workspaceRootURL: URL,
+        generationConfig: GenerationConfig
     ) async throws -> ExternalInferenceResponse {
         var routing = (try? RoutingConfigurationStore(root: root).load()) ?? RoutingConfiguration()
         routing.enabled = true
@@ -1125,7 +1319,7 @@ struct TUIApplication {
             messages: preparedSession.messages.map {
                 ExternalInferenceMessage(role: $0.role, text: $0.text)
             },
-            generation: GenerationConfig(temperature: routing.mainTemperature),
+            generation: generationConfig,
             routing: routing
         )
         let service = ExternalInferenceService(
