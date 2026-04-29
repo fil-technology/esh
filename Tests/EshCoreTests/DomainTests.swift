@@ -3,6 +3,12 @@ import Testing
 @testable import EshCore
 
 @Test
+func storageCapacityFallsBackWhenImportantUsageIsZero() {
+    #expect(SystemStorage.availableCapacity(importantUsage: 0, generalAvailable: 42_000) == 42_000)
+    #expect(SystemStorage.availableCapacity(importantUsage: 84_000, generalAvailable: 42_000) == 84_000)
+}
+
+@Test
 func sessionRoundTripBasics() throws {
     let session = ChatSession(name: "default", messages: [
         Message(role: .user, text: "Hello")

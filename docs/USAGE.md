@@ -54,6 +54,10 @@ esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
 esh benchmark history
 esh capabilities
 esh doctor
+esh engines list
+esh engines doctor <llama.cpp|mlx>
+esh config [show|path|init]
+esh validate <model-id-or-repo> [--engine llama.cpp|mlx] [--json]
 esh infer --input <path-or->
 esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
 esh model recommended [--profile chat|code]
@@ -176,6 +180,41 @@ Notes:
 - `--offline` falls back to identifier and filename heuristics only
 - `--variant` lets you target a specific repo variant, especially GGUF quant variants like `Q4_K_M`
 - initial GGUF support uses llama.cpp and is currently text-only
+
+Validate an installed model and runtime before inference:
+
+```bash
+./esh engines list
+./esh engines doctor llama.cpp
+./esh engines doctor mlx
+./esh config show
+./esh validate mlx-community--qwen2.5-0.5b-instruct-4bit
+./esh validate bartowski--deepseek-r1-distill-qwen-14b-gguf --engine llama.cpp
+```
+
+What `validate` does:
+- detects local GGUF or MLX files
+- lists compatible engines
+- selects a ready runtime when possible
+- reports missing dependencies and suggested fixes
+
+Create a local orchestrator config:
+
+```bash
+./esh config init
+./esh config show
+```
+
+Optional roadmap adapters are disabled by default. To detect them in
+`engines list`, enable the matching flag in `~/.esh/config.toml`:
+
+```toml
+[experimental]
+ollama_adapter = true
+llamafile = true
+transformers = true
+llama_cpp_server = true
+```
 
 Then:
 

@@ -17,12 +17,22 @@ public enum SystemStorage {
             return nil
         }
 
-        if let available = values.volumeAvailableCapacityForImportantUsage {
+        if let available = availableCapacity(
+            importantUsage: values.volumeAvailableCapacityForImportantUsage,
+            generalAvailable: values.volumeAvailableCapacity.map(Int64.init)
+        ) {
             return SystemStorageSnapshot(availableBytes: available)
         }
-        if let available = values.volumeAvailableCapacity {
-            return SystemStorageSnapshot(availableBytes: Int64(available))
-        }
         return nil
+    }
+
+    static func availableCapacity(importantUsage: Int64?, generalAvailable: Int64?) -> Int64? {
+        if let importantUsage, importantUsage > 0 {
+            return importantUsage
+        }
+        if let generalAvailable, generalAvailable > 0 {
+            return generalAvailable
+        }
+        return importantUsage ?? generalAvailable
     }
 }

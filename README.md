@@ -11,7 +11,7 @@ It gives you:
 - TurboQuant cache compression for MLX
 - self-contained release packaging
 
-Today, Esh is built around an MLX backend with a Swift core and CLI/TUI, plus a small Python bridge for `mlx-lm` and `mlx-vlm`.
+Today, Esh is an orchestration layer over local macOS runtimes: MLX through a small Python bridge, plus GGUF execution through `llama.cpp` when `llama-cli` is available.
 
 ## Planning Notes
 
@@ -101,10 +101,16 @@ Running `./esh` with no command opens a default interactive launcher menu with t
 
 Use `esh capabilities` to get a JSON map of supported backends, installed models, and whether each path supports direct inference, cache build, and cache load.
 
+Use `esh engines list`, `esh engines doctor <engine>`, `esh config show`, and `esh validate <model>` to inspect the local runtime layer before running a model.
+
 Use `esh infer` for machine-friendly inference. It returns JSON for both MLX and GGUF models, and MLX cache load stays optional rather than being the only supported integration path.
 
 ```bash
 ./esh capabilities
+./esh engines list
+./esh engines doctor llama.cpp
+./esh config show
+./esh validate mlx-community--qwen2.5-0.5b-instruct-4bit
 cat <<'JSON' | ./esh infer --input -
 {
   "schemaVersion": "esh.infer.request.v1",

@@ -50,6 +50,12 @@ private struct CLI {
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "doctor":
             try DoctorCommand.run()
+        case "engines":
+            try EnginesCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "config":
+            try ConfigCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "validate":
+            try ValidateCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "version":
             print(AppVersionResolver.currentVersion() ?? "unknown")
         case "update":
@@ -275,6 +281,8 @@ private struct CLI {
                 service: service,
                 catalogService: catalogService
             )
+        case "validate":
+            try ValidateCommand.run(arguments: Array(arguments.dropFirst()), root: root)
         case "install":
             let remaining = Array(arguments.dropFirst())
             let variant = CommandSupport.optionalValue(flag: "--variant", in: remaining)
@@ -423,6 +431,10 @@ private struct CLI {
               esh read related <name-or-path> [--limit N] [--run <id>]
               esh read file <path> --range start:end [--run <id>]
               esh doctor
+              esh engines list
+              esh engines doctor <llama.cpp|mlx>
+              esh config [show|path|init]
+              esh validate <model-id-or-repo> [--engine llama.cpp|mlx] [--json]
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
@@ -437,6 +449,7 @@ private struct CLI {
               esh model list [--task text|audio|vision|embedding|reranker|tool|multimodal] [--capability chat|tts|stt|image-understanding|embedding|rerank|tool-calling]
               esh model search <query> [--source all|local|hf] [--limit N]
               esh model check <model-or-repo> [--backend mlx|gguf|auto] [--context N] [--variant <name>] [--json] [--strict] [--offline]
+              esh model validate <model-id-or-repo> [--engine llama.cpp|mlx] [--json]
               esh model install <hf-repo-id-or-alias-or-search-term> [--variant <name>] [--force]
               esh model open <model-id-or-alias-or-repo-or-search-term>
               esh model inspect <model-id>

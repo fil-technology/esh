@@ -22,4 +22,26 @@ public struct InferenceBackendRegistry: Sendable {
             mlxBackend
         }
     }
+
+    public func backend(for engine: EngineID) throws -> any InferenceBackend {
+        switch engine {
+        case .mlx:
+            return mlxBackend
+        case .llamaCpp:
+            return ggufBackend
+        case .llamaCppServer, .ollama, .llamafile, .transformers:
+            throw StoreError.invalidManifest("\(engine.displayName) is a roadmap adapter and is not enabled as a runtime backend yet.")
+        }
+    }
+
+    public func engineID(for install: ModelInstall) -> EngineID? {
+        switch install.spec.backend {
+        case .mlx:
+            return .mlx
+        case .gguf:
+            return .llamaCpp
+        case .onnx:
+            return nil
+        }
+    }
 }
