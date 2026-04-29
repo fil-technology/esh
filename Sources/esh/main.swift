@@ -76,6 +76,10 @@ private struct CLI {
             try await InferCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "serve":
             try await ServeCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
+        case "integrations":
+            try await IntegrationsCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
+        case "launch":
+            try await IntegrationsCommand.launchShortcut(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "read":
             try ReadCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "chat":
@@ -422,6 +426,11 @@ private struct CLI {
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
+              esh integrations list
+              esh integrations show <claude|codex>
+              esh integrations configure <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>]
+              esh integrations launch <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>] [-- <tool-args...>]
+              esh launch <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>] [-- <tool-args...>]
               esh audio models
               esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
               esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
@@ -490,6 +499,7 @@ private struct CLI {
             print("OpenAI server on: \(baseURL)")
             print("Models: \(baseURL)/v1/models")
             print("Audio models: \(baseURL)/v1/audio/models")
+            print("Audio speech: \(baseURL)/v1/audio/speech")
         } else {
             print("OpenAI server off")
         }

@@ -126,6 +126,14 @@ Use `esh serve` to expose a local OpenAI-compatible HTTP surface for editors, sc
 ./esh serve --host 127.0.0.1 --port 11435
 curl http://127.0.0.1:11435/v1/models
 curl http://127.0.0.1:11435/v1/audio/models
+curl http://127.0.0.1:11435/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "pocket-tts",
+    "input": "Hello from esh",
+    "voice": "alba"
+  }' \
+  --output hello.wav
 curl http://127.0.0.1:11435/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
@@ -142,6 +150,7 @@ Supported routes in v1:
 - `GET /v1/tools`
 - `GET /v1/audio/models`
 - `GET /api/tags`
+- `POST /v1/audio/speech`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 
@@ -151,10 +160,47 @@ Notes:
 - text inputs are supported for chat/responses in v1
 - `/v1/models` includes installed text models only for strict OpenAI-compatible clients such as Xcode
 - `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
+- `/v1/audio/speech` generates WAV audio and returns the bytes directly so terminal-driven agents can save or forward the file without shared filesystem access
 - `/v1/tools` advertises request-side tool support and `/api/tags` provides an Ollama-compatible model list for local-provider probes
-- set `ESH_API_KEY` or pass `--api-key <token>` to require `Authorization: Bearer <token>`
+- pass `--api-key <token>` to require `Authorization: Bearer <token>`
 
 In the interactive TUI (`./esh`), select **OpenAI server** to toggle the same local API while the TUI process stays open. In chat, use `/serve toggle`, `/serve start`, `/serve stop`, or `/serve status`; the header shows whether the local API is on.
+
+### Launch external coding agents
+
+Esh can now launch external coding CLIs against local models, similar to Ollama’s tool integrations.
+
+Inspect what is available:
+
+```bash
+./esh integrations list
+./esh integrations show codex
+./esh integrations show claude
+./esh integrations configure codex --model mlx-community--qwen2.5-0.5b-instruct-4bit
+./esh integrations configure claude --model mlx-community--qwen2.5-0.5b-instruct-4bit
+```
+
+Launch Codex CLI against Esh’s OpenAI-compatible local server:
+
+```bash
+./esh serve --host 127.0.0.1 --port 11435
+codex --profile esh-launch
+./esh launch codex --model mlx-community--qwen2.5-0.5b-instruct-4bit
+./esh launch codex --model mlx-community--qwen2.5-0.5b-instruct-4bit -- exec --ephemeral "Summarize this repository"
+```
+
+Launch Claude Code against Esh’s Anthropic-compatible local server:
+
+```bash
+./esh launch claude --model mlx-community--qwen2.5-0.5b-instruct-4bit
+./esh launch claude --model mlx-community--qwen2.5-0.5b-instruct-4bit -- -p "Explain the cache pipeline" --output-format text
+```
+
+Notes:
+- `codex` is wired through Esh’s local `Responses` API surface
+- `claude` is wired through Esh’s local Anthropic `Messages` API surface
+- Codex profiles omit `env_key` by default so `codex --profile esh-launch` works without an `OPENAI_API_KEY`; pass `--api-key <token>` only when you also run Codex with `OPENAI_API_KEY=<token>`
+- `esh launch claude` starts a local Anthropic-compatible server and injects the matching Claude Code auth env automatically; persistent `configure` writes Codex/Claude settings for manual launches
 
 ### Release mode
 

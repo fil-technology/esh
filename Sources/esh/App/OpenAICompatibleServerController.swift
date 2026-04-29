@@ -33,12 +33,16 @@ final class OpenAICompatibleServerController: @unchecked Sendable {
         defer { lock.unlock() }
         guard server == nil else { return }
 
+        let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),
             cacheStore: FileCacheStore(root: root),
             toolVersion: toolVersion,
-            audioModels: OpenAICompatibleAudioCatalog.ttsModels
+            audioModels: OpenAICompatibleAudioCatalog.ttsModels,
+            speech: { request in
+                try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
+            }
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey)
         let newServer = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)

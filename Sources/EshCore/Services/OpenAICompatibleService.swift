@@ -250,6 +250,9 @@ public struct OpenAIResponsesStreamEvent: Codable, Hashable, Sendable {
     public var outputIndex: Int?
     public var contentIndex: Int?
     public var delta: String?
+    public var text: String?
+    public var item: JSONValue?
+    public var part: JSONValue?
     public var response: OpenAIResponsesResponse?
 
     enum CodingKeys: String, CodingKey {
@@ -259,26 +262,210 @@ public struct OpenAIResponsesStreamEvent: Codable, Hashable, Sendable {
         case outputIndex = "output_index"
         case contentIndex = "content_index"
         case delta
+        case text
+        case item
+        case part
         case response
+    }
+}
+
+public enum JSONValue: Codable, Hashable, Sendable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case int(Int)
+    case bool(Bool)
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let int = try? container.decode(Int.self) {
+            self = .int(int)
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if container.decodeNil() {
+            self = .null
+        } else {
+            throw DecodingError.typeMismatch(JSONValue.self, .init(codingPath: decoder.codingPath, debugDescription: "Unsupported JSON value"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let object):
+            try container.encode(object)
+        case .array(let array):
+            try container.encode(array)
+        case .string(let string):
+            try container.encode(string)
+        case .int(let int):
+            try container.encode(int)
+        case .bool(let bool):
+            try container.encode(bool)
+        case .null:
+            try container.encodeNil()
+        }
     }
 }
 
 public struct OpenAIModelsResponse: Codable, Hashable, Sendable {
     public var object: String
     public var data: [Model]
+    public var models: [Model]
+
+    public init(object: String, data: [Model]) {
+        self.object = object
+        self.data = data
+        self.models = data
+    }
 
     public struct Model: Codable, Hashable, Sendable {
         public var id: String
+        public var slug: String
+        public var displayName: String
+        public var defaultReasoningLevel: String
+        public var supportedReasoningLevels: [String]
+        public var inputModalities: [String]
+        public var supportsPersonality: Bool
+        public var additionalSpeedTiers: [String]
+        public var isDefault: Bool
+        public var shellType: String
+        public var visibility: String
+        public var supportsReasoningSummaries: Bool
+        public var defaultReasoningSummary: String
+        public var supportVerbosity: Bool
+        public var defaultVerbosity: String
+        public var supportsImageDetailOriginal: Bool
+        public var contextWindow: Int
+        public var maxContextWindow: Int
+        public var autoCompactTokenLimit: Int
+        public var effectiveContextWindowPercent: Int
+        public var experimentalSupportedTools: [String]
+        public var supportsSearchTool: Bool
+        public var supportedInAPI: Bool
+        public var priority: Int
         public var object: String
         public var created: Int
         public var ownedBy: String
 
+        public init(id: String, object: String, created: Int, ownedBy: String) {
+            self.id = id
+            self.slug = id
+            self.displayName = id
+            self.defaultReasoningLevel = "medium"
+            self.supportedReasoningLevels = []
+            self.inputModalities = ["text"]
+            self.supportsPersonality = false
+            self.additionalSpeedTiers = []
+            self.isDefault = false
+            self.shellType = "default"
+            self.visibility = "list"
+            self.supportsReasoningSummaries = false
+            self.defaultReasoningSummary = "none"
+            self.supportVerbosity = false
+            self.defaultVerbosity = "medium"
+            self.supportsImageDetailOriginal = false
+            self.contextWindow = 32_768
+            self.maxContextWindow = 32_768
+            self.autoCompactTokenLimit = 28_000
+            self.effectiveContextWindowPercent = 100
+            self.experimentalSupportedTools = []
+            self.supportsSearchTool = false
+            self.supportedInAPI = true
+            self.priority = 0
+            self.object = object
+            self.created = created
+            self.ownedBy = ownedBy
+        }
+
         enum CodingKeys: String, CodingKey {
             case id
+            case slug
+            case displayName = "display_name"
+            case defaultReasoningLevel = "default_reasoning_level"
+            case supportedReasoningLevels = "supported_reasoning_levels"
+            case inputModalities = "input_modalities"
+            case supportsPersonality = "supports_personality"
+            case additionalSpeedTiers = "additional_speed_tiers"
+            case isDefault = "is_default"
+            case shellType = "shell_type"
+            case visibility
+            case supportsReasoningSummaries = "supports_reasoning_summaries"
+            case defaultReasoningSummary = "default_reasoning_summary"
+            case supportVerbosity = "support_verbosity"
+            case defaultVerbosity = "default_verbosity"
+            case supportsImageDetailOriginal = "supports_image_detail_original"
+            case contextWindow = "context_window"
+            case maxContextWindow = "max_context_window"
+            case autoCompactTokenLimit = "auto_compact_token_limit"
+            case effectiveContextWindowPercent = "effective_context_window_percent"
+            case experimentalSupportedTools = "experimental_supported_tools"
+            case supportsSearchTool = "supports_search_tool"
+            case supportedInAPI = "supported_in_api"
+            case priority
             case object
             case created
             case ownedBy = "owned_by"
         }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            slug = try container.decodeIfPresent(String.self, forKey: .slug) ?? id
+            displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? id
+            defaultReasoningLevel = try container.decodeIfPresent(String.self, forKey: .defaultReasoningLevel) ?? "medium"
+            supportedReasoningLevels = try container.decodeIfPresent([String].self, forKey: .supportedReasoningLevels) ?? []
+            inputModalities = try container.decodeIfPresent([String].self, forKey: .inputModalities) ?? ["text"]
+            supportsPersonality = try container.decodeIfPresent(Bool.self, forKey: .supportsPersonality) ?? false
+            additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
+            isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+            shellType = try container.decodeIfPresent(String.self, forKey: .shellType) ?? "default"
+            visibility = try container.decodeIfPresent(String.self, forKey: .visibility) ?? "list"
+            supportsReasoningSummaries = try container.decodeIfPresent(Bool.self, forKey: .supportsReasoningSummaries) ?? false
+            defaultReasoningSummary = try container.decodeIfPresent(String.self, forKey: .defaultReasoningSummary) ?? "none"
+            supportVerbosity = try container.decodeIfPresent(Bool.self, forKey: .supportVerbosity) ?? false
+            defaultVerbosity = try container.decodeIfPresent(String.self, forKey: .defaultVerbosity) ?? "medium"
+            supportsImageDetailOriginal = try container.decodeIfPresent(Bool.self, forKey: .supportsImageDetailOriginal) ?? false
+            contextWindow = try container.decodeIfPresent(Int.self, forKey: .contextWindow) ?? 32_768
+            maxContextWindow = try container.decodeIfPresent(Int.self, forKey: .maxContextWindow) ?? contextWindow
+            autoCompactTokenLimit = try container.decodeIfPresent(Int.self, forKey: .autoCompactTokenLimit) ?? max(0, contextWindow - 4_768)
+            effectiveContextWindowPercent = try container.decodeIfPresent(Int.self, forKey: .effectiveContextWindowPercent) ?? 100
+            experimentalSupportedTools = try container.decodeIfPresent([String].self, forKey: .experimentalSupportedTools) ?? []
+            supportsSearchTool = try container.decodeIfPresent(Bool.self, forKey: .supportsSearchTool) ?? false
+            supportedInAPI = try container.decodeIfPresent(Bool.self, forKey: .supportedInAPI) ?? true
+            priority = try container.decodeIfPresent(Int.self, forKey: .priority) ?? 0
+            object = try container.decode(String.self, forKey: .object)
+            created = try container.decode(Int.self, forKey: .created)
+            ownedBy = try container.decode(String.self, forKey: .ownedBy)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case object
+        case data
+        case models
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        object = try container.decode(String.self, forKey: .object)
+        data = try container.decodeIfPresent([Model].self, forKey: .data)
+            ?? container.decode([Model].self, forKey: .models)
+        models = try container.decodeIfPresent([Model].self, forKey: .models) ?? data
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(object, forKey: .object)
+        try container.encode(data, forKey: .data)
+        try container.encode(models, forKey: .models)
     }
 }
 
@@ -344,6 +531,50 @@ public struct OpenAIToolsResponse: Codable, Hashable, Sendable {
 public struct OpenAIAudioModelsResponse: Codable, Hashable, Sendable {
     public var object: String
     public var data: [OpenAIAudioModel]
+}
+
+public struct OpenAIAudioSpeechRequest: Codable, Hashable, Sendable {
+    public var model: String?
+    public var input: String
+    public var voice: String?
+    public var language: String?
+    public var responseFormat: String?
+    public var maxTokens: Int?
+    public var temperature: Double?
+    public var topP: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case input
+        case voice
+        case language
+        case responseFormat = "response_format"
+        case maxTokens = "max_tokens"
+        case temperature
+        case topP = "top_p"
+    }
+}
+
+public struct OpenAIAudioSpeechResponse: Hashable, Sendable {
+    public var audioData: Data
+    public var contentType: String
+    public var filename: String
+    public var modelID: String
+    public var sampleRate: Int
+
+    public init(
+        audioData: Data,
+        contentType: String = "audio/wav",
+        filename: String,
+        modelID: String,
+        sampleRate: Int
+    ) {
+        self.audioData = audioData
+        self.contentType = contentType
+        self.filename = filename
+        self.modelID = modelID
+        self.sampleRate = sampleRate
+    }
 }
 
 public struct OpenAIAudioModel: Codable, Hashable, Sendable {
@@ -435,15 +666,20 @@ public struct OpenAICompatibleService: Sendable {
     private let inferClosure: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse
     private let installedModelsClosure: @Sendable () throws -> [ExternalInstalledModelCapability]
     private let audioModelsClosure: @Sendable () throws -> [OpenAIAudioModel]
+    private let speechClosure: @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
         installedModels: @escaping @Sendable () throws -> [ExternalInstalledModelCapability],
-        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] }
+        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
+        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
+            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
+        }
     ) {
         self.inferClosure = infer
         self.installedModelsClosure = installedModels
         self.audioModelsClosure = audioModels
+        self.speechClosure = speech
     }
 
     public init(
@@ -453,7 +689,10 @@ public struct OpenAICompatibleService: Sendable {
         toolVersion: String? = nil,
         registry: InferenceBackendRegistry = .init(),
         workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
-        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] }
+        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
+        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
+            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
+        }
     ) {
         let inference = ExternalInferenceService(
             modelStore: modelStore,
@@ -470,7 +709,8 @@ public struct OpenAICompatibleService: Sendable {
             installedModels: {
                 try capabilities.describe(toolVersion: toolVersion).installedModels
             },
-            audioModels: audioModels
+            audioModels: audioModels,
+            speech: speech
         )
     }
 
@@ -617,6 +857,7 @@ public struct OpenAICompatibleService: Sendable {
         let text = response.outputText
         var events = Data()
         var sequence = 0
+        let item = response.output.first
 
         func appendEvent(_ name: String, _ event: OpenAIResponsesStreamEvent) throws {
             events.append(Data("event: \(name)\n".utf8))
@@ -632,10 +873,49 @@ public struct OpenAICompatibleService: Sendable {
                 outputIndex: nil,
                 contentIndex: nil,
                 delta: nil,
+                text: nil,
+                item: nil,
+                part: nil,
                 response: response
             )
         )
         sequence += 1
+
+        if let item {
+            try appendEvent(
+                "response.output_item.added",
+                .init(
+                    type: "response.output_item.added",
+                    sequenceNumber: sequence,
+                    itemID: item.id,
+                    outputIndex: 0,
+                    contentIndex: nil,
+                    delta: nil,
+                    text: nil,
+                    item: responseOutputItemJSON(id: item.id, role: item.role, text: "", status: "in_progress"),
+                    part: nil,
+                    response: nil
+                )
+            )
+            sequence += 1
+
+            try appendEvent(
+                "response.content_part.added",
+                .init(
+                    type: "response.content_part.added",
+                    sequenceNumber: sequence,
+                    itemID: item.id,
+                    outputIndex: 0,
+                    contentIndex: 0,
+                    delta: nil,
+                    text: nil,
+                    item: nil,
+                    part: outputTextPartJSON(text: ""),
+                    response: nil
+                )
+            )
+            sequence += 1
+        }
 
         for chunk in streamingTextChunks(text) {
             try appendEvent(
@@ -647,6 +927,9 @@ public struct OpenAICompatibleService: Sendable {
                     outputIndex: 0,
                     contentIndex: 0,
                     delta: chunk,
+                    text: nil,
+                    item: nil,
+                    part: nil,
                     response: nil
                 )
             )
@@ -661,11 +944,49 @@ public struct OpenAICompatibleService: Sendable {
                 itemID: response.output.first?.id,
                 outputIndex: 0,
                 contentIndex: 0,
-                delta: text,
+                delta: nil,
+                text: text,
+                item: nil,
+                part: nil,
                 response: nil
             )
         )
         sequence += 1
+        if let item {
+            try appendEvent(
+                "response.content_part.done",
+                .init(
+                    type: "response.content_part.done",
+                    sequenceNumber: sequence,
+                    itemID: item.id,
+                    outputIndex: 0,
+                    contentIndex: 0,
+                    delta: nil,
+                    text: nil,
+                    item: nil,
+                    part: outputTextPartJSON(text: text),
+                    response: nil
+                )
+            )
+            sequence += 1
+
+            try appendEvent(
+                "response.output_item.done",
+                .init(
+                    type: "response.output_item.done",
+                    sequenceNumber: sequence,
+                    itemID: item.id,
+                    outputIndex: 0,
+                    contentIndex: nil,
+                    delta: nil,
+                    text: nil,
+                    item: responseOutputItemJSON(id: item.id, role: item.role, text: text, status: "completed"),
+                    part: nil,
+                    response: nil
+                )
+            )
+            sequence += 1
+        }
         try appendEvent(
             "response.completed",
             .init(
@@ -675,6 +996,9 @@ public struct OpenAICompatibleService: Sendable {
                 outputIndex: nil,
                 contentIndex: nil,
                 delta: nil,
+                text: nil,
+                item: nil,
+                part: nil,
                 response: response
             )
         )
@@ -700,6 +1024,24 @@ public struct OpenAICompatibleService: Sendable {
         let models = try audioModelsClosure()
             .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
         return OpenAIAudioModelsResponse(object: "list", data: models)
+    }
+
+    public func audioSpeech(_ request: OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse {
+        let trimmedInput = request.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedInput.isEmpty == false else {
+            throw OpenAICompatibleError.invalidRequest("Audio input must not be empty.")
+        }
+
+        if let responseFormat = request.responseFormat?.trimmingCharacters(in: .whitespacesAndNewlines),
+           responseFormat.isEmpty == false,
+           responseFormat.localizedCaseInsensitiveCompare("wav") != .orderedSame {
+            throw OpenAICompatibleError.unsupported("Only wav response_format is supported.")
+        }
+
+        var normalized = request
+        normalized.input = trimmedInput
+        normalized.responseFormat = "wav"
+        return try await speechClosure(normalized)
     }
 
     public func ollamaTags() throws -> OllamaTagsResponse {
@@ -728,7 +1070,13 @@ public struct OpenAICompatibleService: Sendable {
     }
 
     private func externalMessage(from message: OpenAIInputMessage) throws -> ExternalInferenceMessage {
-        guard let role = Message.Role(rawValue: message.role) else {
+        let normalizedRole = message.role.lowercased()
+        let role: Message.Role
+        if normalizedRole == "developer" {
+            role = .system
+        } else if let parsed = Message.Role(rawValue: normalizedRole) {
+            role = parsed
+        } else {
             throw OpenAICompatibleError.invalidRequest("Unsupported message role: \(message.role)")
         }
         guard role != .tool else {
@@ -770,6 +1118,24 @@ public struct OpenAICompatibleService: Sendable {
             throw OpenAICompatibleError.invalidRequest("Could not encode streaming payload.")
         }
         return text
+    }
+
+    private func responseOutputItemJSON(id: String, role: String, text: String, status: String) -> JSONValue {
+        .object([
+            "id": .string(id),
+            "type": .string("message"),
+            "role": .string(role),
+            "status": .string(status),
+            "content": .array([outputTextPartJSON(text: text)])
+        ])
+    }
+
+    private func outputTextPartJSON(text: String) -> JSONValue {
+        .object([
+            "type": .string("output_text"),
+            "text": .string(text),
+            "annotations": .array([])
+        ])
     }
 }
 

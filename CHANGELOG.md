@@ -6,7 +6,10 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
-## [0.1.32] - 2026-04-25
+## [0.1.33] - 2026-04-25
+
+### Added
+- OpenAI-compatible audio speech generation at `POST /v1/audio/speech`, including direct WAV responses for terminal-driven agents and the TUI-hosted local API.
 
 ### Fixed
 - Debug SwiftPM builds no longer emit stale clang module-cache warnings.
