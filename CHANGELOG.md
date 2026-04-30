@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- Backend capability reports for MLX and llama.cpp runtime feature detection.
+- Normalized prompt cache keys on new cache manifests for future cache lookup and reuse policy.
+
 ## [0.1.37] - 2026-04-30
 
 ### Added

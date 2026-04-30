@@ -4,9 +4,16 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
     public let kind: BackendKind = .gguf
     public let runtimeVersion: String
     public static let runtimeNotFoundMessage = "llama.cpp runtime not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-cli` path."
+    private let executableResolver: @Sendable () throws -> URL
 
-    public init(runtimeVersion: String = "llama.cpp-cli-v1") {
+    public init(
+        runtimeVersion: String = "llama.cpp-cli-v1",
+        executableResolver: (@Sendable () throws -> URL)? = nil
+    ) {
         self.runtimeVersion = runtimeVersion
+        self.executableResolver = executableResolver ?? {
+            try LlamaCppBackend.defaultResolveExecutable()
+        }
     }
 
     public func loadRuntime(for install: ModelInstall) async throws -> BackendRuntime {
@@ -24,6 +31,53 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
         _ = try locateModelFile(for: install)
         _ = try resolveExecutable()
         return nil
+    }
+
+    public func capabilityReport(for install: ModelInstall) -> BackendCapabilityReport {
+        var warnings: [String] = []
+        var unavailable: [UnavailableBackendFeature] = [
+            .init(
+                feature: .promptCacheBuild,
+                reason: "GGUF cache build is not supported by the llama.cpp backend yet."
+            ),
+            .init(
+                feature: .promptCacheLoad,
+                reason: "GGUF cache load is not supported by the llama.cpp backend yet."
+            ),
+            .init(
+                feature: .promptCacheBenchmark,
+                reason: "GGUF cache benchmarking hooks are not implemented yet."
+            )
+        ]
+
+        do {
+            _ = try locateModelFile(for: install)
+            _ = try resolveExecutable()
+        } catch {
+            let reason = error.localizedDescription
+            warnings.append(reason)
+            unavailable.append(.init(feature: .directInference, reason: reason))
+            unavailable.append(.init(feature: .tokenStreaming, reason: reason))
+            return BackendCapabilityReport(
+                backend: kind,
+                runtimeVersion: runtimeVersion,
+                ready: false,
+                supportedFeatures: [],
+                unavailableFeatures: unavailable,
+                warnings: warnings
+            )
+        }
+
+        return BackendCapabilityReport(
+            backend: kind,
+            runtimeVersion: runtimeVersion,
+            ready: true,
+            supportedFeatures: [
+                .directInference,
+                .tokenStreaming
+            ],
+            unavailableFeatures: unavailable
+        )
     }
 
     public func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking {
@@ -53,6 +107,10 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
     }
 
     func resolveExecutable() throws -> URL {
+        try executableResolver()
+    }
+
+    private static func defaultResolveExecutable() throws -> URL {
         let env = ProcessInfo.processInfo.environment
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         let bundledCandidate = executable
@@ -85,7 +143,6 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
 
         throw StoreError.invalidManifest(Self.runtimeNotFoundMessage)
     }
-
 }
 
 private struct LlamaCppCompatibilityChecker: CompatibilityChecking, Sendable {

@@ -42,3 +42,55 @@ func promptNormalizerDropsEmptyMessages() {
     #expect(normalized.messages.count == 1)
     #expect(normalized.messages.first?.text == "hello")
 }
+
+@Test
+func promptCacheKeyStabilizesEquivalentSessionsAndIncludesModelAndTools() {
+    let normalizer = PromptSessionNormalizer()
+    let left = ChatSession(
+        id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+        name: "demo",
+        messages: [
+            Message(role: .system, text: "  system line  \r\n"),
+            Message(role: .user, text: "  hello\t")
+        ]
+    )
+    let right = ChatSession(
+        id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+        name: "renamed",
+        messages: [
+            Message(role: .system, text: "system line"),
+            Message(role: .user, text: "hello")
+        ]
+    )
+
+    let leftKey = normalizer.promptCacheKey(
+        for: left,
+        backend: .mlx,
+        modelID: "qwen",
+        tokenizerID: "tok",
+        runtimeVersion: "mlx-test",
+        toolSignature: "tools:none"
+    )
+    let rightKey = normalizer.promptCacheKey(
+        for: right,
+        backend: .mlx,
+        modelID: "qwen",
+        tokenizerID: "tok",
+        runtimeVersion: "mlx-test",
+        toolSignature: "tools:none"
+    )
+    let differentToolsKey = normalizer.promptCacheKey(
+        for: right,
+        backend: .mlx,
+        modelID: "qwen",
+        tokenizerID: "tok",
+        runtimeVersion: "mlx-test",
+        toolSignature: "tools:read_file@v1"
+    )
+
+    #expect(leftKey == rightKey)
+    #expect(leftKey.hash != differentToolsKey.hash)
+    #expect(leftKey.normalizedMessageCount == 2)
+    #expect(leftKey.backend == .mlx)
+    #expect(leftKey.modelID == "qwen")
+}

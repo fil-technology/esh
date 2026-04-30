@@ -18,6 +18,7 @@ public struct CacheManifest: Codable, Hashable, Sendable {
     public var contextFileCount: Int?
     public var contextReused: Bool?
     public var policyReason: String?
+    public var promptCacheKey: PromptCacheKey?
 
     public init(
         backend: BackendKind,
@@ -36,7 +37,8 @@ public struct CacheManifest: Codable, Hashable, Sendable {
         contextTaskFingerprint: String? = nil,
         contextFileCount: Int? = nil,
         contextReused: Bool? = nil,
-        policyReason: String? = nil
+        policyReason: String? = nil,
+        promptCacheKey: PromptCacheKey? = nil
     ) {
         self.backend = backend
         self.modelID = modelID
@@ -55,5 +57,6 @@ public struct CacheManifest: Codable, Hashable, Sendable {
         self.contextFileCount = contextFileCount
         self.contextReused = contextReused
         self.policyReason = policyReason
+        self.promptCacheKey = promptCacheKey
     }
 }

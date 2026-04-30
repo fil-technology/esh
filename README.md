@@ -127,7 +127,7 @@ Inspect required and optional engines:
 
 ### External callers
 
-Use `esh capabilities` to get a JSON map of supported backends, installed models, and whether each path supports direct inference, cache build, and cache load.
+Use `esh capabilities` to get a JSON map of supported backends, installed models, and whether each path supports direct inference, cache build, and cache load. Internally, backends also expose capability reports for runtime readiness and feature support; MLX currently reports direct inference, token streaming, and prompt cache build/load, while llama.cpp reports direct inference and token streaming with GGUF cache features marked unavailable.
 
 Use `esh infer` for machine-friendly inference. It returns JSON for both MLX and GGUF models, and MLX cache load stays optional rather than being the only supported integration path.
 
@@ -184,7 +184,7 @@ Supported routes in v1:
 
 Notes:
 - unsupported request fields are ignored when safe
-- `stream` is not supported yet
+- `stream: true` is supported for OpenAI-compatible chat/responses and Anthropic-compatible messages; backend token streaming remains runtime-dependent
 - text inputs are supported for chat/responses in v1
 - `/v1/models` includes installed text models only for strict OpenAI-compatible clients such as Xcode
 - `/v1/audio/models` returns the reusable MLX TTS model catalog with voices, languages, output formats, and capabilities so external agents can present and reuse voice choices
@@ -509,6 +509,7 @@ Resume from a saved cache:
 Important:
 - cache artifacts are backend-specific
 - cache artifacts are model-specific
+- new cache artifacts include a normalized prompt cache key that is backend-, model-, tokenizer-, runtime-, and tool-signature-aware
 - Esh reuses one cache pipeline, but artifacts are not portable across runtimes/models
 
 ## Typical Use Cases

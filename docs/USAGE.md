@@ -126,6 +126,8 @@ Check engine readiness:
 
 `llama-cli` detection is passive: Esh checks `ESH_LLAMA_CPP_CLI`, `LLAMA_CPP_CLI`, Homebrew paths, and `PATH`, but does not install llama.cpp automatically. Optional engines such as `llamafile`, Ollama, Transformers, and `llama.cpp_server` are listed as detection/configuration adapters only until explicitly enabled and wired for routing.
 
+Backend capability reports are additive and model-aware. MLX reports direct inference, token streaming, and prompt cache build/load when the install path is available. llama.cpp reports direct inference and token streaming when `llama-cli` and a GGUF file are available, and explicitly marks GGUF prompt cache build/load/benchmark support unavailable until those hooks exist.
+
 Validate a local model path or installed model id:
 
 ```bash
@@ -186,6 +188,7 @@ Notes:
 - direct inference works for both MLX and GGUF installs
 - `cacheArtifactID` is optional and keeps MLX cache-load as an extra capability, not the only integration path
 - `esh capabilities` reports which backends and installed models support direct inference versus cache build/load
+- cache artifacts created from normalized prompts now carry a deterministic prompt cache key for future cache lookup and reuse policy
 
 ## 3. Find and Install Models
 

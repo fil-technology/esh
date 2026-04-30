@@ -55,12 +55,20 @@ public struct CacheService: Sendable {
         let snapshot = try await runtime.exportRuntimeCache()
         let encodedSnapshot = try codec.encode(snapshot: snapshot)
         let compression = try await compressor.compress(encodedSnapshot)
+        let manifestRuntimeVersion = install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v2"
+        let promptCacheKey = PromptSessionNormalizer().promptCacheKey(
+            for: session,
+            backend: runtime.backend,
+            modelID: install.id,
+            tokenizerID: install.spec.tokenizerID,
+            runtimeVersion: manifestRuntimeVersion
+        )
         let manifest = CacheManifest(
             backend: runtime.backend,
             modelID: install.id,
             tokenizerID: install.spec.tokenizerID,
             architectureFingerprint: install.spec.architectureFingerprint ?? Fingerprint.sha256([install.id, install.backendFormat]),
-            runtimeVersion: install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v2",
+            runtimeVersion: manifestRuntimeVersion,
             cacheFormatVersion: codec.formatVersion,
             compressorVersion: compressor.version,
             cacheMode: artifactMode ?? compressor.mode,
@@ -71,7 +79,8 @@ public struct CacheService: Sendable {
             contextTaskFingerprint: context?.taskFingerprint,
             contextFileCount: context?.fileCount,
             contextReused: context?.reused,
-            policyReason: context?.policyReason
+            policyReason: context?.policyReason,
+            promptCacheKey: promptCacheKey
         )
         let artifact = CacheArtifact(
             manifest: manifest,

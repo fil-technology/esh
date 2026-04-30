@@ -21,6 +21,44 @@ public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendabl
         return MLXRuntime(bridge: bridge, install: install)
     }
 
+    public func capabilityReport(for install: ModelInstall) -> BackendCapabilityReport {
+        do {
+            _ = try locator.resolveModelPath(for: install)
+            return BackendCapabilityReport(
+                backend: kind,
+                runtimeVersion: runtimeVersion,
+                ready: true,
+                supportedFeatures: [
+                    .directInference,
+                    .tokenStreaming,
+                    .promptCacheBuild,
+                    .promptCacheLoad
+                ],
+                unavailableFeatures: [
+                    UnavailableBackendFeature(
+                        feature: .promptCacheBenchmark,
+                        reason: "MLX prompt cache benchmarking is not exposed through the backend capability API yet."
+                    )
+                ]
+            )
+        } catch {
+            let reason = error.localizedDescription
+            return BackendCapabilityReport(
+                backend: kind,
+                runtimeVersion: runtimeVersion,
+                ready: false,
+                supportedFeatures: [],
+                unavailableFeatures: [
+                    .init(feature: .directInference, reason: reason),
+                    .init(feature: .tokenStreaming, reason: reason),
+                    .init(feature: .promptCacheBuild, reason: reason),
+                    .init(feature: .promptCacheLoad, reason: reason)
+                ],
+                warnings: [reason]
+            )
+        }
+    }
+
     public func validateChatModel(for install: ModelInstall) throws -> String? {
         let path = try locator.resolveModelPath(for: install)
         let response: MLXModelValidationResponse = try bridge.run(

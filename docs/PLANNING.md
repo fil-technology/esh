@@ -10,10 +10,14 @@ This file is the index for durable engineering notes, audits, and implementation
 ## Near-Term Implementation Queue
 
 1. Prompt cache normalization
-2. Tool loop safety guard
-3. Structured tool replay log
-4. Scenario-style agent workflow tests
-5. Thin MCP boundary design note
+   - foundation landed: normalized, model-aware, backend-aware, tokenizer-aware, runtime-aware, and tool-aware cache keys are recorded on new cache manifests
+   - remaining: cache lookup/reuse policy that can select artifacts by prompt key
+2. Runtime capability reporting
+   - foundation landed: MLX and llama.cpp expose additive backend capability reports for readiness, token streaming, and prompt cache feature support
+   - remaining: surface richer capability details through user-facing commands where useful
+3. Structured execution/request logs
+4. Scenario workflow tests for local model runs with mocked runtimes
+5. Thin MCP/provider boundary design note, only for tool-call/provider integration points that directly support local execution
 
 ## Autonomous Coding Agent Roadmap
 

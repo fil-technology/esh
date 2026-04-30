@@ -36,4 +36,23 @@ public struct PromptSessionNormalizer: Sendable {
             .joined(separator: "\n")
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
     }
+
+    public func promptCacheKey(
+        for session: ChatSession,
+        backend: BackendKind,
+        modelID: String,
+        tokenizerID: String?,
+        runtimeVersion: String,
+        toolSignature: String? = nil
+    ) -> PromptCacheKey {
+        let normalizedSession = normalized(session: session)
+        return PromptCacheKey.make(
+            backend: backend,
+            modelID: modelID,
+            tokenizerID: tokenizerID,
+            runtimeVersion: runtimeVersion,
+            toolSignature: toolSignature,
+            messages: normalizedSession.messages
+        )
+    }
 }
