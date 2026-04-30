@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-04-30
+
+### Added
+- Local runtime orchestration for MLX and llama.cpp with engine discovery, model validation, runtime selection, and configuration commands.
+- Roadmap groundwork for optional Ollama, llamafile, Transformers, and llama.cpp server adapters behind experimental flags.
+
+### Fixed
+- Disk-capacity reporting now falls back to general available capacity when macOS reports zero important-usage capacity.
+
 ## [0.1.35] - 2026-04-29
 
 ### Added
