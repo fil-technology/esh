@@ -19,11 +19,11 @@
 - Modify: `Sources/esh/main.swift`
 - Test: `Tests/EshCoreTests/OrchestratorConfigTests.swift`
 
-- [ ] Write failing tests for default TOML, parse round-trip, `config init`, `config show`, and `config path`.
-- [ ] Implement `EshConfig` with conservative TOML parsing/writing for the roadmap keys only.
-- [ ] Implement `EshConfigStore` rooted at `PersistenceRoot.rootURL/config.toml`.
-- [ ] Add `ConfigCommand` and route `esh config init|show|path`.
-- [ ] Run targeted config tests.
+- [x] Write failing tests for default TOML, parse round-trip, `config init`, `config show`, and `config path`.
+- [x] Implement `EshConfig` with conservative TOML parsing/writing for the roadmap keys only.
+- [x] Implement `EshConfigStore` rooted at `PersistenceRoot.rootURL/config.toml`.
+- [x] Add `ConfigCommand` and route `esh config init|show|path`.
+- [x] Run targeted config tests.
 
 ### Task 2: Engine Detection Surface
 
@@ -36,12 +36,12 @@
 - Test: `Tests/EshCoreTests/EngineOrchestratorTests.swift`
 - Test: `Tests/EshUITests/OrchestratorCommandTests.swift`
 
-- [ ] Write failing tests for passive `llama-cli` detection, disabled optional engines, MLX doctor failure reporting, and no Homebrew install attempt from `LlamaCppBackend`.
-- [ ] Implement required engine statuses for `llama.cpp` and `mlx`.
-- [ ] Implement optional detection/config status for `llamafile`, `ollama`, `transformers`, and `llama.cpp_server`.
-- [ ] Update `esh doctor` and add `esh engines list|doctor`.
-- [ ] Remove automatic `brew install llama.cpp` fallback from runtime resolution.
-- [ ] Run targeted engine tests.
+- [x] Write failing tests for passive `llama-cli` detection, disabled optional engines, MLX doctor failure reporting, and no Homebrew install attempt from `LlamaCppBackend`.
+- [x] Implement required engine statuses for `llama.cpp` and `mlx`.
+- [x] Implement optional detection/config status for `llamafile`, `ollama`, `transformers`, and `llama.cpp_server`.
+- [x] Update `esh doctor` and add `esh engines list|doctor`.
+- [x] Remove automatic `brew install llama.cpp` fallback from runtime resolution.
+- [x] Run targeted engine tests.
 
 ### Task 3: Local Model Validation
 
@@ -53,12 +53,12 @@
 - Test: `Tests/EshCoreTests/LocalModelValidationTests.swift`
 - Test: `Tests/EshUITests/OrchestratorCommandTests.swift`
 
-- [ ] Write failing tests for GGUF file validation, MLX directory validation, engine filtering, JSON output, and missing dependency suggestions.
-- [ ] Implement local path and installed-model resolution.
-- [ ] Detect GGUF files and MLX directories without loading model weights.
-- [ ] Report compatible engines, ready engine selection, warnings, and suggested fixes.
-- [ ] Wire `esh validate <model> [--engine llama.cpp|mlx] [--json]`.
-- [ ] Run targeted validation tests.
+- [x] Write failing tests for GGUF file validation, MLX directory validation, engine filtering, JSON output, and missing dependency suggestions.
+- [x] Implement local path and installed-model resolution.
+- [x] Detect GGUF files and MLX directories without loading model weights.
+- [x] Report compatible engines, ready engine selection, warnings, and suggested fixes.
+- [x] Wire `esh validate <model> [--engine llama.cpp|mlx] [--json]`.
+- [x] Run targeted validation tests.
 
 ### Task 4: Docs, Verification, Publish
 
@@ -68,8 +68,8 @@
 - Modify: `CHANGELOG.md`
 - Modify: `VERSION` only during release.
 
-- [ ] Document the orchestrator commands and passive engine behavior.
-- [ ] Run `swift test`.
-- [ ] Run CLI smoke checks for `config`, `engines`, `doctor`, and `validate`.
-- [ ] Run package smoke/release checks.
-- [ ] Stage only in-scope files, commit, push branch, and create a release tag/artifact when verification passes.
+- [x] Document the orchestrator commands and passive engine behavior.
+- [x] Run `swift test`.
+- [x] Run CLI smoke checks for `config`, `engines`, `doctor`, and `validate`.
+- [x] Run package smoke/release checks.
+- [x] Stage only in-scope files, commit, push branch, and create a release tag/artifact when verification passes.
