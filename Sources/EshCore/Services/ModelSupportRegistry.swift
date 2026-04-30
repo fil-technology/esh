@@ -48,6 +48,7 @@ public struct ModelSupportRegistry: Sendable {
         format: ModelFormat,
         architecture: ModelArchitecture,
         isMultimodal: Bool?,
+        isAdapter: Bool = false,
         hasSelectedGGUFFile: Bool
     ) -> ModelSupportAssessment {
         guard let backend else {
@@ -62,13 +63,22 @@ public struct ModelSupportRegistry: Sendable {
         switch backend {
         case .mlx:
             let formatSupported = format == .mlx
-            let architectureSupported = [.llama, .qwen, .gemma, .mistral, .phi, .unknown].contains(architecture)
+            var notes = formatSupported ? ["MLX format detected."] : []
+            var warnings: [String] = []
+            if isAdapter {
+                notes.append("LoRA adapter detected; Esh will load the base model and apply the adapter at runtime.")
+            }
+            if architecture == .unknown {
+                warnings.append("Architecture could not be confirmed before download.")
+            } else if architecture == .other {
+                warnings.append("MLX runtime supports more architectures than the preflight classifier can name; runtime config validation is deferred to load time.")
+            }
             return ModelSupportAssessment(
                 isFormatSupported: formatSupported,
-                isArchitectureSupported: architectureSupported,
+                isArchitectureSupported: true,
                 backendLabel: "MLX",
-                notes: formatSupported ? ["MLX format detected."] : [],
-                warnings: architecture == .unknown ? ["Architecture could not be confirmed before download."] : []
+                notes: notes,
+                warnings: warnings
             )
         case .gguf:
             let formatSupported = format == .gguf

@@ -48,8 +48,14 @@ private struct CLI {
             try CapabilitiesCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "benchmark":
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
+        case "config":
+            try ConfigCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "doctor":
             try DoctorCommand.run()
+        case "engines":
+            try EnginesCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "validate":
+            try ValidateCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "version":
             print(AppVersionResolver.currentVersion() ?? "unknown")
         case "update":
@@ -407,6 +413,12 @@ private struct CLI {
               esh context query <text> [--limit N] [--run <id>]
               esh context plan <task> [--limit N] [--snippets N] [--run <id>]
               esh context eval <fixture.json> [--limit N]
+              esh config init [--force]
+              esh config show
+              esh config path
+              esh engines list
+              esh engines doctor <llama.cpp|mlx>
+              esh validate <model-path-or-installed-id> [--engine llama.cpp|mlx] [--json]
               esh run start [name]
               esh run status <id>
               esh run note <id> [--hypothesis <text>] [--finding <text>] [--decision <text>] [--pending <text>] [--complete <text>] [--status <value>]

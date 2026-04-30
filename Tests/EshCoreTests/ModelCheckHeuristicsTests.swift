@@ -81,12 +81,45 @@ func supportRegistryRejectsMultimodalGGUF() {
         format: .gguf,
         architecture: .qwen,
         isMultimodal: true,
+        isAdapter: false,
         hasSelectedGGUFFile: true
     )
 
     #expect(assessment.isFormatSupported)
     #expect(!assessment.isArchitectureSupported)
     #expect(assessment.warnings.joined(separator: "\n").contains("text-only"))
+}
+
+@Test
+func supportRegistryAllowsAdditionalMLXArchitectures() {
+    let assessment = ModelSupportRegistry().assess(
+        backend: .mlx,
+        format: .mlx,
+        architecture: .other,
+        isMultimodal: false,
+        isAdapter: false,
+        hasSelectedGGUFFile: true
+    )
+
+    #expect(assessment.isFormatSupported)
+    #expect(assessment.isArchitectureSupported)
+    #expect(assessment.warnings.joined(separator: "\n").contains("MLX runtime supports more architectures"))
+}
+
+@Test
+func supportRegistryAllowsMLXAdapterWhenBaseArchitectureIsKnown() {
+    let assessment = ModelSupportRegistry().assess(
+        backend: .mlx,
+        format: .mlx,
+        architecture: .qwen,
+        isMultimodal: false,
+        isAdapter: true,
+        hasSelectedGGUFFile: true
+    )
+
+    #expect(assessment.isFormatSupported)
+    #expect(assessment.isArchitectureSupported)
+    #expect(assessment.notes.joined(separator: "\n").contains("LoRA adapter"))
 }
 
 @Test

@@ -9,38 +9,25 @@ enum DoctorCommand {
     }
 
     static func outputLines() throws -> [String] {
-        let bridge = MLXBridge()
-        let pythonURL = try bridge.resolvedPythonExecutable()
-        let helperURL = try bridge.resolvedHelperScript()
         let root = PersistenceRoot.default()
-        let bridgeDoctor: BridgeDoctorResponse = try bridge.run(
-            command: "doctor",
-            request: EmptyRequest(),
-            as: BridgeDoctorResponse.self
-        )
+        let service = EngineOrchestratorService(root: root)
+        let statuses = try service.listEngines()
+        let required = statuses.filter(\.required)
+        let allRequiredReady = required.allSatisfy(\.ready)
 
-        return [
-            "status: ok",
+        var lines = [
+            "status: \(allRequiredReady ? "ok" : "degraded")",
             "persistence_root: \(root.rootURL.path)",
-            "python: \(pythonURL.path)",
-            "bridge: \(helperURL.path)",
-            "bridge_python: \(bridgeDoctor.pythonExecutable)",
-            "mlx: \(bridgeDoctor.mlxVersion)",
-            "mlx_lm: \(bridgeDoctor.mlxLMVersion)",
-            "mlx_vlm: \(bridgeDoctor.mlxVLMVersion)",
-            "numpy: \(bridgeDoctor.numpyVersion)",
-            "safetensors: \(bridgeDoctor.safetensorsVersion)"
+            "config: \(EshConfigStore(root: root).configURL.path)",
+            "engines:"
         ]
+        lines += statuses.map { status in
+            "- \(status.id.rawValue): \(status.ready ? "ready" : "not_ready")\(status.required ? " required" : " optional")"
+        }
+        for status in statuses where !status.notes.isEmpty || !status.warnings.isEmpty || status.suggestedFix != nil {
+            lines.append("")
+            lines += EnginesCommand.renderDoctor(status)
+        }
+        return lines
     }
-}
-
-private struct EmptyRequest: Codable {}
-
-private struct BridgeDoctorResponse: Codable {
-    var pythonExecutable: String
-    var mlxVersion: String
-    var mlxLMVersion: String
-    var mlxVLMVersion: String
-    var numpyVersion: String
-    var safetensorsVersion: String
 }

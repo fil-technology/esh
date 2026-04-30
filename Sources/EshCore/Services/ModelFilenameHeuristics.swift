@@ -10,13 +10,48 @@ enum ModelFilenameHeuristics {
         if loweredIdentifier.contains("gguf") {
             return .gguf
         }
-        if loweredFiles.contains(where: { $0.hasSuffix(".safetensors") || $0 == "config.json" }) {
+
+        let hasSafetensors = loweredFiles.contains { $0.hasSuffix(".safetensors") }
+        let hasModelConfig = loweredFiles.contains { $0 == "config.json" || $0.hasSuffix("/config.json") }
+        let hasAdapterConfig = loweredFiles.contains { $0 == "adapter_config.json" || $0.hasSuffix("/adapter_config.json") }
+        if hasSafetensors && (hasModelConfig || hasAdapterConfig) {
             return .mlx
         }
         if loweredIdentifier.contains("mlx") || loweredIdentifier.contains("4bit") {
             return .mlx
         }
         return .unknown
+    }
+
+    static func inferAdapter(
+        identifier: String,
+        tags: [String],
+        filenames: [String],
+        libraryName: String? = nil
+    ) -> Bool {
+        let haystacks = ([identifier, libraryName] + tags + filenames)
+            .compactMap { $0?.lowercased() }
+        return haystacks.contains {
+            $0 == "peft"
+                || $0 == "lora"
+                || $0.contains("adapter_config.json")
+                || $0.contains("adapter_model.safetensors")
+                || $0.contains("base_model:adapter:")
+        }
+    }
+
+    static func inferBaseModelID(tags: [String]) -> String? {
+        for tag in tags {
+            let normalized = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowered = normalized.lowercased()
+            if lowered.hasPrefix("base_model:adapter:") {
+                return String(normalized.dropFirst("base_model:adapter:".count))
+            }
+            if lowered.hasPrefix("base_model:") {
+                return String(normalized.dropFirst("base_model:".count))
+            }
+        }
+        return nil
     }
 
     static func inferArchitecture(

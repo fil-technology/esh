@@ -42,6 +42,7 @@ public struct ModelCheckService: Sendable {
             format: metadata.format,
             architecture: metadata.architecture,
             isMultimodal: metadata.isMultimodal,
+            isAdapter: metadata.isAdapter,
             hasSelectedGGUFFile: metadata.format != .gguf
                 || metadata.selectedGGUFFile != nil
                 || metadata.ggufFileCount == 0
@@ -68,6 +69,9 @@ public struct ModelCheckService: Sendable {
         notes.append("Result is heuristic, not a guarantee.")
         if backend == .gguf, metadata.selectedGGUFFile != nil {
             notes.append("GGUF support currently routes through llama.cpp.")
+        }
+        if let baseModelID = metadata.baseModelID {
+            notes.append("Adapter base model: \(baseModelID)")
         }
 
         var warnings = host.warnings + metadata.warnings + support.warnings

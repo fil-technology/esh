@@ -9,11 +9,15 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
 
         var id: String
         var sha: String?
+        var libraryName: String?
+        var tags: [String]?
         var siblings: [Sibling]?
 
         private enum CodingKeys: String, CodingKey {
             case id = "id"
             case sha
+            case libraryName = "library_name"
+            case tags
             case siblings
         }
 
@@ -22,6 +26,8 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             self.id = try container.decodeIfPresent(String.self, forKey: .id)
                 ?? container.decode(String.self, forKey: .id)
             self.sha = try container.decodeIfPresent(String.self, forKey: .sha)
+            self.libraryName = try container.decodeIfPresent(String.self, forKey: .libraryName)
+            self.tags = try container.decodeIfPresent([String].self, forKey: .tags)
             self.siblings = try container.decodeIfPresent([Sibling].self, forKey: .siblings)
         }
     }
@@ -60,7 +66,13 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         let installID = suggestedID ?? sanitizedInstallID(from: source.reference)
         let installDirectory = try modelStore.prepareInstallDirectory(id: installID)
         let revision = source.revision ?? info.sha ?? "main"
-        let modelPlan = try modelPlan(for: info.siblings ?? [], variant: variant)
+        let modelPlan = try modelPlan(
+            for: info.siblings ?? [],
+            identifier: source.reference,
+            tags: info.tags ?? [],
+            libraryName: info.libraryName,
+            variant: variant
+        )
         guard modelPlan.files.isEmpty == false else {
             throw StoreError.invalidManifest("No downloadable files were found for \(source.reference).")
         }
@@ -92,6 +104,10 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
 
         let actualSize = directorySize(at: installDirectory)
         let resolvedSize = max(actualSize, modelPlan.files.compactMap(\.size).reduce(0, +))
+        let baseModelID = try resolvedBaseModelID(
+            installDirectory: installDirectory,
+            isAdapter: modelPlan.isAdapter
+        )
 
         let install = ModelInstall(
             id: installID,
@@ -101,6 +117,7 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 backend: modelPlan.backend,
                 source: source,
                 localPath: installDirectory.path,
+                baseModelID: baseModelID,
                 architectureFingerprint: modelPlan.architectureFingerprint,
                 variant: modelPlan.variant,
                 task: modelPlan.task,
@@ -170,6 +187,15 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             guard files.contains(where: { $0.rfilename.lowercased().hasSuffix(".safetensors") }) else {
                 throw StoreError.invalidManifest("Install verification failed because no MLX weight files were downloaded.")
             }
+            guard files.contains(where: {
+                let filename = $0.rfilename.lowercased()
+                return filename == "config.json"
+                    || filename.hasSuffix("/config.json")
+                    || filename == "adapter_config.json"
+                    || filename.hasSuffix("/adapter_config.json")
+            }) else {
+                throw StoreError.invalidManifest("Install verification failed because no config.json or adapter_config.json was downloaded.")
+            }
         case .gguf:
             guard files.contains(where: { $0.rfilename.lowercased().hasSuffix(".gguf") }) else {
                 throw StoreError.invalidManifest("Install verification failed because no GGUF file was downloaded.")
@@ -181,6 +207,9 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
 
     private func modelPlan(
         for siblings: [ModelInfo.Sibling],
+        identifier: String,
+        tags: [String],
+        libraryName: String?,
         variant: String?
     ) throws -> (
         backend: BackendKind,
@@ -191,15 +220,22 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         task: ModelTask,
         inputModalities: [ModelModality],
         outputModalities: [ModelModality],
-        capabilities: ModelCapabilities
+        capabilities: ModelCapabilities,
+        isAdapter: Bool
     ) {
         let filenames = siblings.map(\.rfilename)
-        let format = ModelFilenameHeuristics.inferFormat(identifier: "", filenames: filenames)
+        let format = ModelFilenameHeuristics.inferFormat(identifier: identifier, filenames: filenames)
         let architecture = ModelFilenameHeuristics.inferArchitecture(
-            identifier: "",
+            identifier: identifier,
             configModelType: nil,
-            tags: [],
+            tags: tags,
             filenames: filenames
+        )
+        let isAdapter = ModelFilenameHeuristics.inferAdapter(
+            identifier: identifier,
+            tags: tags,
+            filenames: filenames,
+            libraryName: libraryName
         )
 
         if format == .gguf {
@@ -220,7 +256,24 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 task: .text,
                 inputModalities: [.text],
                 outputModalities: [.text],
-                capabilities: .textGeneration
+                capabilities: .textGeneration,
+                isAdapter: false
+            )
+        }
+
+        guard format == .mlx else {
+            throw StoreError.invalidManifest(
+                "Unsupported Hugging Face repo layout. MLX installs need config.json or adapter_config.json with safetensors; GGUF installs need a .gguf file."
+            )
+        }
+
+        let loweredFilenames = filenames.map { $0.lowercased() }
+        let hasSafetensors = loweredFilenames.contains { $0.hasSuffix(".safetensors") }
+        let hasModelConfig = loweredFilenames.contains { $0 == "config.json" || $0.hasSuffix("/config.json") }
+        let hasAdapterConfig = loweredFilenames.contains { $0 == "adapter_config.json" || $0.hasSuffix("/adapter_config.json") }
+        guard hasSafetensors, hasModelConfig || hasAdapterConfig else {
+            throw StoreError.invalidManifest(
+                "Unsupported MLX repo layout. Expected safetensors plus config.json or adapter_config.json."
             )
         }
 
@@ -236,11 +289,12 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             backendFormat: "mlx",
             files: files,
             architectureFingerprint: architecture == .unknown ? nil : architecture.rawValue,
-            variant: variant,
+            variant: variant ?? (isAdapter ? "adapter" : nil),
             task: .text,
             inputModalities: [.text],
             outputModalities: [.text],
-            capabilities: .textGeneration
+            capabilities: .textGeneration,
+            isAdapter: isAdapter
         )
     }
 
@@ -256,6 +310,25 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             .lowercased()
             .replacingOccurrences(of: "/", with: "--")
             .replacingOccurrences(of: " ", with: "-")
+    }
+
+    private func resolvedBaseModelID(installDirectory: URL, isAdapter: Bool) throws -> String? {
+        guard isAdapter else {
+            return nil
+        }
+
+        let adapterConfigURL = installDirectory.appendingPathComponent("adapter_config.json")
+        guard FileManager.default.fileExists(atPath: adapterConfigURL.path) else {
+            throw StoreError.invalidManifest("Adapter install is missing adapter_config.json.")
+        }
+
+        let data = try Data(contentsOf: adapterConfigURL)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let baseModelID = object["base_model_name_or_path"] as? String,
+              baseModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            throw StoreError.invalidManifest("Adapter install is missing base_model_name_or_path in adapter_config.json.")
+        }
+        return baseModelID
     }
 
     private func directorySize(at url: URL) -> Int64 {

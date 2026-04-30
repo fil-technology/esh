@@ -3,6 +3,7 @@ import Foundation
 public struct LlamaCppBackend: InferenceBackend, Sendable {
     public let kind: BackendKind = .gguf
     public let runtimeVersion: String
+    public static let runtimeNotFoundMessage = "llama.cpp runtime not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-cli` path."
 
     public init(runtimeVersion: String = "llama.cpp-cli-v1") {
         self.runtimeVersion = runtimeVersion
@@ -82,88 +83,9 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
             }
         }
 
-        if let bootstrapped = try bootstrapExecutableIfPossible() {
-            return bootstrapped
-        }
-
-        throw StoreError.invalidManifest(
-            "llama.cpp runtime not found and automatic bootstrap was unavailable. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-cli` path."
-        )
+        throw StoreError.invalidManifest(Self.runtimeNotFoundMessage)
     }
 
-    private func bootstrapExecutableIfPossible() throws -> URL? {
-        guard let brewURL = resolveBrewExecutable() else {
-            return nil
-        }
-
-        if let installed = try brewManagedExecutable(using: brewURL) {
-            return installed
-        }
-
-        let installOutput = try ProcessRunner.run(
-            executableURL: brewURL,
-            arguments: ["install", "llama.cpp"],
-            environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
-        )
-        guard installOutput.exitCode == 0 else {
-            let stderr = String(decoding: installOutput.stderr, as: UTF8.self)
-            let stdout = String(decoding: installOutput.stdout, as: UTF8.self)
-            let message = stderr.isEmpty ? stdout : stderr
-            throw StoreError.invalidManifest(
-                "Automatic llama.cpp bootstrap failed: \(message.trimmingCharacters(in: .whitespacesAndNewlines))"
-            )
-        }
-
-        return try brewManagedExecutable(using: brewURL)
-    }
-
-    private func resolveBrewExecutable() -> URL? {
-        let candidates = [
-            "/opt/homebrew/bin/brew",
-            "/usr/local/bin/brew"
-        ]
-
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
-            return URL(fileURLWithPath: candidate)
-        }
-
-        let output = try? ProcessRunner.run(
-            executableURL: URL(fileURLWithPath: "/usr/bin/which"),
-            arguments: ["brew"]
-        )
-        guard let output, output.exitCode == 0 else {
-            return nil
-        }
-        let path = String(decoding: output.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else {
-            return nil
-        }
-        return URL(fileURLWithPath: path)
-    }
-
-    private func brewManagedExecutable(using brewURL: URL) throws -> URL? {
-        let output = try ProcessRunner.run(
-            executableURL: brewURL,
-            arguments: ["--prefix", "llama.cpp"],
-            environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
-        )
-        guard output.exitCode == 0 else {
-            return nil
-        }
-
-        let prefix = String(decoding: output.stdout, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prefix.isEmpty else {
-            return nil
-        }
-
-        let executableURL = URL(fileURLWithPath: prefix).appendingPathComponent("bin/llama-cli")
-        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
-            return nil
-        }
-        return executableURL
-    }
 }
 
 private struct LlamaCppCompatibilityChecker: CompatibilityChecking, Sendable {

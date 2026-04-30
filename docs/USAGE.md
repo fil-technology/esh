@@ -53,7 +53,13 @@ esh chat [session-name] [--model <id-or-repo>]
 esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
 esh benchmark history
 esh capabilities
+esh config init [--force]
+esh config show
+esh config path
 esh doctor
+esh engines list
+esh engines doctor <llama.cpp|mlx>
+esh validate <model-path-or-installed-id> [--engine llama.cpp|mlx] [--json]
 esh infer --input <path-or->
 esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
 esh model recommended [--profile chat|code]
@@ -73,7 +79,64 @@ esh cache inspect [artifact-uuid]
 
 Plain `esh` opens a command menu with common actions like chat, model list, install model, sessions, caches, and doctor.
 
-## 2a. External JSON Commands
+## 2a. Runtime Orchestration
+
+Esh manages existing local runtimes. It does not implement tensor kernels, tokenizers, attention internals, KV-cache formats, or quantization algorithms itself.
+
+Create or inspect `~/.esh/config.toml`:
+
+```bash
+./esh config init
+./esh config show
+./esh config path
+```
+
+The default config enables the required engines and keeps optional roadmap adapters disabled:
+
+```toml
+[defaults]
+engine = "auto"
+model_dir = "~/.esh/models"
+context_size = 8192
+
+[engines.llama_cpp]
+enabled = true
+binary = "auto"
+metal = true
+
+[engines.mlx]
+enabled = true
+python = "auto"
+
+[experimental]
+ollama_adapter = false
+llamafile = false
+transformers = false
+llama_cpp_server = false
+```
+
+Check engine readiness:
+
+```bash
+./esh doctor
+./esh engines list
+./esh engines doctor llama.cpp
+./esh engines doctor mlx
+```
+
+`llama-cli` detection is passive: Esh checks `ESH_LLAMA_CPP_CLI`, `LLAMA_CPP_CLI`, Homebrew paths, and `PATH`, but does not install llama.cpp automatically. Optional engines such as `llamafile`, Ollama, Transformers, and `llama.cpp_server` are listed as detection/configuration adapters only until explicitly enabled and wired for routing.
+
+Validate a local model path or installed model id:
+
+```bash
+./esh validate /path/to/model.gguf
+./esh validate /path/to/model.gguf --engine llama.cpp
+./esh validate /path/to/mlx-model --engine mlx --json
+```
+
+Validation detects GGUF files and MLX directory layouts, reports compatible engines, selects a ready runtime when possible, and prints missing dependencies with suggested fixes.
+
+## 2b. External JSON Commands
 
 Use these when another tool needs a stable machine-facing contract instead of human-readable text.
 
@@ -427,6 +490,8 @@ Runtime validation script:
 
 If chat does not start:
 - run `./esh doctor`
+- run `./esh engines list`
+- run `./esh validate <model-path-or-installed-id>`
 - make sure at least one model is installed
 - check that `mlx`, `mlx-lm`, and `mlx-vlm` are reported
 

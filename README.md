@@ -4,6 +4,7 @@ Esh is a local-first LLM tool for Apple Silicon.
 
 It gives you:
 - local model install and management
+- passive engine detection for MLX and llama.cpp
 - interactive terminal chat
 - stable JSON commands for external callers
 - saved sessions
@@ -11,7 +12,7 @@ It gives you:
 - TurboQuant cache compression for MLX
 - self-contained release packaging
 
-Today, Esh is built around an MLX backend with a Swift core and CLI/TUI, plus a small Python bridge for `mlx-lm` and `mlx-vlm`.
+Today, Esh is a macOS-focused local model orchestrator with MLX and GGUF/llama.cpp backends. It manages, validates, selects, and routes existing runtimes rather than implementing model kernels itself.
 
 ## Planning Notes
 
@@ -91,11 +92,38 @@ Then use the stable launcher:
 ```bash
 ./esh
 ./esh doctor
+./esh engines list
 ./esh model list
 ./esh chat
 ```
 
 Running `./esh` with no command opens a default interactive launcher menu with the most common actions.
+
+### Runtime Orchestration
+
+Esh reads `~/.esh/config.toml` when present. Create or inspect it with:
+
+```bash
+./esh config init
+./esh config show
+./esh config path
+```
+
+Inspect required and optional engines:
+
+```bash
+./esh doctor
+./esh engines list
+./esh engines doctor llama.cpp
+./esh engines doctor mlx
+```
+
+`llama-cli` is detected passively from `ESH_LLAMA_CPP_CLI`, `LLAMA_CPP_CLI`, Homebrew paths, or `PATH`; Esh does not install llama.cpp automatically. Validate local model files before routing them:
+
+```bash
+./esh validate /path/to/model.gguf --engine llama.cpp
+./esh validate /path/to/mlx-model --engine mlx --json
+```
 
 ### External callers
 

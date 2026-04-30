@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import types
 import unittest
@@ -13,7 +14,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_PATH = REPOSITORY_ROOT / "Tools" / "mlx_vlm_bridge.py"
 
 
-def load_bridge_module():
+def load_bridge_module(save_prompt_cache=None):
     triattention_runtime = types.ModuleType("triattention_runtime")
     triattention_runtime.calibrate_model = lambda *args, **kwargs: None
     triattention_runtime.maybe_apply_triattention = lambda *args, **kwargs: None
@@ -22,7 +23,7 @@ def load_bridge_module():
     mlx_lm = types.ModuleType("mlx_lm")
     mlx_lm_models = types.ModuleType("mlx_lm.models")
     mlx_lm_cache = types.ModuleType("mlx_lm.models.cache")
-    mlx_lm_cache.save_prompt_cache = lambda file_name, cache, metadata: None
+    mlx_lm_cache.save_prompt_cache = save_prompt_cache or (lambda file_name, cache, metadata: None)
     sys.modules["mlx_lm"] = mlx_lm
     sys.modules["mlx_lm.models"] = mlx_lm_models
     sys.modules["mlx_lm.models.cache"] = mlx_lm_cache
@@ -53,6 +54,13 @@ class FakeCache:
         self.state = (FakeBFloat16Array(), FakeBFloat16Array())
 
 
+KVCache = type(
+    "KVCache",
+    (),
+    {"__init__": lambda self: setattr(self, "state", (np.ones((1, 2), dtype=np.float32), np.ones((1, 2), dtype=np.float32)))},
+)
+
+
 class MLXVLMBridgeTests(unittest.TestCase):
     def test_prompt_cache_snapshot_casts_bfloat16_arrays_for_json_fallback(self):
         bridge = load_bridge_module()
@@ -63,6 +71,81 @@ class MLXVLMBridgeTests(unittest.TestCase):
         self.assertEqual(snapshot["metadata"]["raw_bytes"], "16")
         self.assertEqual(snapshot["tensors"][0]["dtype"], "float32")
         self.assertEqual(snapshot["tensors"][1]["dtype"], "float32")
+
+    def test_prompt_cache_snapshot_falls_back_when_safetensors_write_fails(self):
+        def fail_save_prompt_cache(file_name, cache, metadata):
+            raise RuntimeError("[write] Unable to write 15518720 bytes to file.")
+
+        bridge = load_bridge_module(save_prompt_cache=fail_save_prompt_cache)
+
+        snapshot = bridge._prompt_cache_to_snapshot([KVCache()], metadata={"model_id": "demo"})
+
+        self.assertEqual(snapshot["metadata"]["raw_bytes"], "16")
+        self.assertEqual(snapshot["metadata"]["model_id"], "demo")
+        self.assertNotIn("mlx_prompt_cache_safetensors_base64", snapshot["metadata"])
+        self.assertIn("mlx_prompt_cache_safetensors_error", snapshot["metadata"])
+        self.assertEqual([tensor["name"] for tensor in snapshot["tensors"]], ["layer0.keys", "layer0.values"])
+
+    def test_adapter_only_path_loads_base_model_with_adapter(self):
+        bridge = load_bridge_module()
+        temp_dir = Path(self._testMethodName)
+        temp_dir.mkdir(exist_ok=True)
+        try:
+            (temp_dir / "adapter_config.json").write_text(
+                json.dumps({"base_model_name_or_path": "Qwen/Qwen3.5-4B-Base"}),
+                encoding="utf-8",
+            )
+            (temp_dir / "adapter_model.safetensors").write_text("weights", encoding="utf-8")
+
+            calls = []
+
+            def fake_load(path_or_repo, **kwargs):
+                calls.append((path_or_repo, kwargs))
+                return "model", "tokenizer"
+
+            model, tokenizer = bridge._load_mlx_model(fake_load, str(temp_dir))
+
+            self.assertEqual((model, tokenizer), ("model", "tokenizer"))
+            self.assertEqual(calls, [("Qwen/Qwen3.5-4B-Base", {"adapter_path": str(temp_dir)})])
+        finally:
+            for child in temp_dir.iterdir():
+                child.unlink()
+            temp_dir.rmdir()
+
+    def test_adapter_validation_uses_base_model_config_without_loading_weights(self):
+        bridge = load_bridge_module()
+        temp_dir = Path(self._testMethodName)
+        temp_dir.mkdir(exist_ok=True)
+        try:
+            (temp_dir / "adapter_config.json").write_text(
+                json.dumps({"base_model_name_or_path": "Qwen/Qwen3.5-4B-Base"}),
+                encoding="utf-8",
+            )
+            (temp_dir / "adapter_model.safetensors").write_text("weights", encoding="utf-8")
+
+            checked_configs = []
+
+            def fake_config_loader(base_model_id):
+                self.assertEqual(base_model_id, "Qwen/Qwen3.5-4B-Base")
+                return {"model_type": "qwen3_5"}
+
+            def fake_get_classes(config):
+                checked_configs.append(config)
+                return object, object
+
+            ok, reason = bridge._validate_mlx_model_path(
+                str(temp_dir),
+                config_loader=fake_config_loader,
+                get_classes=fake_get_classes,
+            )
+
+            self.assertTrue(ok)
+            self.assertIsNone(reason)
+            self.assertEqual(checked_configs, [{"model_type": "qwen3_5"}])
+        finally:
+            for child in temp_dir.iterdir():
+                child.unlink()
+            temp_dir.rmdir()
 
 
 if __name__ == "__main__":

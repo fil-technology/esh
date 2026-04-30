@@ -388,9 +388,12 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
     if can_save_prompt_cache:
         with tempfile.TemporaryDirectory() as temporary_directory:
             cache_file = f"{temporary_directory}/prompt-cache.safetensors"
-            save_prompt_cache(cache_file, prompt_cache, metadata)
-            with open(cache_file, "rb") as handle:
-                metadata["mlx_prompt_cache_safetensors_base64"] = base64.b64encode(handle.read()).decode("ascii")
+            try:
+                save_prompt_cache(cache_file, prompt_cache, metadata)
+                with open(cache_file, "rb") as handle:
+                    metadata["mlx_prompt_cache_safetensors_base64"] = base64.b64encode(handle.read()).decode("ascii")
+            except Exception as exc:
+                metadata["mlx_prompt_cache_safetensors_error"] = str(exc)
     return {
         "format": "mlx-cache-snapshot-v1",
         "metadata": metadata,
@@ -450,6 +453,133 @@ def _save_state_file(state_file_path: str, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, separators=(",", ":"))
 
 
+def _adapter_config_path(model_path: str | Path) -> Path:
+    return Path(model_path) / "adapter_config.json"
+
+
+def _model_config_path(model_path: str | Path) -> Path:
+    return Path(model_path) / "config.json"
+
+
+def _load_adapter_config(model_path: str | Path) -> dict[str, Any]:
+    adapter_config_path = _adapter_config_path(model_path)
+    with open(adapter_config_path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _adapter_weight_files(model_path: str | Path) -> list[Path]:
+    return sorted(Path(model_path).glob("adapter_model*.safetensors"))
+
+
+def _model_weight_files(model_path: str | Path) -> list[Path]:
+    return sorted(Path(model_path).glob("model*.safetensors"))
+
+
+def _adapter_base_model_id(model_path: str | Path) -> str:
+    config = _load_adapter_config(model_path)
+    base_model_id = config.get("base_model_name_or_path")
+    if not isinstance(base_model_id, str) or not base_model_id.strip():
+        raise ValueError("adapter_config.json is missing base_model_name_or_path")
+    return base_model_id.strip()
+
+
+def _is_adapter_only_model_path(model_path: str | Path) -> bool:
+    path = Path(model_path)
+    return (
+        not _model_config_path(path).exists()
+        and _adapter_config_path(path).exists()
+        and bool(_adapter_weight_files(path))
+    )
+
+
+def _load_mlx_model(load, model_path: str):
+    if _is_adapter_only_model_path(model_path):
+        model, tokenizer = load(_adapter_base_model_id(model_path), adapter_path=str(model_path))
+        try:
+            from mlx_lm.utils import load_tokenizer
+
+            tokenizer = load_tokenizer(Path(model_path))
+        except Exception:
+            pass
+        return model, tokenizer
+    return load(model_path)
+
+
+def _config_from_adapter_mapping(adapter_config: dict[str, Any]) -> dict[str, Any] | None:
+    auto_mapping = adapter_config.get("auto_mapping")
+    if not isinstance(auto_mapping, dict):
+        return None
+    base_model_class = str(auto_mapping.get("base_model_class", "")).lower()
+    mappings = {
+        "qwen3_5": "qwen3_5",
+        "qwen3": "qwen3",
+        "qwen2": "qwen2",
+        "qwen": "qwen",
+        "llama": "llama",
+        "mistral": "mistral",
+        "gemma": "gemma",
+        "phi": "phi",
+    }
+    for needle, model_type in mappings.items():
+        if needle in base_model_class:
+            return {"model_type": model_type}
+    return None
+
+
+def _load_base_model_config(base_model_id: str) -> dict[str, Any]:
+    base_path = Path(base_model_id)
+    if base_path.exists():
+        config_path = base_path / "config.json"
+    else:
+        from huggingface_hub import hf_hub_download
+
+        config_path = Path(hf_hub_download(base_model_id, filename="config.json"))
+
+    with open(config_path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _validate_mlx_model_path(
+    model_path: str,
+    config_loader=None,
+    get_classes=None,
+) -> tuple[bool, str | None]:
+    try:
+        if get_classes is None:
+            from mlx_lm.utils import _get_classes
+            get_classes = _get_classes
+        config_loader = config_loader or _load_base_model_config
+        path = Path(model_path)
+        if not path.exists():
+            return False, f"Model install path does not exist: {model_path}"
+
+        if _is_adapter_only_model_path(path):
+            adapter_config = _load_adapter_config(path)
+            inferred_config = _config_from_adapter_mapping(adapter_config)
+            if inferred_config is not None:
+                config = inferred_config
+            else:
+                config = config_loader(_adapter_base_model_id(path))
+            get_classes(config)
+            return True, None
+
+        config_path = _model_config_path(path)
+        if not config_path.exists():
+            return (
+                False,
+                "Missing config.json. LoRA/PEFT adapter installs need adapter_config.json and adapter_model.safetensors.",
+            )
+        if not _model_weight_files(path):
+            return False, f"No model*.safetensors files found in {model_path}"
+
+        with open(config_path, "r", encoding="utf-8") as handle:
+            config = json.load(handle)
+        get_classes(config)
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
 def doctor() -> None:
     try:
         import mlx  # noqa: F401
@@ -474,7 +604,7 @@ def doctor() -> None:
 def mlx_generate() -> None:
     mx, _, stream_generate, KVCache, make_prompt_cache, load = _import_mlx_lm()
     request = _load_json()
-    model, tokenizer = load(request["modelPath"])
+    model, tokenizer = _load_mlx_model(load, request["modelPath"])
 
     messages = [
         {"role": message["role"], "content": message["text"]}
@@ -568,7 +698,7 @@ def mlx_generate() -> None:
 def mlx_build_cache() -> None:
     mx, generate_step, _, _, make_prompt_cache, load = _import_mlx_lm()
     request = _load_json()
-    model, tokenizer = load(request["modelPath"])
+    model, tokenizer = _load_mlx_model(load, request["modelPath"])
     messages = [
         {"role": message["role"], "content": message["text"]}
         for message in request["session"]["messages"]
@@ -639,14 +769,9 @@ def triattention_calibrate() -> None:
 
 
 def mlx_validate_model() -> None:
-    _, _, _, _, _, load = _import_mlx_lm()
     request = _load_json()
-    try:
-        load(request["modelPath"])
-    except Exception as exc:
-        _dump_json({"ok": False, "reason": str(exc)})
-        return
-    _dump_json({"ok": True, "reason": None})
+    ok, reason = _validate_mlx_model_path(request["modelPath"])
+    _dump_json({"ok": ok, "reason": reason})
 
 
 def mlx_validate_config() -> None:

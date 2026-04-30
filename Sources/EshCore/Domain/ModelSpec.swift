@@ -7,6 +7,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
     public var source: ModelSource
     public var localPath: String?
     public var tokenizerID: String?
+    public var baseModelID: String?
     public var architectureFingerprint: String?
     public var variant: String?
     public var task: ModelTask
@@ -21,6 +22,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         source: ModelSource,
         localPath: String? = nil,
         tokenizerID: String? = nil,
+        baseModelID: String? = nil,
         architectureFingerprint: String? = nil,
         variant: String? = nil,
         task: ModelTask = .text,
@@ -34,6 +36,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         self.source = source
         self.localPath = localPath
         self.tokenizerID = tokenizerID
+        self.baseModelID = baseModelID
         self.architectureFingerprint = architectureFingerprint
         self.variant = variant
         self.task = task
@@ -49,6 +52,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         case source
         case localPath
         case tokenizerID
+        case baseModelID
         case architectureFingerprint
         case variant
         case task
@@ -65,6 +69,7 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         self.source = try container.decode(ModelSource.self, forKey: .source)
         self.localPath = try container.decodeIfPresent(String.self, forKey: .localPath)
         self.tokenizerID = try container.decodeIfPresent(String.self, forKey: .tokenizerID)
+        self.baseModelID = try container.decodeIfPresent(String.self, forKey: .baseModelID)
         self.architectureFingerprint = try container.decodeIfPresent(String.self, forKey: .architectureFingerprint)
         self.variant = try container.decodeIfPresent(String.self, forKey: .variant)
         self.task = try container.decodeIfPresent(ModelTask.self, forKey: .task) ?? .text

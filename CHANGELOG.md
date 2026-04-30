@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-04-30
+
+### Added
+- Runtime orchestration commands: `esh config`, `esh engines list`, `esh engines doctor`, and `esh validate`.
+- Passive llama.cpp and MLX readiness checks with local model validation for GGUF files and MLX model directories.
+- Optional engine tracking for llamafile, Ollama, Transformers, and llama.cpp server adapters.
+
+### Changed
+- llama.cpp runtime lookup no longer attempts automatic Homebrew installation; it now reports the missing dependency and suggested fix.
+
 ## [0.1.35] - 2026-04-29
 
 ### Added

@@ -85,6 +85,8 @@ public struct ModelMetadata: Codable, Hashable, Sendable {
     public var selectedGGUFFile: String?
     public var isSplitGGUF: Bool
     public var isMultimodal: Bool?
+    public var isAdapter: Bool
+    public var baseModelID: String?
     public var notes: [String]
     public var warnings: [String]
 
@@ -104,6 +106,8 @@ public struct ModelMetadata: Codable, Hashable, Sendable {
         selectedGGUFFile: String? = nil,
         isSplitGGUF: Bool = false,
         isMultimodal: Bool? = nil,
+        isAdapter: Bool = false,
+        baseModelID: String? = nil,
         notes: [String] = [],
         warnings: [String] = []
     ) {
@@ -122,6 +126,8 @@ public struct ModelMetadata: Codable, Hashable, Sendable {
         self.selectedGGUFFile = selectedGGUFFile
         self.isSplitGGUF = isSplitGGUF
         self.isMultimodal = isMultimodal
+        self.isAdapter = isAdapter
+        self.baseModelID = baseModelID
         self.notes = notes
         self.warnings = warnings
     }

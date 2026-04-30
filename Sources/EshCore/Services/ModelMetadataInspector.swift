@@ -9,8 +9,17 @@ public struct ModelMetadataInspector: Sendable {
 
         let id: String
         let pipelineTag: String?
+        let libraryName: String?
         let tags: [String]?
         let siblings: [Sibling]?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case pipelineTag
+            case libraryName = "library_name"
+            case tags
+            case siblings
+        }
     }
 
     private let session: URLSession
@@ -35,6 +44,7 @@ public struct ModelMetadataInspector: Sendable {
                 repoID: repoID,
                 filenames: [],
                 tags: [],
+                libraryName: nil,
                 configModelType: nil,
                 backendPreference: backendPreference,
                 variant: variant,
@@ -53,6 +63,7 @@ public struct ModelMetadataInspector: Sendable {
             repoID: repoID,
             filenames: filenames,
             tags: tags,
+            libraryName: info.libraryName,
             configModelType: configModelType,
             backendPreference: backendPreference,
             variant: variant,
@@ -70,6 +81,7 @@ public struct ModelMetadataInspector: Sendable {
         repoID: String,
         filenames: [String],
         tags: [String],
+        libraryName: String?,
         configModelType: String?,
         backendPreference: ModelCheckBackendPreference,
         variant: String?,
@@ -88,10 +100,20 @@ public struct ModelMetadataInspector: Sendable {
         let availableVariants = ModelFilenameHeuristics.availableVariants(in: filenames, format: format)
         let effectiveBits = ModelFilenameHeuristics.inferEffectiveBits(quantization: quantization, format: format)
         let multimodal = ModelFilenameHeuristics.inferMultimodal(identifier: repoID, tags: tags, configModelType: configModelType)
+        let isAdapter = ModelFilenameHeuristics.inferAdapter(
+            identifier: repoID,
+            tags: tags,
+            filenames: filenames,
+            libraryName: libraryName
+        )
+        let baseModelID = ModelFilenameHeuristics.inferBaseModelID(tags: tags)
         let ggufSelection = ModelFilenameHeuristics.selectGGUFFiles(filenames, variant: variant)
         var metadataWarnings = warnings
         if let ggufWarning = ggufSelection.warning {
             metadataWarnings.append(ggufWarning)
+        }
+        if isAdapter, baseModelID == nil {
+            metadataWarnings.append("Adapter model detected, but the base model could not be inferred before download.")
         }
 
         let inferredBackend = backendPreference.resolvedBackend ?? {
@@ -117,6 +139,8 @@ public struct ModelMetadataInspector: Sendable {
             selectedGGUFFile: ggufSelection.selected,
             isSplitGGUF: ggufSelection.isSplit,
             isMultimodal: multimodal,
+            isAdapter: isAdapter,
+            baseModelID: baseModelID,
             notes: notes,
             warnings: metadataWarnings
         )
