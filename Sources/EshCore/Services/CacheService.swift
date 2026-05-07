@@ -55,7 +55,7 @@ public struct CacheService: Sendable {
         let snapshot = try await runtime.exportRuntimeCache()
         let encodedSnapshot = try codec.encode(snapshot: snapshot)
         let compression = try await compressor.compress(encodedSnapshot)
-        let manifestRuntimeVersion = install.runtimeVersion ?? "mlx-vlm-0.4.3+mlx-lm-bridge-v2"
+        let manifestRuntimeVersion = install.runtimeVersion ?? "mlx-vlm-0.5.0+mlx-lm-bridge-v3"
         let promptCacheKey = PromptSessionNormalizer().promptCacheKey(
             for: session,
             backend: runtime.backend,

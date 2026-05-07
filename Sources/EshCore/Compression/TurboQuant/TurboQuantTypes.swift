@@ -12,7 +12,7 @@ public struct TurboQuantConfiguration: Codable, Hashable, Sendable {
         helperScriptPath: String? = nil,
         bits: Double = 3.5,
         seed: Int = 0,
-        mlxVLMVersion: String = "0.4.3"
+        mlxVLMVersion: String = "0.5.0"
     ) {
         self.pythonExecutablePath = pythonExecutablePath
         self.helperScriptPath = helperScriptPath

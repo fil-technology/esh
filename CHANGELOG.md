@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-05-07
+
+### Changed
+- Updated the MLX VLM bridge dependency contract to `mlx-vlm` 0.5.0 with compatible `mlx` and `mlx-lm` minimum versions.
+- Bumped MLX cache/runtime metadata to `mlx-vlm-0.5.0+mlx-lm-bridge-v3` so older 0.4.3 prompt-cache artifacts remain version-isolated.
+
 ## [0.1.38] - 2026-04-30
 
 ### Added

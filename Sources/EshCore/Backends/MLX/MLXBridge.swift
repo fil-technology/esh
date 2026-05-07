@@ -10,7 +10,7 @@ public struct MLXBridgeConfiguration: Codable, Hashable, Sendable {
         pythonExecutablePath: String? = nil,
         helperScriptPath: String? = nil,
         mlxLMVersion: String = "main",
-        mlxVLMVersion: String = "0.4.3"
+        mlxVLMVersion: String = "0.5.0"
     ) {
         self.pythonExecutablePath = pythonExecutablePath
         self.helperScriptPath = helperScriptPath

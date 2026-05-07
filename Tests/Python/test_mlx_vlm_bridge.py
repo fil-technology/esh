@@ -62,6 +62,15 @@ KVCache = type(
 
 
 class MLXVLMBridgeTests(unittest.TestCase):
+    def test_bridge_declares_mlx_vlm_0_5_dependency_contract(self):
+        bridge = load_bridge_module()
+        requirements = (REPOSITORY_ROOT / "Tools" / "python-requirements.txt").read_text(encoding="utf-8")
+
+        self.assertIn("mlx>=0.31.2", requirements)
+        self.assertIn("mlx-lm>=0.31.3", requirements)
+        self.assertIn("mlx-vlm==0.5.0", requirements)
+        self.assertEqual(bridge.MLX_VLM_PACKAGE_VERSION, "0.5.0")
+
     def test_prompt_cache_snapshot_casts_bfloat16_arrays_for_json_fallback(self):
         bridge = load_bridge_module()
         bridge._mlx_dtype = lambda dtype: dtype

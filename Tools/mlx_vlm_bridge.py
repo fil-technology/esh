@@ -18,6 +18,9 @@ from triattention_runtime import calibrate_model, maybe_apply_triattention
 
 
 MLX_RESUME_OVERLAP_TOKENS = 2
+MLX_VLM_PACKAGE_VERSION = "0.5.0"
+MLX_MINIMUM_VERSION = "0.31.2"
+MLX_LM_MINIMUM_VERSION = "0.31.3"
 
 
 def _fail(message: str, exit_code: int = 1) -> None:
@@ -48,8 +51,9 @@ def _import_mlx_vlm():
         from mlx_vlm.turboquant import TurboQuantKVCache
     except Exception as exc:
         _fail(
-            "mlx-vlm v0.4.3 TurboQuant bridge requires Python packages "
-            "`mlx` and `mlx-vlm==0.4.3`: "
+            f"mlx-vlm v{MLX_VLM_PACKAGE_VERSION} TurboQuant bridge requires Python packages "
+            f"`mlx>={MLX_MINIMUM_VERSION}`, `mlx-lm>={MLX_LM_MINIMUM_VERSION}`, "
+            f"and `mlx-vlm=={MLX_VLM_PACKAGE_VERSION}`: "
             f"{exc}"
         )
     return mx, KVCache, TurboQuantKVCache
@@ -917,7 +921,7 @@ def turboquant_compress(bits: float, seed: int) -> None:
         "format": "mlx-vlm-turboquant-artifact-v1",
         "metadata": {
             "engine": "mlx-vlm",
-            "engine_version": "0.4.3",
+            "engine_version": MLX_VLM_PACKAGE_VERSION,
             "bits": str(bits),
             "seed": str(seed),
             "source_format": snapshot.get("format", "unknown"),

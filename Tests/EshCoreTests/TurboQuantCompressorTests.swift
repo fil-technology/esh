@@ -5,6 +5,13 @@ import Testing
 @Suite
 struct TurboQuantCompressorTests {
     @Test
+    func defaultVersionsTargetMLXVLM050() {
+        #expect(MLXBridgeConfiguration().mlxVLMVersion == "0.5.0")
+        #expect(TurboQuantConfiguration().mlxVLMVersion == "0.5.0")
+        #expect(TurboQuantCompressor().version == "mlx-vlm-turboquant-v0.5.0")
+    }
+
+    @Test
     func bridgeUsesHelperProcessForRoundTrip() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

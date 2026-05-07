@@ -6,7 +6,7 @@ public struct TurboQuantCompressor: CacheCompressor, Sendable {
     private let bridge: TurboQuantBridge
 
     public init(
-        version: String = "mlx-vlm-turboquant-v0.4.3",
+        version: String = "mlx-vlm-turboquant-v0.5.0",
         bridge: TurboQuantBridge = .init()
     ) {
         self.version = version

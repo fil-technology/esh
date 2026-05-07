@@ -5,6 +5,13 @@ import Testing
 @Suite
 struct BackendCapabilityTests {
     @Test
+    func mlxDefaultRuntimeVersionTargetsMLXVLM050BridgeV3() {
+        let backend = MLXBackend()
+
+        #expect(backend.runtimeVersion == "mlx-vlm-0.5.0+mlx-lm-bridge-v3")
+    }
+
+    @Test
     func mlxReportsStreamingAndPromptCacheCapabilitiesWhenInstallPathExists() {
         let installURL = temporaryDirectory()
         let install = modelInstall(id: "qwen-mlx", backend: .mlx, installURL: installURL, backendFormat: "mlx")

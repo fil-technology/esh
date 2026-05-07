@@ -102,7 +102,7 @@ struct StaticMLXPackageDoctor: MLXPackageDoctor {
             pythonExecutable: "/tmp/python",
             mlxVersion: "0.26.0",
             mlxLMVersion: "0.25.0",
-            mlxVLMVersion: "0.4.3",
+            mlxVLMVersion: "0.5.0",
             numpyVersion: "2.0.0",
             safetensorsVersion: "0.5.0"
         )))
