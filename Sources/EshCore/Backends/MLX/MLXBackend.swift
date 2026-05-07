@@ -32,12 +32,18 @@ public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendabl
                     .directInference,
                     .tokenStreaming,
                     .promptCacheBuild,
-                    .promptCacheLoad
+                    .promptCacheLoad,
+                    .thinkingMode,
+                    .kvCacheQuantization
                 ],
                 unavailableFeatures: [
                     UnavailableBackendFeature(
                         feature: .promptCacheBenchmark,
                         reason: "MLX prompt cache benchmarking is not exposed through the backend capability API yet."
+                    ),
+                    UnavailableBackendFeature(
+                        feature: .responseFormatJsonSchema,
+                        reason: "MLX json_schema response_format requires constrained decoding support, which is not exposed yet."
                     )
                 ]
             )
@@ -52,7 +58,13 @@ public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendabl
                     .init(feature: .directInference, reason: reason),
                     .init(feature: .tokenStreaming, reason: reason),
                     .init(feature: .promptCacheBuild, reason: reason),
-                    .init(feature: .promptCacheLoad, reason: reason)
+                    .init(feature: .promptCacheLoad, reason: reason),
+                    .init(feature: .thinkingMode, reason: reason),
+                    .init(feature: .kvCacheQuantization, reason: reason),
+                    .init(
+                        feature: .responseFormatJsonSchema,
+                        reason: "MLX json_schema response_format requires constrained decoding support, which is not exposed yet."
+                    )
                 ],
                 warnings: [reason]
             )

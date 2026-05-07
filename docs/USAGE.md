@@ -61,7 +61,7 @@ esh engines list
 esh engines doctor <llama.cpp|mlx>
 esh validate <model-path-or-installed-id> [--engine llama.cpp|mlx] [--json]
 esh infer --input <path-or->
-esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
+esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
 esh model recommended [--profile chat|code]
 esh model list
 esh model search <query> [--source all|local|hf] [--limit N]
@@ -177,7 +177,10 @@ cat <<'JSON' | ./esh infer --input -
   ],
   "generation": {
     "maxTokens": 64,
-    "temperature": 0.2
+    "temperature": 0.2,
+    "enableThinking": true,
+    "kvBits": 3.5,
+    "kvQuantScheme": "turboquant"
   }
 }
 JSON
@@ -186,6 +189,7 @@ JSON
 Notes:
 - `esh infer` always returns JSON using `esh.infer.response.v1`
 - direct inference works for both MLX and GGUF installs
+- MLX installs accept optional thinking-template controls and KV-cache quantization controls in `generation`
 - `cacheArtifactID` is optional and keeps MLX cache-load as an extra capability, not the only integration path
 - `esh capabilities` reports which backends and installed models support direct inference versus cache build/load
 - cache artifacts created from normalized prompts now carry a deterministic prompt cache key for future cache lookup and reuse policy

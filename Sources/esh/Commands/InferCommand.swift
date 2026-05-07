@@ -36,6 +36,13 @@ enum InferCommand {
             "--min-p",
             "--repetition-penalty",
             "--seed",
+            "--thinking-budget",
+            "--thinking-start-token",
+            "--thinking-end-token",
+            "--kv-bits",
+            "--kv-quant-scheme",
+            "--kv-group-size",
+            "--quantized-kv-start",
             "--cache-mode",
             "--intent",
             "--session-name",
@@ -51,7 +58,7 @@ enum InferCommand {
         let message = CommandSupport.optionalValue(flag: "--message", in: arguments) ?? positionalMessage
         guard let message, message.isEmpty == false else {
             throw StoreError.invalidManifest(
-                "Usage: esh infer --input <path-or-> | esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]"
+                "Usage: esh infer --input <path-or-> | esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]"
             )
         }
 
@@ -74,6 +81,14 @@ enum InferCommand {
         let minP = try optionalDouble(flag: "--min-p", in: arguments)
         let repetitionPenalty = try optionalDouble(flag: "--repetition-penalty", in: arguments)
         let seed = try optionalUInt64(flag: "--seed", in: arguments)
+        let enableThinking = arguments.contains("--enable-thinking") ? true : nil
+        let thinkingBudget = try optionalInt(flag: "--thinking-budget", in: arguments)
+        let thinkingStartToken = CommandSupport.optionalValue(flag: "--thinking-start-token", in: arguments)
+        let thinkingEndToken = CommandSupport.optionalValue(flag: "--thinking-end-token", in: arguments)
+        let kvBits = try optionalDouble(flag: "--kv-bits", in: arguments)
+        let kvQuantScheme = CommandSupport.optionalValue(flag: "--kv-quant-scheme", in: arguments)
+        let kvGroupSize = try optionalInt(flag: "--kv-group-size", in: arguments)
+        let quantizedKVStart = try optionalInt(flag: "--quantized-kv-start", in: arguments)
 
         let cacheArtifactID: UUID?
         if let artifactValue {
@@ -134,7 +149,15 @@ enum InferCommand {
                 topK: topK,
                 minP: minP,
                 repetitionPenalty: repetitionPenalty,
-                seed: seed
+                seed: seed,
+                enableThinking: enableThinking,
+                thinkingBudget: thinkingBudget,
+                thinkingStartToken: thinkingStartToken,
+                thinkingEndToken: thinkingEndToken,
+                kvBits: kvBits,
+                kvQuantScheme: kvQuantScheme,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
             ),
             routing: routing
         )

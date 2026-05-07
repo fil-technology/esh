@@ -71,6 +71,60 @@ class MLXVLMBridgeTests(unittest.TestCase):
         self.assertIn("mlx-vlm==0.5.0", requirements)
         self.assertEqual(bridge.MLX_VLM_PACKAGE_VERSION, "0.5.0")
 
+    def test_render_prompt_passes_supported_thinking_flag_to_chat_template(self):
+        bridge = load_bridge_module()
+
+        class Tokenizer:
+            chat_template = "template"
+
+            def apply_chat_template(self, messages, tokenize, add_generation_prompt, enable_thinking=None):
+                self.kwargs = {
+                    "messages": messages,
+                    "tokenize": tokenize,
+                    "add_generation_prompt": add_generation_prompt,
+                    "enable_thinking": enable_thinking,
+                }
+                return "rendered"
+
+        tokenizer = Tokenizer()
+
+        rendered = bridge._render_prompt(
+            tokenizer,
+            [{"role": "user", "content": "Think."}],
+            add_generation_prompt=True,
+            config={"enableThinking": True},
+        )
+
+        self.assertEqual(rendered, "rendered")
+        self.assertIs(tokenizer.kwargs["enable_thinking"], True)
+
+    def test_apply_kv_mode_uses_generation_kv_quantization_controls(self):
+        bridge = load_bridge_module()
+        calls = []
+
+        def fake_quantize(prompt_cache, config):
+            calls.append((prompt_cache, config))
+            return "uniform"
+
+        bridge._maybe_apply_generation_kv_quantization = fake_quantize
+
+        effective = bridge._apply_kv_mode(
+            ["cache"],
+            object(),
+            {
+                "kvMode": "raw",
+                "config": {
+                    "kvBits": 8,
+                    "kvQuantScheme": "uniform",
+                    "kvGroupSize": 32,
+                    "quantizedKVStart": 64,
+                },
+            },
+        )
+
+        self.assertEqual(effective, "uniform")
+        self.assertEqual(calls, [(["cache"], {"kvBits": 8, "kvQuantScheme": "uniform", "kvGroupSize": 32, "quantizedKVStart": 64})])
+
     def test_prompt_cache_snapshot_casts_bfloat16_arrays_for_json_fallback(self):
         bridge = load_bridge_module()
         bridge._mlx_dtype = lambda dtype: dtype

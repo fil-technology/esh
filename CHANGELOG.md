@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-05-07
+
+### Added
+- Added MLX 0.5 generation controls for thinking-mode chat templates and KV-cache quantization across OpenAI-compatible requests, external inference, the CLI, and the MLX bridge.
+- Advertised MLX thinking-mode and KV-cache quantization capabilities while explicitly marking `json_schema` response format constrained decoding as unavailable.
+
 ## [0.1.39] - 2026-05-07
 
 ### Changed

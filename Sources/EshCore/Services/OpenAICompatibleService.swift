@@ -35,6 +35,15 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
     public var maxCompletionTokens: Int?
     public var seed: UInt64?
     public var stream: Bool?
+    public var responseFormat: OpenAIResponseFormat?
+    public var enableThinking: Bool?
+    public var thinkingBudget: Int?
+    public var thinkingStartToken: String?
+    public var thinkingEndToken: String?
+    public var kvBits: Double?
+    public var kvQuantScheme: String?
+    public var kvGroupSize: Int?
+    public var quantizedKVStart: Int?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -48,6 +57,15 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
         case maxCompletionTokens = "max_completion_tokens"
         case seed
         case stream
+        case responseFormat = "response_format"
+        case enableThinking = "enable_thinking"
+        case thinkingBudget = "thinking_budget"
+        case thinkingStartToken = "thinking_start_token"
+        case thinkingEndToken = "thinking_end_token"
+        case kvBits = "kv_bits"
+        case kvQuantScheme = "kv_quant_scheme"
+        case kvGroupSize = "kv_group_size"
+        case quantizedKVStart = "quantized_kv_start"
     }
 }
 
@@ -63,6 +81,15 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
     public var maxOutputTokens: Int?
     public var seed: UInt64?
     public var stream: Bool?
+    public var responseFormat: OpenAIResponseFormat?
+    public var enableThinking: Bool?
+    public var thinkingBudget: Int?
+    public var thinkingStartToken: String?
+    public var thinkingEndToken: String?
+    public var kvBits: Double?
+    public var kvQuantScheme: String?
+    public var kvGroupSize: Int?
+    public var quantizedKVStart: Int?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -76,6 +103,25 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
         case maxOutputTokens = "max_output_tokens"
         case seed
         case stream
+        case responseFormat = "response_format"
+        case enableThinking = "enable_thinking"
+        case thinkingBudget = "thinking_budget"
+        case thinkingStartToken = "thinking_start_token"
+        case thinkingEndToken = "thinking_end_token"
+        case kvBits = "kv_bits"
+        case kvQuantScheme = "kv_quant_scheme"
+        case kvGroupSize = "kv_group_size"
+        case quantizedKVStart = "quantized_kv_start"
+    }
+}
+
+public struct OpenAIResponseFormat: Codable, Hashable, Sendable {
+    public var type: String
+    public var jsonSchema: JSONValue?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case jsonSchema = "json_schema"
     }
 }
 
@@ -291,6 +337,7 @@ public enum JSONValue: Codable, Hashable, Sendable {
     case array([JSONValue])
     case string(String)
     case int(Int)
+    case double(Double)
     case bool(Bool)
     case null
 
@@ -304,6 +351,8 @@ public enum JSONValue: Codable, Hashable, Sendable {
             self = .string(string)
         } else if let int = try? container.decode(Int.self) {
             self = .int(int)
+        } else if let double = try? container.decode(Double.self) {
+            self = .double(double)
         } else if let bool = try? container.decode(Bool.self) {
             self = .bool(bool)
         } else if container.decodeNil() {
@@ -324,6 +373,8 @@ public enum JSONValue: Codable, Hashable, Sendable {
             try container.encode(string)
         case .int(let int):
             try container.encode(int)
+        case .double(let double):
+            try container.encode(double)
         case .bool(let bool):
             try container.encode(bool)
         case .null:
@@ -737,6 +788,7 @@ public struct OpenAICompatibleService: Sendable {
             nonStreamingRequest.stream = false
             return try await chatCompletions(nonStreamingRequest)
         }
+        try validateResponseFormat(request.responseFormat)
         let messages = try request.messages.map(externalMessage(from:))
         let external = ExternalInferenceRequest(
             model: request.model,
@@ -748,7 +800,15 @@ public struct OpenAICompatibleService: Sendable {
                 topK: request.topK,
                 minP: request.minP,
                 repetitionPenalty: request.repetitionPenalty,
-                seed: request.seed
+                seed: request.seed,
+                enableThinking: request.enableThinking,
+                thinkingBudget: request.thinkingBudget,
+                thinkingStartToken: request.thinkingStartToken,
+                thinkingEndToken: request.thinkingEndToken,
+                kvBits: request.kvBits,
+                kvQuantScheme: request.kvQuantScheme,
+                kvGroupSize: request.kvGroupSize,
+                quantizedKVStart: request.quantizedKVStart
             )
         )
         let response = try await inferClosure(external)
@@ -831,6 +891,7 @@ public struct OpenAICompatibleService: Sendable {
             nonStreamingRequest.stream = false
             return try await responses(nonStreamingRequest)
         }
+        try validateResponseFormat(request.responseFormat)
 
         var messages: [ExternalInferenceMessage] = []
         if let instructions = request.instructions?.trimmingCharacters(in: .whitespacesAndNewlines), !instructions.isEmpty {
@@ -853,7 +914,15 @@ public struct OpenAICompatibleService: Sendable {
                 topK: request.topK,
                 minP: request.minP,
                 repetitionPenalty: request.repetitionPenalty,
-                seed: request.seed
+                seed: request.seed,
+                enableThinking: request.enableThinking,
+                thinkingBudget: request.thinkingBudget,
+                thinkingStartToken: request.thinkingStartToken,
+                thinkingEndToken: request.thinkingEndToken,
+                kvBits: request.kvBits,
+                kvQuantScheme: request.kvQuantScheme,
+                kvGroupSize: request.kvGroupSize,
+                quantizedKVStart: request.quantizedKVStart
             )
         )
         let response = try await inferClosure(external)
@@ -1110,6 +1179,15 @@ public struct OpenAICompatibleService: Sendable {
             throw OpenAICompatibleError.unsupported("Tool messages are not supported yet.")
         }
         return ExternalInferenceMessage(role: role, text: try message.content.flattenedText())
+    }
+
+    private func validateResponseFormat(_ responseFormat: OpenAIResponseFormat?) throws {
+        guard let responseFormat else { return }
+        if responseFormat.type.lowercased() == "json_schema" {
+            throw OpenAICompatibleError.unsupported(
+                "json_schema response_format is parsed but not exposed yet; MLX constrained decoding support is required before Esh can honor it."
+            )
+        }
     }
 
     private func unixTimestamp() -> Int {

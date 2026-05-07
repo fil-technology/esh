@@ -25,6 +25,10 @@ struct BackendCapabilityTests {
         #expect(report.supports(.tokenStreaming))
         #expect(report.supports(.promptCacheBuild))
         #expect(report.supports(.promptCacheLoad))
+        #expect(report.supports(.thinkingMode))
+        #expect(report.supports(.kvCacheQuantization))
+        #expect(!report.supports(.responseFormatJsonSchema))
+        #expect(report.unavailableFeature(.responseFormatJsonSchema)?.reason.contains("constrained decoding") == true)
     }
 
     @Test

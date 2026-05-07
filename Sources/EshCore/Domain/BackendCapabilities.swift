@@ -8,6 +8,9 @@ public enum BackendRuntimeFeature: String, Codable, Hashable, Sendable, CaseIter
     case promptCacheBenchmark = "prompt-cache-benchmark"
     case toolMessages = "tool-messages"
     case multimodalInput = "multimodal-input"
+    case thinkingMode = "thinking-mode"
+    case kvCacheQuantization = "kv-cache-quantization"
+    case responseFormatJsonSchema = "response-format-json-schema"
 }
 
 public struct UnavailableBackendFeature: Codable, Hashable, Sendable {

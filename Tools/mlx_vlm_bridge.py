@@ -190,6 +190,67 @@ def _maybe_apply_turboquant(prompt_cache, bits: float, seed: int):
         prompt_cache[index] = convert(prompt_cache[index])
 
 
+def _generation_config(request: dict[str, Any]) -> dict[str, Any]:
+    config = request.get("config")
+    return config if isinstance(config, dict) else {}
+
+
+def _is_fractional_bits(value: float) -> bool:
+    return value != int(value)
+
+
+def _maybe_apply_generation_kv_quantization(prompt_cache, config: dict[str, Any]) -> str | None:
+    kv_bits_value = config.get("kvBits")
+    if kv_bits_value is None:
+        return None
+
+    kv_bits = float(kv_bits_value)
+    if kv_bits <= 0:
+        _fail("kv_bits must be greater than zero.")
+
+    scheme = str(config.get("kvQuantScheme") or "").lower()
+    if not scheme:
+        scheme = "turboquant" if _is_fractional_bits(kv_bits) else "uniform"
+    if scheme == "turbo":
+        scheme = "turboquant"
+
+    if scheme == "turboquant":
+        _maybe_apply_turboquant(
+            prompt_cache,
+            bits=kv_bits,
+            seed=int(config.get("turboSeed", 0)),
+        )
+        return "turboquant"
+
+    if scheme == "uniform":
+        if _is_fractional_bits(kv_bits):
+            _fail("Uniform KV cache quantization requires integer kv_bits.")
+        try:
+            from mlx_lm.generate import maybe_quantize_kv_cache
+        except Exception as exc:
+            _fail(f"mlx-lm does not expose KV cache quantization support: {exc}")
+
+        kwargs = _supported_kwargs(
+            maybe_quantize_kv_cache,
+            {
+                "quantized_kv_start": int(config.get("quantizedKVStart", 0)),
+                "kv_group_size": int(config.get("kvGroupSize", 64)),
+                "kv_bits": int(kv_bits),
+            },
+        )
+        if not kwargs:
+            kwargs = {
+                "quantized_kv_start": int(config.get("quantizedKVStart", 0)),
+                "kv_group_size": int(config.get("kvGroupSize", 64)),
+                "kv_bits": int(kv_bits),
+            }
+        maybe_quantize_kv_cache(prompt_cache, **kwargs)
+        return "uniform"
+
+    _fail(f"Unsupported kv_quant_scheme: {scheme}")
+    return None
+
+
 def _resolve_requested_kv_mode(request: dict[str, Any]) -> str:
     requested = request.get("kvMode", "raw")
     if requested != "auto":
@@ -209,6 +270,9 @@ def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
     triattention_calib = request.get("triattentionCalibPath")
     turbo_bits = float(request.get("turboBits", 3.5))
     turbo_seed = int(request.get("turboSeed", 0))
+    generation_kv_mode = _maybe_apply_generation_kv_quantization(prompt_cache, _generation_config(request))
+    if generation_kv_mode is not None:
+        return generation_kv_mode
 
     if effective_mode == "triattention":
         try:
@@ -405,12 +469,28 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
     }
 
 
-def _render_prompt(tokenizer, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
+def _render_prompt(
+    tokenizer,
+    messages: list[dict[str, str]],
+    add_generation_prompt: bool,
+    config: dict[str, Any] | None = None,
+) -> str:
     if getattr(tokenizer, "chat_template", None):
+        config = config or {}
+        template_kwargs = _supported_kwargs(
+            tokenizer.apply_chat_template,
+            {
+                "enable_thinking": config.get("enableThinking"),
+                "thinking_budget": config.get("thinkingBudget"),
+                "thinking_start_token": config.get("thinkingStartToken"),
+                "thinking_end_token": config.get("thinkingEndToken"),
+            },
+        )
         return tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=add_generation_prompt,
+            **template_kwargs,
         )
 
     rendered = []
@@ -615,7 +695,13 @@ def mlx_generate() -> None:
         for message in request["session"]["messages"]
     ]
     messages = _normalize_messages_for_prompt(messages)
-    full_prompt = _render_prompt(tokenizer, messages, add_generation_prompt=True)
+    config = _generation_config(request)
+    full_prompt = _render_prompt(
+        tokenizer,
+        messages,
+        add_generation_prompt=True,
+        config=config,
+    )
     full_prompt_tokens = _tokenize_prompt(tokenizer, full_prompt)
     state_payload = _load_state_file(request["stateFilePath"])
 
@@ -651,9 +737,9 @@ def mlx_generate() -> None:
         model=model,
         tokenizer=tokenizer,
         prompt=prompt_tokens,
-        max_tokens=request["config"]["maxTokens"],
+        max_tokens=config["maxTokens"],
         prompt_cache=prompt_cache,
-        **_mlx_stream_generation_kwargs(stream_generate, mx, request["config"]),
+        **_mlx_stream_generation_kwargs(stream_generate, mx, config),
     ):
         last_response = response
         if response.text:
@@ -665,7 +751,7 @@ def mlx_generate() -> None:
     reply = "".join(reply_parts)
     updated_messages = messages + [{"role": "assistant", "content": reply}]
     rendered_with_reply = _render_prompt(
-        tokenizer, updated_messages, add_generation_prompt=False
+        tokenizer, updated_messages, add_generation_prompt=False, config=config
     )
     snapshot = _prompt_cache_to_snapshot(
         prompt_cache,
@@ -708,7 +794,12 @@ def mlx_build_cache() -> None:
         for message in request["session"]["messages"]
     ]
     messages = _normalize_messages_for_prompt(messages)
-    rendered_prompt = _render_prompt(tokenizer, messages, add_generation_prompt=False)
+    rendered_prompt = _render_prompt(
+        tokenizer,
+        messages,
+        add_generation_prompt=False,
+        config=_generation_config(request),
+    )
     prompt_tokens = _tokenize_prompt(tokenizer, rendered_prompt)
     prompt_cache = make_prompt_cache(model)
     effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)

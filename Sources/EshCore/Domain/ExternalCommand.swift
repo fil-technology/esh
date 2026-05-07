@@ -24,17 +24,42 @@ public struct ExternalBackendCapability: Codable, Hashable, Sendable {
     public var supportsDirectInference: Bool
     public var supportsCacheBuild: Bool
     public var supportsCacheLoad: Bool
+    public var supportedFeatures: [BackendRuntimeFeature]
+    public var unavailableFeatures: [UnavailableBackendFeature]
 
     public init(
         backend: BackendKind,
         supportsDirectInference: Bool,
         supportsCacheBuild: Bool,
-        supportsCacheLoad: Bool
+        supportsCacheLoad: Bool,
+        supportedFeatures: [BackendRuntimeFeature] = [],
+        unavailableFeatures: [UnavailableBackendFeature] = []
     ) {
         self.backend = backend
         self.supportsDirectInference = supportsDirectInference
         self.supportsCacheBuild = supportsCacheBuild
         self.supportsCacheLoad = supportsCacheLoad
+        self.supportedFeatures = supportedFeatures
+        self.unavailableFeatures = unavailableFeatures
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case backend
+        case supportsDirectInference
+        case supportsCacheBuild
+        case supportsCacheLoad
+        case supportedFeatures
+        case unavailableFeatures
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.backend = try container.decode(BackendKind.self, forKey: .backend)
+        self.supportsDirectInference = try container.decode(Bool.self, forKey: .supportsDirectInference)
+        self.supportsCacheBuild = try container.decode(Bool.self, forKey: .supportsCacheBuild)
+        self.supportsCacheLoad = try container.decode(Bool.self, forKey: .supportsCacheLoad)
+        self.supportedFeatures = try container.decodeIfPresent([BackendRuntimeFeature].self, forKey: .supportedFeatures) ?? []
+        self.unavailableFeatures = try container.decodeIfPresent([UnavailableBackendFeature].self, forKey: .unavailableFeatures) ?? []
     }
 }
 
@@ -48,6 +73,8 @@ public struct ExternalInstalledModelCapability: Codable, Hashable, Sendable {
     public var supportsDirectInference: Bool
     public var supportsCacheBuild: Bool
     public var supportsCacheLoad: Bool
+    public var supportedFeatures: [BackendRuntimeFeature]
+    public var unavailableFeatures: [UnavailableBackendFeature]
 
     public init(
         id: String,
@@ -58,7 +85,9 @@ public struct ExternalInstalledModelCapability: Codable, Hashable, Sendable {
         runtimeVersion: String?,
         supportsDirectInference: Bool,
         supportsCacheBuild: Bool,
-        supportsCacheLoad: Bool
+        supportsCacheLoad: Bool,
+        supportedFeatures: [BackendRuntimeFeature] = [],
+        unavailableFeatures: [UnavailableBackendFeature] = []
     ) {
         self.id = id
         self.displayName = displayName
@@ -69,6 +98,37 @@ public struct ExternalInstalledModelCapability: Codable, Hashable, Sendable {
         self.supportsDirectInference = supportsDirectInference
         self.supportsCacheBuild = supportsCacheBuild
         self.supportsCacheLoad = supportsCacheLoad
+        self.supportedFeatures = supportedFeatures
+        self.unavailableFeatures = unavailableFeatures
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case backend
+        case source
+        case variant
+        case runtimeVersion
+        case supportsDirectInference
+        case supportsCacheBuild
+        case supportsCacheLoad
+        case supportedFeatures
+        case unavailableFeatures
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.displayName = try container.decode(String.self, forKey: .displayName)
+        self.backend = try container.decode(BackendKind.self, forKey: .backend)
+        self.source = try container.decode(String.self, forKey: .source)
+        self.variant = try container.decodeIfPresent(String.self, forKey: .variant)
+        self.runtimeVersion = try container.decodeIfPresent(String.self, forKey: .runtimeVersion)
+        self.supportsDirectInference = try container.decode(Bool.self, forKey: .supportsDirectInference)
+        self.supportsCacheBuild = try container.decode(Bool.self, forKey: .supportsCacheBuild)
+        self.supportsCacheLoad = try container.decode(Bool.self, forKey: .supportsCacheLoad)
+        self.supportedFeatures = try container.decodeIfPresent([BackendRuntimeFeature].self, forKey: .supportedFeatures) ?? []
+        self.unavailableFeatures = try container.decodeIfPresent([UnavailableBackendFeature].self, forKey: .unavailableFeatures) ?? []
     }
 }
 

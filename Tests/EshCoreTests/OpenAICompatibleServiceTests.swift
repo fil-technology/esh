@@ -87,6 +87,96 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
+    func chatCompletionsMapsMLXControlsIntoGenerationConfig() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "demo-model",
+              "messages": [
+                { "role": "user", "content": "Think briefly." }
+              ],
+              "enable_thinking": true,
+              "thinking_budget": 48,
+              "thinking_start_token": "<think>",
+              "thinking_end_token": "</think>",
+              "kv_bits": 3.5,
+              "kv_quant_scheme": "turboquant",
+              "kv_group_size": 64,
+              "quantized_kv_start": 128
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: requestData)
+
+        let capture = RequestCapture()
+        let service = OpenAICompatibleService(
+            infer: { externalRequest in
+                await capture.store(externalRequest)
+                return ExternalInferenceResponse(
+                    modelID: "demo-model",
+                    backend: .mlx,
+                    integration: .init(mode: "direct"),
+                    outputText: "done",
+                    metrics: .init()
+                )
+            },
+            installedModels: { [] }
+        )
+
+        _ = try await service.chatCompletions(request)
+        let externalRequest = try #require(await capture.load())
+
+        #expect(externalRequest.generation.enableThinking == true)
+        #expect(externalRequest.generation.thinkingBudget == 48)
+        #expect(externalRequest.generation.thinkingStartToken == "<think>")
+        #expect(externalRequest.generation.thinkingEndToken == "</think>")
+        #expect(externalRequest.generation.kvBits == 3.5)
+        #expect(externalRequest.generation.kvQuantScheme == "turboquant")
+        #expect(externalRequest.generation.kvGroupSize == 64)
+        #expect(externalRequest.generation.quantizedKVStart == 128)
+    }
+
+    @Test
+    func chatCompletionsRejectsJsonSchemaResponseFormatClearly() async throws {
+        let requestData = Data(
+            """
+            {
+              "model": "demo-model",
+              "messages": [
+                { "role": "user", "content": "Return JSON." }
+              ],
+              "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                  "name": "answer",
+                  "schema": {
+                    "type": "object",
+                    "properties": { "answer": { "type": "string" } },
+                    "required": ["answer"]
+                  }
+                }
+              }
+            }
+            """.utf8
+        )
+        let request = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: requestData)
+        let service = OpenAICompatibleService(
+            infer: { _ in
+                throw OpenAICompatibleError.invalidRequest("Unexpected inference.")
+            },
+            installedModels: { [] }
+        )
+
+        do {
+            _ = try await service.chatCompletions(request)
+            Issue.record("Expected json_schema response_format to be rejected.")
+        } catch let error as OpenAICompatibleError {
+            #expect(error.localizedDescription.contains("json_schema response_format"))
+            #expect(error.localizedDescription.contains("not exposed"))
+        }
+    }
+
+    @Test
     func chatCompletionsMapsDeveloperRoleToSystem() async throws {
         let requestData = Data(
             """

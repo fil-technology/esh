@@ -24,7 +24,9 @@ public struct ExternalCapabilitiesService: Sendable {
                     runtimeVersion: install.runtimeVersion,
                     supportsDirectInference: backendCapability.supportsDirectInference,
                     supportsCacheBuild: backendCapability.supportsCacheBuild,
-                    supportsCacheLoad: backendCapability.supportsCacheLoad
+                    supportsCacheLoad: backendCapability.supportsCacheLoad,
+                    supportedFeatures: backendCapability.supportedFeatures,
+                    unavailableFeatures: backendCapability.unavailableFeatures
                 )
             }
 
@@ -56,21 +58,50 @@ public struct ExternalCapabilitiesService: Sendable {
                 backend: backend,
                 supportsDirectInference: true,
                 supportsCacheBuild: true,
-                supportsCacheLoad: true
+                supportsCacheLoad: true,
+                supportedFeatures: [
+                    .directInference,
+                    .tokenStreaming,
+                    .promptCacheBuild,
+                    .promptCacheLoad,
+                    .thinkingMode,
+                    .kvCacheQuantization
+                ],
+                unavailableFeatures: [
+                    .init(
+                        feature: .responseFormatJsonSchema,
+                        reason: "MLX json_schema response_format requires constrained decoding support, which is not exposed yet."
+                    )
+                ]
             )
         case .gguf:
             ExternalBackendCapability(
                 backend: backend,
                 supportsDirectInference: true,
                 supportsCacheBuild: false,
-                supportsCacheLoad: false
+                supportsCacheLoad: false,
+                supportedFeatures: [
+                    .directInference,
+                    .tokenStreaming
+                ],
+                unavailableFeatures: [
+                    .init(feature: .promptCacheBuild, reason: "GGUF cache build is not supported by the llama.cpp backend yet."),
+                    .init(feature: .promptCacheLoad, reason: "GGUF cache load is not supported by the llama.cpp backend yet."),
+                    .init(feature: .promptCacheBenchmark, reason: "GGUF cache benchmarking hooks are not implemented yet.")
+                ]
             )
         case .onnx:
             ExternalBackendCapability(
                 backend: backend,
                 supportsDirectInference: false,
                 supportsCacheBuild: false,
-                supportsCacheLoad: false
+                supportsCacheLoad: false,
+                unavailableFeatures: [
+                    .init(feature: .directInference, reason: "ONNX direct inference is not implemented yet."),
+                    .init(feature: .tokenStreaming, reason: "ONNX token streaming is not implemented yet."),
+                    .init(feature: .promptCacheBuild, reason: "ONNX prompt cache build is not implemented yet."),
+                    .init(feature: .promptCacheLoad, reason: "ONNX prompt cache load is not implemented yet.")
+                ]
             )
         }
     }
