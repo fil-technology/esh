@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-05-12
+
+### Fixed
+- Packaged MLX and TurboQuant runtimes now resolve their bundled Python helper paths from the installed release layout instead of falling back to compile-time source checkout paths.
+
 ## [0.1.40] - 2026-05-07
 
 ### Added
