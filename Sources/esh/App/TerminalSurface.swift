@@ -1,4 +1,5 @@
 import Foundation
+import EshCore
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -14,7 +15,8 @@ final class TerminalSurface {
         let overlayLines = state.overlay.map {
             OverlayPanelView.renderedLines(overlay: $0, availableWidth: size.columns)
         } ?? []
-        let reservedBottom = 2 + overlayLines.count
+        let suggestionLines = Self.slashSuggestionLines(input: state.inputText, width: size.columns)
+        let reservedBottom = 2 + overlayLines.count + suggestionLines.count
         let reservedTop = headerLines.count + 1
         let transcriptHeight = max(size.rows - reservedBottom - reservedTop, 1)
 
@@ -40,6 +42,7 @@ final class TerminalSurface {
         }
 
         output.append(contentsOf: overlayLines)
+        output.append(contentsOf: suggestionLines)
         let inputLine = InputBarView.render(state: state, width: size.columns)
         output.append(inputLine)
         output.append(FooterStatsView.renderedLine(state: state, width: size.columns))
@@ -68,6 +71,19 @@ final class TerminalSurface {
         fflush(stdout)
         lastLines = output
         lastSize = size
+    }
+
+    /// Slash-command autocomplete lines shown above the input as the user types `/…`.
+    static func slashSuggestionLines(input: String, width: Int) -> [String] {
+        let suggestions = SlashCommandCatalog.suggestions(for: input)
+        guard !suggestions.isEmpty else { return [] }
+        var lines: [String] = ["\(TerminalUIStyle.faint)commands (\(suggestions.count)) — Tab/Enter to run:\(TerminalUIStyle.reset)"]
+        for entry in suggestions {
+            let left = "\(TerminalUIStyle.cyan)\(entry.display)\(TerminalUIStyle.reset)"
+            let line = "  \(left)  \(TerminalUIStyle.faint)\(entry.description)\(TerminalUIStyle.reset)"
+            lines.append(TerminalUIStyle.truncateVisible(line, limit: width))
+        }
+        return lines
     }
 
     static func visibleTranscriptLines(
