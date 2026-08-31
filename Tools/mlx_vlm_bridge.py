@@ -781,6 +781,16 @@ def mlx_generate() -> None:
         "memoryBytes": int(mx.get_peak_memory()),
         "cacheSizeBytes": int(snapshot["metadata"]["raw_bytes"]),
         "compressionRatio": None,
+        # Measured token accounting (never fabricated; only what the runtime actually reports).
+        "promptTokens": (
+            int(last_response.prompt_tokens) if last_response is not None else None
+        ),
+        "generationTokens": (
+            int(last_response.generation_tokens) if last_response is not None else None
+        ),
+        "finishReason": (
+            last_response.finish_reason if last_response is not None else None
+        ),
     }
     _emit_json_line({"event": "done", "text": reply, "metrics": metrics, "kvMode": effective_kv_mode})
 

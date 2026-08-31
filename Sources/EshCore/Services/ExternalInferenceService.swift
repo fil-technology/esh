@@ -154,8 +154,18 @@ public struct ExternalInferenceService: Sendable {
             usedPromptCache: request.cacheArtifactID != nil
         )
         let finalMetrics = await runtime.metrics
-        // Normalized usage: only counters the runtime actually reports (never fabricated).
+        // Normalized usage: only counters the runtime actually reports (never fabricated). Total is
+        // derived only when both halves are measured.
+        let totalTokens: Int?
+        if let p = finalMetrics.promptTokens, let g = finalMetrics.generationTokens {
+            totalTokens = p + g
+        } else {
+            totalTokens = nil
+        }
         let usage = EshUsage(
+            inputTokens: finalMetrics.promptTokens,
+            outputTokens: finalMetrics.generationTokens,
+            totalTokens: totalTokens,
             contextUsed: finalMetrics.contextTokens,
             monetaryCostUSD: 0,
             costProvenance: "local on-device inference; no API cost"
