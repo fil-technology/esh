@@ -124,6 +124,12 @@ enum AudioSpeechGenerator {
     private static func resolveModel(_ requestedModel: String?) throws -> TTSModelDescriptor {
         let models = TTSMLX.supportedModels
         guard let requestedModel else {
+            // The historical first entry (Marvis) currently fails to load on this TTSMLX version
+            // (RoPE-key mismatch), so prefer a known-working default; fall back to the first model.
+            let preferredDefaults = ["mlx-community/Soprano-80M-bf16", "mlx-community/pocket-tts"]
+            for preferred in preferredDefaults {
+                if let model = models.first(where: { $0.id == preferred }) { return model }
+            }
             guard let first = models.first else {
                 throw StoreError.notFound("TTSMLX did not report any supported MLX TTS models.")
             }

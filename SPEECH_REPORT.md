@@ -17,10 +17,19 @@ responds. The full audio → STT → LLM → **TTS** loop is blocked only by the
 Notes: `mlx-community/whisper-tiny` is **not** compatible (missing HF processor: `mlx_audio` raises
 "Processor not found"); parakeet works. The command surfaces that honestly per model.
 
-## TTS — real finding from the hardening pass
+## TTS — fixed default + closed audio loop
 
-TTS already existed (`esh audio speak`). Exercising it during this pass surfaced a **real regression**:
-the default **Marvis** TTS model fails to load with
+TTS now works out of the box: `esh audio speak "…"` (no `--model`) produced a valid WAV. The **full
+audio → STT → LLM → TTS loop is demonstrated**: `hello.wav` → STT "Hello from Esh." → LLM
+"Hello from me." → TTS (143 KB WAV).
+
+The fix: the historical default TTS model (**Marvis**) fails to load on this `TTSMLX` version (see
+below), so the default now prefers a **known-working** model (`Soprano-80M`, verified). Marvis remains
+selectable but is a model-specific known issue.
+
+### Marvis — model-specific known issue
+
+The **Marvis** TTS model still fails to load with
 
 ```
 Key model.decoder.layers.0.self_attn.rope.cosF32 not found in
