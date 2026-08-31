@@ -26,7 +26,10 @@ enum AudioCommand {
             throw StoreError.invalidManifest("Usage: esh audio transcribe <audio-file> [--model <id>] [--language <name>] [--json]")
         }
         let audioURL = URL(fileURLWithPath: audioArg, relativeTo: currentDirectoryURL).standardizedFileURL
-        let model = CommandSupport.optionalValue(flag: "--model", in: arguments)
+        // Prefer an explicit --model, else the configured STT model (`esh config set-speech --stt …`),
+        // else the built-in default.
+        let configuredSTT = (try? EshConfigStore().load())?.defaults.sttModel
+        let model = CommandSupport.optionalValue(flag: "--model", in: arguments) ?? configuredSTT
         let language = CommandSupport.optionalValue(flag: "--language", in: arguments)
         let json = arguments.contains("--json")
 
@@ -55,10 +58,12 @@ enum AudioCommand {
             throw StoreError.invalidManifest("Output file already exists at \(outputURL.path). Re-run with --force to overwrite it.")
         }
 
+        // Prefer an explicit --model, else the configured TTS model, else the built-in working default.
+        let configuredTTS = (try? EshConfigStore().load())?.defaults.ttsModel
         let result = try await AudioSpeechGenerator.synthesize(
             .init(
                 text: options.text,
-                model: options.model,
+                model: options.model ?? configuredTTS,
                 voice: options.voice,
                 language: options.language,
                 outputURL: outputURL,

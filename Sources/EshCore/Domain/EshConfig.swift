@@ -66,6 +66,12 @@ public struct EshConfig: Codable, Hashable, Sendable {
                 config.defaults.contextSize = Int(value) ?? config.defaults.contextSize
             case ("defaults", "performance_mode"):
                 config.defaults.performanceMode = parseString(value)
+            case ("defaults", "tts_model"):
+                let m = parseString(value)
+                config.defaults.ttsModel = m.isEmpty ? nil : m
+            case ("defaults", "stt_model"):
+                let m = parseString(value)
+                config.defaults.sttModel = m.isEmpty ? nil : m
             case ("engines.llama_cpp", "enabled"):
                 config.engines.llamaCpp.enabled = parseBool(value) ?? config.engines.llamaCpp.enabled
             case ("engines.llama_cpp", "binary"):
@@ -104,6 +110,8 @@ public struct EshConfig: Codable, Hashable, Sendable {
         # (see `esh storage show`). This value is retained only for backward compatibility.
         model_dir = "\(defaults.modelDir)"
         context_size = \(defaults.contextSize)
+        tts_model = "\(defaults.ttsModel ?? "")"
+        stt_model = "\(defaults.sttModel ?? "")"
 
         [engines.llama_cpp]
         enabled = \(formatBool(engines.llamaCpp.enabled))
@@ -129,16 +137,23 @@ public struct EshDefaultsConfig: Codable, Hashable, Sendable {
     public var modelDir: String
     public var contextSize: Int
     public var performanceMode: String
+    /// Preferred speech models (M10). Persisted so `esh audio speak` / `esh audio transcribe` use them
+    /// by default and can be switched. nil = use the built-in working default.
+    public var ttsModel: String?
+    public var sttModel: String?
 
-    public init(engine: String = "auto", modelDir: String = "~/.esh/models", contextSize: Int = 8192, performanceMode: String = "auto") {
+    public init(engine: String = "auto", modelDir: String = "~/.esh/models", contextSize: Int = 8192,
+                performanceMode: String = "auto", ttsModel: String? = nil, sttModel: String? = nil) {
         self.engine = engine
         self.modelDir = modelDir
         self.contextSize = contextSize
         self.performanceMode = performanceMode
+        self.ttsModel = ttsModel
+        self.sttModel = sttModel
     }
 
     private enum CodingKeys: String, CodingKey {
-        case engine, modelDir, contextSize, performanceMode
+        case engine, modelDir, contextSize, performanceMode, ttsModel, sttModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -147,6 +162,8 @@ public struct EshDefaultsConfig: Codable, Hashable, Sendable {
         self.modelDir = try c.decodeIfPresent(String.self, forKey: .modelDir) ?? "~/.esh/models"
         self.contextSize = try c.decodeIfPresent(Int.self, forKey: .contextSize) ?? 8192
         self.performanceMode = try c.decodeIfPresent(String.self, forKey: .performanceMode) ?? "auto"
+        self.ttsModel = try c.decodeIfPresent(String.self, forKey: .ttsModel)
+        self.sttModel = try c.decodeIfPresent(String.self, forKey: .sttModel)
     }
 }
 
