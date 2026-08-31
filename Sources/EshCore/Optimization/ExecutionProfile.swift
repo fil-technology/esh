@@ -21,6 +21,10 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
     public var evidenceBacked: Bool
     /// Version of the local optimization profile DB consulted (nil if none available).
     public var benchmarkProfileVersion: Int?
+    /// Truthful runtime residency for this execution (`weights-resident` vs `handle-cached`), or nil
+    /// when the runtime does not report it. Lets callers see whether the model's weights were actually
+    /// kept in memory (persistent worker) or reloaded for this request.
+    public var residency: String?
 
     public init(
         schemaVersion: Int = OptimizationSchema.version,
@@ -32,7 +36,8 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
         selections: [String: String] = [:],
         reasons: [String] = [],
         evidenceBacked: Bool = false,
-        benchmarkProfileVersion: Int? = nil
+        benchmarkProfileVersion: Int? = nil,
+        residency: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.backend = backend
@@ -45,6 +50,7 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
         self.reasons = reasons
         self.evidenceBacked = evidenceBacked
         self.benchmarkProfileVersion = benchmarkProfileVersion
+        self.residency = residency
     }
 
     public func strategyID(for category: OptimizationCategory) -> String? {

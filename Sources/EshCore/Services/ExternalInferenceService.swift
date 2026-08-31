@@ -147,12 +147,17 @@ public struct ExternalInferenceService: Sendable {
         }
 
         let executedCacheMode = request.cacheMode ?? session.cacheMode ?? .raw
-        let executionProfile = Self.executionProfile(
+        var executionProfile = Self.executionProfile(
             backend: install.spec.backend,
             modelID: install.id,
             cacheMode: executedCacheMode,
             usedPromptCache: request.cacheArtifactID != nil
         )
+        // Truthful residency for this execution: a persistent worker reports weights-resident; the
+        // per-request runtimes leave it unset (handled/unknown), never claiming false warmth.
+        if let reporter = runtime as? ResidencyReporting {
+            executionProfile.residency = (reporter.isHealthy ? reporter.residency : .handleCached).rawValue
+        }
         let finalMetrics = await runtime.metrics
         // Normalized usage: only counters the runtime actually reports (never fabricated). Total is
         // derived only when both halves are measured.
