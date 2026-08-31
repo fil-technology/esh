@@ -240,13 +240,7 @@ public final class EngineOrchestratorService {
     }
 
     private func expandedURL(_ path: String) -> URL {
-        if path == "~" {
-            return FileManager.default.homeDirectoryForCurrentUser
-        }
-        if path.hasPrefix("~/") {
-            return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(String(path.dropFirst(2)))
-        }
-        return URL(fileURLWithPath: path)
+        PathResolving.url(from: path)
     }
 
     private func isExecutable(_ url: URL) -> Bool {

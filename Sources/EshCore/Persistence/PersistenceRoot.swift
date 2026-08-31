@@ -85,7 +85,7 @@ public struct PersistenceRoot: Sendable {
         return stateRoot
     }
 
-    private static func migrateLegacyRootIfNeeded(
+    static func migrateLegacyRootIfNeeded(
         fileManager: FileManager,
         legacyRoot: URL,
         eshRoot: URL

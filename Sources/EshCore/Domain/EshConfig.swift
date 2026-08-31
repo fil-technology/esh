@@ -1,18 +1,37 @@
 import Foundation
 
 public struct EshConfig: Codable, Hashable, Sendable {
+    /// Current config schema version. Bump when the schema changes so releases can migrate.
+    public static let currentSchemaVersion = 1
+
+    public var schemaVersion: Int
     public var defaults: EshDefaultsConfig
     public var engines: EshEnginesConfig
     public var experimental: EshExperimentalConfig
 
     public init(
+        schemaVersion: Int = EshConfig.currentSchemaVersion,
         defaults: EshDefaultsConfig = .init(),
         engines: EshEnginesConfig = .init(),
         experimental: EshExperimentalConfig = .init()
     ) {
+        self.schemaVersion = schemaVersion
         self.defaults = defaults
         self.engines = engines
         self.experimental = experimental
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, defaults, engines, experimental
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Configs written before schema versioning default to version 1.
+        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        self.defaults = try container.decodeIfPresent(EshDefaultsConfig.self, forKey: .defaults) ?? .init()
+        self.engines = try container.decodeIfPresent(EshEnginesConfig.self, forKey: .engines) ?? .init()
+        self.experimental = try container.decodeIfPresent(EshExperimentalConfig.self, forKey: .experimental) ?? .init()
     }
 
     public static let `default` = EshConfig()
@@ -37,6 +56,8 @@ public struct EshConfig: Codable, Hashable, Sendable {
             let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
 
             switch (section, key) {
+            case ("meta", "schema_version"):
+                config.schemaVersion = Int(value) ?? config.schemaVersion
             case ("defaults", "engine"):
                 config.defaults.engine = parseString(value)
             case ("defaults", "model_dir"):
@@ -71,8 +92,13 @@ public struct EshConfig: Codable, Hashable, Sendable {
 
     public var tomlString: String {
         """
+        [meta]
+        schema_version = \(schemaVersion)
+
         [defaults]
         engine = "\(defaults.engine)"
+        # model_dir is deprecated: model/asset storage is managed by `esh storage`
+        # (see `esh storage show`). This value is retained only for backward compatibility.
         model_dir = "\(defaults.modelDir)"
         context_size = \(defaults.contextSize)
 
