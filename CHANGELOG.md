@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-31
+
+### Added
+- **M8 contract — remaining gaps closed.** Realized prompt-cache state as a first-class, honest
+  execution signal (`cacheHit` + `cachedTokens` reused on `Metrics`/`EshUsage.cachedInputTokens`/
+  `ExecutionProfile.cacheHit`, distinct from the chosen strategy). Typed `EshAttachment`
+  (image/document/audio) on requests, resolved honestly as rejected — never silently dropped — with a
+  reason distinguishing a model-capability gap from an esh-execution gap. **Apple Foundation Models
+  participate in the capability contract** (`esh capabilities` → `appleProvider`): honest
+  availability, on-device-only by construction (`permitsCloudOrPCC=false`, `neverAutoSelected=true`),
+  limitations listed not hidden. A consolidated cross-backend M8 conformance suite. See
+  M8_CONTRACT_REPORT.md (M8 honesty contract now substantially complete; making Apple a
+  routable/schedulable backend is deferred as a design decision).
+
 ## [0.9.0] - 2026-08-31
 
 ### Added
