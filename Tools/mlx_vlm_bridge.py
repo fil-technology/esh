@@ -736,6 +736,8 @@ def _generate_with_loaded_model(
         state_payload.get("snapshot", {}).get("metadata", {}).get("resume_overlap_tokens", MLX_RESUME_OVERLAP_TOKENS)
     ) if state_payload is not None else MLX_RESUME_OVERLAP_TOKENS
 
+    cache_hit = False
+    cached_tokens = 0
     if (
         state_payload is not None
         and full_prompt.startswith(previous_prompt)
@@ -744,6 +746,8 @@ def _generate_with_loaded_model(
         replay_start = max(len(previous_prompt_tokens) - resume_overlap_tokens, 0)
         prompt_tokens = full_prompt_tokens[replay_start:]
         prompt_cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
+        cache_hit = True
+        cached_tokens = replay_start  # prefix tokens reused from cache, not reprocessed
     else:
         prompt_tokens = full_prompt_tokens
         prompt_cache = make_prompt_cache(model)
@@ -818,6 +822,9 @@ def _generate_with_loaded_model(
             if cancelled
             else (last_response.finish_reason if last_response is not None else None)
         ),
+        # Realized prompt-cache state (not the chosen strategy — what actually happened this request).
+        "cacheHit": cache_hit,
+        "cachedTokens": cached_tokens,
     }
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
 

@@ -25,6 +25,9 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
     /// when the runtime does not report it. Lets callers see whether the model's weights were actually
     /// kept in memory (persistent worker) or reloaded for this request.
     public var residency: String?
+    /// Realized prompt-cache outcome for this execution (true = a cached prefix was reused), or nil
+    /// when the runtime does not report it. Distinct from the chosen cache strategy in `selections`.
+    public var cacheHit: Bool?
 
     public init(
         schemaVersion: Int = OptimizationSchema.version,
@@ -37,7 +40,8 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
         reasons: [String] = [],
         evidenceBacked: Bool = false,
         benchmarkProfileVersion: Int? = nil,
-        residency: String? = nil
+        residency: String? = nil,
+        cacheHit: Bool? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.backend = backend
@@ -51,6 +55,7 @@ public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
         self.evidenceBacked = evidenceBacked
         self.benchmarkProfileVersion = benchmarkProfileVersion
         self.residency = residency
+        self.cacheHit = cacheHit
     }
 
     public func strategyID(for category: OptimizationCategory) -> String? {

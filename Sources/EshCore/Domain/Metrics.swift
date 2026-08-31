@@ -12,6 +12,10 @@ public struct Metrics: Codable, Hashable, Sendable {
     public var generationTokens: Int?
     /// Why generation stopped, as reported by the runtime (e.g. "stop", "length").
     public var finishReason: String?
+    /// Realized prompt/KV cache state for THIS request (what actually happened, not the chosen
+    /// strategy): whether a cached prefix was reused, and how many tokens it saved reprocessing.
+    public var cacheHit: Bool?
+    public var cachedTokens: Int?
 
     public init(
         contextTokens: Int? = nil,
@@ -22,7 +26,9 @@ public struct Metrics: Codable, Hashable, Sendable {
         compressionRatio: Double? = nil,
         promptTokens: Int? = nil,
         generationTokens: Int? = nil,
-        finishReason: String? = nil
+        finishReason: String? = nil,
+        cacheHit: Bool? = nil,
+        cachedTokens: Int? = nil
     ) {
         self.contextTokens = contextTokens
         self.ttftMilliseconds = ttftMilliseconds
@@ -33,5 +39,7 @@ public struct Metrics: Codable, Hashable, Sendable {
         self.promptTokens = promptTokens
         self.generationTokens = generationTokens
         self.finishReason = finishReason
+        self.cacheHit = cacheHit
+        self.cachedTokens = cachedTokens
     }
 }

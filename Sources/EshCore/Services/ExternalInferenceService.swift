@@ -159,6 +159,15 @@ public struct ExternalInferenceService: Sendable {
             executionProfile.residency = (reporter.isHealthy ? reporter.residency : .handleCached).rawValue
         }
         let finalMetrics = await runtime.metrics
+        // Realized cache state (what actually happened) as a first-class, honest execution signal —
+        // distinct from the chosen cache strategy already in the profile.
+        if let hit = finalMetrics.cacheHit {
+            executionProfile.cacheHit = hit
+            let reused = finalMetrics.cachedTokens ?? 0
+            executionProfile.reasons.append(hit
+                ? "prompt cache HIT — reused \(reused) cached prefix tokens (not reprocessed)"
+                : "prompt cache MISS — full prompt processed")
+        }
         // Normalized usage: only counters the runtime actually reports (never fabricated). Total is
         // derived only when both halves are measured.
         let totalTokens: Int?
@@ -170,6 +179,7 @@ public struct ExternalInferenceService: Sendable {
         let usage = EshUsage(
             inputTokens: finalMetrics.promptTokens,
             outputTokens: finalMetrics.generationTokens,
+            cachedInputTokens: finalMetrics.cachedTokens,
             totalTokens: totalTokens,
             contextUsed: finalMetrics.contextTokens,
             monetaryCostUSD: 0,
