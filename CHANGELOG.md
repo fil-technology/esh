@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-31
+
+### Added
+- **Optimization Foundation (M1).** A pluggable optimization boundary: strategies (KV-cache incl. TurboQuant, prompt cache) are data behind `OptimizationStrategy`; the `OptimizationPlanner` produces a serializable `ExecutionProfile`. A benchmark harness runs strategies through the **real** inference path and persists raw results keyed by hardware/model/backend/runtime; `auto` selects a non-baseline strategy only with local measured evidence that clears a quality floor (applied in every mode). New `esh performance <auto|speed|balanced|memory>` and `esh optimize status|strategies|plan|benchmark|compare|reset` (all `--json`). See OPTIMIZATION_REPORT.md and docs/OPTIMIZATION.md.
+- **Pre-download model-fit gate.** Before downloading multi-GB weights, esh estimates fit against chip/unified-memory/context/disk/storage and classifies it comfortable/fits/tight/unlikely/unsupported/unknown with a memory breakdown and rationale. Soft gates (tight/unlikely/unknown, insufficient disk) require confirmation or `--force`; only genuine technical incompatibility or an unavailable storage volume is blocked. esh never substitutes a different model. New `esh model fit <model>`.
+- **Apple Foundation Models detection.** `esh doctor` and `esh onboard` report Apple Intelligence (Apple Foundation Models) availability as a zero-download on-device provider (available / deviceNotEligible / appleIntelligenceNotEnabled / modelNotReady / unsupported), distinct from Private Cloud Compute. Full inference integration is planned for the Capability API / Scheduler milestones.
+
+### Changed
+- `ModelInstallPreflightService` no longer hard-blocks installs on predicted memory/disk pressure — memory is a soft fit gate so knowledgeable users can still try a model; only unsupported format/architecture blocks.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added
