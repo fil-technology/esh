@@ -53,7 +53,7 @@ private struct CLI {
         case "storage":
             try StorageCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "doctor":
-            try DoctorCommand.run()
+            try DoctorCommand.run(arguments: Array(command.dropFirst()))
         case "engines":
             try EnginesCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "validate":
@@ -440,7 +440,7 @@ private struct CLI {
               esh read references <name> [--limit N] [--run <id>]
               esh read related <name-or-path> [--limit N] [--run <id>]
               esh read file <path> --range start:end [--run <id>]
-              esh doctor
+              esh doctor [--json]
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
