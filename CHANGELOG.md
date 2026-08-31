@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-31
+
+### Added
+- **Adaptive Intelligence Scheduler v1 (M9).** `esh schedule` takes a capability request under constraints — `--goal general|coding|reasoning|structured --quality high|balanced|fast --latency interactive|batch --context N --tools --vision` — and picks the best installed model + optimization plan for this Mac, recording the rationale (`--json` for tooling). It composes catalog capabilities, per-model fit, and the M1 optimizer's benchmark evidence: it filters by required capabilities, excludes models that don't fit, ranks by fit then quality-aligned size, and derives the performance mode (dropping to `memory` for tight fits). When no installed model satisfies the request it *suggests* Apple Intelligence (only for modest, tool-free requests) or installing a model — a suggestion, never a silent substitution. (Live memory-pressure/warm-pool state is an M7 input, taken as a parameter for now and noted honestly.)
+
 ## [0.5.0] - 2026-08-31
 
 ### Added
