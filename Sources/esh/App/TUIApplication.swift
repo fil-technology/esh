@@ -437,6 +437,7 @@ struct TUIApplication {
                 ? "planning with local context…"
                 : (runtime.backend == .gguf ? "loading GGUF model / waiting for first token…" : "streaming…")
             state.inputText = ""
+            let turnStart = Date()
             let stream = chatService.streamReply(runtime: runtime, session: preparedSession.session, config: generationConfig)
             let pump = StreamPump()
             pump.start(stream: stream)
@@ -486,9 +487,13 @@ struct TUIApplication {
                 state.metrics = await runtime.metrics
                 state.inputText = inputController.currentBuffer()
                 state.streamingAssistantMessageID = nil
+                // First-class per-turn summary, e.g. "1.8s · 927 tokens · 38 tok/s · KV hit".
+                let summary = TerminalStatusFormatting.executionSummary(
+                    metrics: state.metrics, latencySeconds: Date().timeIntervalSince(turnStart))
+                let readyBase = summary.isEmpty ? "ready" : "ready · \(summary)"
                 state.statusText = queuedPrompts.isEmpty
-                    ? "ready | /menu commands | /back launcher"
-                    : "ready | \(queuedPrompts.count) queued"
+                    ? "\(readyBase) | /menu commands"
+                    : "\(readyBase) | \(queuedPrompts.count) queued"
                 updateStreamingAssistant(
                     state: &state,
                     assistantID: assistantID,
@@ -663,6 +668,11 @@ struct TUIApplication {
                 title: "Command Menu",
                 lines: [
                     "/menu or /help  Show this command panel",
+                    "/status         Runtime/backend/cache/context status",
+                    "/context        Context usage (last turn)",
+                    "/performance    Last-turn latency/tokens/tok-s/cache",
+                    "/auto           What the Adaptive Scheduler would pick",
+                    "/clear          Clear the transcript",
                     "/back           Return to the launcher",
                     "/close          Close the current panel",
                     "/save           Save the active chat session",
@@ -701,6 +711,51 @@ struct TUIApplication {
                 ]
             )
             state.statusText = "command menu open"
+        case "/clear":
+            state.transcriptItems = []
+            state.transcriptScrollOffset = 0
+            state.streamingAssistantMessageID = nil
+            state.statusText = "transcript cleared"
+        case "/status":
+            let residencyLine = TerminalStatusFormatting.residencyLine(
+                residency: nil, contextUsed: state.metrics.contextTokens, contextLimit: nil,
+                memoryBytes: state.metrics.memoryBytes)
+            state.overlay = OverlayPanelState(title: "Runtime Status", lines: [
+                "model     \(state.modelLabel)",
+                "backend   \(state.backendLabel)",
+                "cache     \(state.cacheMode)",
+                residencyLine.isEmpty ? "context   (no turn yet)" : residencyLine,
+                "openai    \(state.openAIServerEnabled ? (state.openAIServerAddress ?? "on") : "off")",
+                "autosave  \(state.autosaveEnabled ? "on" : "off")"
+            ])
+            state.statusText = "status"
+        case "/context":
+            let used = state.metrics.contextTokens.map(String.init) ?? "-"
+            state.overlay = OverlayPanelState(title: "Context", lines: [
+                "context tokens used (last turn): \(used)"
+            ])
+            state.statusText = "context"
+        case "/performance":
+            let summary = TerminalStatusFormatting.executionSummary(metrics: state.metrics, latencySeconds: nil)
+            state.overlay = OverlayPanelState(title: "Performance — last turn", lines: [
+                summary.isEmpty ? "no measured metrics yet — send a message first" : summary
+            ])
+            state.statusText = "performance"
+        case "/auto":
+            let decision = SchedulerService().decide(
+                request: CapabilityRequest(goal: .general, quality: .balanced),
+                root: root, host: HostMachineProfileService().currentProfile())
+            var lines = ["The Adaptive Scheduler would select:"]
+            if let id = decision.selectedModelID {
+                lines.append("  \(id) [\(decision.backend?.rawValue ?? "-")]")
+            } else if decision.appleIntelligenceSuggested {
+                lines.append("  Apple Intelligence (on-device) — suggestion only")
+            } else {
+                lines.append("  (no installed model fits — see /doctor)")
+            }
+            lines.append(contentsOf: decision.rationale.map { "  - \($0)" })
+            state.overlay = OverlayPanelState(title: "Auto Selection", lines: lines)
+            state.statusText = "auto"
         case "/serve", "/serve toggle":
             do {
                 let running = try OpenAICompatibleServerController.shared.toggle(root: root, toolVersion: toolVersion)
