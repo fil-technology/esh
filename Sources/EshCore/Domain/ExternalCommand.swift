@@ -132,6 +132,43 @@ public struct ExternalInstalledModelCapability: Codable, Hashable, Sendable {
     }
 }
 
+/// Apple Foundation Models participating in the esh capability contract as an on-device provider.
+/// Honest by construction: esh only ever uses the on-device system model (`SystemLanguageModel.default`)
+/// and never any Private Cloud Compute / cloud path, so `onDevice` is true and `permitsCloudOrPCC` is
+/// false. Apple is never auto-substituted for an explicit downloaded-model request
+/// (`neverAutoSelected`), and its contract limitations are listed rather than hidden.
+public struct AppleProviderCapability: Codable, Hashable, Sendable {
+    public var available: Bool
+    public var availability: String        // e.g. "available", "appleIntelligenceNotEnabled"
+    public var detail: String
+    public var onDevice: Bool
+    public var permitsCloudOrPCC: Bool
+    public var neverAutoSelected: Bool
+    /// Contract features Apple does not expose through this path (honest limitations).
+    public var limitations: [String]
+    public var suggestedFix: String?
+
+    public init(
+        available: Bool,
+        availability: String,
+        detail: String,
+        onDevice: Bool,
+        permitsCloudOrPCC: Bool,
+        neverAutoSelected: Bool,
+        limitations: [String],
+        suggestedFix: String? = nil
+    ) {
+        self.available = available
+        self.availability = availability
+        self.detail = detail
+        self.onDevice = onDevice
+        self.permitsCloudOrPCC = permitsCloudOrPCC
+        self.neverAutoSelected = neverAutoSelected
+        self.limitations = limitations
+        self.suggestedFix = suggestedFix
+    }
+}
+
 public struct ExternalCapabilitiesResponse: Codable, Hashable, Sendable {
     public static let schemaVersion = "esh.capabilities.v1"
 
@@ -141,6 +178,8 @@ public struct ExternalCapabilitiesResponse: Codable, Hashable, Sendable {
     public var commands: [ExternalCommandDescriptor]
     public var backends: [ExternalBackendCapability]
     public var installedModels: [ExternalInstalledModelCapability]
+    /// Apple Foundation Models provider participation in the contract (nil when not described).
+    public var appleProvider: AppleProviderCapability?
 
     public init(
         schemaVersion: String = ExternalCapabilitiesResponse.schemaVersion,
@@ -148,7 +187,8 @@ public struct ExternalCapabilitiesResponse: Codable, Hashable, Sendable {
         toolVersion: String? = nil,
         commands: [ExternalCommandDescriptor],
         backends: [ExternalBackendCapability],
-        installedModels: [ExternalInstalledModelCapability]
+        installedModels: [ExternalInstalledModelCapability],
+        appleProvider: AppleProviderCapability? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.tool = tool
@@ -156,6 +196,22 @@ public struct ExternalCapabilitiesResponse: Codable, Hashable, Sendable {
         self.commands = commands
         self.backends = backends
         self.installedModels = installedModels
+        self.appleProvider = appleProvider
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, tool, toolVersion, commands, backends, installedModels, appleProvider
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ExternalCapabilitiesResponse.schemaVersion
+        self.tool = try c.decodeIfPresent(String.self, forKey: .tool) ?? "esh"
+        self.toolVersion = try c.decodeIfPresent(String.self, forKey: .toolVersion)
+        self.commands = try c.decode([ExternalCommandDescriptor].self, forKey: .commands)
+        self.backends = try c.decode([ExternalBackendCapability].self, forKey: .backends)
+        self.installedModels = try c.decode([ExternalInstalledModelCapability].self, forKey: .installedModels)
+        self.appleProvider = try c.decodeIfPresent(AppleProviderCapability.self, forKey: .appleProvider)
     }
 }
 

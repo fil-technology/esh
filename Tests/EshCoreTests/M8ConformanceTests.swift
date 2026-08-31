@@ -113,6 +113,30 @@ struct M8ConformanceTests {
         #expect(decoded.capabilityResolution?.first(named: "response_format")?.resolution == .applied)
     }
 
+    // MARK: - Apple provider in the capability contract
+
+    @Test
+    func appleProviderParticipatesWithOnDeviceOnlyGuarantees() throws {
+        let root = PersistenceRoot(rootURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("esh-apple-\(UUID().uuidString)", isDirectory: true))
+        let response = try ExternalCapabilitiesService(modelStore: FileModelStore(root: root))
+            .describe(toolVersion: "test")
+        let apple = try #require(response.appleProvider)
+        // Safety-critical invariants: on-device only, never cloud/PCC, never auto-substituted.
+        #expect(apple.permitsCloudOrPCC == false)
+        #expect(apple.neverAutoSelected == true)
+        #expect(apple.limitations.isEmpty == false)   // limitations listed, not hidden
+        if apple.available { #expect(apple.onDevice == true) }
+    }
+
+    @Test
+    func capabilitiesResponseWithoutAppleProviderStillDecodes() throws {
+        // Backward compatibility: a pre-Apple capabilities JSON (no appleProvider key).
+        let json = Data(#"{"schemaVersion":"esh.capabilities.v1","tool":"esh","commands":[],"backends":[],"installedModels":[]}"#.utf8)
+        let decoded = try JSONCoding.decoder.decode(ExternalCapabilitiesResponse.self, from: json)
+        #expect(decoded.appleProvider == nil)
+    }
+
     @Test
     func localUsageHasZeroMonetaryCostWithProvenance() {
         let usage = EshUsage(inputTokens: 3, outputTokens: 4, totalTokens: 7)

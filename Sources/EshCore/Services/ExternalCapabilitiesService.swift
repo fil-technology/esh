@@ -47,7 +47,31 @@ public struct ExternalCapabilitiesService: Sendable {
                 )
             ],
             backends: backendCapabilities,
-            installedModels: installedModels
+            installedModels: installedModels,
+            appleProvider: appleProviderCapability()
+        )
+    }
+
+    /// Describe Apple Foundation Models as an honest on-device provider in the contract. esh only uses
+    /// the on-device system model and never a cloud/PCC path, so on-device is guaranteed and cloud is
+    /// not permitted; Apple is never auto-substituted for an explicit downloaded-model request.
+    private func appleProviderCapability() -> AppleProviderCapability {
+        let status = AppleIntelligenceService().status()
+        return AppleProviderCapability(
+            available: status.available,
+            availability: status.availability.rawValue,
+            detail: status.detail,
+            onDevice: status.onDevice,
+            permitsCloudOrPCC: false,
+            neverAutoSelected: true,
+            limitations: [
+                "no custom sampling parameters (temperature/top-p/top-k/seed are not exposed by the system model)",
+                "no native constrained decoding / GBNF (Apple guided generation is a separate mechanism, not wired to EshResponseFormat yet)",
+                "text in/out only on this path (no arbitrary attachments)",
+                "no explicit tool/function schemas on this path",
+                "usage token counts are not reported by the system model"
+            ],
+            suggestedFix: status.suggestedFix
         )
     }
 
