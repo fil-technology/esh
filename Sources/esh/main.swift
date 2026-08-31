@@ -331,6 +331,13 @@ private struct CLI {
                 throw StoreError.invalidManifest("Usage: esh model info <model-alias-or-id>")
             }
             try ModelInfoCommand.run(identifier: identifier, service: service)
+        case "fit":
+            guard let identifier = arguments.dropFirst().first else {
+                throw StoreError.invalidManifest("Usage: esh model fit <model-alias-or-repo>")
+            }
+            let resolvedFit = service.resolveRecommended(alias: identifier)
+            let fit = await ModelInstallCommand.assessFit(resolved: resolvedFit, repoID: resolvedFit?.repoID ?? identifier)
+            ModelInstallCommand.renderFit(fit, label: identifier)
         case "compatibility":
             // Compatibility == the existing runtime/template/tool check.
             try await ModelCheckCommand.run(
@@ -488,6 +495,7 @@ private struct CLI {
               esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
               esh model recommended [--profile chat|code|coding|reasoning|fast|low-memory|best] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx] [--for-this-mac] [--experimental]
               esh model info <model-alias-or-id>
+              esh model fit <model-alias-or-repo>
               esh model compatibility <model-or-repo> [--backend mlx|gguf|auto] [--json]
               esh model list [--task text|audio|vision|embedding|reranker|tool|multimodal] [--capability chat|tts|stt|image-understanding|embedding|rerank|tool-calling]
               esh model search <query> [--source all|local|hf] [--limit N]

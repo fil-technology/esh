@@ -34,21 +34,12 @@ public struct ModelInstallPreflightService: Sendable {
                 "This Mac: \(ByteFormatting.string(for: memory.totalBytes)) total, \(ByteFormatting.string(for: memory.availableBytes)) available now"
             )
 
+            // Memory sufficiency is assessed (and soft-gated) by ModelFitService as a fit class;
+            // it is NOT a hard block here. Knowledgeable users may deliberately try a model esh
+            // predicts will be tight. Only genuine technical incompatibility (below) blocks.
             if memory.totalBytes < requirement {
-                report.blockers.append(
-                    """
-                    Not enough unified memory for \(repoID).
-                    Recommended: \(ByteFormatting.string(for: requirement))
-                    This Mac: \(ByteFormatting.string(for: memory.totalBytes)) total
-                    """
-                )
-            } else if memory.availableBytes < requirement {
-                report.blockers.append(
-                    """
-                    Not enough available memory to start downloading \(repoID).
-                    Recommended free memory: \(ByteFormatting.string(for: requirement))
-                    Available now: \(ByteFormatting.string(for: memory.availableBytes))
-                    """
+                report.warnings.append(
+                    "This Mac has \(ByteFormatting.string(for: memory.totalBytes)) unified memory; ~\(ByteFormatting.string(for: requirement)) is recommended — expect heavy memory pressure."
                 )
             }
         }
@@ -66,12 +57,10 @@ public struct ModelInstallPreflightService: Sendable {
                     "Available disk: \(ByteFormatting.string(for: storage.availableBytes))"
                 )
                 if storage.availableBytes < diskRequirement {
-                    report.blockers.append(
-                        """
-                        Not enough disk space to download \(repoID).
-                        Required free space: \(ByteFormatting.string(for: diskRequirement))
-                        Available now: \(ByteFormatting.string(for: storage.availableBytes))
-                        """
+                    // Soft gate: surfaced by ModelFitService (diskSufficient=false) and confirmed
+                    // by the install command, not hard-blocked here.
+                    report.warnings.append(
+                        "Target storage has \(ByteFormatting.string(for: storage.availableBytes)) free but ~\(ByteFormatting.string(for: diskRequirement)) is needed for \(repoID)."
                     )
                 }
             } else {
@@ -89,7 +78,8 @@ public struct ModelInstallPreflightService: Sendable {
             report.warnings.append(contentsOf: check.warnings)
 
             switch check.verdict {
-            case .unsupportedFormat, .unsupportedArchitecture, .insufficientMemory:
+            case .unsupportedFormat, .unsupportedArchitecture:
+                // Genuine technical incompatibility -> the only hard block.
                 let message = """
                 Pre-download compatibility check failed for \(repoID).
                 Verdict: \(check.verdict.rawValue)
@@ -102,6 +92,9 @@ public struct ModelInstallPreflightService: Sendable {
                 } else {
                     report.blockers.append(message)
                 }
+            case .insufficientMemory:
+                // Not a hard block — memory is a soft fit gate. Surface as a warning.
+                report.warnings.append("Runtime compatibility check flags \(repoID) as memory-heavy for this Mac (verdict: insufficientMemory).")
             case .unknown where check.backend == nil:
                 report.warnings.append("Could not resolve a backend confidently before download.")
             default:

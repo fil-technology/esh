@@ -40,6 +40,14 @@ enum ModelInstallCommand {
             interactive: isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
         )
 
+        // Hard pre-download fit gate: estimate whether this model fits and runs on this Mac BEFORE
+        // downloading multi-GB weights. Soft gates (tight/unlikely/unknown) require confirmation
+        // but never silently block or substitute; only genuine incompatibility blocks.
+        let fit = await assessFit(resolved: resolved ?? service.resolveRecommended(alias: repoID), repoID: repoID)
+        if !handleFit(fit, repoID: repoID, force: forceUnsupportedRuntime) {
+            throw CLIHandledError()
+        }
+
         let preflight = try await ModelInstallPreflightService().evaluate(
             repoID: repoID,
             recommendedModel: resolved ?? service.resolveRecommended(alias: repoID),
@@ -114,6 +122,64 @@ enum ModelInstallCommand {
             subtitle: "Use ↑/↓ and Enter to choose the repo to install. Esc cancels.",
             results: results
         )
+    }
+
+    static func assessFit(resolved: RecommendedModel?, repoID: String) async -> ModelFitAssessment {
+        let host = HostMachineProfileService().currentProfile()
+        let root = PersistenceRoot.default()
+        if let resolved {
+            return ModelFitService().assess(recommendedModel: resolved, contextTokens: nil, host: host, root: root)
+        }
+        if let metadata = try? await ModelMetadataInspector().inspect(repoID: repoID, backendPreference: .auto, offline: false) {
+            let input = ModelFitService.Input(
+                parameterCountB: metadata.parameterCountB,
+                effectiveBits: metadata.effectiveBits,
+                format: metadata.format,
+                backend: metadata.backend,
+                contextTokens: 8192,
+                diskRequiredBytes: metadata.estimatedWeightsGB.map { Int64($0 * 1.1 * 1_073_741_824) }
+            )
+            return ModelFitService().assess(input: input, host: host, root: root)
+        }
+        return ModelFitAssessment(fitClass: .unknown, reasons: ["Could not fetch model metadata before download."])
+    }
+
+    static func renderFit(_ fit: ModelFitAssessment, label: String) {
+        print("Model fit for this Mac — \(label): \(fit.fitClass.headline)")
+        if let peak = fit.estimatedPeakMemoryGB, let usable = fit.usableMemoryGB {
+            print(String(format: "  memory: ~%.1f GB peak vs ~%.1f GB usable", peak, usable))
+        }
+        if let req = fit.diskRequiredGB, let free = fit.diskFreeGB {
+            print(String(format: "  disk: ~%.1f GB needed, ~%.1f GB free%@", req, free, fit.diskSufficient ? "" : "  ⚠ insufficient"))
+        }
+        for reason in fit.reasons { print("  - \(reason)") }
+        if let opt = fit.expectedOptimization { print("  suggestion: \(opt)") }
+        if let ctx = fit.recommendedContext { print("  recommended context: \(ctx) tokens") }
+    }
+
+    private static func handleFit(_ fit: ModelFitAssessment, repoID: String, force: Bool) -> Bool {
+        renderFit(fit, label: repoID)
+        if fit.isBlocked {
+            print("Cannot install \(repoID): \(fit.blockers.isEmpty ? (fit.storageAvailable ? "unsupported" : "storage volume unavailable") : fit.blockers.joined(separator: "; ")).")
+            return false
+        }
+        guard fit.requiresConfirmation, !force else { return true }
+
+        let interactive = isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+        if !interactive {
+            print("Fit is '\(fit.fitClass.rawValue)' on this Mac. Re-run with --force to install anyway (esh will not substitute a different model).")
+            return false
+        }
+        let prompt = InteractiveChoicePrompt()
+        let strong = fit.fitClass == .unlikely
+        let choice = prompt.choose(
+            title: strong ? "This Model May Not Run Well" : "Confirm Install",
+            message: "\(repoID) is '\(fit.fitClass.rawValue)' on this Mac. \(strong ? "It may swap heavily or fail to load." : "Proceed?")",
+            details: fit.reasons + (fit.expectedOptimization.map { [$0] } ?? []),
+            choices: [.init(key: "y", label: strong ? "Install anyway" : "Install"), .init(key: "n", label: "Cancel")],
+            footer: "←/→ navigate • enter confirm • esc cancel"
+        )
+        return choice == "y"
     }
 
     private static func handlePreflight(_ report: ModelInstallPreflightReport, repoID: String) -> Bool {
