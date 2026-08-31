@@ -339,6 +339,10 @@ private struct CLI {
                 throw StoreError.invalidManifest("Usage: esh model remove <model-id>")
             }
             try ModelRemoveCommand.run(modelID: modelID, service: service)
+        case "import":
+            try ModelImportCommand.run(arguments: Array(arguments.dropFirst()), root: root, currentDirectoryURL: currentDirectoryURL)
+        case "scan":
+            try ModelScanCommand.run(arguments: Array(arguments.dropFirst()), root: root, currentDirectoryURL: currentDirectoryURL)
         default:
             throw StoreError.invalidManifest("Unknown model subcommand: \(subcommand)")
         }
@@ -481,6 +485,8 @@ private struct CLI {
               esh model open <model-id-or-alias-or-repo-or-search-term>
               esh model inspect <model-id>
               esh model remove <model-id>
+              esh model import <path> [--id <id>] [--move]
+              esh model scan [<dir>] [--clean] [--move]
               esh session [list|show <uuid-or-name>|grep <text>]
               esh cache build --session <uuid-or-name> [--mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--model <id-or-repo>] [--task <text>]
               esh cache load --artifact <uuid> --message <text> [--model <id-or-repo>]
