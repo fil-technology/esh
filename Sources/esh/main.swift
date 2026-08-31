@@ -72,7 +72,7 @@ private struct CLI {
         case "version":
             print(AppVersionResolver.currentVersion() ?? "unknown")
         case "update":
-            await showUpdateStatus()
+            await handleUpdate(arguments: Array(command.dropFirst()))
         case "model":
             try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
         case "audio":
@@ -440,7 +440,7 @@ private struct CLI {
               esh
               esh onboard [--status] [--yes]
               esh version
-              esh update
+              esh update [check] [--json]
               esh chat [session-name]
               esh chat [session-name] --model <id-or-repo> [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--autosave on|off]
               esh benchmark --session <uuid-or-name> [--model <id-or-repo>] [--message <text>]
@@ -520,15 +520,35 @@ private struct CLI {
         )
     }
 
-    private func showUpdateStatus() async {
+    private func handleUpdate(arguments: [String]) async {
+        // esh only NOTIFIES about updates; it never installs an executable update itself. The user
+        // runs `brew upgrade --cask esh`. `esh update` and `esh update check` are equivalent.
+        let json = arguments.contains("--json")
         let current = AppVersionResolver.currentVersion() ?? "unknown"
-        if let notice = await ReleaseUpdateService(persistenceRoot: root).checkForUpdate() {
-            print("current: \(notice.currentVersion)")
-            print("latest: \(notice.latestVersion)")
-            print("update: \(notice.upgradeCommand)")
+        let notice = await ReleaseUpdateService(persistenceRoot: root).checkForUpdate()
+
+        if json {
+            let payload: [String: Any] = [
+                "current": notice?.currentVersion ?? current,
+                "latest": notice?.latestVersion as Any? ?? current,
+                "updateAvailable": notice != nil,
+                "upgradeCommand": notice?.upgradeCommand ?? "brew upgrade --cask esh",
+                "autoInstall": false
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                print(text)
+            }
             return
         }
 
+        if let notice {
+            print("current: \(notice.currentVersion)")
+            print("latest: \(notice.latestVersion)")
+            print("update available: run \(notice.upgradeCommand)")
+            print("note: esh never installs updates automatically.")
+            return
+        }
         print("current: \(current)")
         print("status: up to date or unable to verify right now")
         print("update: brew upgrade --cask esh")
