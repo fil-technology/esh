@@ -49,6 +49,35 @@ public struct EshToolCall: Codable, Hashable, Sendable {
     }
 }
 
+/// A typed, extensible attachment on an inference request (M8). The canonical contract models
+/// multimodal inputs explicitly so they are never silently dropped; whether a backend can actually
+/// consume one is resolved honestly by `CapabilityResolver`.
+public struct EshAttachment: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case image
+        case document
+        case audio
+        case other
+    }
+    public var kind: Kind
+    /// MIME type when known (e.g. "image/png", "application/pdf").
+    public var mimeType: String?
+    /// A local file path or URL to the attachment content.
+    public var uri: String?
+    /// Inline base64 content, as an alternative to `uri`.
+    public var base64: String?
+    /// Optional human-facing name.
+    public var name: String?
+
+    public init(kind: Kind, mimeType: String? = nil, uri: String? = nil, base64: String? = nil, name: String? = nil) {
+        self.kind = kind
+        self.mimeType = mimeType
+        self.uri = uri
+        self.base64 = base64
+        self.name = name
+    }
+}
+
 /// Normalized token/usage accounting. Every field is optional and populated ONLY when the backend
 /// actually reports it — never fabricated. `available` lists which counters were measurable.
 public struct EshUsage: Codable, Hashable, Sendable {

@@ -187,6 +187,8 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
     /// Tool/function definitions the model may call (M8).
     public var tools: [EshToolDefinition]?
     public var toolChoice: EshToolChoice?
+    /// Typed multimodal attachments (M8). Resolved honestly; never silently dropped.
+    public var attachments: [EshAttachment]?
 
     public init(
         schemaVersion: String = ExternalInferenceRequest.schemaVersion,
@@ -200,7 +202,8 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         routing: RoutingConfiguration? = nil,
         responseFormat: EshResponseFormat? = nil,
         tools: [EshToolDefinition]? = nil,
-        toolChoice: EshToolChoice? = nil
+        toolChoice: EshToolChoice? = nil,
+        attachments: [EshAttachment]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.model = model
@@ -214,10 +217,11 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.responseFormat = responseFormat
         self.tools = tools
         self.toolChoice = toolChoice
+        self.attachments = attachments
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, model, cacheArtifactID, sessionName, cacheMode, intent, messages, generation, routing, responseFormat, tools, toolChoice
+        case schemaVersion, model, cacheArtifactID, sessionName, cacheMode, intent, messages, generation, routing, responseFormat, tools, toolChoice, attachments
     }
 
     public init(from decoder: Decoder) throws {
@@ -234,6 +238,7 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.responseFormat = try c.decodeIfPresent(EshResponseFormat.self, forKey: .responseFormat)
         self.tools = try c.decodeIfPresent([EshToolDefinition].self, forKey: .tools)
         self.toolChoice = try c.decodeIfPresent(EshToolChoice.self, forKey: .toolChoice)
+        self.attachments = try c.decodeIfPresent([EshAttachment].self, forKey: .attachments)
     }
 }
 

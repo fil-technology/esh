@@ -43,9 +43,25 @@ public struct CapabilityResolver: Sendable {
         responseFormat: EshResponseFormat?,
         backend: BackendKind,
         tools: [EshToolDefinition]? = nil,
-        reasoningEnabled: Bool? = nil
+        reasoningEnabled: Bool? = nil,
+        attachments: [EshAttachment]? = nil,
+        modelSupportsVision: Bool = false
     ) -> Outcome {
         var extraOptions: [ResolvedOption] = []
+
+        // Attachments/multimodal: esh does not yet feed attachments through the local inference path,
+        // so any attachment is honestly rejected (never silently ignored). The reason distinguishes a
+        // model-capability gap from an esh-execution gap so callers know which.
+        if let attachments, !attachments.isEmpty {
+            let kinds = Set(attachments.map { $0.kind.rawValue }).sorted().joined(separator: ", ")
+            let detail: String
+            if attachments.contains(where: { $0.kind == .image }) && modelSupportsVision {
+                detail = "attachments (\(kinds)) rejected: the model supports vision, but esh does not yet feed attachments through the inference path"
+            } else {
+                detail = "attachments (\(kinds)) rejected: not supported by the \(backend.rawValue) runtime / model on the esh inference path yet"
+            }
+            extraOptions.append(ResolvedOption(name: "attachments", resolution: .rejected, detail: detail))
+        }
         // Tools: native model function-calling is not wired into the local runtime yet, so requested
         // tools are honestly reported as rejected (the esh agent layer does tool orchestration
         // separately). This is not silent — the caller sees it in capabilityResolution.

@@ -157,6 +157,34 @@ struct CapabilityResolverTests {
         #expect(outcome.resolution.first(named: "reasoning") == nil)
     }
 
+    // MARK: - Attachments (multimodal)
+
+    @Test
+    func imageAttachmentIsRejectedNotSilentlyDropped() {
+        let outcome = resolver.resolve(responseFormat: nil, backend: .mlx,
+                                       attachments: [EshAttachment(kind: .image, uri: "/tmp/x.png")])
+        let opt = outcome.resolution.first(named: "attachments")
+        #expect(opt?.resolution == .rejected)
+        #expect(opt?.detail?.isEmpty == false)
+    }
+
+    @Test
+    func imageAttachmentReasonDistinguishesModelCapabilityFromEshGap() {
+        let visionModel = resolver.resolve(responseFormat: nil, backend: .mlx,
+            attachments: [EshAttachment(kind: .image)], modelSupportsVision: true)
+        #expect(visionModel.resolution.first(named: "attachments")?.detail?.contains("model supports vision") == true)
+
+        let textModel = resolver.resolve(responseFormat: nil, backend: .mlx,
+            attachments: [EshAttachment(kind: .image)], modelSupportsVision: false)
+        #expect(textModel.resolution.first(named: "attachments")?.detail?.contains("not supported") == true)
+    }
+
+    @Test
+    func noAttachmentsYieldsNoAttachmentOption() {
+        let outcome = resolver.resolve(responseFormat: nil, backend: .mlx, attachments: nil)
+        #expect(outcome.resolution.first(named: "attachments") == nil)
+    }
+
     @Test
     func legacyRequestWithoutResponseFormatStillDecodes() throws {
         // Backward compatibility: an infer request JSON from before M8 (no responseFormat key).

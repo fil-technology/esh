@@ -90,7 +90,9 @@ public struct ExternalInferenceService: Sendable {
             responseFormat: request.responseFormat,
             backend: install.spec.backend,
             tools: request.tools,
-            reasoningEnabled: request.generation.enableThinking
+            reasoningEnabled: request.generation.enableThinking,
+            attachments: request.attachments,
+            modelSupportsVision: install.spec.inputModalities.contains(.image)
         )
         // A strict structured-output request that cannot be satisfied natively must fail, not
         // silently fall back to unconstrained generation.
