@@ -1,5 +1,16 @@
 import Foundation
 
+/// Whether keeping a runtime "warm" actually keeps the expensive model weights resident, or only
+/// caches a lightweight handle while the backend reloads weights on each call. esh must not present
+/// handle-caching as true model warmth.
+public enum RuntimeResidency: String, Codable, Sendable {
+    /// Model weights stay resident in memory across requests (true warmth).
+    case weightsResident = "weights-resident"
+    /// Only a lightweight runtime handle is cached; the backend reloads weights per call (e.g. the
+    /// current MLX/llama.cpp subprocess-per-generate design). Not true weight residency.
+    case handleCached = "handle-cached"
+}
+
 /// Lifecycle state of a model runtime in the warm pool.
 public enum ModelRuntimeState: String, Codable, Sendable {
     case unloaded    // not resident
@@ -54,16 +65,19 @@ public struct ResidentModelInfo: Codable, Sendable, Equatable {
     public var modelID: String
     public var backend: BackendKind
     public var state: String                 // ModelRuntimeState raw value
+    /// Truthful residency: whether "warm" means weights-resident or only handle-cached.
+    public var residency: String             // RuntimeResidency raw value
     public var estimatedMemoryGB: Double?
     public var measuredMemoryBytes: Int64?
     public var activeRequests: Int
     public var loadCount: Int
     public var lastUsedISO8601: String?
 
-    public init(modelID: String, backend: BackendKind, state: String, estimatedMemoryGB: Double?, measuredMemoryBytes: Int64?, activeRequests: Int, loadCount: Int, lastUsedISO8601: String?) {
+    public init(modelID: String, backend: BackendKind, state: String, residency: String, estimatedMemoryGB: Double?, measuredMemoryBytes: Int64?, activeRequests: Int, loadCount: Int, lastUsedISO8601: String?) {
         self.modelID = modelID
         self.backend = backend
         self.state = state
+        self.residency = residency
         self.estimatedMemoryGB = estimatedMemoryGB
         self.measuredMemoryBytes = measuredMemoryBytes
         self.activeRequests = activeRequests

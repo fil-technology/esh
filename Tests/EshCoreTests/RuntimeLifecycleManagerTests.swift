@@ -135,6 +135,16 @@ struct RuntimeLifecycleManagerTests {
     }
 
     @Test
+    func residencyIsTruthfulHandleCachedByDefault() async throws {
+        // Default residency is handle-cached: the pool must NOT claim true weight residency for the
+        // current subprocess-per-call MLX/llama.cpp backends.
+        let mgr = RuntimeLifecycleManager(loader: { MockRuntime(modelID: $0.id) })
+        _ = try await mgr.acquire(install: install("m")); await mgr.release(modelID: "m")
+        let status = await mgr.status()
+        #expect(status.residents.first?.residency == RuntimeResidency.handleCached.rawValue)
+    }
+
+    @Test
     func statusReportsResidentsAndBudget() async throws {
         let mgr = RuntimeLifecycleManager(usableBudgetGB: 16, estimator: { _ in 4 }, loader: { MockRuntime(modelID: $0.id) })
         _ = try await mgr.acquire(install: install("m")); await mgr.release(modelID: "m")

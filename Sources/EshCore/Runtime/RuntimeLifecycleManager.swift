@@ -37,6 +37,10 @@ public actor RuntimeLifecycleManager {
     private let estimator: @Sendable (ModelInstall) -> Double?
     private let loader: Loader
     private let clock: @Sendable () -> Date
+    /// Truthful residency per model. Defaults to `.handleCached`: today's MLX/llama.cpp backends
+    /// reload weights per generate (subprocess-per-call), so a cached handle is NOT true weight
+    /// residency. A future persistent backend declares `.weightsResident`.
+    private let residencyProbe: @Sendable (ModelInstall) -> RuntimeResidency
 
     private var residents: [String: Resident] = [:]
     private var loadingTasks: [String: Task<BackendRuntime, Error>] = [:]
@@ -48,12 +52,14 @@ public actor RuntimeLifecycleManager {
         usableBudgetGB: Double? = nil,
         estimator: @escaping @Sendable (ModelInstall) -> Double? = { _ in nil },
         loader: @escaping Loader,
+        residencyProbe: @escaping @Sendable (ModelInstall) -> RuntimeResidency = { _ in .handleCached },
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.config = config
         self.usableBudgetGB = usableBudgetGB
         self.estimator = estimator
         self.loader = loader
+        self.residencyProbe = residencyProbe
         self.clock = clock
     }
 
@@ -285,6 +291,7 @@ public actor RuntimeLifecycleManager {
         let infos = residents.values.map { r in
             ResidentModelInfo(
                 modelID: r.install.id, backend: r.install.spec.backend, state: r.state.rawValue,
+                residency: residencyProbe(r.install).rawValue,
                 estimatedMemoryGB: r.estimatedGB, measuredMemoryBytes: r.measuredBytes,
                 activeRequests: r.activeRequests, loadCount: r.loadCount,
                 lastUsedISO8601: formatter.string(from: r.lastUsed)
