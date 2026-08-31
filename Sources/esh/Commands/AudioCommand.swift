@@ -15,6 +15,8 @@ enum AudioCommand {
             try await speak(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "transcribe":
             try transcribe(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "converse":
+            try await converse(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         default:
             throw StoreError.invalidManifest("Unknown audio subcommand: \(subcommand)")
         }
@@ -40,6 +42,57 @@ enum AudioCommand {
         } else {
             print(text)
         }
+    }
+
+    /// `esh audio converse <audio-file> [--model <llm>] [--out <path>] [--play]`
+    /// One voice round: STT the input (speech model) → LLM (language model) → TTS the reply (speech
+    /// model). Demonstrates switching between the language model and the speech models via esh
+    /// primitives.
+    private static func converse(arguments: [String], currentDirectoryURL: URL) async throws {
+        let positional = arguments.filter { !$0.hasPrefix("--") }
+        guard let audioArg = CommandSupport.optionalValue(flag: "--input", in: arguments) ?? positional.first else {
+            throw StoreError.invalidManifest("Usage: esh audio converse <audio-file> [--model <llm>] [--out <path>] [--play]")
+        }
+        let root = PersistenceRoot.default()
+        let config = try? EshConfigStore(root: root).load()
+        let audioURL = URL(fileURLWithPath: audioArg, relativeTo: currentDirectoryURL).standardizedFileURL
+
+        // 1) Speech model: transcribe.
+        let heard = try SpeechToTextService().transcribe(
+            audioPath: audioURL.path, model: config?.defaults.sttModel)
+        FileHandle.standardError.write(Data("heard: \(heard)\n".utf8))
+
+        // 2) Language model: respond.
+        let modelStore = FileModelStore(root: root)
+        let installs = try modelStore.listInstalls()
+        let requestedLLM = CommandSupport.optionalValue(flag: "--model", in: arguments)
+        guard let llm = requestedLLM ?? installs.first(where: { $0.spec.backend == .mlx })?.id ?? installs.first?.id else {
+            throw StoreError.notFound("No installed language model. Install one with `esh model install`.")
+        }
+        let inference = ExternalInferenceService(
+            modelStore: modelStore, sessionStore: FileSessionStore(root: root), cacheStore: FileCacheStore(root: root))
+        let response = try await inference.infer(request: ExternalInferenceRequest(
+            model: llm,
+            messages: [ExternalInferenceMessage(role: .user, text: heard)],
+            generation: GenerationConfig(maxTokens: 200, temperature: 0.7)))
+        let reply = ThinkingParser.parse(response.outputText).answer ?? response.outputText
+        FileHandle.standardError.write(Data("reply: \(reply)\n".utf8))
+
+        // 3) Speech model: speak the reply.
+        let outURL: URL
+        if let out = CommandSupport.optionalValue(flag: "--out", in: arguments) {
+            outURL = URL(fileURLWithPath: out, relativeTo: currentDirectoryURL)
+        } else {
+            outURL = try defaultOutputURL(currentDirectoryURL: currentDirectoryURL)
+        }
+        let result = try await AudioSpeechGenerator.synthesize(
+            .init(text: reply, model: config?.defaults.ttsModel, voice: nil, language: nil,
+                  outputURL: outURL, forceOverwrite: true, profile: nil, maxTokens: nil,
+                  temperature: nil, topP: nil, hfToken: nil),
+            currentDirectoryURL: currentDirectoryURL)
+        print("heard: \(heard)")
+        print("reply: \(reply)")
+        print("spoke: \(result.url.path)")
     }
 
     private static func listTTSModels() {
