@@ -19,6 +19,7 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 - Aligned swift-syntax with the Swift 6.3 toolchain (600.0.1 → 603.0.2).
 - TTS voice models and generated audio now write under the configured assets root (e.g. `~/.esh/audio`) instead of the current working directory.
 - Config gains an explicit schema version; the unused `model_dir` knob is deprecated in favor of `esh storage`. Path expansion (`~`, `$HOME`, relative, absolute) is standardized.
+- `esh doctor` remains a non-failing diagnostic: it reports `degraded` (e.g. when only one engine is available) but exits 0; pass `--strict` to make a non-`ok` status exit non-zero for health-gating.
 
 ## [0.1.41] - 2026-05-12
 

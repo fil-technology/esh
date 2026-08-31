@@ -6,6 +6,10 @@ enum DoctorCommand {
         let root = PersistenceRoot.default()
         let version = AppVersionResolver.currentVersion()
         let report = DoctorService().report(root: root, version: version)
+        // `esh doctor` is a diagnostic: it exits 0 and reports status even when degraded (e.g. an
+        // optional/second engine is missing but the system is still usable via MLX). Pass --strict
+        // to make a non-"ok" status exit non-zero for scripting/health-gating.
+        let strict = arguments.contains("--strict")
 
         if arguments.contains("--json") {
             let encoder = JSONEncoder()
@@ -13,14 +17,14 @@ enum DoctorCommand {
             if let data = try? encoder.encode(report), let text = String(data: data, encoding: .utf8) {
                 print(text)
             }
-            if report.status != "ok" { throw CLIHandledError() }
+            if strict, report.status != "ok" { throw CLIHandledError() }
             return
         }
 
         for line in humanLines(report: report, root: root) {
             print(line)
         }
-        if report.status != "ok" { throw CLIHandledError() }
+        if strict, report.status != "ok" { throw CLIHandledError() }
     }
 
     /// Retained for callers/tests that only want the text engine section.
