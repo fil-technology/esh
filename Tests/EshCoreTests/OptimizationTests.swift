@@ -87,6 +87,24 @@ struct OptimizationPlannerTests {
     }
 
     @Test
+    func speedModeStillRespectsQualityFloor() throws {
+        // A faster strategy that FAILS quality must not be chosen even in speed mode.
+        let dir = tempDir()
+        let store = OptimizationProfileStore(directoryURL: dir)
+        let ctx = context()
+        let key = OptimizationPlanner().profileKey(context: ctx)
+        try store.save(makeResult(key: key, strategyID: OptimizationStrategyRegistry.kvTriAttention.id,
+                                  workload: .chat, bucket: ContextBucket(tokens: 512),
+                                  decode: 250, quality: 0.05))   // fast but broken output
+        try store.save(makeResult(key: key, strategyID: OptimizationStrategyRegistry.kvRaw.id,
+                                  workload: .chat, bucket: ContextBucket(tokens: 512),
+                                  decode: 245, quality: 1.0))
+        let planner = OptimizationPlanner(store: store)
+        let profile = planner.plan(context: ctx, workload: .chat, contextTokens: 512, mode: .speed)
+        #expect(profile.strategyID(for: .kvCache) == OptimizationStrategyRegistry.kvRaw.id)
+    }
+
+    @Test
     func executionProfileRoundTrips() throws {
         let profile = OptimizationPlanner(store: nil).plan(context: context(), workload: .reasoning, contextTokens: 8000, mode: .balanced)
         let data = try JSONEncoder().encode(profile)

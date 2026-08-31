@@ -135,8 +135,10 @@ public struct OptimizationPlanner: Sendable {
             return false // quality-changing strategy with no quality measurement is NOT auto-eligible
         }
 
+        // The quality floor applies to EVERY mode: speed/memory still respect a minimum
+        // quality/correctness constraint, they only differ in the objective they optimize.
         let eligible = results.filter { r in
-            r.median.errorCount == 0 && (mode != .auto || passesQuality(r))
+            r.median.errorCount == 0 && passesQuality(r)
         }
         guard !eligible.isEmpty else { return nil }
 
