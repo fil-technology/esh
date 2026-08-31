@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-31
+
 ### Added
 - **External-SSD storage.** Large AI assets (model weights, GGUF files, TTS voices, caches, downloads) can live on an external volume while lightweight config/state stays on the internal disk. `esh storage show|set|use-internal|doctor|migrate` (human + `--json`). A volume-marker scheme detects a disconnected drive and fails with a clear "Model storage volume is unavailable" error instead of silently re-downloading huge assets to the internal disk. `ESH_ASSETS_HOME` overrides the assets root.
 - **Guided onboarding.** `esh onboard` detects the Mac (chip/RAM/macOS/engines), chooses storage, recommends a hardware-matched model, installs it, and finishes with next steps. Safe to re-run; `--status` (non-interactive summary) and `--yes` (auto-install) modes. Persisted, versioned onboarding state.
