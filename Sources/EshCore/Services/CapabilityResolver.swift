@@ -39,7 +39,12 @@ public struct CapabilityResolver: Sendable {
         backend == .gguf
     }
 
-    public func resolve(responseFormat: EshResponseFormat?, backend: BackendKind, tools: [EshToolDefinition]? = nil) -> Outcome {
+    public func resolve(
+        responseFormat: EshResponseFormat?,
+        backend: BackendKind,
+        tools: [EshToolDefinition]? = nil,
+        reasoningEnabled: Bool? = nil
+    ) -> Outcome {
         var extraOptions: [ResolvedOption] = []
         // Tools: native model function-calling is not wired into the local runtime yet, so requested
         // tools are honestly reported as rejected (the esh agent layer does tool orchestration
@@ -47,6 +52,12 @@ public struct CapabilityResolver: Sendable {
         if let tools, !tools.isEmpty {
             extraOptions.append(ResolvedOption(name: "tools", resolution: .rejected,
                 detail: "native tool/function calling is not available on the \(backend.rawValue) runtime yet; use `esh agent` for tool orchestration"))
+        }
+
+        // Reasoning/thinking: only report when the caller explicitly asked to toggle it. Grounded in
+        // real backend behavior — never claim a reasoning channel that isn't honored.
+        if let reasoningEnabled {
+            extraOptions.append(resolveReasoning(enabled: reasoningEnabled, backend: backend))
         }
 
         guard let responseFormat else {
@@ -60,6 +71,23 @@ public struct CapabilityResolver: Sendable {
             nativeJSONSchema: base.nativeJSONSchema,
             nativeGrammar: base.nativeGrammar
         )
+    }
+
+    /// Honest per-backend reasoning handling. MLX passes `enable_thinking` into the model's chat
+    /// template (a real control); llama.cpp/ONNX have no such toggle — the GGUF chat template decides
+    /// and any thinking tokens are emitted inline, not separately accounted. We never fabricate a
+    /// reasoning-token count for backends that don't report one (see EshUsage.reasoningTokens).
+    private func resolveReasoning(enabled: Bool, backend: BackendKind) -> ResolvedOption {
+        switch backend {
+        case .mlx:
+            return ResolvedOption(name: "reasoning", resolution: .applied,
+                detail: enabled
+                    ? "enable_thinking passed to the model chat template; reasoning tokens are not separately reported"
+                    : "thinking disabled via the model chat template")
+        case .gguf, .onnx:
+            return ResolvedOption(name: "reasoning", resolution: .ignored,
+                detail: "the \(backend.rawValue) runtime has no reasoning toggle; the model/template decides and any thinking is emitted inline (not separately accounted)")
+        }
     }
 
     private func resolveFormat(_ responseFormat: EshResponseFormat, backend: BackendKind) -> Outcome {

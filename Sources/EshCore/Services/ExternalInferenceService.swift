@@ -89,7 +89,8 @@ public struct ExternalInferenceService: Sendable {
         let capabilityOutcome = CapabilityResolver().resolve(
             responseFormat: request.responseFormat,
             backend: install.spec.backend,
-            tools: request.tools
+            tools: request.tools,
+            reasoningEnabled: request.generation.enableThinking
         )
         // A strict structured-output request that cannot be satisfied natively must fail, not
         // silently fall back to unconstrained generation.

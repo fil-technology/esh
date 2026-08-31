@@ -134,6 +134,29 @@ struct CapabilityResolverTests {
         #expect(outcome.nativeJSONSchema == nil)
     }
 
+    // MARK: - Reasoning / thinking
+
+    @Test
+    func reasoningIsAppliedOnMLX() {
+        let outcome = resolver.resolve(responseFormat: nil, backend: .mlx, reasoningEnabled: true)
+        let opt = outcome.resolution.first(named: "reasoning")
+        #expect(opt?.resolution == .applied)   // MLX passes enable_thinking to the chat template
+    }
+
+    @Test
+    func reasoningIsIgnoredOnGGUFNotFakedAsApplied() {
+        let outcome = resolver.resolve(responseFormat: nil, backend: .gguf, reasoningEnabled: true)
+        let opt = outcome.resolution.first(named: "reasoning")
+        #expect(opt?.resolution == .ignored)   // honest: llama.cpp has no reasoning toggle
+        #expect(opt?.detail?.isEmpty == false)
+    }
+
+    @Test
+    func reasoningNotReportedWhenCallerDidNotAskToToggle() {
+        let outcome = resolver.resolve(responseFormat: nil, backend: .mlx, reasoningEnabled: nil)
+        #expect(outcome.resolution.first(named: "reasoning") == nil)
+    }
+
     @Test
     func legacyRequestWithoutResponseFormatStillDecodes() throws {
         // Backward compatibility: an infer request JSON from before M8 (no responseFormat key).
