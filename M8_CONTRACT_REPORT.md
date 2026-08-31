@@ -48,19 +48,26 @@ adapt onto it, never the reverse.
 - Realized cache state as a first-class signal; typed attachments with honest rejection; cross-backend
   conformance suite; truthful residency (weights-resident) surfaced via the persistent MLX worker.
 
-## Apple — provider vs routable backend
+## Apple — routable first-class backend (done)
 
-Apple now **participates in the capability contract** (`esh capabilities` → `appleProvider`): honest
-availability + reason, `onDevice`, `permitsCloudOrPCC=false` and `neverAutoSelected=true` (both
-guaranteed by construction — esh only ever uses `SystemLanguageModel.default`, never a PCC/cloud
-path), with contract limitations listed rather than hidden. The safety guarantees the user required
-are met and tested.
+Apple is now a **first-class routable `BackendKind`**: `esh infer --model apple-intelligence` runs the
+on-device system model through the canonical inference path, returning a canonical response with
+`backend: apple` and honest capability resolution. Verified end-to-end (real on-device generation:
+"pong"). It also participates in the capability contract (`esh capabilities` → `appleProvider`).
 
-**Deferred (design-consequential, needs a product call):** making Apple a *routable/schedulable*
-`BackendKind` that competes with local models in `infer`/the scheduler. This touches ~16 exhaustive
-`BackendKind` switch sites and raises product questions (should Apple auto-compete? how does
-`localOnly` interact with any future PCC option?). It is deferred deliberately, not stubbed — Apple
-stays explicitly-selected-only via `esh apple` until that decision.
+Safety guarantees — met and tested:
+- **Never auto-substituted.** Apple routes ONLY on an explicit reserved id (`apple` /
+  `apple-intelligence` / `apple-foundation`); a normal/unknown model id can never match one, and the
+  model store never contains Apple. Verified: an unknown model resolves to an installed local model,
+  never Apple.
+- **On-device only / `localOnly` safe.** `AppleBackendRuntime` uses only `SystemLanguageModel.default`;
+  esh never calls any PCC/cloud path, so Apple can never route a request off-device.
+- **Honest capabilities.** Strict structured output is **rejected** (no native constrained decoding),
+  non-strict json is **approximated** (labeled not guaranteed), reasoning is **ignored**, responses
+  are returned whole (not token-streamed) — all surfaced, none faked.
+
+Follow-up (Scheduler Revalidation milestone): make Apple a *scored* scheduler candidate that competes
+on measured evidence (today the scheduler offers Apple as a fallback suggestion when nothing fits).
 
 ## Remaining for full M8
 

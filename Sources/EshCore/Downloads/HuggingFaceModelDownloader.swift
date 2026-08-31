@@ -212,6 +212,10 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             }
         case .onnx:
             break
+        case .apple:
+            // Apple Foundation Models is a system provider, not a downloadable model — nothing to
+            // verify here (and it is never installed via this path).
+            break
         }
     }
 

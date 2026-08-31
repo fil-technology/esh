@@ -103,6 +103,9 @@ public struct CapabilityResolver: Sendable {
         case .gguf, .onnx:
             return ResolvedOption(name: "reasoning", resolution: .ignored,
                 detail: "the \(backend.rawValue) runtime has no reasoning toggle; the model/template decides and any thinking is emitted inline (not separately accounted)")
+        case .apple:
+            return ResolvedOption(name: "reasoning", resolution: .ignored,
+                detail: "Apple Foundation Models does not expose a reasoning/thinking toggle")
         }
     }
 

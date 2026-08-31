@@ -127,6 +127,20 @@ public struct ExternalCapabilitiesService: Sendable {
                     .init(feature: .promptCacheLoad, reason: "ONNX prompt cache load is not implemented yet.")
                 ]
             )
+        case .apple:
+            ExternalBackendCapability(
+                backend: backend,
+                supportsDirectInference: true,
+                supportsCacheBuild: false,
+                supportsCacheLoad: false,
+                supportedFeatures: [.directInference],
+                unavailableFeatures: [
+                    .init(feature: .tokenStreaming, reason: "Apple Foundation Models responses are returned whole on this path (not token-streamed)."),
+                    .init(feature: .promptCacheBuild, reason: "Apple Foundation Models does not support prompt caches."),
+                    .init(feature: .promptCacheLoad, reason: "Apple Foundation Models does not support prompt caches."),
+                    .init(feature: .kvCacheQuantization, reason: "Apple Foundation Models does not expose KV cache controls.")
+                ]
+            )
         }
     }
 }

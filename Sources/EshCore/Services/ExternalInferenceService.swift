@@ -514,6 +514,13 @@ public struct ExternalInferenceService: Sendable {
     }
 
     private func resolveInstall(request: ExternalInferenceRequest) throws -> ModelInstall {
+        // Apple routes ONLY on an explicit reserved id — never as a fallback for a downloaded model,
+        // and it needs no installed models. A normal model id can never match a reserved Apple id, so
+        // Apple is never silently substituted.
+        if AppleProvider.isAppleModelID(request.model) {
+            return AppleProvider.syntheticInstall()
+        }
+
         let installs = try modelStore.listInstalls()
         guard installs.isEmpty == false else {
             throw StoreError.notFound("No installed models found.")

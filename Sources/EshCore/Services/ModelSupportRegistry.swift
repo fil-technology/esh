@@ -104,6 +104,13 @@ public struct ModelSupportRegistry: Sendable {
                 backendLabel: "ONNX",
                 warnings: ["ONNX model checking is not implemented in this command yet."]
             )
+        case .apple:
+            return ModelSupportAssessment(
+                isFormatSupported: false,
+                isArchitectureSupported: false,
+                backendLabel: "Apple",
+                warnings: ["Apple Foundation Models is a system provider, not a downloadable model."]
+            )
         }
     }
 }
