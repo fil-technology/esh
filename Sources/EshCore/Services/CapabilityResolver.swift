@@ -27,20 +27,40 @@ public struct CapabilityResolver: Sendable {
                 systemInstructionAugmentation: nil
             )
         case .json:
+            // No backend currently has native constrained JSON decoding wired. Strict callers get a
+            // rejection rather than a prompt-instruction approximation.
+            if responseFormat.strict {
+                return Outcome(
+                    resolution: CapabilityResolution(options: [
+                        ResolvedOption(name: "response_format", resolution: .rejected,
+                            detail: "strict json requested but the \(backend.rawValue) runtime has no native constrained decoding; not approximating because strict was set")
+                    ]),
+                    systemInstructionAugmentation: nil
+                )
+            }
             return Outcome(
                 resolution: CapabilityResolution(options: [
-                    ResolvedOption(name: "response_format", resolution: .transformed,
-                        detail: "json enforced via instruction; the \(backend.rawValue) runtime has no native constrained decoding, so output validity is not guaranteed")
+                    ResolvedOption(name: "response_format", resolution: .approximated,
+                        detail: "json approximated via a prompt instruction (no native constrained decoding on \(backend.rawValue)); validity is not guaranteed. Set strict to reject approximation.")
                 ]),
                 systemInstructionAugmentation: "Respond with a single valid JSON object and nothing else. Do not include markdown code fences or any prose."
             )
         case .jsonSchema:
             let schema = responseFormat.schema?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if responseFormat.strict {
+                return Outcome(
+                    resolution: CapabilityResolution(options: [
+                        ResolvedOption(name: "response_format", resolution: .rejected,
+                            detail: "strict json_schema requested but no native constrained decoding is available on \(backend.rawValue); not approximating because strict was set")
+                    ]),
+                    systemInstructionAugmentation: nil
+                )
+            }
             let augmentation = "Respond with a single JSON object that strictly conforms to this JSON Schema, and nothing else:\n\(schema ?? "(the requested schema)")"
             return Outcome(
                 resolution: CapabilityResolution(options: [
-                    ResolvedOption(name: "response_format", resolution: .transformed,
-                        detail: "json_schema enforced via instruction; no native constrained decoding, so schema conformance is not guaranteed")
+                    ResolvedOption(name: "response_format", resolution: .approximated,
+                        detail: "json_schema approximated via a prompt instruction (no native constrained decoding); conformance is not guaranteed. Set strict to reject approximation.")
                 ]),
                 systemInstructionAugmentation: augmentation
             )

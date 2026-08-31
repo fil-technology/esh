@@ -14,20 +14,34 @@ struct CapabilityResolverTests {
     }
 
     @Test
-    func jsonIsTransformedViaInstruction() {
+    func jsonIsApproximatedViaInstruction() {
         let outcome = resolver.resolve(responseFormat: .json, backend: .mlx)
         let opt = outcome.resolution.first(named: "response_format")
-        #expect(opt?.resolution == .transformed)     // honest: not native constrained decoding
+        #expect(opt?.resolution == .approximated)     // honest: not native constrained decoding
         #expect(outcome.systemInstructionAugmentation != nil)
         #expect(outcome.systemInstructionAugmentation?.contains("JSON") == true)
     }
 
     @Test
-    func jsonSchemaIsTransformedAndCarriesSchema() {
+    func strictJSONIsRejectedNotApproximated() {
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .json, strict: true), backend: .mlx)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .rejected)
+        #expect(outcome.systemInstructionAugmentation == nil)   // no silent approximation under strict
+    }
+
+    @Test
+    func jsonSchemaIsApproximatedAndCarriesSchema() {
         let schema = #"{"type":"object","properties":{"name":{"type":"string"}}}"#
         let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .jsonSchema, schema: schema), backend: .mlx)
-        #expect(outcome.resolution.first(named: "response_format")?.resolution == .transformed)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .approximated)
         #expect(outcome.systemInstructionAugmentation?.contains(schema) == true)
+    }
+
+    @Test
+    func strictJSONSchemaIsRejected() {
+        let schema = #"{"type":"object"}"#
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .jsonSchema, schema: schema, strict: true), backend: .mlx)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .rejected)
     }
 
     @Test

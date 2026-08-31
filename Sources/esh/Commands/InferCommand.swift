@@ -170,6 +170,7 @@ enum InferCommand {
 
     private static func resolveResponseFormat(arguments: [String]) throws -> EshResponseFormat? {
         guard let value = CommandSupport.optionalValue(flag: "--response-format", in: arguments) else { return nil }
+        let strict = arguments.contains("--strict-format")
         let schemaArg = CommandSupport.optionalValue(flag: "--json-schema", in: arguments)
         // Schema may be a path to a .json file or inline JSON text.
         let schema: String?
@@ -184,9 +185,9 @@ enum InferCommand {
         }
         switch value.lowercased() {
         case "text": return .text
-        case "json": return .json
-        case "json_schema", "jsonschema", "schema": return EshResponseFormat(kind: .jsonSchema, schema: schema)
-        case "grammar": return EshResponseFormat(kind: .grammar, grammar: schema)
+        case "json": return EshResponseFormat(kind: .json, strict: strict)
+        case "json_schema", "jsonschema", "schema": return EshResponseFormat(kind: .jsonSchema, schema: schema, strict: strict)
+        case "grammar": return EshResponseFormat(kind: .grammar, grammar: schema, strict: strict)
         default:
             throw StoreError.invalidManifest("Invalid --response-format: \(value). Use text, json, json_schema, or grammar.")
         }

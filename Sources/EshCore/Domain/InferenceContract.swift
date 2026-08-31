@@ -15,11 +15,15 @@ public struct EshResponseFormat: Codable, Hashable, Sendable {
     public var schema: String?
     /// Grammar text, e.g. GBNF (for `.grammar`).
     public var grammar: String?
+    /// When true, the caller requires a NATIVE constraint. If the backend cannot enforce it
+    /// natively, the request is rejected rather than approximated via a prompt instruction.
+    public var strict: Bool
 
-    public init(kind: Kind, schema: String? = nil, grammar: String? = nil) {
+    public init(kind: Kind, schema: String? = nil, grammar: String? = nil, strict: Bool = false) {
         self.kind = kind
         self.schema = schema
         self.grammar = grammar
+        self.strict = strict
     }
 
     public static let text = EshResponseFormat(kind: .text)
@@ -29,10 +33,11 @@ public struct EshResponseFormat: Codable, Hashable, Sendable {
 /// How a requested option was actually handled. The contract NEVER silently pretends an
 /// unsupported option was honored — every consequential option resolves to one of these.
 public enum OptionResolution: String, Codable, Sendable {
-    case applied       // honored as requested
-    case transformed   // approximated (e.g. JSON via instruction instead of constrained decoding)
-    case ignored       // not applicable / no effect on this backend
-    case rejected      // requested but cannot be satisfied
+    case applied       // honored natively, as requested
+    case transformed   // mapped to a native equivalent (e.g. a renamed parameter)
+    case approximated  // simulated via a non-native mechanism (e.g. JSON via a prompt instruction)
+    case ignored       // ignored by explicit policy / no effect on this backend
+    case rejected      // requested but cannot be satisfied (unsupported, or strict-mode)
 }
 
 public struct ResolvedOption: Codable, Hashable, Sendable {

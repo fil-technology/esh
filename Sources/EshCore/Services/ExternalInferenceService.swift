@@ -90,6 +90,12 @@ public struct ExternalInferenceService: Sendable {
             responseFormat: request.responseFormat,
             backend: install.spec.backend
         )
+        // A strict structured-output request that cannot be satisfied natively must fail, not
+        // silently fall back to unconstrained generation.
+        if request.responseFormat?.strict == true, capabilityOutcome.resolution.hasRejections {
+            let detail = capabilityOutcome.resolution.first(named: "response_format")?.detail ?? "not supported"
+            throw StoreError.invalidManifest("Strict structured output rejected: \(detail)")
+        }
         if let augmentation = capabilityOutcome.systemInstructionAugmentation {
             request.messages.insert(ExternalInferenceMessage(role: .system, text: augmentation), at: 0)
         }
