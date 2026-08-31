@@ -184,6 +184,9 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
     /// Requested output format (text/json/json_schema/grammar). Resolved honestly by
     /// CapabilityResolver; see the response's `capabilityResolution`.
     public var responseFormat: EshResponseFormat?
+    /// Tool/function definitions the model may call (M8).
+    public var tools: [EshToolDefinition]?
+    public var toolChoice: EshToolChoice?
 
     public init(
         schemaVersion: String = ExternalInferenceRequest.schemaVersion,
@@ -195,7 +198,9 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         messages: [ExternalInferenceMessage],
         generation: GenerationConfig = .init(),
         routing: RoutingConfiguration? = nil,
-        responseFormat: EshResponseFormat? = nil
+        responseFormat: EshResponseFormat? = nil,
+        tools: [EshToolDefinition]? = nil,
+        toolChoice: EshToolChoice? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.model = model
@@ -207,10 +212,12 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.generation = generation
         self.routing = routing
         self.responseFormat = responseFormat
+        self.tools = tools
+        self.toolChoice = toolChoice
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, model, cacheArtifactID, sessionName, cacheMode, intent, messages, generation, routing, responseFormat
+        case schemaVersion, model, cacheArtifactID, sessionName, cacheMode, intent, messages, generation, routing, responseFormat, tools, toolChoice
     }
 
     public init(from decoder: Decoder) throws {
@@ -225,6 +232,8 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.generation = try c.decodeIfPresent(GenerationConfig.self, forKey: .generation) ?? .init()
         self.routing = try c.decodeIfPresent(RoutingConfiguration.self, forKey: .routing)
         self.responseFormat = try c.decodeIfPresent(EshResponseFormat.self, forKey: .responseFormat)
+        self.tools = try c.decodeIfPresent([EshToolDefinition].self, forKey: .tools)
+        self.toolChoice = try c.decodeIfPresent(EshToolChoice.self, forKey: .toolChoice)
     }
 }
 
@@ -254,6 +263,10 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
     public var capabilityResolution: CapabilityResolution?
     /// The optimization plan that actually ran (backend, mode, KV/prompt-cache selections, reasons).
     public var executionProfile: ExecutionProfile?
+    /// Normalized token/usage accounting (only measured counters; never fabricated).
+    public var usage: EshUsage?
+    /// Tool calls the model produced (M8; nil/empty until native tool-calling is wired).
+    public var toolCalls: [EshToolCall]?
 
     public init(
         schemaVersion: String = ExternalInferenceResponse.schemaVersion,
@@ -264,7 +277,9 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         metrics: Metrics,
         routing: RoutingTrace? = nil,
         capabilityResolution: CapabilityResolution? = nil,
-        executionProfile: ExecutionProfile? = nil
+        executionProfile: ExecutionProfile? = nil,
+        usage: EshUsage? = nil,
+        toolCalls: [EshToolCall]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -275,5 +290,7 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         self.routing = routing
         self.capabilityResolution = capabilityResolution
         self.executionProfile = executionProfile
+        self.usage = usage
+        self.toolCalls = toolCalls
     }
 }

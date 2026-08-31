@@ -88,7 +88,8 @@ public struct ExternalInferenceService: Sendable {
         var request = originalRequest
         let capabilityOutcome = CapabilityResolver().resolve(
             responseFormat: request.responseFormat,
-            backend: install.spec.backend
+            backend: install.spec.backend,
+            tools: request.tools
         )
         // A strict structured-output request that cannot be satisfied natively must fail, not
         // silently fall back to unconstrained generation.
@@ -142,16 +143,24 @@ public struct ExternalInferenceService: Sendable {
             cacheMode: executedCacheMode,
             usedPromptCache: request.cacheArtifactID != nil
         )
+        let finalMetrics = await runtime.metrics
+        // Normalized usage: only counters the runtime actually reports (never fabricated).
+        let usage = EshUsage(
+            contextUsed: finalMetrics.contextTokens,
+            monetaryCostUSD: 0,
+            costProvenance: "local on-device inference; no API cost"
+        )
 
         return ExternalInferenceResponse(
             modelID: install.id,
             backend: install.spec.backend,
             integration: integration,
             outputText: outputText,
-            metrics: await runtime.metrics,
+            metrics: finalMetrics,
             routing: routing,
             capabilityResolution: capabilityOutcome.resolution.isEmpty ? nil : capabilityOutcome.resolution,
-            executionProfile: executionProfile
+            executionProfile: executionProfile,
+            usage: usage
         )
     }
 

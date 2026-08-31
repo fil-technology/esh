@@ -13,11 +13,28 @@ public struct CapabilityResolver: Sendable {
         public var systemInstructionAugmentation: String?
     }
 
-    public func resolve(responseFormat: EshResponseFormat?, backend: BackendKind) -> Outcome {
-        guard let responseFormat else {
-            return Outcome(resolution: CapabilityResolution(), systemInstructionAugmentation: nil)
+    public func resolve(responseFormat: EshResponseFormat?, backend: BackendKind, tools: [EshToolDefinition]? = nil) -> Outcome {
+        var extraOptions: [ResolvedOption] = []
+        // Tools: native model function-calling is not wired into the local runtime yet, so requested
+        // tools are honestly reported as rejected (the esh agent layer does tool orchestration
+        // separately). This is not silent — the caller sees it in capabilityResolution.
+        if let tools, !tools.isEmpty {
+            extraOptions.append(ResolvedOption(name: "tools", resolution: .rejected,
+                detail: "native tool/function calling is not available on the \(backend.rawValue) runtime yet; use `esh agent` for tool orchestration"))
         }
 
+        guard let responseFormat else {
+            return Outcome(resolution: CapabilityResolution(options: extraOptions), systemInstructionAugmentation: nil)
+        }
+
+        let base = resolveFormat(responseFormat, backend: backend)
+        return Outcome(
+            resolution: CapabilityResolution(options: base.resolution.options + extraOptions),
+            systemInstructionAugmentation: base.systemInstructionAugmentation
+        )
+    }
+
+    private func resolveFormat(_ responseFormat: EshResponseFormat, backend: BackendKind) -> Outcome {
         switch responseFormat.kind {
         case .text:
             return Outcome(
