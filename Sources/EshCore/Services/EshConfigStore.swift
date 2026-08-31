@@ -19,6 +19,11 @@ public struct EshConfigStore {
         return true
     }
 
+    public func save(_ config: EshConfig) throws {
+        try FileManager.default.createDirectory(at: root.rootURL, withIntermediateDirectories: true)
+        try Data(config.tomlString.utf8).write(to: configURL, options: .atomic)
+    }
+
     public func load() throws -> EshConfig {
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             return .default

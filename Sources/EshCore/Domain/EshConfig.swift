@@ -64,6 +64,8 @@ public struct EshConfig: Codable, Hashable, Sendable {
                 config.defaults.modelDir = parseString(value)
             case ("defaults", "context_size"):
                 config.defaults.contextSize = Int(value) ?? config.defaults.contextSize
+            case ("defaults", "performance_mode"):
+                config.defaults.performanceMode = parseString(value)
             case ("engines.llama_cpp", "enabled"):
                 config.engines.llamaCpp.enabled = parseBool(value) ?? config.engines.llamaCpp.enabled
             case ("engines.llama_cpp", "binary"):
@@ -97,6 +99,7 @@ public struct EshConfig: Codable, Hashable, Sendable {
 
         [defaults]
         engine = "\(defaults.engine)"
+        performance_mode = "\(defaults.performanceMode)"
         # model_dir is deprecated: model/asset storage is managed by `esh storage`
         # (see `esh storage show`). This value is retained only for backward compatibility.
         model_dir = "\(defaults.modelDir)"
@@ -125,11 +128,25 @@ public struct EshDefaultsConfig: Codable, Hashable, Sendable {
     public var engine: String
     public var modelDir: String
     public var contextSize: Int
+    public var performanceMode: String
 
-    public init(engine: String = "auto", modelDir: String = "~/.esh/models", contextSize: Int = 8192) {
+    public init(engine: String = "auto", modelDir: String = "~/.esh/models", contextSize: Int = 8192, performanceMode: String = "auto") {
         self.engine = engine
         self.modelDir = modelDir
         self.contextSize = contextSize
+        self.performanceMode = performanceMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case engine, modelDir, contextSize, performanceMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.engine = try c.decodeIfPresent(String.self, forKey: .engine) ?? "auto"
+        self.modelDir = try c.decodeIfPresent(String.self, forKey: .modelDir) ?? "~/.esh/models"
+        self.contextSize = try c.decodeIfPresent(Int.self, forKey: .contextSize) ?? 8192
+        self.performanceMode = try c.decodeIfPresent(String.self, forKey: .performanceMode) ?? "auto"
     }
 }
 

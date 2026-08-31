@@ -61,6 +61,10 @@ private struct CLI {
             )
         case "doctor":
             try DoctorCommand.run(arguments: Array(command.dropFirst()))
+        case "optimize":
+            try await OptimizeCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "performance":
+            try OptimizeCommand.setPerformanceMode(arguments: Array(command.dropFirst()), root: root)
         case "engines":
             try EnginesCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "validate":
@@ -465,6 +469,13 @@ private struct CLI {
               esh read related <name-or-path> [--limit N] [--run <id>]
               esh read file <path> --range start:end [--run <id>]
               esh doctor [--json]
+              esh performance <auto|speed|balanced|memory>
+              esh optimize status [--json]
+              esh optimize strategies [--model <id>] [--json]
+              esh optimize plan <model> [--workload chat|coding|reasoning|structured|agent|long] [--context N] [--mode auto|speed|balanced|memory] [--json]
+              esh optimize benchmark <model> [--quick|--full] [--workload <w>] [--json]
+              esh optimize compare [<model>] [--json]
+              esh optimize reset <model>
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
