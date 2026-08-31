@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
+### Added
+- **Model Benchmark Lab v1 (recommendation engine).** `esh model recommended --explain [--profile] [--json]` produces fit-aware, per-profile recommendations for this Mac (general/coding/reasoning/fast/low-memory/long-context/tools/best-quality) over a versioned dataset schema. Rankings exclude models that don't fit, prefer comfortable/fits, and are honestly labeled `estimated` unless you've locally benchmarked the model — in which case your measured decode speed supersedes/annotates the ranking (`measured-local`). No fabricated quality numbers. Candidate discovery is researched live. See MODEL_BENCHMARK_REPORT.md.
+- **Execution transparency.** Inference responses now include an `executionProfile` reflecting the KV/prompt-cache strategy that actually ran, for the Scheduler / Web Chat / Terminal UX.
+- `docs/GAP_AUDIT.md`: honest audit documenting which milestones are complete vs. slices (M7/M8/structured-gen/cache/update/apple).
+
 ## [0.6.0] - 2026-08-31
 
 ### Added
