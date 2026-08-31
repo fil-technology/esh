@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-31
+
+### Added
+- **Apple Intelligence generation.** `esh apple <prompt> [--system …]` runs the on-device Apple Foundation Models system model with zero model downloads; `esh apple status [--json]` reports availability. Guarded so it compiles/runs without the FoundationModels SDK, throws clearly when unavailable, and is never used to replace an explicitly requested MLX/GGUF model. (Full provider integration into the capability contract is planned for a later milestone.)
+- **`esh update check [--json]`.** Explicit update-check surface with a documented notify-only policy — esh reports a newer release (`brew upgrade --cask esh`) but never installs an executable update itself (`autoInstall: false`).
+- `docs/ROADMAP_STATUS.md` tracking milestone status against the delivery roadmap.
+
 ## [0.3.0] - 2026-08-31
 
 ### Added
