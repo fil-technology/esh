@@ -1,7 +1,8 @@
 import Foundation
+import EshCore
 
 enum TranscriptView {
-    static func renderedLines(items: [TranscriptItem], availableWidth: Int) -> [String] {
+    static func renderedLines(items: [TranscriptItem], availableWidth: Int, reasoningExpanded: Bool = false) -> [String] {
         let width = max(availableWidth, 40)
         guard !items.isEmpty else {
             return [
@@ -17,7 +18,7 @@ enum TranscriptView {
             }
 
             if item.role == .assistant {
-                let segments = assistantSegments(for: item)
+                let segments = assistantSegments(for: item, reasoningExpanded: reasoningExpanded)
                 for (segmentIndex, segment) in segments.enumerated() {
                     if segmentIndex > 0 {
                         lines.append("")
@@ -56,8 +57,8 @@ enum TranscriptView {
         let prefix: String
     }
 
-    private static func assistantSegments(for item: TranscriptItem) -> [AssistantSegment] {
-        let parsed = parseThinkingSegments(from: item.text)
+    private static func assistantSegments(for item: TranscriptItem, reasoningExpanded: Bool) -> [AssistantSegment] {
+        let parsed = ThinkingParser.parse(item.text)
         if parsed.reasoning == nil && parsed.answer == nil {
             return [
                 AssistantSegment(
@@ -70,16 +71,25 @@ enum TranscriptView {
 
         var segments: [AssistantSegment] = []
         if let reasoning = parsed.reasoning, !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let label = item.isStreaming && parsed.answer == nil
-                ? "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset) \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)"
-                : "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset)"
-            segments.append(
-                AssistantSegment(
-                    label: label,
-                    text: reasoning,
-                    prefix: TerminalUIStyle.dim
+            // Live thinking is always shown so the user sees progress; a completed chain collapses to a
+            // one-line summary unless expanded (/think).
+            let live = item.isStreaming && parsed.answer == nil
+            if !live && !reasoningExpanded {
+                segments.append(
+                    AssistantSegment(
+                        label: "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset)",
+                        text: TerminalUIStyle.faint + ThinkingParser.collapsedSummary(reasoning) + TerminalUIStyle.reset,
+                        prefix: ""
+                    )
                 )
-            )
+            } else {
+                let label = live
+                    ? "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset) \(TerminalUIStyle.amber)[live]\(TerminalUIStyle.reset)"
+                    : "\(TerminalUIStyle.bold)\(TerminalUIStyle.amber)Reasoning\(TerminalUIStyle.reset) \(TerminalUIStyle.faint)(/think to collapse)\(TerminalUIStyle.reset)"
+                segments.append(
+                    AssistantSegment(label: label, text: reasoning, prefix: TerminalUIStyle.dim)
+                )
+            }
         }
         if let answer = parsed.answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let label = item.isStreaming
@@ -94,29 +104,6 @@ enum TranscriptView {
             )
         }
         return segments
-    }
-
-    private static func parseThinkingSegments(from text: String) -> (reasoning: String?, answer: String?) {
-        let source = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard source.contains("<think>") || source.contains("</think>") else {
-            return (nil, source.isEmpty ? nil : source)
-        }
-
-        let openTag = "<think>"
-        let closeTag = "</think>"
-        guard let openRange = source.range(of: openTag) else {
-            return (nil, source)
-        }
-
-        let afterOpen = source[openRange.upperBound...]
-        if let closeRange = afterOpen.range(of: closeTag) {
-            let reasoning = String(afterOpen[..<closeRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let answer = String(afterOpen[closeRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            return (reasoning.isEmpty ? nil : reasoning, answer.isEmpty ? nil : answer)
-        }
-
-        let reasoning = String(afterOpen).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (reasoning.isEmpty ? nil : reasoning, nil)
     }
 
     private static func roleLabel(for item: TranscriptItem) -> String {

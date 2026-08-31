@@ -672,6 +672,7 @@ struct TUIApplication {
                     "/context        Context usage (last turn)",
                     "/performance    Last-turn latency/tokens/tok-s/cache",
                     "/auto           What the Adaptive Scheduler would pick",
+                    "/think          Expand/collapse model reasoning",
                     "/clear          Clear the transcript",
                     "/back           Return to the launcher",
                     "/close          Close the current panel",
@@ -716,6 +717,9 @@ struct TUIApplication {
             state.transcriptScrollOffset = 0
             state.streamingAssistantMessageID = nil
             state.statusText = "transcript cleared"
+        case "/think":
+            state.reasoningExpanded.toggle()
+            state.statusText = state.reasoningExpanded ? "reasoning expanded" : "reasoning collapsed"
         case "/status":
             let residencyLine = TerminalStatusFormatting.residencyLine(
                 residency: nil, contextUsed: state.metrics.contextTokens, contextLimit: nil,

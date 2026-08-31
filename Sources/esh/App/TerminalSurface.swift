@@ -20,7 +20,8 @@ final class TerminalSurface {
 
         let transcriptLines = TranscriptView.renderedLines(
             items: state.transcriptItems,
-            availableWidth: max(size.columns - 4, 20)
+            availableWidth: max(size.columns - 4, 20),
+            reasoningExpanded: state.reasoningExpanded
         )
         let visibleTranscript = Self.visibleTranscriptLines(
             transcriptLines: transcriptLines,
@@ -98,7 +99,8 @@ final class TerminalSurface {
         let transcriptHeight = max(terminalRows - reservedBottom - reservedTop, 1)
         let transcriptLines = TranscriptView.renderedLines(
             items: state.transcriptItems,
-            availableWidth: max(terminalColumns - 4, 20)
+            availableWidth: max(terminalColumns - 4, 20),
+            reasoningExpanded: state.reasoningExpanded
         )
         return max(transcriptLines.count - transcriptHeight, 0)
     }

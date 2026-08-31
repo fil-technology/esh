@@ -62,6 +62,9 @@ struct ChatScreenState: Sendable {
     var autosaveEnabled: Bool
     var openAIServerEnabled: Bool
     var openAIServerAddress: String?
+    /// When false (default), model reasoning/thinking chains render collapsed to a one-line summary;
+    /// `/think` toggles expansion.
+    var reasoningExpanded: Bool = false
 
     init(
         sessionName: String,
