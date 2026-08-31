@@ -7,27 +7,62 @@ enum ModelRecommendedCommand {
         let tierValue = CommandSupport.optionalValue(flag: "--tier", in: arguments)
         let backendValue = CommandSupport.optionalValue(flag: "--backend", in: arguments)
         let tag = CommandSupport.optionalValue(flag: "--tag", in: arguments)
+        let forThisMac = arguments.contains("--for-this-mac")
+        let includeExperimental = arguments.contains("--experimental")
+        let backend = try backendValue.map(resolveBackend)
+
+        // Hardware-aware mode: `--for-this-mac`, or a use-case profile like coding/reasoning/fast.
+        if forThisMac || (profileValue.flatMap(RecommendedModelRegistry.UseCase.init(cliValue:)).map(isUseCaseOnly) ?? false) {
+            let useCase = profileValue.flatMap(RecommendedModelRegistry.UseCase.init(cliValue:)) ?? .bestForThisMac
+            let host = HostMachineProfileService().currentProfile()
+            let models = service.recommend(
+                useCase: useCase,
+                host: forThisMac ? host : nil,
+                backend: backend,
+                limit: forThisMac ? 4 : 8,
+                includeExperimental: includeExperimental
+            )
+            if let budget = host.safeBudgetGB, forThisMac {
+                print("For this Mac (\(host.chipDescription ?? "Apple Silicon"), ~\(String(format: "%.0f", budget)) GB usable) — \(useCase.title):")
+            } else {
+                print("\(useCase.title):")
+            }
+            printTable(models)
+            return
+        }
 
         let profile = try profileValue.map(resolveProfile)
         let tier = try tierValue.map(resolveTier)
-        let backend = try backendValue.map(resolveBackend)
         let models = service.listRecommended(profile: profile, tier: tier, backend: backend, tag: tag)
+        printTable(models)
+    }
 
+    /// Whether a --profile value is a hardware-aware use case that is NOT one of the legacy
+    /// chat/code profiles (so `--profile chat` keeps the classic listing).
+    private static func isUseCaseOnly(_ useCase: RecommendedModelRegistry.UseCase) -> Bool {
+        switch useCase {
+        case .general, .coding: return false   // overlap with legacy chat/code profiles
+        case .reasoning, .fast, .lowMemory, .bestForThisMac: return true
+        }
+    }
+
+    private static func printTable(_ models: [RecommendedModel]) {
         guard !models.isEmpty else {
             print("No recommended models found.")
             return
         }
-
-        print("alias                        tier    quant  memory    disk      tags                         repo")
+        print("alias                        tier    quant  ctx   memory    disk      status        capabilities                 repo")
         for model in models {
             print(
                 [
                     pad(model.id, width: 28),
                     pad(tierLabel(for: model.tier), width: 7),
                     pad(model.quantization, width: 6),
+                    pad(model.contextHint, width: 5),
                     pad(model.memoryHint, width: 9),
                     pad(model.sizeHint, width: 9),
-                    pad(model.tags.joined(separator: ","), width: 28),
+                    pad(model.status.rawValue, width: 13),
+                    pad(model.capabilities.map(\.rawValue).joined(separator: ","), width: 28),
                     model.repoID
                 ].joined(separator: " ")
             )

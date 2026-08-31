@@ -46,6 +46,23 @@ public struct ModelService: Sendable {
         recommendedRegistry.resolve(alias: alias)
     }
 
+    /// Hardware-aware recommendations for a use case, filtered to the host's safe memory budget.
+    public func recommend(
+        useCase: RecommendedModelRegistry.UseCase,
+        host: HostMachineProfile?,
+        backend: BackendKind? = nil,
+        limit: Int = 4,
+        includeExperimental: Bool = false
+    ) -> [RecommendedModel] {
+        recommendedRegistry.recommend(
+            useCase: useCase,
+            host: host,
+            backend: backend,
+            limit: limit,
+            includeExperimental: includeExperimental
+        )
+    }
+
     public func inspect(id: String) throws -> ModelManifest {
         try store.loadManifest(id: id)
     }

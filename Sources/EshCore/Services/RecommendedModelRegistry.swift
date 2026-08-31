@@ -36,6 +36,82 @@ public struct RecommendedModelRegistry: Sendable {
             .sorted(by: isOrderedBefore)
     }
 
+    /// Use-case profiles for hardware-aware recommendations.
+    public enum UseCase: String, Sendable, CaseIterable {
+        case general
+        case coding
+        case reasoning
+        case fast
+        case lowMemory = "low-memory"
+        case bestForThisMac = "best"
+
+        public init?(cliValue: String) {
+            switch cliValue.lowercased() {
+            case "general", "chat", "balanced": self = .general
+            case "coding", "code": self = .coding
+            case "reasoning", "reason": self = .reasoning
+            case "fast", "quick": self = .fast
+            case "low-memory", "lowmemory", "low", "tiny": self = .lowMemory
+            case "best", "best-quality", "quality", "max": self = .bestForThisMac
+            default: return nil
+            }
+        }
+
+        public var title: String {
+            switch self {
+            case .general: "General"
+            case .coding: "Coding"
+            case .reasoning: "Reasoning"
+            case .fast: "Fast"
+            case .lowMemory: "Low memory"
+            case .bestForThisMac: "Best quality for this Mac"
+            }
+        }
+    }
+
+    /// Recommend models for a use case, filtered to what fits the host's safe memory budget.
+    /// Excludes `.incompatible` always and `.experimental` unless `includeExperimental` is set.
+    public func recommend(
+        useCase: UseCase,
+        host: HostMachineProfile? = nil,
+        backend: BackendKind? = nil,
+        limit: Int = 4,
+        includeExperimental: Bool = false
+    ) -> [RecommendedModel] {
+        let budget = host?.safeBudgetGB
+        let candidates = models.filter { model in
+            if model.status == .incompatible { return false }
+            if model.status == .experimental, !includeExperimental { return false }
+            if let backend, model.backend != backend { return false }
+            if let budget, budget > 0, model.estimatedMemoryGB > budget { return false }
+            switch useCase {
+            case .coding: return model.capabilities.contains(.coding)
+            case .reasoning: return model.capabilities.contains(.reasoning)
+            case .general, .fast, .lowMemory, .bestForThisMac:
+                return model.capabilities.contains(.chat)
+            }
+        }
+
+        let sorted: [RecommendedModel]
+        switch useCase {
+        case .fast, .lowMemory:
+            // Smallest memory footprint first (fastest / lowest pressure).
+            sorted = candidates.sorted { lhs, rhs in
+                lhs.estimatedMemoryGB == rhs.estimatedMemoryGB
+                    ? lhs.sortOrder < rhs.sortOrder
+                    : lhs.estimatedMemoryGB < rhs.estimatedMemoryGB
+            }
+        case .general, .coding, .reasoning, .bestForThisMac:
+            // Best quality that still fits: largest footprint within budget first.
+            sorted = candidates.sorted { lhs, rhs in
+                lhs.estimatedMemoryGB == rhs.estimatedMemoryGB
+                    ? lhs.sortOrder < rhs.sortOrder
+                    : lhs.estimatedMemoryGB > rhs.estimatedMemoryGB
+            }
+        }
+        return Array(sorted.prefix(limit))
+    }
+
     public func resolve(alias: String) -> RecommendedModel? {
         let normalized = alias.lowercased()
         return models.first { model in
@@ -66,6 +142,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 5.2,
             tags: ["default", "balanced", "general-purpose"],
             summary: "Balanced first-choice local assistant for everyday chat, drafting, and research.",
+            contextWindow: 262144,
+            capabilities: [.chat, .coding, .reasoning, .toolCalling],
+            status: .recommended,
             sortOrder: 0
         ),
         RecommendedModel(
@@ -80,6 +159,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 13.3,
             tags: ["general-purpose", "coding", "agentic"],
             summary: "Balanced built-in default for everyday chat, coding, and agentic tasks.",
+            contextWindow: 32768,
+            capabilities: [.chat, .coding, .toolCalling],
+            status: .recommended,
             sortOrder: 1
         ),
         RecommendedModel(
@@ -94,6 +176,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 8.3,
             tags: ["reasoning", "fast-inference", "logic"],
             summary: "Reasoning-focused sweet spot model with faster inference than larger R1 distills.",
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 2
         ),
         RecommendedModel(
@@ -108,6 +193,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.4,
             tags: ["reasoning", "compact", "logic"],
             summary: "Smaller reasoning-focused preset for deliberate math, logic, and structured problem solving.",
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 3
         ),
         RecommendedModel(
@@ -122,6 +210,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 5.1,
             tags: ["instruction-following", "vision-language", "high-throughput"],
             summary: "High-throughput mid-size option with strong instruction following and VLM support.",
+            contextWindow: 262144,
+            capabilities: [.chat, .coding, .reasoning, .toolCalling],
+            status: .experimental,
             sortOrder: 4
         ),
         RecommendedModel(
@@ -136,6 +227,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 2.9,
             tags: ["reasoning", "small", "structured-output"],
             summary: "Compact reasoning helper for logic-heavy prompts, structured outputs, and short code bursts.",
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 5
         ),
         RecommendedModel(
@@ -150,6 +244,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.5,
             tags: ["agentic", "general-purpose", "roleplay"],
             summary: "Efficient general-purpose small model for broad local usage.",
+            contextWindow: 131072,
+            capabilities: [.chat, .toolCalling],
+            status: .recommended,
             sortOrder: 6
         ),
         RecommendedModel(
@@ -164,6 +261,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 4.3,
             tags: ["coding", "lightweight", "autocomplete"],
             summary: "Lightweight coding recommendation with a strong quality-to-efficiency tradeoff.",
+            contextWindow: 32768,
+            capabilities: [.chat, .coding, .toolCalling],
+            status: .recommended,
             sortOrder: 7
         ),
         RecommendedModel(
@@ -178,6 +278,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 2.5,
             tags: ["compact", "general-purpose", "helper"],
             summary: "Lean helper preset for lightweight drafting, Q&A, and quick tool-oriented turns.",
+            contextWindow: 131072,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 8
         ),
         RecommendedModel(
@@ -192,6 +295,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 1.3,
             tags: ["fast-inference", "lightweight", "general-purpose"],
             summary: "Fast small generalist when you want noticeably better quality than tiny models without much extra cost.",
+            contextWindow: 262144,
+            capabilities: [.chat, .toolCalling],
+            status: .recommended,
             sortOrder: 9
         ),
         RecommendedModel(
@@ -206,6 +312,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 3.0,
             tags: ["gemma", "compact", "general-purpose"],
             summary: "Compact Gemma preset with a useful balance for chat, drafting, and quick research loops.",
+            contextWindow: 131072,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 10
         ),
         RecommendedModel(
@@ -220,6 +329,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 1.8,
             tags: ["fast-inference", "embedded-tasks", "summarization"],
             summary: "Very fast lightweight choice for summarization and small-device workflows.",
+            contextWindow: 131072,
+            capabilities: [.chat, .toolCalling],
+            status: .recommended,
             sortOrder: 11
         ),
         RecommendedModel(
@@ -234,6 +346,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.4,
             tags: ["starter", "always-on", "fast-inference"],
             summary: "Tiny starter model for instant first-run chat and lightweight assistant loops.",
+            contextWindow: 32768,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 12
         ),
         RecommendedModel(
@@ -248,6 +363,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.6,
             tags: ["background-agent", "ultra-fast", "formatting"],
             summary: "Ultra-light model for background helpers, formatting, and fast automation loops.",
+            contextWindow: 262144,
+            capabilities: [.chat],
+            status: .experimental,
             sortOrder: 13
         ),
         RecommendedModel(
@@ -262,6 +380,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 0.7,
             tags: ["tiny", "ultra-fast", "helper"],
             summary: "Tiny helper preset for ultra-fast chat, formatting, and background assistant tasks.",
+            contextWindow: 262144,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 14
         ),
         RecommendedModel(
@@ -276,6 +397,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 1.2,
             tags: ["tiny", "gemma", "helper"],
             summary: "Small Gemma helper for lightweight chat and short drafting turns on tighter memory budgets.",
+            contextWindow: 131072,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 15
         ),
         RecommendedModel(
@@ -290,6 +414,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 14.8,
             tags: ["reasoning", "distilled", "chain-of-thought"],
             summary: "Large distilled reasoning preset aimed at higher-quality chain-of-thought style tasks.",
+            contextWindow: 262144,
+            capabilities: [.chat, .reasoning],
+            status: .experimental,
             sortOrder: 16
         ),
         RecommendedModel(
@@ -304,6 +431,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["math", "logic", "chain-of-thought"],
             summary: "Large reasoning recommendation tuned for math and logic heavy workloads.",
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 17
         ),
         RecommendedModel(
@@ -318,6 +448,9 @@ public struct RecommendedModelRegistry: Sendable {
             totalDiskSizeGB: 18.4,
             tags: ["coding", "development", "agentic"],
             summary: "Largest built-in coding preset for advanced development and agentic tasks.",
+            contextWindow: 32768,
+            capabilities: [.chat, .coding, .toolCalling],
+            status: .recommended,
             sortOrder: 18
         ),
         RecommendedModel(
@@ -333,6 +466,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "default", "balanced"],
             summary: "GGUF fallback for a strong all-around local assistant through llama.cpp.",
             backend: .gguf,
+            contextWindow: 262144,
+            capabilities: [.chat, .coding, .reasoning, .toolCalling],
+            status: .recommended,
             sortOrder: 19
         ),
         RecommendedModel(
@@ -348,6 +484,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "starter", "fast-inference"],
             summary: "GGUF starter preset for lightweight local chat through llama.cpp.",
             backend: .gguf,
+            contextWindow: 131072,
+            capabilities: [.chat, .toolCalling],
+            status: .recommended,
             sortOrder: 20
         ),
         RecommendedModel(
@@ -363,6 +502,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "coding", "lightweight"],
             summary: "GGUF coding preset with a strong quality-to-speed tradeoff.",
             backend: .gguf,
+            contextWindow: 32768,
+            capabilities: [.chat, .coding, .toolCalling],
+            status: .recommended,
             sortOrder: 21
         ),
         RecommendedModel(
@@ -378,6 +520,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "reasoning", "logic"],
             summary: "GGUF reasoning preset for llama.cpp-backed local chat.",
             backend: .gguf,
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 22
         ),
         RecommendedModel(
@@ -393,6 +538,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "reasoning", "compact"],
             summary: "Compact GGUF reasoning preset when you want a smaller deliberate model through llama.cpp.",
             backend: .gguf,
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 23
         ),
         RecommendedModel(
@@ -408,6 +556,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "reasoning", "small"],
             summary: "Compact GGUF reasoning helper for logic-heavy prompts and structured outputs.",
             backend: .gguf,
+            contextWindow: 131072,
+            capabilities: [.chat, .reasoning],
+            status: .recommended,
             sortOrder: 24
         ),
         RecommendedModel(
@@ -423,6 +574,9 @@ public struct RecommendedModelRegistry: Sendable {
             tags: ["gguf", "compact", "helper"],
             summary: "Lean GGUF helper preset for lightweight drafting, Q&A, and quick tool-oriented turns.",
             backend: .gguf,
+            contextWindow: 131072,
+            capabilities: [.chat],
+            status: .recommended,
             sortOrder: 25
         )
     ]

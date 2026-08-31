@@ -6,6 +6,26 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
         case code
     }
 
+    /// Structured capabilities a model is known to support well. Kept as an explicit list on each
+    /// catalog entry (rather than heuristically guessed from the name) so recommendations and
+    /// filtering are reliable. See ModelFeatureClassifier for the display-badge heuristics.
+    public enum Capability: String, Codable, Hashable, Sendable, CaseIterable {
+        case chat
+        case coding
+        case reasoning
+        case toolCalling = "tool-calling"
+        case vision
+    }
+
+    /// Lifecycle status of a catalog entry, so obsolete entries are deprecated rather than
+    /// silently broken.
+    public enum Status: String, Codable, Hashable, Sendable, CaseIterable {
+        case recommended     // verified current + compatible
+        case experimental    // works but newer/less-proven runtime or template
+        case legacy          // superseded; kept for compatibility
+        case incompatible    // known not to run through esh's current runtimes
+    }
+
     public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
         case good
         case small
@@ -47,6 +67,9 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
     public var tags: [String]
     public var summary: String
     public var backend: BackendKind
+    public var contextWindow: Int?
+    public var capabilities: [Capability]
+    public var status: Status
     public var sortOrder: Int
 
     public var memoryHint: String {
@@ -56,6 +79,20 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
     public var sizeHint: String {
         "~\(Self.formatGigabytes(totalDiskSizeGB)) GB"
     }
+
+    /// Human-friendly context window, e.g. "256K", "128K", "32K", or "-" when unknown.
+    public var contextHint: String {
+        guard let contextWindow else { return "-" }
+        if contextWindow >= 1024, contextWindow % 1024 == 0 {
+            return "\(contextWindow / 1024)K"
+        }
+        if contextWindow >= 1000 {
+            return "\(contextWindow / 1000)K"
+        }
+        return "\(contextWindow)"
+    }
+
+    public var supportsToolCalling: Bool { capabilities.contains(.toolCalling) }
 
     public init(
         id: String,
@@ -70,6 +107,9 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
         tags: [String],
         summary: String,
         backend: BackendKind = .mlx,
+        contextWindow: Int? = nil,
+        capabilities: [Capability] = [],
+        status: Status = .recommended,
         sortOrder: Int
     ) {
         self.id = id
@@ -84,6 +124,9 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
         self.tags = tags
         self.summary = summary
         self.backend = backend
+        self.contextWindow = contextWindow
+        self.capabilities = capabilities
+        self.status = status
         self.sortOrder = sortOrder
     }
 

@@ -315,6 +315,18 @@ private struct CLI {
                 throw StoreError.invalidManifest("Usage: esh model inspect <model-id>")
             }
             try ModelInspectCommand.run(modelID: modelID, service: service)
+        case "info":
+            guard let identifier = arguments.dropFirst().first else {
+                throw StoreError.invalidManifest("Usage: esh model info <model-alias-or-id>")
+            }
+            try ModelInfoCommand.run(identifier: identifier, service: service)
+        case "compatibility":
+            // Compatibility == the existing runtime/template/tool check.
+            try await ModelCheckCommand.run(
+                arguments: Array(arguments.dropFirst()),
+                service: service,
+                catalogService: catalogService
+            )
         case "remove":
             guard let modelID = arguments.dropFirst().first else {
                 throw StoreError.invalidManifest("Usage: esh model remove <model-id>")
@@ -451,7 +463,9 @@ private struct CLI {
               esh launch <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>] [-- <tool-args...>]
               esh audio models
               esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
-              esh model recommended [--profile chat|code] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx]
+              esh model recommended [--profile chat|code|coding|reasoning|fast|low-memory|best] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx] [--for-this-mac] [--experimental]
+              esh model info <model-alias-or-id>
+              esh model compatibility <model-or-repo> [--backend mlx|gguf|auto] [--json]
               esh model list [--task text|audio|vision|embedding|reranker|tool|multimodal] [--capability chat|tts|stt|image-understanding|embedding|rerank|tool-calling]
               esh model search <query> [--source all|local|hf] [--limit N]
               esh model check <model-or-repo> [--backend mlx|gguf|auto] [--context N] [--variant <name>] [--json] [--strict] [--offline]
