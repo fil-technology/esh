@@ -205,9 +205,10 @@ Recommended presets:
 
 ```bash
 ./esh model recommended
-./esh model recommended --profile chat
-./esh model install fast-chat
-./esh model install quality-code
+./esh model recommended --for-this-mac
+./esh model recommended --profile coding
+./esh model install qwen-2-5-0-5b
+./esh model install qwen-2-5-coder-7b
 ```
 
 Examples:

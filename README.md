@@ -66,6 +66,28 @@ brew install --cask esh
 esh
 ```
 
+**First run — guided setup.** `esh onboard` detects your Mac, lets you choose where
+large models live (internal disk or an external SSD), recommends a model matched to
+your hardware, installs it, and finishes with the commands to start. It is safe to
+re-run any time.
+
+```bash
+esh onboard             # guided setup (or: esh onboard --status to just inspect)
+```
+
+**Where large models live.** By default everything lives under `~/.esh`. To keep
+multi-gigabyte model weights, GGUF files, TTS voices, and caches on an external SSD
+while lightweight config/state stays internal:
+
+```bash
+esh storage set /Volumes/AI/esh    # moves existing assets there; internal config stays put
+esh storage show                    # where things live + free space
+esh storage doctor                  # verify the volume is connected (esh never silently
+                                     # re-downloads huge assets to the internal disk)
+```
+
+See [docs/STORAGE.md](docs/STORAGE.md) for the full storage model.
+
 Upgrade later with:
 
 ```bash
@@ -301,8 +323,9 @@ Start there:
 
 ```bash
 ./esh model recommended
-./esh model recommended --profile chat
-./esh model install fast-chat
+./esh model recommended --for-this-mac          # hardware-matched picks for your Mac
+./esh model recommended --profile coding        # or reasoning | fast | best | low-memory
+./esh model install qwen-2-5-0-5b               # install by built-in alias
 ```
 
 You can still install directly from a Hugging Face repo id too.
@@ -340,7 +363,7 @@ Then inspect what is installed:
 ```
 
 Notes:
-- the install command accepts either a Hugging Face repo id or a built-in alias like `fast-chat`
+- the install command accepts either a Hugging Face repo id or a built-in alias like `qwen-2-5-0-5b` (see `esh model recommended`); `esh model info <alias>` shows a model's context window, capabilities, and RAM/disk needs
 - `model check` is heuristic: it estimates likely backend support and likely fit, not a guarantee
 - `model check --backend auto` resolves the backend from repo metadata and filenames when it can
 - `model check` and `model install` accept `--variant <name>` for GGUF quant variants and other explicit repo variants
@@ -366,7 +389,7 @@ Generate a WAV file with an MLX TTS model:
 ./esh audio speak "Hello from esh" --model Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit --play
 ```
 
-The first run downloads the selected TTS model into `.esh/tts-models`. Speech-to-text is still a planned backend slice; `audio transcribe` currently reports that STT is not wired yet.
+The first run downloads the selected TTS model into the assets root (`~/.esh/audio/tts-models` by default, or your external SSD if configured with `esh storage`). Speech-to-text is still a planned backend slice; `audio transcribe` currently reports that STT is not wired yet.
 
 ## Chat
 
@@ -578,15 +601,18 @@ By default, Esh stores data under:
 ~/.esh
 ```
 
-This includes separate locations for:
-- models
-- sessions
-- caches
+esh separates **state** (config, sessions, benchmarks, runtime — always internal) from
+**assets** (models, caches, audio/TTS, temp — relocatable). By default both live under `~/.esh`.
 
-Override the root if needed:
+- state: `config.toml`, `storage.json`, `sessions/`, `benchmarks/`, `runtime/`
+- assets: `models/`, `caches/`, `audio/` (incl. `tts-models/`), `tmp/`
+
+Move only the large assets to an external SSD with `esh storage set /Volumes/AI/esh` (see
+[docs/STORAGE.md](docs/STORAGE.md)). Override the whole internal root, or just the assets root:
 
 ```bash
-ESH_HOME=/path/to/custom-root ./esh chat
+ESH_HOME=/path/to/custom-root ./esh chat          # everything (state + assets)
+ESH_ASSETS_HOME=/Volumes/AI/esh ./esh model list  # just the large assets
 ```
 
 Esh also accepts legacy `LLMCACHE_*` env vars for compatibility during the rename transition.

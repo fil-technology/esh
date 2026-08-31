@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- **External-SSD storage.** Large AI assets (model weights, GGUF files, TTS voices, caches, downloads) can live on an external volume while lightweight config/state stays on the internal disk. `esh storage show|set|use-internal|doctor|migrate` (human + `--json`). A volume-marker scheme detects a disconnected drive and fails with a clear "Model storage volume is unavailable" error instead of silently re-downloading huge assets to the internal disk. `ESH_ASSETS_HOME` overrides the assets root.
+- **Guided onboarding.** `esh onboard` detects the Mac (chip/RAM/macOS/engines), chooses storage, recommends a hardware-matched model, installs it, and finishes with next steps. Safe to re-run; `--status` (non-interactive summary) and `--yes` (auto-install) modes. Persisted, versioned onboarding state.
+- **Hardware-aware model catalog.** Recommended models now carry context window, structured capabilities (chat/coding/reasoning/tool-calling/vision), and status (recommended/experimental/legacy/incompatible). `esh model recommended --for-this-mac` and `--profile coding|reasoning|fast|best|low-memory`; new `esh model info <model>` and `esh model compatibility <model>`.
+- **First-class local models.** `esh model import <path>` registers a local MLX directory or GGUF file with no re-download (copy or `--move`); `esh model scan [<dir>] [--clean]` discovers models already on storage and cleans orphaned partial downloads.
+- **Richer diagnostics.** `esh doctor --json` emits a stable machine-readable health report (status, host, storage, engines, models); human output now includes storage availability, host, and incomplete-install detection.
+
+### Changed
+- Aligned swift-syntax with the Swift 6.3 toolchain (600.0.1 → 603.0.2).
+- TTS voice models and generated audio now write under the configured assets root (e.g. `~/.esh/audio`) instead of the current working directory.
+- Config gains an explicit schema version; the unused `model_dir` knob is deprecated in favor of `esh storage`. Path expansion (`~`, `$HOME`, relative, absolute) is standardized.
+
 ## [0.1.41] - 2026-05-12
 
 ### Fixed
