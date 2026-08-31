@@ -52,6 +52,13 @@ private struct CLI {
             try ConfigCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "storage":
             try StorageCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "onboard":
+            try await OnboardCommand.run(
+                arguments: Array(command.dropFirst()),
+                root: root,
+                service: modelService,
+                catalogService: modelCatalogService
+            )
         case "doctor":
             try DoctorCommand.run(arguments: Array(command.dropFirst()))
         case "engines":
@@ -414,6 +421,7 @@ private struct CLI {
             """
             esh commands:
               esh
+              esh onboard [--status] [--yes]
               esh version
               esh update
               esh chat [session-name]
