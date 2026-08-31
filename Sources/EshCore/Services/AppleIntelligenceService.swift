@@ -42,6 +42,37 @@ public struct AppleIntelligenceStatus: Codable, Sendable, Equatable {
 public struct AppleIntelligenceService: Sendable {
     public init() {}
 
+    public enum GenerationError: Error, LocalizedError {
+        case unavailable(reason: String)
+        case frameworkMissing
+        public var errorDescription: String? {
+            switch self {
+            case let .unavailable(reason): return "Apple Intelligence is not available: \(reason)"
+            case .frameworkMissing: return "This esh build was compiled without the Apple FoundationModels SDK."
+            }
+        }
+    }
+
+    /// Generate text on-device through the Apple Foundation Models system model. Zero downloads.
+    /// Throws `GenerationError` when Apple Intelligence is not available (never silently degrades).
+    public func generate(prompt: String, instructions: String? = nil) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let current = status()
+            guard current.available else {
+                throw GenerationError.unavailable(reason: current.detail)
+            }
+            let session = instructions.map { LanguageModelSession(instructions: $0) } ?? LanguageModelSession()
+            let response = try await session.respond(to: prompt)
+            return response.content
+        } else {
+            throw GenerationError.unavailable(reason: "requires a newer macOS")
+        }
+        #else
+        throw GenerationError.frameworkMissing
+        #endif
+    }
+
     public func status() -> AppleIntelligenceStatus {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {

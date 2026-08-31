@@ -77,6 +77,8 @@ private struct CLI {
             try await handleModel(arguments: Array(command.dropFirst()), service: modelService, catalogService: modelCatalogService)
         case "audio":
             try await AudioCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "apple":
+            try await AppleCommand.run(arguments: Array(command.dropFirst()))
         case "session":
             try handleSession(arguments: Array(command.dropFirst()), store: sessionStore)
         case "cache":
@@ -491,6 +493,8 @@ private struct CLI {
               esh integrations configure <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>]
               esh integrations launch <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>] [-- <tool-args...>]
               esh launch <claude|codex> [--model <id-or-repo>] [--host <host>] [--port <port>] [--api-key <token>] [-- <tool-args...>]
+              esh apple status [--json]
+              esh apple <prompt> [--system <instructions>]
               esh audio models
               esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
               esh model recommended [--profile chat|code|coding|reasoning|fast|low-memory|best] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx] [--for-this-mac] [--experimental]
