@@ -2,7 +2,51 @@ import Foundation
 import EshCore
 
 enum ModelRecommendedCommand {
-    static func run(arguments: [String], service: ModelService) throws {
+    static func run(arguments: [String], service: ModelService, root: PersistenceRoot) throws {
+        // Benchmark-Lab explain mode: fit-aware, evidence-annotated, profile-specific recommendations.
+        if arguments.contains("--explain") || arguments.contains("--best-for-this-mac") {
+            try runExplain(arguments: arguments, root: root)
+            return
+        }
+        try runClassic(arguments: arguments, service: service)
+    }
+
+    private static func runExplain(arguments: [String], root: PersistenceRoot) throws {
+        let host = HostMachineProfileService().currentProfile()
+        let recommender = ModelRecommendationService()
+        let json = arguments.contains("--json")
+        let profiles: [RecommendationProfile]
+        if let p = CommandSupport.optionalValue(flag: "--profile", in: arguments).flatMap(RecommendationProfile.init(cliValue:)) {
+            profiles = [p]
+        } else {
+            profiles = [.general, .coding, .reasoning, .fast, .lowMemory, .longContext, .tools, .bestQuality]
+        }
+
+        if json {
+            let dataset = recommender.dataset(host: host, root: root)
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            if let data = try? encoder.encode(dataset), let text = String(data: data, encoding: .utf8) { print(text) }
+            return
+        }
+
+        let hw = HardwareClass(totalMemoryGB: host.totalMemoryGB ?? 16)
+        print("Best for this Mac (\(host.chipDescription ?? "Apple Silicon"), \(hw.displayName)) · scoring v\(ModelRecommendationService.scoringVersion)")
+        print("")
+        for profile in profiles {
+            let recs = recommender.recommend(profile: profile, host: host, root: root, limit: 2)
+            guard let top = recs.first else { continue }
+            let evidenceTag = top.evidence == .measuredLocal ? "★ measured on your Mac" : "estimated (fit + capability)"
+            print("\(profile.title.padding(toLength: 14, withPad: " ", startingAt: 0)) \(top.modelID)  [\(top.fit)]  \(evidenceTag)")
+            for reason in top.reasons { print("               - \(reason)") }
+            if recs.count > 1 { print("               alt: \(recs[1].modelID) [\(recs[1].fit)]") }
+        }
+        print("")
+        print("Notes: recommendations are fit-aware and use your local benchmark evidence when present")
+        print("(`esh optimize benchmark <model>`). Curated cross-hardware quality scores are populated on")
+        print("representative machines — see MODEL_BENCHMARK_REPORT.md.")
+    }
+
+    private static func runClassic(arguments: [String], service: ModelService) throws {
         let profileValue = CommandSupport.optionalValue(flag: "--profile", in: arguments)
         let tierValue = CommandSupport.optionalValue(flag: "--tier", in: arguments)
         let backendValue = CommandSupport.optionalValue(flag: "--backend", in: arguments)

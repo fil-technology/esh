@@ -287,7 +287,7 @@ private struct CLI {
 
         switch subcommand {
         case "recommended":
-            try ModelRecommendedCommand.run(arguments: Array(arguments.dropFirst()), service: service)
+            try ModelRecommendedCommand.run(arguments: Array(arguments.dropFirst()), service: service, root: root)
         case "list":
             try ModelListCommand.run(arguments: Array(arguments.dropFirst()), service: service)
         case "search":
@@ -500,7 +500,8 @@ private struct CLI {
               esh apple <prompt> [--system <instructions>]
               esh audio models
               esh audio speak <text> [--model <id>] [--voice <id>] [--language <name>] [--out <path>] [--play] [--force]
-              esh model recommended [--profile chat|code|coding|reasoning|fast|low-memory|best] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx] [--for-this-mac] [--experimental]
+              esh model recommended [--profile chat|code|coding|reasoning|fast|low-memory|long-context|tools|best] [--tier good|small|tiny|max] [--tag <tag>] [--backend mlx|gguf|onnx] [--for-this-mac] [--experimental]
+              esh model recommended --explain [--profile <p>] [--json]   (fit-aware, evidence-annotated per profile)
               esh model info <model-alias-or-id>
               esh model fit <model-alias-or-repo>
               esh model compatibility <model-or-repo> [--backend mlx|gguf|auto] [--json]
