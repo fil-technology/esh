@@ -18,7 +18,10 @@ adapt onto it, never the reverse.
 | **Reasoning** | Explicit thinking toggle resolves per backend: MLX `.applied` (passed into the model chat template as `enable_thinking`); llama.cpp/ONNX `.ignored` (no toggle; model/template decides, thinking inline). Only reported when the caller sets it. | `reasoningIsAppliedOnMLX`, `reasoningIsIgnoredOnGGUFNotFakedAsApplied`, `reasoningNotReportedWhenCallerDidNotAskToToggle` |
 | **Usage accounting** | `EshUsage` on the response: measured `inputTokens`/`outputTokens`/`totalTokens` (MLX bridge now emits `promptTokens`/`generationTokens` from the runtime's `GenerationResponse`), plus `contextUsed`. Total derived only when both halves are measured. Local monetary cost = 0 with explicit `costProvenance`, kept distinct from resource usage. No fabricated counts — llama.cpp leaves token counts nil. | **real MLX inference**: `usage` reports `inputTokens/outputTokens/totalTokens` end-to-end |
 | **Streaming events** | Canonical `EshStreamEvent` envelope (`textDelta`/`reasoningDelta`/`toolCall`/`usage`/`done`/`failed`) + `ChatService.streamEvents` adapting the real runtime text stream: `.textDelta` per chunk, terminal `.done`/`.failed`, cancellation surfaced as a thrown `CancellationError`. Only genuinely observed events emitted (text today); richer events reserved for producers that supply them. | `StreamEventTests`: deltas→done, empty-chunk suppression, error→terminal `.failed` |
-| **Execution metadata** | `ExecutionProfile` reflecting the KV/prompt-cache strategy that actually ran is attached to every response (from 0.7.0). | `OptimizationTests`, response round-trip |
+| **Execution metadata** | `ExecutionProfile` reflecting the KV/prompt-cache strategy that actually ran is attached to every response (from 0.7.0), plus truthful `residency` (weights-resident vs handle-cached) for this execution. | `OptimizationTests`, response round-trip, `M8ConformanceTests` |
+| **Realized cache state** | Distinct from the chosen strategy: the runtime reports the actual prompt-cache outcome per request (`cacheHit` + `cachedTokens` reused), surfaced on `Metrics`, `EshUsage.cachedInputTokens`, and `ExecutionProfile.cacheHit`. | **real MLX inference**: `cacheHit`/`cachedInputTokens` end-to-end |
+| **Attachments** | Typed `EshAttachment` (image/document/audio/other) on the request; resolved **honestly as rejected** (never silently dropped), with a reason distinguishing a model-capability gap from an esh-execution gap. | `imageAttachmentIsRejectedNotSilentlyDropped`, `imageAttachmentReasonDistinguishesModelCapabilityFromEshGap` |
+| **Cross-backend conformance** | A consolidated conformance suite asserts the honesty invariants uniformly across backends + full-request/response serialization. | `M8ConformanceTests` (7 tests) |
 | **Backward compatibility** | Additive optional fields; pre-M8 infer request JSON still decodes (`decodeIfPresent` throughout). | `legacyRequestWithoutResponseFormatStillDecodes` |
 
 ## Backend-specific limitations (documented, not hidden)
@@ -39,6 +42,11 @@ adapt onto it, never the reverse.
   installed locally** (only MLX/safetensors), so a live constrained generation has not been executed.
   Tracked follow-up: install a small GGUF (e.g. qwen2.5-0.5b Q4, ~350 MB) and assert schema-conformant
   output. Not auto-downloaded here due to download-permission policy and disk pressure (~13 GB free).
+
+## Recently completed (0.9.x)
+
+- Realized cache state as a first-class signal; typed attachments with honest rejection; cross-backend
+  conformance suite; truthful residency (weights-resident) surfaced via the persistent MLX worker.
 
 ## Remaining for full M8
 
