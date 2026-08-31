@@ -114,7 +114,14 @@ public actor RuntimeLifecycleManager {
     private func ensureResident(install: ModelInstall) async throws -> BackendRuntime {
         if let resident = residents[install.id], let runtime = resident.runtime,
            resident.state != .unloaded, resident.state != .failed, resident.state != .unloading {
-            return runtime   // already warm/active/idle
+            // Crash recovery: a self-reporting runtime (persistent worker) that has died is dropped and
+            // reloaded below, rather than handed out dead. Only when idle — an in-flight request will
+            // surface the crash to its own caller.
+            if let reporter = runtime as? ResidencyReporting, !reporter.isHealthy, resident.activeRequests == 0 {
+                unloadResident(resident)
+            } else {
+                return runtime   // already warm/active/idle
+            }
         }
         // Deduplicate concurrent loads of the same model.
         if let existing = loadingTasks[install.id] {

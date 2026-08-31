@@ -51,7 +51,7 @@ esh → RuntimeLifecycleManager → MLXPersistentRuntime → MLXWorkerProcess �
 | Persistent process, weights resident | ✅ | worker pid stable across requests; warm 0.24s |
 | Streaming | ✅ | per-token `token` events demuxed by id |
 | Cancellation | ✅ | `cancel` op + `should_cancel` poll; stream teardown sends cancel |
-| Crash detection/restart | ✅ detection; restart via manager | `terminationHandler` fails in-flight; manager reloads on next acquire |
+| Crash detection/restart | ✅ verified | killed worker (SIGKILL) → next request auto-reloaded a fresh worker (new pid) and succeeded; `ensureResident` drops an unhealthy idle runtime and reloads |
 | Graceful unload | ✅ | `shutdown` op → stdin close → worker exits; then force-terminate fallback |
 | Lifecycle-manager ownership (no parallel manager) | ✅ | loader builds it; `unload()`/eviction terminate it |
 | Model switching / idle / pressure eviction / bounded concurrency | ✅ (reused M7) | manager budget + LRU + admit control unchanged |
