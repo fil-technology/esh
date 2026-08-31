@@ -6,6 +6,28 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-31
+
+### Added
+- **Model Benchmark Lab.** `esh benchmark lab [--all | <ids>]` measures installed models through esh's
+  own inference path (not a duplicate framework): deterministic quality probes (math / instruction /
+  structured / coding / general, fair to reasoning models via `<think>` stripping + thinking budget)
+  plus real runtime performance (TTFT, decode tok/s, peak memory), stored as a **versioned,
+  provenance-stamped** dataset. It computes profile leaders (Fast / Low-Memory / Reasoning / Coding /
+  Maximum Quality) and feeds `esh model recommended --explain`, which now marks benchmarked models
+  **“★ measured on your Mac”** — local measured evidence overriding curated estimates. See
+  MODEL_BENCHMARK_LAB_REPORT.md.
+- **Adaptive Scheduler revalidation.** `esh schedule` now ranks on the Benchmark Lab dataset: measured
+  goal-specific quality replaces the parameter-size proxy, measured decode tok/s rewards fast requests,
+  and a model measured as **failing to run is deprioritized and called out**. Demonstrated: a
+  high-quality request selects the working 3B and **skips a larger catalog-recommended model the lab
+  measured as broken** — adaptive selection beating the naive size default.
+
+### Fixed
+- **Free-space reporting on non-APFS (ExFAT) external volumes** returned 0 (`…ForImportantUsage` is
+  APFS-only), reporting a full disk and blocking downloads / Model Fit. Now falls back correctly.
+- **MLX bridge crash on newer cache types** (`ArraysCache` has no `.offset`) → safe fallback.
+
 ## [0.9.2] - 2026-08-31
 
 ### Added
