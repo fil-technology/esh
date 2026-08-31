@@ -17,6 +17,7 @@ adapt onto it, never the reverse.
 | **Tools** | Canonical `EshToolDefinition` / `EshToolChoice` / `EshToolCall` on request+response. Requested tools are **honestly reported `.rejected`** (no native function-calling on the local runtime yet; `esh agent` orchestrates tools separately) — not silently dropped. | contract round-trip tests |
 | **Reasoning** | Explicit thinking toggle resolves per backend: MLX `.applied` (passed into the model chat template as `enable_thinking`); llama.cpp/ONNX `.ignored` (no toggle; model/template decides, thinking inline). Only reported when the caller sets it. | `reasoningIsAppliedOnMLX`, `reasoningIsIgnoredOnGGUFNotFakedAsApplied`, `reasoningNotReportedWhenCallerDidNotAskToToggle` |
 | **Usage accounting** | `EshUsage` on the response: only counters the runtime actually reports are populated (`contextUsed` from runtime metrics); `available` lists measured counters. Local monetary cost = 0 with explicit `costProvenance`, kept distinct from resource usage. No fabricated token counts. | contract round-trip; `EshUsage.available` |
+| **Streaming events** | Canonical `EshStreamEvent` envelope (`textDelta`/`reasoningDelta`/`toolCall`/`usage`/`done`/`failed`) + `ChatService.streamEvents` adapting the real runtime text stream: `.textDelta` per chunk, terminal `.done`/`.failed`, cancellation surfaced as a thrown `CancellationError`. Only genuinely observed events emitted (text today); richer events reserved for producers that supply them. | `StreamEventTests`: deltas→done, empty-chunk suppression, error→terminal `.failed` |
 | **Execution metadata** | `ExecutionProfile` reflecting the KV/prompt-cache strategy that actually ran is attached to every response (from 0.7.0). | `OptimizationTests`, response round-trip |
 | **Backward compatibility** | Additive optional fields; pre-M8 infer request JSON still decodes (`decodeIfPresent` throughout). | `legacyRequestWithoutResponseFormatStillDecodes` |
 
@@ -41,9 +42,10 @@ adapt onto it, never the reverse.
 
 ## Remaining for full M8
 
-- **Streaming event model** — one canonical incremental event stream (`textDelta` / `reasoningDelta`
-  / `toolCall` / `usage` / `done` / `error`) consumed by serve/Web Chat/Terminal UX. Today the native
-  path streams text chunks; the normalized event envelope is not yet defined.
+- **Streaming events — producer/consumer wiring.** The canonical envelope + text adapter exist and
+  are tested (`ChatService.streamEvents`). Remaining: have `esh serve` and the Terminal UX/Web Chat
+  consume `EshStreamEvent` instead of raw text chunks, and add `.usage`/`.reasoningDelta` emission
+  from producers that can observe them.
 - **Attachments / multimodal** typed inputs (images/documents/audio) with honest unsupported
   reporting. Deliberately deferred rather than blanket-rejected, because the MLX-VLM bridge *can* do
   vision for VLM models — needs per-model capability resolution to avoid mis-reporting.
