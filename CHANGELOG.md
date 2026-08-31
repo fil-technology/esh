@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
+### Added
+- **Structured output + honest capability resolution (Inference Contract v2, first slice).** The native infer contract gains `response_format` (text / json / json_schema / grammar). `esh infer --response-format json [--json-schema <path-or-text>]` and the JSON response now include a `capabilityResolution` block reporting exactly how each requested option was handled — `applied` / `transformed` / `ignored` / `rejected` — so esh never silently pretends an unsupported option was honored. json/json_schema are approximated via an injected instruction (clearly labeled "not guaranteed" since MLX has no native constrained decoding); grammar is `rejected`. Backward-compatible: pre-existing infer request JSON still decodes.
+
 ## [0.4.0] - 2026-08-31
 
 ### Added
