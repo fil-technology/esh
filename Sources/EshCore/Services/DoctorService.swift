@@ -11,6 +11,7 @@ public struct DoctorReport: Codable, Sendable {
     public var storage: StorageReport
     public var engines: [EngineStatus]
     public var models: DoctorModelsReport
+    public var appleIntelligence: AppleIntelligenceStatus
     public var stateRoot: String
     public var configPath: String
 
@@ -22,6 +23,7 @@ public struct DoctorReport: Codable, Sendable {
         storage: StorageReport,
         engines: [EngineStatus],
         models: DoctorModelsReport,
+        appleIntelligence: AppleIntelligenceStatus,
         stateRoot: String,
         configPath: String
     ) {
@@ -32,6 +34,7 @@ public struct DoctorReport: Codable, Sendable {
         self.storage = storage
         self.engines = engines
         self.models = models
+        self.appleIntelligence = appleIntelligence
         self.stateRoot = stateRoot
         self.configPath = configPath
     }
@@ -72,6 +75,7 @@ public struct DoctorService: Sendable {
             storage: storage,
             engines: engines,
             models: models,
+            appleIntelligence: AppleIntelligenceService().status(),
             stateRoot: root.stateRootURL.path,
             configPath: root.stateRootURL.appendingPathComponent("config.toml").path
         )

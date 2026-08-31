@@ -59,8 +59,11 @@ public struct OnboardingEnvironment: Sendable {
     public var storage: StorageReport
     public var installedModelCount: Int
     public var installedModelIDs: [String]
+    public var appleIntelligence: AppleIntelligenceStatus
 
     public var hasUsableEngine: Bool { mlxReady || llamaCppReady }
+    /// True when the user could get a first result with zero downloads via Apple Intelligence.
+    public var hasZeroDownloadOption: Bool { appleIntelligence.available }
 
     public var missingEngineHelp: String? {
         guard !hasUsableEngine else { return nil }
@@ -95,7 +98,8 @@ public struct OnboardingService: Sendable {
             llamaCppReady: llamaReady,
             storage: StorageService().report(root: root, computeSizes: false),
             installedModelCount: installs.count,
-            installedModelIDs: installs.map(\.id)
+            installedModelIDs: installs.map(\.id),
+            appleIntelligence: AppleIntelligenceService().status()
         )
     }
 

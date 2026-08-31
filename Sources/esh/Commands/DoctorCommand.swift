@@ -74,6 +74,12 @@ enum DoctorCommand {
             lines.append("  fix: `esh model remove <id>` then reinstall")
         }
 
+        // Apple Intelligence (zero-download provider)
+        lines.append("")
+        lines.append("apple intelligence: \(report.appleIntelligence.available ? "available" : report.appleIntelligence.availability.rawValue)")
+        lines.append("  \(report.appleIntelligence.detail)")
+        if let fix = report.appleIntelligence.suggestedFix { lines.append("  fix: \(fix)") }
+
         // Config
         lines.append("")
         lines.append("config: \(report.configPath)")

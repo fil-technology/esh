@@ -46,7 +46,8 @@ struct OnboardingServiceTests {
             llamaCppReady: true,
             storage: StorageService().report(root: PersistenceRoot(rootURL: temporaryDirectory())),
             installedModelCount: 0,
-            installedModelIDs: []
+            installedModelIDs: [],
+            appleIntelligence: AppleIntelligenceStatus(available: false, availability: .frameworkUnavailable, detail: "test", onDevice: true)
         )
         let recs = OnboardingService().recommendations(useCase: .general, environment: env)
         #expect(!recs.isEmpty)
@@ -63,7 +64,8 @@ struct OnboardingServiceTests {
             llamaCppReady: true,
             storage: StorageService().report(root: PersistenceRoot(rootURL: temporaryDirectory())),
             installedModelCount: 0,
-            installedModelIDs: []
+            installedModelIDs: [],
+            appleIntelligence: AppleIntelligenceStatus(available: false, availability: .frameworkUnavailable, detail: "test", onDevice: true)
         )
         let recs = OnboardingService().recommendations(useCase: .general, environment: env)
         #expect(!recs.isEmpty)
@@ -79,7 +81,8 @@ struct OnboardingServiceTests {
             llamaCppReady: false,
             storage: StorageService().report(root: PersistenceRoot(rootURL: temporaryDirectory())),
             installedModelCount: 0,
-            installedModelIDs: []
+            installedModelIDs: [],
+            appleIntelligence: AppleIntelligenceStatus(available: false, availability: .frameworkUnavailable, detail: "test", onDevice: true)
         )
         #expect(!env.hasUsableEngine)
         #expect(env.missingEngineHelp != nil)

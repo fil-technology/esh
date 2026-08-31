@@ -179,6 +179,9 @@ enum OnboardCommand {
             + (environment.host.totalMemoryGB.map { String(format: ", %.0f GB RAM", $0) } ?? ""))
         let engines = [environment.mlxReady ? "MLX" : nil, environment.llamaCppReady ? "llama.cpp" : nil].compactMap { $0 }
         print("Engines ready: \(engines.isEmpty ? "none" : engines.joined(separator: ", "))")
+        if environment.appleIntelligence.available {
+            print("Apple Intelligence: available on this Mac (a zero-download on-device option; full esh integration is coming).")
+        }
         print("")
     }
 
@@ -191,6 +194,7 @@ enum OnboardCommand {
             print(String(format: "memory: %.0f GB total, ~%.0f GB usable for models", total, environment.host.safeBudgetGB ?? 0))
         }
         print("engines: mlx=\(environment.mlxReady ? "ready" : "not_ready") llama.cpp=\(environment.llamaCppReady ? "ready" : "not_ready")")
+        print("apple_intelligence: \(environment.appleIntelligence.available ? "available" : environment.appleIntelligence.availability.rawValue)")
         print("storage: \(environment.storage.assetsRoot) (\(environment.storage.status))")
         print("installed_models: \(environment.installedModelCount)")
         if let help = environment.missingEngineHelp { print(""); print(help) }
