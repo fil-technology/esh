@@ -71,16 +71,18 @@ public struct ModelBenchmarkLabService: Sendable {
         self.runProbe = runProbe
     }
 
+    // Token budgets are generous enough that a reasoning model can think (<think>…</think>) AND still
+    // emit the answer within the cap — otherwise the probe measures the budget, not the model.
     public static let defaultProbes: [BenchmarkProbe] = [
-        BenchmarkProbe(id: "math", category: "reasoning", maxTokensDefault: 24,
+        BenchmarkProbe(id: "math", category: "reasoning", maxTokensDefault: 512,
                        prompt: "What is 17 multiplied by 23? Reply with only the number.") { $0.contains("391") },
-        BenchmarkProbe(id: "instruction", category: "instruction", maxTokensDefault: 12,
+        BenchmarkProbe(id: "instruction", category: "instruction", maxTokensDefault: 256,
                        prompt: "Reply with exactly the single word: BANANA (uppercase, nothing else).") { $0.uppercased().contains("BANANA") },
-        BenchmarkProbe(id: "structured", category: "structured", maxTokensDefault: 48,
+        BenchmarkProbe(id: "structured", category: "structured", maxTokensDefault: 384,
                        prompt: "Output a JSON object with keys \"a\" and \"b\" set to 1 and 2. Only JSON.") { BenchmarkChecks.looksLikeJSONObject($0) },
-        BenchmarkProbe(id: "coding", category: "coding", maxTokensDefault: 48,
+        BenchmarkProbe(id: "coding", category: "coding", maxTokensDefault: 384,
                        prompt: "Write a Python one-liner that returns the sum of a list `xs`. Reply with only code.") { $0.replacingOccurrences(of: " ", with: "").contains("sum(xs") },
-        BenchmarkProbe(id: "general", category: "general", maxTokensDefault: 12,
+        BenchmarkProbe(id: "general", category: "general", maxTokensDefault: 256,
                        prompt: "What is the capital of Japan? One word.") { $0.lowercased().contains("tokyo") }
     ]
 
@@ -97,8 +99,11 @@ public struct ModelBenchmarkLabService: Sendable {
                 if let t = metrics.ttftMilliseconds { ttfts.append(t) }
                 if let tps = metrics.tokensPerSecond { tpss.append(tps) }
                 if let mem = metrics.memoryBytes { mems.append(Double(mem) / 1_000_000) }
+                // Reasoning models emit <think>…</think> chains before the answer; judge the answer
+                // portion so a reasoning model isn't unfairly failed on format.
+                let answer = BenchmarkChecks.stripReasoning(text)
                 results.append(BenchmarkProbeResult(
-                    id: probe.id, category: probe.category, passed: probe.check(text),
+                    id: probe.id, category: probe.category, passed: probe.check(answer),
                     reply: String(text.prefix(80))))
             } catch {
                 stable = false
@@ -138,6 +143,24 @@ public enum BenchmarkChecks {
         let mid = sorted.count / 2
         let m = sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
         return (m * 10).rounded() / 10
+    }
+
+    /// Remove a leading reasoning chain (`<think>…</think>` and common variants) so probes judge the
+    /// answer, not the model's thinking. If the closing tag is missing (thinking ran to the token cap),
+    /// drop everything up to the opening tag so an unfinished chain doesn't mask a present answer.
+    public static func stripReasoning(_ text: String) -> String {
+        var t = text
+        for (open, close) in [("<think>", "</think>"), ("<reasoning>", "</reasoning>")] {
+            while let o = t.range(of: open) {
+                if let c = t.range(of: close, range: o.upperBound..<t.endIndex) {
+                    t.removeSubrange(o.lowerBound..<c.upperBound)
+                } else {
+                    t.removeSubrange(o.lowerBound..<t.endIndex)
+                    break
+                }
+            }
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func looksLikeJSONObject(_ text: String) -> Bool {

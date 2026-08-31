@@ -39,17 +39,29 @@ Host: Apple M1 Pro / 32 GB.
 
 ## Findings
 
-### Measured evidence (representative; a clean quiet-system re-run supersedes contaminated numbers)
+### Measured evidence (clean, quiet-system run)
 
-| model | TTFT | decode tok/s | peak mem | quality |
-|---|---|---|---|---|
-| qwen2.5-0.5b | ~44 ms | ~279 | 292 MB | 4/5 (fails 17×23) |
-| llama-3.2-3b | ~103 ms | ~103 | 1888 MB | 5/5 |
+| model | TTFT | decode tok/s | peak mem | quality | notes |
+|---|---|---|---|---|---|
+| qwen2.5-0.5b-4bit | 44 ms | 324 | 292 MB | 4/5 | Fast + Low-Memory leader |
+| llama-3.2-3b-4bit | 99 ms | 106 | 1891 MB | 5/5 | Maximum-Quality leader |
+| deepseek-r1-qwen-7b-4bit | 152 ms | 38 | 4343 MB | 4/5 | Reasoning + Coding leader |
+| qwen3.5-9b-mlx-4bit | — | — | — | 0/5 | **NOT stable — fails to run** |
 
-The 0.5B is ~2.7× faster decode and ~6× lighter but fails harder reasoning; the 3B is the quality
-leader. (A batch run taken *while a large download was saturating disk I/O* showed depressed tok/s —
-benchmark hygiene: perf must be measured on a quiet system; the lab records provenance so such runs are
-identifiable and re-runnable.)
+Profile leaders (local measured evidence): **Fast/Low-Memory** → 0.5B; **Reasoning/Coding** →
+deepseek-r1-7B; **Maximum Quality** → 3B. This is exactly the discriminating, per-profile signal the
+lab is for — and the reasoning specialist correctly leads reasoning only once the probes are fair to it
+(below).
+
+Benchmark hygiene: an earlier batch taken *while a large download saturated disk I/O* showed depressed
+tok/s. Perf must be measured on a quiet system; provenance makes such runs identifiable and re-runnable.
+
+### Methodology fix: fairness to reasoning models
+
+deepseek-r1 first scored **0/5** despite running fine — because it is a reasoning model that emits long
+`<think>…</think>` chains, and the probes' low token caps + exact-match cut off the answer. Fixed: the
+lab now **strips the reasoning chain before judging** and gives a **thinking token budget**, after which
+deepseek-r1 scores **4/5** and leads Reasoning/Coding. The probe measures the model, not the budget.
 
 ### Real bugs surfaced by the lab
 

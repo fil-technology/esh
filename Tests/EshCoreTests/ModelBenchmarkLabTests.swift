@@ -14,6 +14,15 @@ struct ModelBenchmarkLabTests {
     }
 
     @Test
+    func stripReasoningRemovesThinkChains() {
+        #expect(BenchmarkChecks.stripReasoning("<think>17*23... let me compute</think>391") == "391")
+        // Unfinished chain (hit the token cap) — drop up to the open tag so a present answer survives.
+        #expect(BenchmarkChecks.stripReasoning("<think>still thinking").isEmpty)
+        #expect(BenchmarkChecks.stripReasoning("no tags here") == "no tags here")
+        #expect(BenchmarkChecks.stripReasoning("<think>a</think> Tokyo").contains("Tokyo"))
+    }
+
+    @Test
     func medianAndJSONChecksAreCorrect() {
         #expect(BenchmarkChecks.median([]) == nil)
         #expect(BenchmarkChecks.median([10, 20, 30]) == 20)
