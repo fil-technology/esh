@@ -6,6 +6,26 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-08-31
+
+### Added
+- **First-class Terminal UX status.** The chat status line now shows a per-turn execution summary
+  (`1.8s · 927 tokens · 38 tok/s · KV hit`), the footer surfaces realized KV hit/miss + peak memory,
+  and new slash commands `/status`, `/context`, `/performance`, `/auto` (what the scheduler would
+  pick), and `/clear`. Formatting/parsing is pure and unit-tested; interactive behavior needs a TTY.
+- **M8.5 Web Chat.** `esh web` launches the local esh server and opens a self-contained, single-file
+  browser chat client (served at `GET /web`) over the canonical esh APIs (`/v1/models` + streaming
+  `/v1/chat/completions`, same-origin, no external assets): model picker, streaming, Stop/cancel. A
+  reference client, not another inference engine. Server side verified via curl.
+- **M10 Speech-to-text.** `esh audio transcribe <file>` — on-device STT via mlx_audio (default
+  `parakeet-tdt-0.6b-v2`), symmetric with the MLX TTS path; replaces the old "not wired yet" stub.
+  Verified end-to-end (`hello.wav` → "Hello from Esh."), including an audio → STT → LLM pipeline.
+
+### Notes
+- Hardening pass (HARDENING_REPORT.md): 11 shipping surfaces smoke-verified on the real binary. Two
+  model/runtime version mismatches recorded truthfully — qwen3.5-9b (mlx-lm) and the Marvis TTS model
+  (RoPE key); see SPEECH_REPORT.md. Not 2.0.0 yet, by evidence.
+
 ## [0.9.3] - 2026-08-31
 
 ### Added
