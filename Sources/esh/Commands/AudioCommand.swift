@@ -14,9 +14,28 @@ enum AudioCommand {
         case "speak":
             try await speak(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "transcribe":
-            throw StoreError.invalidManifest("Audio transcription is not wired yet. TTSMLX currently exposes MLX TTS only; STT remains a later backend slice.")
+            try transcribe(arguments: Array(arguments.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         default:
             throw StoreError.invalidManifest("Unknown audio subcommand: \(subcommand)")
+        }
+    }
+
+    private static func transcribe(arguments: [String], currentDirectoryURL: URL) throws {
+        let positional = arguments.filter { !$0.hasPrefix("--") }
+        guard let audioArg = CommandSupport.optionalValue(flag: "--input", in: arguments) ?? positional.first else {
+            throw StoreError.invalidManifest("Usage: esh audio transcribe <audio-file> [--model <id>] [--language <name>] [--json]")
+        }
+        let audioURL = URL(fileURLWithPath: audioArg, relativeTo: currentDirectoryURL).standardizedFileURL
+        let model = CommandSupport.optionalValue(flag: "--model", in: arguments)
+        let language = CommandSupport.optionalValue(flag: "--language", in: arguments)
+        let json = arguments.contains("--json")
+
+        let text = try SpeechToTextService().transcribe(audioPath: audioURL.path, model: model, language: language)
+        if json {
+            let data = try JSONCoding.encoder.encode(["text": text])
+            print(String(decoding: data, as: UTF8.self))
+        } else {
+            print(text)
         }
     }
 

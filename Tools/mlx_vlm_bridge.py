@@ -857,6 +857,40 @@ def mlx_generate() -> None:
     )
 
 
+def mlx_transcribe() -> None:
+    """Speech-to-text via mlx_audio. Reads {audioPath, modelPath, language?} from stdin and returns
+    {text}. On-device MLX STT (e.g. parakeet); the model is fetched/cached by mlx_audio."""
+    request = _load_json()
+    try:
+        from mlx_audio.stt.generate import generate_transcription
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"mlx_audio STT is not available: {exc}")
+    import tempfile
+    out_base = tempfile.mktemp()
+    kwargs = {}
+    if request.get("language"):
+        kwargs["language"] = request["language"]
+    try:
+        generate_transcription(
+            model=request["modelPath"],
+            audio=request["audioPath"],
+            output_path=out_base,
+            format="txt",
+            **kwargs,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"transcription failed: {exc}")
+    txt_path = out_base + ".txt"
+    text = ""
+    if Path(txt_path).exists():
+        text = Path(txt_path).read_text(encoding="utf-8").strip()
+        try:
+            Path(txt_path).unlink()
+        except OSError:
+            pass
+    _dump_json({"text": text})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1255,6 +1289,7 @@ def main() -> None:
             "mlx-build-cache",
             "mlx-generate",
             "mlx-serve",
+            "mlx-transcribe",
             "mlx-validate-model",
             "mlx-validate-config",
             "mlx-export-cache",
@@ -1276,6 +1311,8 @@ def main() -> None:
         mlx_generate()
     elif args.command == "mlx-serve":
         mlx_serve()
+    elif args.command == "mlx-transcribe":
+        mlx_transcribe()
     elif args.command == "mlx-build-cache":
         mlx_build_cache()
     elif args.command == "mlx-validate-model":
