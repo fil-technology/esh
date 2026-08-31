@@ -6,6 +6,27 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-31
+
+### Added
+- **Persistent, weights-resident MLX runtime (true residency).** A new `mlx-serve` worker loads a
+  model ONCE and serves many requests over a newline-delimited JSON protocol, so MLX "warm" can mean
+  weights actually stay in memory instead of reloading per request. Owned by the existing
+  `RuntimeLifecycleManager` (no parallel manager): streaming, cancellation, crash detection +
+  automatic restart, graceful unload, idle/memory-pressure eviction, bounded concurrency, and clean
+  shutdown — with no orphan workers (a worker exits when esh does). Truthful residency + health are
+  surfaced through pool status and `ExecutionProfile.residency`. Opt-in via `ESH_MLX_PERSISTENT=1`
+  until a stability soak justifies default-on. Benchmarked ~13× faster warm requests (0.24s vs 3.28s
+  reload-per-request) on qwen2.5-0.5b; savings scale with model size. See PERSISTENT_RESIDENCY_REPORT.md.
+- **Inference Contract v2 (M8) progress.** Canonical tools (`EshToolDefinition`/`EshToolChoice`/
+  `EshToolCall`) and normalized usage (`EshUsage`) with **measured** input/output/total tokens from
+  the MLX runtime (never fabricated; local monetary cost = 0 with provenance). **Native constrained
+  decoding on GGUF (llama.cpp)** — strict `json_schema`/`grammar` resolve to `.applied` and are
+  enforced via `--json-schema`/`--grammar`; MLX/ONNX honestly report `.approximated`/`.rejected`
+  (no silent prompt-instruction substitution). Honest per-backend reasoning capability resolution.
+  A canonical streaming event model (`EshStreamEvent`) with a real text-stream adapter. See
+  M8_CONTRACT_REPORT.md (M8 is advancing, not yet complete).
+
 ## [0.8.1] - 2026-08-31
 
 ### Fixed
