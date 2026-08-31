@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-08-31
+
+### Added
+- **`esh audio converse <audio>` — one voice round.** Transcribes the input (speech model), gets a
+  reply from the language model, and speaks it (speech model) — switching between the language and
+  speech models via esh primitives, using the configured STT/TTS and a resolved LLM. Verified
+  end-to-end (`hello.wav` → "Hello from Esh." → LLM reply → spoken WAV). Continuous mic-driven
+  conversation is the next extension.
+
 ## [0.9.6] - 2026-08-31
 
 ### Fixed / Added (Terminal UX + speech, from real-use feedback)
