@@ -1,0 +1,94 @@
+import Foundation
+import Testing
+@testable import EshCore
+
+@Suite
+struct SchedulerServiceTests {
+    private let scheduler = SchedulerService()
+
+    private func host(gb: Double) -> HostMachineProfile {
+        HostMachineProfile(chipDescription: "Apple M-test", totalMemoryGB: gb, availableMemoryGB: gb * 0.6, safeBudgetGB: gb * 0.6)
+    }
+
+    /// Build an install whose NAME drives heuristic capabilities and whose byte size drives the
+    /// estimated parameter count (~ gib*8/4.5 bits).
+    private func install(id: String, name: String, backend: BackendKind = .mlx, gib: Double) -> ModelInstall {
+        let spec = ModelSpec(id: id, displayName: name, backend: backend,
+                             source: ModelSource(kind: .localPath, reference: "local/\(name)"))
+        return ModelInstall(id: id, spec: spec, installPath: "/tmp/\(id)",
+                            sizeBytes: Int64(gib * 1_073_741_824), backendFormat: backend.rawValue)
+    }
+
+    private func decide(_ request: CapabilityRequest, _ installs: [ModelInstall], gb: Double, apple: Bool = false) -> SchedulerDecision {
+        scheduler.decide(request: request, installs: installs, host: host(gb: gb),
+                         root: PersistenceRoot(rootURL: tempDir()), appleAvailable: apple)
+    }
+
+    @Test
+    func selectsCapableFittingModelForCoding() {
+        let coder = install(id: "coder7b", name: "Qwen2.5-Coder-7B-Instruct", gib: 4.3)  // ~7.6B
+        let chat = install(id: "chat3b", name: "Llama-3.2-3B-Instruct", gib: 1.8)         // chat only
+        let d = decide(CapabilityRequest(goal: .coding, quality: .balanced), [coder, chat], gb: 32)
+        #expect(d.selectedModelID == "coder7b")     // only the coder satisfies .coding
+        #expect(d.backend == .mlx)
+        #expect(d.executionProfile != nil)
+        #expect(!d.rationale.isEmpty)
+    }
+
+    @Test
+    func excludesModelsMissingRequiredCapability() {
+        let chat = install(id: "chat3b", name: "Llama-3.2-3B-Instruct", gib: 1.8)
+        let d = decide(CapabilityRequest(goal: .coding, quality: .balanced), [chat], gb: 32)
+        #expect(d.selectedModelID == nil)           // no coder installed
+    }
+
+    @Test
+    func qualityHighPrefersLargerFastPrefersSmaller() {
+        let small = install(id: "coderSmall", name: "Qwen2.5-Coder-3B", gib: 1.8)   // ~3B
+        let big = install(id: "coderBig", name: "Qwen2.5-Coder-14B", gib: 8.0)      // ~14B
+        let high = decide(CapabilityRequest(goal: .coding, quality: .high), [small, big], gb: 64)
+        let fast = decide(CapabilityRequest(goal: .coding, quality: .fast), [small, big], gb: 64)
+        #expect(high.selectedModelID == "coderBig")
+        #expect(fast.selectedModelID == "coderSmall")
+    }
+
+    @Test
+    func tightFitSwitchesToMemoryMode() {
+        // A ~32B coder (~20GB peak) on a 24GB Mac is tight -> memory mode.
+        let big = install(id: "coder32b", name: "Qwen2.5-Coder-32B", gib: 18.0)     // ~32B
+        let d = decide(CapabilityRequest(goal: .coding, quality: .high), [big], gb: 24)
+        #expect(d.selectedModelID == "coder32b")
+        #expect(d.performanceMode == .memory)
+        #expect(d.fitClass == "tight" || d.fitClass == "unlikely")
+    }
+
+    @Test
+    func suggestsAppleWhenNothingFitsAndRequestIsModest() {
+        let d = decide(CapabilityRequest(goal: .general, quality: .balanced), [], gb: 32, apple: true)
+        #expect(d.selectedModelID == nil)
+        #expect(d.appleIntelligenceSuggested)
+        // Honest: a suggestion, not a silent substitution.
+        #expect(d.warnings.contains { $0.contains("will not use Apple Intelligence in place") })
+    }
+
+    @Test
+    func doesNotSuggestAppleWhenToolsRequired() {
+        let d = decide(CapabilityRequest(goal: .general, quality: .balanced, toolCallingRequired: true), [], gb: 32, apple: true)
+        #expect(!d.appleIntelligenceSuggested)      // Apple isn't offered for tool-calling here
+        #expect(d.selectedModelID == nil)
+    }
+
+    @Test
+    func recordsRationaleAndCandidateCount() {
+        let coder = install(id: "coder7b", name: "Qwen2.5-Coder-7B", gib: 4.3)
+        let d = decide(CapabilityRequest(goal: .coding, quality: .balanced), [coder], gb: 32)
+        #expect(d.candidatesConsidered == 1)
+        #expect(d.rationale.count >= 2)
+    }
+
+    private func tempDir() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}

@@ -63,6 +63,8 @@ private struct CLI {
             try DoctorCommand.run(arguments: Array(command.dropFirst()))
         case "optimize":
             try await OptimizeCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "schedule":
+            try ScheduleCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "performance":
             try OptimizeCommand.setPerformanceMode(arguments: Array(command.dropFirst()), root: root)
         case "engines":
@@ -485,6 +487,7 @@ private struct CLI {
               esh optimize benchmark <model> [--quick|--full] [--workload <w>] [--json]
               esh optimize compare [<model>] [--json]
               esh optimize reset <model>
+              esh schedule [--goal general|coding|reasoning|structured] [--quality high|balanced|fast] [--latency interactive|batch] [--context N] [--tools] [--vision] [--json]
               esh infer --input <path-or->
               esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>] [--response-format text|json|json_schema|grammar] [--json-schema <path-or-text>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
