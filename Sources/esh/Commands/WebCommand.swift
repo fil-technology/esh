@@ -1,0 +1,54 @@
+import Foundation
+import EshCore
+
+/// `esh web [--host 127.0.0.1] [--port 11436] [--no-open]`
+/// Launches the local esh server and opens a browser to the Web Chat reference client (served at
+/// `/web`). It is a reference client over the canonical esh APIs — not another inference engine.
+enum WebCommand {
+    static let defaultPort: UInt16 = 11436
+    private static let usage = "Usage: esh web [--host 127.0.0.1] [--port <1-65535>] [--no-open]"
+
+    static func run(arguments: [String], root: PersistenceRoot, toolVersion: String?) async throws {
+        let knownFlags: Set<String> = ["--host", "--port"]
+        let unexpected = CommandSupport.removingKnownFlags(knownFlags, from: arguments)
+            .filter { $0 != "--no-open" }
+        guard unexpected.isEmpty else { throw StoreError.invalidManifest(usage) }
+
+        let host = CommandSupport.optionalValue(flag: "--host", in: arguments) ?? "127.0.0.1"
+        let port: UInt16 = CommandSupport.optionalValue(flag: "--port", in: arguments)
+            .flatMap { UInt16($0) } ?? defaultPort
+        let open = !arguments.contains("--no-open")
+        let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+
+        let service = OpenAICompatibleService(
+            modelStore: FileModelStore(root: root),
+            sessionStore: FileSessionStore(root: root),
+            cacheStore: FileCacheStore(root: root),
+            toolVersion: toolVersion,
+            audioModels: OpenAICompatibleAudioCatalog.ttsModels,
+            speech: { request in
+                try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
+            }
+        )
+        // No bearer token: the browser page needs unauthenticated same-origin access to the API.
+        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil)
+        let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
+        server.start()
+
+        let url = "http://\(host):\(port)/web"
+        print("esh Web Chat: \(url)")
+        print("(reference client over the local esh API — press Ctrl+C to stop)")
+        if open { openBrowser(url) }
+
+        let signalHandler = SignalHandler()
+        signalHandler.wait()
+        server.stop()
+    }
+
+    private static func openBrowser(_ url: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [url]
+        try? process.run()
+    }
+}

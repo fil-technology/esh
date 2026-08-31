@@ -51,6 +51,8 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                         "routes": "/v1/models,/v1/chat/completions,/v1/responses,/v1/tools,/v1/audio/models,/v1/audio/speech,/api/tags"
                     ]
                 )
+            case ("GET", "/web"), ("GET", "/chat"):
+                return htmlResponse(WebChatPage.html(toolVersion: nil))
             case ("GET", "/v1/models"):
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):
@@ -124,6 +126,15 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
         return OpenAICompatibleHTTPResponse(
             statusCode: statusCode,
             headers: jsonHeaders(contentLength: body.count),
+            body: body
+        )
+    }
+
+    private func htmlResponse(_ html: String) -> OpenAICompatibleHTTPResponse {
+        let body = Data(html.utf8)
+        return OpenAICompatibleHTTPResponse(
+            statusCode: 200,
+            headers: ["Content-Type": WebChatPage.contentType, "Content-Length": "\(body.count)"],
             body: body
         )
     }

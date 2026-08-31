@@ -62,7 +62,7 @@ enum ServeCommand {
 
 }
 
-private final class SignalHandler {
+final class SignalHandler {
     private let semaphore = DispatchSemaphore(value: 0)
     private let queue = DispatchQueue(label: "esh.signal-handler")
     private var sources: [DispatchSourceSignal] = []

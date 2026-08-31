@@ -99,6 +99,8 @@ private struct CLI {
             try await InferCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "serve":
             try await ServeCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
+        case "web":
+            try await WebCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "integrations":
             try await IntegrationsCommand.run(arguments: Array(command.dropFirst()), root: root, toolVersion: AppVersionResolver.currentVersion())
         case "launch":
