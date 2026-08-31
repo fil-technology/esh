@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-31
+
+### Added
+- **Apple Foundation Models as a first-class routable backend.** `esh infer --model apple-intelligence`
+  runs the on-device Apple system model through the canonical inference path (`backend: apple`, honest
+  capability resolution). Safety guarantees, tested: never auto-substituted (routes only on an
+  explicit reserved id — `apple` / `apple-intelligence` / `apple-foundation`; a normal/unknown id can
+  never match one); on-device only via `SystemLanguageModel.default` (never PCC/cloud, so `localOnly`
+  is safe); strict structured output rejected, non-strict approximated, reasoning ignored, responses
+  returned whole — all surfaced honestly, none faked. Verified with real on-device generation. A
+  scored Apple scheduler candidate is deferred to the Scheduler Revalidation milestone.
+
 ## [0.9.1] - 2026-08-31
 
 ### Added
