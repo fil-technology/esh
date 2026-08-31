@@ -185,3 +185,20 @@ struct BenchmarkHarnessTests {
         #expect(!BenchmarkHarness.isValidJSON("not json"))
     }
 }
+
+@Suite
+struct ExecutionProfileReflectionTests {
+    @Test
+    func reflectsCacheModeAsKVStrategy() {
+        let raw = ExternalInferenceService.executionProfile(backend: .mlx, modelID: "m", cacheMode: .raw, usedPromptCache: false)
+        #expect(raw.strategyID(for: .kvCache) == OptimizationStrategyRegistry.kvRaw.id)
+        #expect(raw.strategyID(for: .promptCache) == OptimizationStrategyRegistry.promptOff.id)
+
+        let turbo = ExternalInferenceService.executionProfile(backend: .mlx, modelID: "m", cacheMode: .turbo, usedPromptCache: true)
+        #expect(turbo.strategyID(for: .kvCache) == OptimizationStrategyRegistry.kvTurbo.id)
+        #expect(turbo.strategyID(for: .promptCache) == OptimizationStrategyRegistry.promptReuse.id)
+
+        let tri = ExternalInferenceService.executionProfile(backend: .mlx, modelID: "m", cacheMode: .triattention, usedPromptCache: false)
+        #expect(tri.strategyID(for: .kvCache) == OptimizationStrategyRegistry.kvTriAttention.id)
+    }
+}

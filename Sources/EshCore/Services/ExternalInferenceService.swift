@@ -106,6 +106,14 @@ public struct ExternalInferenceService: Sendable {
             outputText += chunk
         }
 
+        let executedCacheMode = request.cacheMode ?? session.cacheMode ?? .raw
+        let executionProfile = Self.executionProfile(
+            backend: install.spec.backend,
+            modelID: install.id,
+            cacheMode: executedCacheMode,
+            usedPromptCache: request.cacheArtifactID != nil
+        )
+
         return ExternalInferenceResponse(
             modelID: install.id,
             backend: install.spec.backend,
@@ -113,7 +121,34 @@ public struct ExternalInferenceService: Sendable {
             outputText: outputText,
             metrics: await runtime.metrics,
             routing: routing,
-            capabilityResolution: capabilityOutcome.resolution.isEmpty ? nil : capabilityOutcome.resolution
+            capabilityResolution: capabilityOutcome.resolution.isEmpty ? nil : capabilityOutcome.resolution,
+            executionProfile: executionProfile
+        )
+    }
+
+    /// Build an ExecutionProfile that honestly reflects the KV/prompt-cache strategy that actually
+    /// ran for this request (transparency for the Scheduler, Web Chat, and Terminal UX).
+    static func executionProfile(backend: BackendKind, modelID: String, cacheMode: CacheMode, usedPromptCache: Bool) -> ExecutionProfile {
+        let kv: String
+        switch cacheMode {
+        case .turbo: kv = OptimizationStrategyRegistry.kvTurbo.id
+        case .triattention: kv = OptimizationStrategyRegistry.kvTriAttention.id
+        default: kv = OptimizationStrategyRegistry.kvRaw.id
+        }
+        let selections: [String: String] = [
+            OptimizationCategory.kvCache.rawValue: kv,
+            OptimizationCategory.promptCache.rawValue: usedPromptCache
+                ? OptimizationStrategyRegistry.promptReuse.id
+                : OptimizationStrategyRegistry.promptOff.id
+        ]
+        return ExecutionProfile(
+            backend: backend,
+            model: modelID,
+            performanceMode: .auto,
+            workload: .chat,
+            selections: selections,
+            reasons: ["reflects the KV/prompt-cache strategy that actually ran (cache mode: \(cacheMode.rawValue))"],
+            evidenceBacked: false
         )
     }
 

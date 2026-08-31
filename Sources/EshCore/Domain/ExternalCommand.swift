@@ -252,6 +252,8 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
     public var routing: RoutingTrace?
     /// Honest report of how requested options (e.g. response_format) were handled.
     public var capabilityResolution: CapabilityResolution?
+    /// The optimization plan that actually ran (backend, mode, KV/prompt-cache selections, reasons).
+    public var executionProfile: ExecutionProfile?
 
     public init(
         schemaVersion: String = ExternalInferenceResponse.schemaVersion,
@@ -261,7 +263,8 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         outputText: String,
         metrics: Metrics,
         routing: RoutingTrace? = nil,
-        capabilityResolution: CapabilityResolution? = nil
+        capabilityResolution: CapabilityResolution? = nil,
+        executionProfile: ExecutionProfile? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -271,5 +274,6 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         self.metrics = metrics
         self.routing = routing
         self.capabilityResolution = capabilityResolution
+        self.executionProfile = executionProfile
     }
 }

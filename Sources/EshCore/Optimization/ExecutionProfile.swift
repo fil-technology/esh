@@ -4,7 +4,7 @@ import Foundation
 /// and *why*. Human-readable and stable-JSON for Ashex/external clients; attachable to run/inference
 /// diagnostics. This is the boundary output of the OptimizationPlanner and the input the backend
 /// execution layer honors.
-public struct ExecutionProfile: Codable, Sendable, Equatable {
+public struct ExecutionProfile: Codable, Sendable, Equatable, Hashable {
     public var schemaVersion: Int
     public var backend: BackendKind
     public var model: String

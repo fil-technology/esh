@@ -37,8 +37,9 @@ Delivered: `response_format` (text/json/json_schema/grammar) + `CapabilityResolu
 - **Token/usage breakdown** — `Metrics` has ttft/tok-s/memory only; no input/output/reasoning/
   cached/total token accounting or context-used/limit.
 - **Cost/resource provenance** — none ($0-local vs provider cost not modeled).
-- **Extended execution metadata on responses** — `ExecutionProfile` exists (M1) but is not attached
-  to inference responses yet.
+- **Extended execution metadata on responses** — ✅ (0.7.0) `ExecutionProfile` reflecting the KV/
+  prompt-cache strategy that actually ran is now attached to `ExternalInferenceResponse`. Still to
+  add: normalized token usage + reasoning/cache-hit metadata on the profile.
 
 ## M9 Scheduler — what's a slice
 
