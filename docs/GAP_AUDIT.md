@@ -13,7 +13,7 @@ not started, so nothing downstream is falsely treated as finished. Verified agai
 | M4 Model lifecycle + Fit gate | **complete (v0.2/0.3)** | catalog, import/scan, 6-class fit gate |
 | M5 Onboarding + Doctor | **complete (v0.2/0.3)** | `esh onboard`, `doctor --json` |
 | M6 Update system | **SLICE** | only `esh update check` (notify-only). Living catalog / versioning / rollback / channels **not done** |
-| **M7 Runtime Lifecycle / Warm Pool** | **NOT STARTED** | no loaded-model registry, warm/cold state, idle/pressure eviction, bounded concurrency, cancellation infra, priorities. `SchedulerService` takes resident-models as a param defaulting to 0 |
+| **M7 Runtime Lifecycle / Warm Pool** | **done (0.8.0)** | `RuntimeLifecycleManager`: registry, states, load dedup, budget + idle/pressure eviction, bounded concurrency + priority, cancellation; wired into `esh serve`; scheduler is warm-aware. Follow-up: persistent MLX bridge for weight-residency (RUNTIME_LIFECYCLE_REPORT.md) |
 | **M8 Inference Contract v2** | **SLICE (v0.5.0)** | only `response_format` + capability resolution (applied/transformed/ignored/rejected). See gaps below |
 | M8.5 Web Chat | **NOT STARTED** | |
 | **M9 Adaptive Scheduler** | **v1 slice (v0.6.0)** | selection + rationale works, but consumes only heuristic capability metadata + fit + M1 evidence; no warm-pool awareness, no benchmark-lab dataset yet |
