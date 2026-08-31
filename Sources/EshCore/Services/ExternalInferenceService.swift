@@ -100,6 +100,15 @@ public struct ExternalInferenceService: Sendable {
         if let augmentation = capabilityOutcome.systemInstructionAugmentation {
             request.messages.insert(ExternalInferenceMessage(role: .system, text: augmentation), at: 0)
         }
+        // When the backend can enforce the requested structured output NATIVELY, carry the concrete
+        // constraint into the generation config so the runtime applies constrained decoding.
+        var generation = request.generation
+        if let nativeSchema = capabilityOutcome.nativeJSONSchema {
+            generation.jsonSchema = nativeSchema
+        }
+        if let nativeGrammar = capabilityOutcome.nativeGrammar {
+            generation.grammar = nativeGrammar
+        }
 
         let session = try resolveSession(request: request, install: install)
         let integration: ExternalInferenceIntegration
@@ -129,7 +138,7 @@ public struct ExternalInferenceService: Sendable {
         let stream = ChatService().streamReply(
             runtime: runtime,
             session: session,
-            config: request.generation
+            config: generation
         )
         var outputText = ""
         for try await chunk in stream {

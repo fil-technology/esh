@@ -1,16 +1,42 @@
 import Foundation
 
 /// Resolves requested inference options against what the target backend can actually do, producing
-/// an honest `CapabilityResolution` (applied/transformed/ignored/rejected) plus any system-prompt
-/// augmentation needed to approximate a request. Implements the M8 principle: never silently
-/// pretend an unsupported option was honored.
+/// an honest `CapabilityResolution` (applied/transformed/approximated/ignored/rejected) plus, where a
+/// constraint can be enforced natively, the concrete native constraint the backend should apply.
+/// Implements the M8 principle: never silently pretend an unsupported option was honored, and never
+/// silently treat a prompt instruction as equivalent to constrained decoding.
 public struct CapabilityResolver: Sendable {
     public init() {}
 
     public struct Outcome: Sendable {
         public var resolution: CapabilityResolution
-        /// A system instruction to inject to approximate the request (e.g. JSON output), or nil.
+        /// A system instruction to inject to APPROXIMATE the request (e.g. JSON via prompt), or nil.
+        /// Only set for non-native (approximated) handling.
         public var systemInstructionAugmentation: String?
+        /// A JSON schema to enforce NATIVELY via constrained decoding (backend fills this into the
+        /// generation config). Set only when the backend genuinely supports it.
+        public var nativeJSONSchema: String?
+        /// A GBNF grammar to enforce NATIVELY via constrained decoding. Set only when supported.
+        public var nativeGrammar: String?
+
+        init(
+            resolution: CapabilityResolution,
+            systemInstructionAugmentation: String? = nil,
+            nativeJSONSchema: String? = nil,
+            nativeGrammar: String? = nil
+        ) {
+            self.resolution = resolution
+            self.systemInstructionAugmentation = systemInstructionAugmentation
+            self.nativeJSONSchema = nativeJSONSchema
+            self.nativeGrammar = nativeGrammar
+        }
+    }
+
+    /// Whether a backend can enforce structured output via native constrained decoding.
+    /// GGUF (llama.cpp) supports GBNF grammars and JSON-schema-to-grammar natively; MLX and ONNX do
+    /// not have it wired, so they honestly approximate/reject instead.
+    static func supportsNativeConstrainedDecoding(_ backend: BackendKind) -> Bool {
+        backend == .gguf
     }
 
     public func resolve(responseFormat: EshResponseFormat?, backend: BackendKind, tools: [EshToolDefinition]? = nil) -> Outcome {
@@ -24,36 +50,44 @@ public struct CapabilityResolver: Sendable {
         }
 
         guard let responseFormat else {
-            return Outcome(resolution: CapabilityResolution(options: extraOptions), systemInstructionAugmentation: nil)
+            return Outcome(resolution: CapabilityResolution(options: extraOptions))
         }
 
         let base = resolveFormat(responseFormat, backend: backend)
         return Outcome(
             resolution: CapabilityResolution(options: base.resolution.options + extraOptions),
-            systemInstructionAugmentation: base.systemInstructionAugmentation
+            systemInstructionAugmentation: base.systemInstructionAugmentation,
+            nativeJSONSchema: base.nativeJSONSchema,
+            nativeGrammar: base.nativeGrammar
         )
     }
 
     private func resolveFormat(_ responseFormat: EshResponseFormat, backend: BackendKind) -> Outcome {
+        let native = Self.supportsNativeConstrainedDecoding(backend)
         switch responseFormat.kind {
         case .text:
-            return Outcome(
-                resolution: CapabilityResolution(options: [
-                    ResolvedOption(name: "response_format", resolution: .applied, detail: "text")
-                ]),
-                systemInstructionAugmentation: nil
-            )
+            return Outcome(resolution: CapabilityResolution(options: [
+                ResolvedOption(name: "response_format", resolution: .applied, detail: "text")
+            ]))
+
         case .json:
-            // No backend currently has native constrained JSON decoding wired. Strict callers get a
-            // rejection rather than a prompt-instruction approximation.
-            if responseFormat.strict {
+            if native {
+                // Enforce "any JSON object" natively via a permissive JSON schema.
                 return Outcome(
                     resolution: CapabilityResolution(options: [
-                        ResolvedOption(name: "response_format", resolution: .rejected,
-                            detail: "strict json requested but the \(backend.rawValue) runtime has no native constrained decoding; not approximating because strict was set")
+                        ResolvedOption(name: "response_format", resolution: .applied,
+                            detail: "json enforced natively via constrained decoding on \(backend.rawValue)")
                     ]),
-                    systemInstructionAugmentation: nil
+                    nativeJSONSchema: #"{"type":"object"}"#
                 )
+            }
+            // No native constrained JSON decoding on this backend. Strict callers get a rejection
+            // rather than a prompt-instruction approximation.
+            if responseFormat.strict {
+                return Outcome(resolution: CapabilityResolution(options: [
+                    ResolvedOption(name: "response_format", resolution: .rejected,
+                        detail: "strict json requested but the \(backend.rawValue) runtime has no native constrained decoding; not approximating because strict was set")
+                ]))
             }
             return Outcome(
                 resolution: CapabilityResolution(options: [
@@ -62,33 +96,56 @@ public struct CapabilityResolver: Sendable {
                 ]),
                 systemInstructionAugmentation: "Respond with a single valid JSON object and nothing else. Do not include markdown code fences or any prose."
             )
+
         case .jsonSchema:
             let schema = responseFormat.schema?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if responseFormat.strict {
+            if native {
+                // llama.cpp converts a JSON schema to a grammar and enforces it during decoding.
+                let effectiveSchema = (schema?.isEmpty == false) ? schema! : #"{"type":"object"}"#
                 return Outcome(
                     resolution: CapabilityResolution(options: [
-                        ResolvedOption(name: "response_format", resolution: .rejected,
-                            detail: "strict json_schema requested but no native constrained decoding is available on \(backend.rawValue); not approximating because strict was set")
+                        ResolvedOption(name: "response_format", resolution: .applied,
+                            detail: "json_schema enforced natively via constrained decoding on \(backend.rawValue)")
                     ]),
-                    systemInstructionAugmentation: nil
+                    nativeJSONSchema: effectiveSchema
                 )
+            }
+            if responseFormat.strict {
+                return Outcome(resolution: CapabilityResolution(options: [
+                    ResolvedOption(name: "response_format", resolution: .rejected,
+                        detail: "strict json_schema requested but no native constrained decoding is available on \(backend.rawValue); not approximating because strict was set")
+                ]))
             }
             let augmentation = "Respond with a single JSON object that strictly conforms to this JSON Schema, and nothing else:\n\(schema ?? "(the requested schema)")"
             return Outcome(
                 resolution: CapabilityResolution(options: [
                     ResolvedOption(name: "response_format", resolution: .approximated,
-                        detail: "json_schema approximated via a prompt instruction (no native constrained decoding); conformance is not guaranteed. Set strict to reject approximation.")
+                        detail: "json_schema approximated via a prompt instruction (no native constrained decoding on \(backend.rawValue)); conformance is not guaranteed. Set strict to reject approximation.")
                 ]),
                 systemInstructionAugmentation: augmentation
             )
+
         case .grammar:
-            return Outcome(
-                resolution: CapabilityResolution(options: [
+            let grammar = responseFormat.grammar?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if native, let grammar, !grammar.isEmpty {
+                return Outcome(
+                    resolution: CapabilityResolution(options: [
+                        ResolvedOption(name: "response_format", resolution: .applied,
+                            detail: "grammar enforced natively via constrained decoding (GBNF) on \(backend.rawValue)")
+                    ]),
+                    nativeGrammar: grammar
+                )
+            }
+            if native {
+                return Outcome(resolution: CapabilityResolution(options: [
                     ResolvedOption(name: "response_format", resolution: .rejected,
-                        detail: "grammar-constrained decoding is not available in the current \(backend.rawValue) runtime")
-                ]),
-                systemInstructionAugmentation: nil
-            )
+                        detail: "grammar constrained decoding requested but no grammar text was provided")
+                ]))
+            }
+            return Outcome(resolution: CapabilityResolution(options: [
+                ResolvedOption(name: "response_format", resolution: .rejected,
+                    detail: "grammar-constrained decoding is not available in the current \(backend.rawValue) runtime")
+            ]))
         }
     }
 }

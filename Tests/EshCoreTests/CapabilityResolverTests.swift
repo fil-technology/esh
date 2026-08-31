@@ -81,6 +81,59 @@ struct CapabilityResolverTests {
         #expect(decodedResp.capabilityResolution?.first(named: "response_format")?.resolution == .transformed)
     }
 
+    // MARK: - GGUF native constrained decoding (llama.cpp)
+
+    @Test
+    func ggufJSONIsAppliedNativelyWithSchema() {
+        let outcome = resolver.resolve(responseFormat: .json, backend: .gguf)
+        let opt = outcome.resolution.first(named: "response_format")
+        #expect(opt?.resolution == .applied)                 // native, not approximated
+        #expect(outcome.systemInstructionAugmentation == nil)  // no prompt-instruction hack
+        #expect(outcome.nativeJSONSchema == #"{"type":"object"}"#)
+    }
+
+    @Test
+    func ggufJSONSchemaIsAppliedNativelyCarryingTheSchema() {
+        let schema = #"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .jsonSchema, schema: schema), backend: .gguf)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .applied)
+        #expect(outcome.nativeJSONSchema == schema)
+        #expect(outcome.systemInstructionAugmentation == nil)
+    }
+
+    @Test
+    func ggufStrictJSONSchemaIsAppliedNotRejected() {
+        // The whole point of native constrained decoding: strict callers are satisfied, not rejected.
+        let schema = #"{"type":"object"}"#
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .jsonSchema, schema: schema, strict: true), backend: .gguf)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .applied)
+        #expect(outcome.resolution.hasRejections == false)
+        #expect(outcome.nativeJSONSchema == schema)
+    }
+
+    @Test
+    func ggufGrammarIsAppliedNativelyWhenProvided() {
+        let grammar = "root ::= \"yes\" | \"no\""
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .grammar, grammar: grammar), backend: .gguf)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .applied)
+        #expect(outcome.nativeGrammar == grammar)
+    }
+
+    @Test
+    func ggufGrammarWithoutTextIsRejectedNotFabricated() {
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .grammar), backend: .gguf)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .rejected)
+        #expect(outcome.nativeGrammar == nil)
+    }
+
+    @Test
+    func onnxHasNoNativeConstrainedDecoding() {
+        // ONNX must not be treated as GGUF; strict structured output is honestly rejected.
+        let outcome = resolver.resolve(responseFormat: EshResponseFormat(kind: .jsonSchema, schema: "{}", strict: true), backend: .onnx)
+        #expect(outcome.resolution.first(named: "response_format")?.resolution == .rejected)
+        #expect(outcome.nativeJSONSchema == nil)
+    }
+
     @Test
     func legacyRequestWithoutResponseFormatStillDecodes() throws {
         // Backward compatibility: an infer request JSON from before M8 (no responseFormat key).

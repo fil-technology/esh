@@ -16,6 +16,12 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
     public var kvQuantScheme: String?
     public var kvGroupSize: Int?
     public var quantizedKVStart: Int?
+    /// Concrete native structured-output constraints resolved by CapabilityResolver and enforced by
+    /// the backend (not user-facing knobs — the user requests `responseFormat`, the resolver decides
+    /// whether it can be applied natively and, if so, fills these in). A backend that cannot enforce
+    /// them leaves them unset; the resolver never populates them for such a backend.
+    public var jsonSchema: String?
+    public var grammar: String?
 
     public init(
         maxTokens: Int = 512,
@@ -32,7 +38,9 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         kvBits: Double? = nil,
         kvQuantScheme: String? = nil,
         kvGroupSize: Int? = nil,
-        quantizedKVStart: Int? = nil
+        quantizedKVStart: Int? = nil,
+        jsonSchema: String? = nil,
+        grammar: String? = nil
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -49,6 +57,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         self.kvQuantScheme = kvQuantScheme
         self.kvGroupSize = kvGroupSize
         self.quantizedKVStart = quantizedKVStart
+        self.jsonSchema = jsonSchema
+        self.grammar = grammar
     }
 
     enum CodingKeys: String, CodingKey {
@@ -67,6 +77,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         case kvQuantScheme
         case kvGroupSize
         case quantizedKVStart
+        case jsonSchema
+        case grammar
     }
 
     enum SnakeCaseCodingKeys: String, CodingKey {
@@ -83,6 +95,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         case kvQuantScheme = "kv_quant_scheme"
         case kvGroupSize = "kv_group_size"
         case quantizedKVStart = "quantized_kv_start"
+        case jsonSchema = "json_schema"
+        case grammar
     }
 
     public init(from decoder: Decoder) throws {
@@ -120,6 +134,10 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
             ?? snakeContainer.decodeIfPresent(Int.self, forKey: .kvGroupSize)
         self.quantizedKVStart = try container.decodeIfPresent(Int.self, forKey: .quantizedKVStart)
             ?? snakeContainer.decodeIfPresent(Int.self, forKey: .quantizedKVStart)
+        self.jsonSchema = try container.decodeIfPresent(String.self, forKey: .jsonSchema)
+            ?? snakeContainer.decodeIfPresent(String.self, forKey: .jsonSchema)
+        self.grammar = try container.decodeIfPresent(String.self, forKey: .grammar)
+            ?? snakeContainer.decodeIfPresent(String.self, forKey: .grammar)
     }
 }
 

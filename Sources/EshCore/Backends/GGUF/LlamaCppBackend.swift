@@ -224,6 +224,15 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                     if let seed = config.seed {
                         arguments.append(contentsOf: ["--seed", String(seed)])
                     }
+                    // Native constrained decoding (M8). Resolved by CapabilityResolver only for
+                    // backends that genuinely support it; llama.cpp enforces a JSON schema (converted
+                    // to a grammar internally) or a raw GBNF grammar during sampling. JSON schema
+                    // takes precedence when both are somehow present.
+                    if let jsonSchema = config.jsonSchema, !jsonSchema.isEmpty {
+                        arguments.append(contentsOf: ["--json-schema", jsonSchema])
+                    } else if let grammar = config.grammar, !grammar.isEmpty {
+                        arguments.append(contentsOf: ["--grammar", grammar])
+                    }
                     process.arguments = arguments
 
                     let stdoutPipe = Pipe()
