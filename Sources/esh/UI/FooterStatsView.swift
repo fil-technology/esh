@@ -7,6 +7,12 @@ enum FooterStatsView {
         let ttft = state.metrics.ttftMilliseconds.map { String(format: "%.1fms", $0) } ?? "-"
         let tokPerSecond = state.metrics.tokensPerSecond.map { String(format: "%.1f", $0) } ?? "-"
         let cache = state.metrics.cacheSizeBytes.map(ByteFormatting.string(for:)) ?? "-"
+        // Realized KV/prompt-cache outcome for the last turn (from the runtime), and peak memory.
+        let kv: String? = state.metrics.cacheHit.map {
+            $0 ? "\(TerminalUIStyle.green)KV hit\(TerminalUIStyle.reset)"
+               : "\(TerminalUIStyle.faint)KV miss\(TerminalUIStyle.reset)"
+        }
+        let mem = state.metrics.memoryBytes.map { "\(TerminalUIStyle.faint)mem\(TerminalUIStyle.reset) \(ByteFormatting.string(for: $0))" }
 
         let autosave = state.autosaveEnabled
             ? "\(TerminalUIStyle.green)autosave on\(TerminalUIStyle.reset)"
@@ -18,17 +24,20 @@ enum FooterStatsView {
             "\(TerminalUIStyle.faint)ctx\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(ctx)\(TerminalUIStyle.reset)",
             "\(TerminalUIStyle.faint)ttft\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(ttft)\(TerminalUIStyle.reset)",
             "\(TerminalUIStyle.faint)tok/s\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(tokPerSecond)\(TerminalUIStyle.reset)",
+            kv,
+            mem,
             "\(TerminalUIStyle.faint)cache\(TerminalUIStyle.reset) \(TerminalUIStyle.ink)\(cache)\(TerminalUIStyle.reset)",
             scroll,
             autosave
-        ]
+        ].compactMap { $0 }
         let compactSegments = [
             "\(TerminalUIStyle.faint)ctx\(TerminalUIStyle.reset) \(ctx)",
             "\(TerminalUIStyle.faint)t/s\(TerminalUIStyle.reset) \(tokPerSecond)",
+            kv,
             "\(TerminalUIStyle.faint)cache\(TerminalUIStyle.reset) \(cache)",
             scroll,
             autosave
-        ]
+        ].compactMap { $0 }
         let minimalSegments = [
             scroll,
             "\(TerminalUIStyle.faint)t/s\(TerminalUIStyle.reset) \(tokPerSecond)",
