@@ -48,36 +48,37 @@ adapt onto it, never the reverse.
 - Realized cache state as a first-class signal; typed attachments with honest rejection; cross-backend
   conformance suite; truthful residency (weights-resident) surfaced via the persistent MLX worker.
 
+## Apple — provider vs routable backend
+
+Apple now **participates in the capability contract** (`esh capabilities` → `appleProvider`): honest
+availability + reason, `onDevice`, `permitsCloudOrPCC=false` and `neverAutoSelected=true` (both
+guaranteed by construction — esh only ever uses `SystemLanguageModel.default`, never a PCC/cloud
+path), with contract limitations listed rather than hidden. The safety guarantees the user required
+are met and tested.
+
+**Deferred (design-consequential, needs a product call):** making Apple a *routable/schedulable*
+`BackendKind` that competes with local models in `infer`/the scheduler. This touches ~16 exhaustive
+`BackendKind` switch sites and raises product questions (should Apple auto-compete? how does
+`localOnly` interact with any future PCC option?). It is deferred deliberately, not stubbed — Apple
+stays explicitly-selected-only via `esh apple` until that decision.
+
 ## Remaining for full M8
 
 - **Streaming events — producer/consumer wiring.** The canonical envelope + text adapter exist and
   are tested (`ChatService.streamEvents`). Remaining: have `esh serve` and the Terminal UX/Web Chat
   consume `EshStreamEvent` instead of raw text chunks, and add `.usage`/`.reasoningDelta` emission
   from producers that can observe them.
-- **Attachments / multimodal** typed inputs (images/documents/audio) with honest unsupported
-  reporting. Deliberately deferred rather than blanket-rejected, because the MLX-VLM bridge *can* do
-  vision for VLM models — needs per-model capability resolution to avoid mis-reporting.
-- **Cache state as a first-class runtime signal** — runtime reporting KV/prompt-cache hit/miss + cache
-  memory back into `ExecutionProfile`/`EshUsage.cachedInputTokens` (currently the profile records the
-  chosen strategy, not the realized hit/miss).
-- **Apple Foundation Models as a first-class contract provider.** Today `AppleIntelligenceService`
-  is honest and safe as a *separate* provider: availability + reason surfaced (doctor/onboarding/
-  `esh apple`), `onDevice` flagged with PCC called out as a distinct semantic, and `generate()`
-  throws rather than silently degrading when unavailable. It is structurally impossible for an
-  explicit downloaded-model request to become Apple (Apple is not in the backend registry).
-  Remaining: make Apple participate through `ExternalInferenceService`/the canonical contract with
-  honest capability resolution (Apple exposes no custom sampling params or GBNF; guided generation is
-  its own mechanism), a `localOnly` guarantee that provably cannot reach PCC/cloud, and Apple as a
-  measured scheduler candidate. This is a design-consequential addition (how Apple maps onto the
-  contract) — deferred pending that decision, not stubbed.
-- **Conformance harness across backends** — the resolver layer is unit-tested; a cross-backend
-  conformance suite driving real inference (text, streaming, strict json_schema on GGUF, unsupported
-  structured behavior on MLX, generation params, cancellation, usage accounting) is the next step.
+- **Attachment execution** (not just honest rejection): feed images to VLM models through the MLX-VLM
+  path. Today attachments are typed and honestly rejected; actual multimodal execution is a follow-up.
+- **Live GGUF constrained-decoding smoke test**: wiring is unit-verified but not yet run against an
+  installed GGUF (none present locally).
 
 ## Verdict
 
-M8 is **advanced but not complete**. The headline honesty guarantee is met: **native constrained
-decoding is real on GGUF and strict callers are satisfied natively, while backends without it reject
-rather than pretend.** Tools, usage, and reasoning are modeled with truthful capability resolution.
-Streaming events, attachments, realized cache state, Apple-as-provider, and the cross-backend
-conformance harness remain — and a live GGUF constrained-decoding smoke test is still pending.
+M8's honesty contract is **substantially complete and verified**: native constrained decoding real on
+GGUF (strict satisfied natively, others reject rather than pretend), canonical tools, measured usage,
+per-backend reasoning resolution, canonical streaming events, realized cache state, typed attachments
+with honest rejection, truthful residency, Apple as an honest on-device contract provider, and a
+cross-backend conformance suite. Remaining are execution-wiring items (streaming consumers, VLM
+attachment execution, a live GGUF smoke) and the design-consequential Apple-routable-backend decision
+— all tracked, none misrepresented.
