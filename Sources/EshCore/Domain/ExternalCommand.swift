@@ -181,6 +181,9 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
     public var messages: [ExternalInferenceMessage]
     public var generation: GenerationConfig
     public var routing: RoutingConfiguration?
+    /// Requested output format (text/json/json_schema/grammar). Resolved honestly by
+    /// CapabilityResolver; see the response's `capabilityResolution`.
+    public var responseFormat: EshResponseFormat?
 
     public init(
         schemaVersion: String = ExternalInferenceRequest.schemaVersion,
@@ -191,7 +194,8 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         intent: SessionIntent? = nil,
         messages: [ExternalInferenceMessage],
         generation: GenerationConfig = .init(),
-        routing: RoutingConfiguration? = nil
+        routing: RoutingConfiguration? = nil,
+        responseFormat: EshResponseFormat? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.model = model
@@ -202,6 +206,25 @@ public struct ExternalInferenceRequest: Codable, Hashable, Sendable {
         self.messages = messages
         self.generation = generation
         self.routing = routing
+        self.responseFormat = responseFormat
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, model, cacheArtifactID, sessionName, cacheMode, intent, messages, generation, routing, responseFormat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ExternalInferenceRequest.schemaVersion
+        self.model = try c.decodeIfPresent(String.self, forKey: .model)
+        self.cacheArtifactID = try c.decodeIfPresent(UUID.self, forKey: .cacheArtifactID)
+        self.sessionName = try c.decodeIfPresent(String.self, forKey: .sessionName)
+        self.cacheMode = try c.decodeIfPresent(CacheMode.self, forKey: .cacheMode)
+        self.intent = try c.decodeIfPresent(SessionIntent.self, forKey: .intent)
+        self.messages = try c.decode([ExternalInferenceMessage].self, forKey: .messages)
+        self.generation = try c.decodeIfPresent(GenerationConfig.self, forKey: .generation) ?? .init()
+        self.routing = try c.decodeIfPresent(RoutingConfiguration.self, forKey: .routing)
+        self.responseFormat = try c.decodeIfPresent(EshResponseFormat.self, forKey: .responseFormat)
     }
 }
 
@@ -227,6 +250,8 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
     public var outputText: String
     public var metrics: Metrics
     public var routing: RoutingTrace?
+    /// Honest report of how requested options (e.g. response_format) were handled.
+    public var capabilityResolution: CapabilityResolution?
 
     public init(
         schemaVersion: String = ExternalInferenceResponse.schemaVersion,
@@ -235,7 +260,8 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         integration: ExternalInferenceIntegration,
         outputText: String,
         metrics: Metrics,
-        routing: RoutingTrace? = nil
+        routing: RoutingTrace? = nil,
+        capabilityResolution: CapabilityResolution? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -244,5 +270,6 @@ public struct ExternalInferenceResponse: Codable, Hashable, Sendable {
         self.outputText = outputText
         self.metrics = metrics
         self.routing = routing
+        self.capabilityResolution = capabilityResolution
     }
 }

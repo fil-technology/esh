@@ -52,13 +52,24 @@ public struct ExternalInferenceService: Sendable {
     }
 
     private func inferDirect(
-        request: ExternalInferenceRequest,
+        request originalRequest: ExternalInferenceRequest,
         install: ModelInstall,
         routing: RoutingTrace?
     ) async throws -> ExternalInferenceResponse {
         let backend = backendResolver(install)
         let runtime = try await backend.loadRuntime(for: install)
         defer { Task { await runtime.unload() } }
+
+        // Resolve requested options (e.g. response_format) against what this backend can do, and
+        // approximate where necessary via an injected system instruction — reported honestly.
+        var request = originalRequest
+        let capabilityOutcome = CapabilityResolver().resolve(
+            responseFormat: request.responseFormat,
+            backend: install.spec.backend
+        )
+        if let augmentation = capabilityOutcome.systemInstructionAugmentation {
+            request.messages.insert(ExternalInferenceMessage(role: .system, text: augmentation), at: 0)
+        }
 
         let session = try resolveSession(request: request, install: install)
         let integration: ExternalInferenceIntegration
@@ -101,7 +112,8 @@ public struct ExternalInferenceService: Sendable {
             integration: integration,
             outputText: outputText,
             metrics: await runtime.metrics,
-            routing: routing
+            routing: routing,
+            capabilityResolution: capabilityOutcome.resolution.isEmpty ? nil : capabilityOutcome.resolution
         )
     }
 

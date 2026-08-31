@@ -49,7 +49,9 @@ enum InferCommand {
             "--routing-mode",
             "--router",
             "--coding-model",
-            "--fallback-model"
+            "--fallback-model",
+            "--response-format",
+            "--json-schema"
         ]
         let positional = CommandSupport.positionalArguments(in: arguments, knownFlags: knownFlags)
             .filter { !$0.hasPrefix("--") }
@@ -120,6 +122,8 @@ enum InferCommand {
             intent = nil
         }
 
+        let responseFormat = try resolveResponseFormat(arguments: arguments)
+
         var messages: [ExternalInferenceMessage] = []
         if let systemPrompt, systemPrompt.isEmpty == false {
             messages.append(ExternalInferenceMessage(role: .system, text: systemPrompt))
@@ -159,8 +163,33 @@ enum InferCommand {
                 kvGroupSize: kvGroupSize,
                 quantizedKVStart: quantizedKVStart
             ),
-            routing: routing
+            routing: routing,
+            responseFormat: responseFormat
         )
+    }
+
+    private static func resolveResponseFormat(arguments: [String]) throws -> EshResponseFormat? {
+        guard let value = CommandSupport.optionalValue(flag: "--response-format", in: arguments) else { return nil }
+        let schemaArg = CommandSupport.optionalValue(flag: "--json-schema", in: arguments)
+        // Schema may be a path to a .json file or inline JSON text.
+        let schema: String?
+        if let schemaArg {
+            if FileManager.default.fileExists(atPath: schemaArg) {
+                schema = try? String(contentsOfFile: schemaArg, encoding: .utf8)
+            } else {
+                schema = schemaArg
+            }
+        } else {
+            schema = nil
+        }
+        switch value.lowercased() {
+        case "text": return .text
+        case "json": return .json
+        case "json_schema", "jsonschema", "schema": return EshResponseFormat(kind: .jsonSchema, schema: schema)
+        case "grammar": return EshResponseFormat(kind: .grammar, grammar: schema)
+        default:
+            throw StoreError.invalidManifest("Invalid --response-format: \(value). Use text, json, json_schema, or grammar.")
+        }
     }
 
     private static func optionalDouble(flag: String, in arguments: [String]) throws -> Double? {

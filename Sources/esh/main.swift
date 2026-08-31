@@ -486,7 +486,7 @@ private struct CLI {
               esh optimize compare [<model>] [--json]
               esh optimize reset <model>
               esh infer --input <path-or->
-              esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>]
+              esh infer --model <id-or-repo> --message <text> [--system <text>] [--artifact <uuid>] [--max-tokens N] [--temperature T] [--top-p P] [--top-k K] [--min-p P] [--repetition-penalty R] [--seed N] [--enable-thinking] [--thinking-budget N] [--kv-bits N] [--kv-quant-scheme uniform|turboquant] [--kv-group-size N] [--quantized-kv-start N] [--cache-mode raw|turbo|triattention|auto] [--intent chat|code|documentqa|agentrun|multimodal] [--session-name <name>] [--response-format text|json|json_schema|grammar] [--json-schema <path-or-text>]
               esh serve [--host 127.0.0.1|localhost|::1|0.0.0.0|::] [--port <1-65535>] [--api-key <token>]
               esh integrations list
               esh integrations show <claude|codex>
