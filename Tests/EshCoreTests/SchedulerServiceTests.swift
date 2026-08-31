@@ -79,6 +79,31 @@ struct SchedulerServiceTests {
     }
 
     @Test
+    func prefersWarmModelOnCloseCalls() {
+        // Two similar coding models; the warm one should win a close call (M7 resource awareness).
+        let cold = install(id: "coderCold", name: "Qwen2.5-Coder-7B-A", gib: 4.3)
+        let warm = install(id: "coderWarm", name: "Qwen2.5-Coder-7B-B", gib: 4.2)
+        let d = scheduler.decide(request: CapabilityRequest(goal: .coding, quality: .balanced),
+                                 installs: [cold, warm], host: host(gb: 32),
+                                 root: PersistenceRoot(rootURL: tempDir()), appleAvailable: false,
+                                 warmModelIDs: ["coderWarm"])
+        #expect(d.selectedModelID == "coderWarm")
+        #expect(d.rationale.contains { $0.contains("already warm") })
+    }
+
+    @Test
+    func muchBetterColdModelStillBeatsTinyWarmOne() {
+        // A large cold coding model beats a tiny warm one for best-quality (warm bonus is bounded).
+        let tinyWarm = install(id: "tiny", name: "Qwen2.5-Coder-1.5B", gib: 1.0)
+        let bigCold = install(id: "big", name: "Qwen2.5-Coder-32B", gib: 18.0)
+        let d = scheduler.decide(request: CapabilityRequest(goal: .coding, quality: .high),
+                                 installs: [tinyWarm, bigCold], host: host(gb: 64),
+                                 root: PersistenceRoot(rootURL: tempDir()), appleAvailable: false,
+                                 warmModelIDs: ["tiny"])
+        #expect(d.selectedModelID == "big")
+    }
+
+    @Test
     func recordsRationaleAndCandidateCount() {
         let coder = install(id: "coder7b", name: "Qwen2.5-Coder-7B", gib: 4.3)
         let d = decide(CapabilityRequest(goal: .coding, quality: .balanced), [coder], gb: 32)

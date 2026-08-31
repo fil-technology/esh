@@ -21,6 +21,7 @@ public struct SchedulerService: Sendable {
         let capabilities: [RecommendedModel.Capability]
         let paramB: Double
         let fit: ModelFitAssessment
+        let warm: Bool
     }
 
     /// Convenience: read installed models + Apple availability from the environment.
@@ -36,7 +37,8 @@ public struct SchedulerService: Sendable {
         host: HostMachineProfile,
         root: PersistenceRoot,
         appleAvailable: Bool,
-        otherResidentGB: Double = 0
+        otherResidentGB: Double = 0,
+        warmModelIDs: Set<String> = []
     ) -> SchedulerDecision {
         var rationale: [String] = []
         var warnings: [String] = []
@@ -55,7 +57,8 @@ public struct SchedulerService: Sendable {
                 otherResidentGB: otherResidentGB
             )
             return Candidate(install: install, capabilities: caps, paramB: paramB,
-                             fit: fitService.assess(input: fitInput, host: host, root: root))
+                             fit: fitService.assess(input: fitInput, host: host, root: root),
+                             warm: warmModelIDs.contains(install.id))
         }
 
         let required = requiredCapabilities(for: request)
@@ -85,6 +88,7 @@ public struct SchedulerService: Sendable {
         let profile = planner.plan(context: optContext, workload: workload(for: request.goal), contextTokens: context, mode: mode)
 
         rationale.append("selected \(chosen.install.id) [\(chosen.install.spec.backend.rawValue)] — fit \(chosen.fit.fitClass.rawValue), ~\(chosen.paramB.clean)B params")
+        if chosen.warm { rationale.append("already warm (resident) — answers immediately with no load latency") }
         rationale.append("optimization: \(profile.summaryLine)\(profile.evidenceBacked ? " (evidence-backed)" : "")")
         if !profile.evidenceBacked {
             rationale.append("no local benchmark evidence yet — run `esh optimize benchmark \(chosen.install.id)` to let the scheduler use measured strategies")
@@ -109,16 +113,20 @@ public struct SchedulerService: Sendable {
     // MARK: - Ranking
 
     private func rank(_ candidates: [Candidate], request: CapabilityRequest) -> [Candidate] {
-        candidates.sorted { a, b in
-            let fa = fitRank(a.fit.fitClass), fb = fitRank(b.fit.fitClass)
-            if fa != fb { return fa > fb }                 // avoid OOM first
-            switch request.quality {
-            case .fast:                                     // smaller = faster/lighter
-                return a.paramB < b.paramB
-            case .high, .balanced:                          // larger = better quality (that still fit)
-                return a.paramB > b.paramB
-            }
+        candidates.sorted { score($0, request: request) > score($1, request: request) }
+    }
+
+    private func score(_ c: Candidate, request: CapabilityRequest) -> Double {
+        var s = Double(fitRank(c.fit.fitClass)) * 100     // avoid OOM first (dominant term)
+        let mem = c.fit.estimatedPeakMemoryGB ?? c.paramB
+        switch request.quality {
+        case .fast: s -= mem                               // smaller = faster/lighter
+        case .high, .balanced: s += mem                    // larger = better quality (that still fits)
         }
+        // M7: an already-warm model can answer immediately — prefer it on close calls. The bonus is
+        // deliberately small (a few GB of quality-size advantage in a cold model still wins).
+        if c.warm { s += 10 }
+        return s
     }
 
     private func fitRank(_ fit: ModelFitClass) -> Int {

@@ -6,18 +6,24 @@ public struct ExternalInferenceService: Sendable {
     private let cacheStore: CacheStore
     private let backendResolver: @Sendable (ModelInstall) -> any InferenceBackend
     private let workspaceRootURL: URL
+    /// Optional warm pool (M7). When present, model runtimes are acquired from it (kept warm and
+    /// reused across requests) instead of loaded + unloaded per request. Long-lived hosts (esh
+    /// serve, the chat TUI) pass a shared manager; one-shot CLI leaves it nil.
+    private let lifecycleManager: RuntimeLifecycleManager?
 
     public init(
         modelStore: ModelStore,
         sessionStore: SessionStore,
         cacheStore: CacheStore,
         registry: InferenceBackendRegistry = .init(),
+        lifecycleManager: RuntimeLifecycleManager? = nil,
         workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     ) {
         self.modelStore = modelStore
         self.sessionStore = sessionStore
         self.cacheStore = cacheStore
         self.backendResolver = { registry.backend(for: $0) }
+        self.lifecycleManager = lifecycleManager
         self.workspaceRootURL = workspaceRootURL.standardizedFileURL
     }
 
@@ -26,12 +32,14 @@ public struct ExternalInferenceService: Sendable {
         sessionStore: SessionStore,
         cacheStore: CacheStore,
         backendResolver: @escaping @Sendable (ModelInstall) -> any InferenceBackend,
+        lifecycleManager: RuntimeLifecycleManager? = nil,
         workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     ) {
         self.modelStore = modelStore
         self.sessionStore = sessionStore
         self.cacheStore = cacheStore
         self.backendResolver = backendResolver
+        self.lifecycleManager = lifecycleManager
         self.workspaceRootURL = workspaceRootURL.standardizedFileURL
     }
 
@@ -57,8 +65,23 @@ public struct ExternalInferenceService: Sendable {
         routing: RoutingTrace?
     ) async throws -> ExternalInferenceResponse {
         let backend = backendResolver(install)
-        let runtime = try await backend.loadRuntime(for: install)
-        defer { Task { await runtime.unload() } }
+        // M7: acquire from the warm pool when available (kept warm + reused); otherwise load and
+        // unload per request as before.
+        let runtime: BackendRuntime
+        if let manager = lifecycleManager {
+            runtime = try await manager.acquire(install: install, priority: .interactive)
+        } else {
+            runtime = try await backend.loadRuntime(for: install)
+        }
+        let lifecycleManager = self.lifecycleManager
+        defer {
+            if let manager = lifecycleManager {
+                let id = install.id
+                Task { await manager.release(modelID: id) }
+            } else {
+                Task { await runtime.unload() }
+            }
+        }
 
         // Resolve requested options (e.g. response_format) against what this backend can do, and
         // approximate where necessary via an injected system instruction — reported honestly.

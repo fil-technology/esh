@@ -762,11 +762,20 @@ public struct OpenAICompatibleService: Sendable {
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
         }
     ) {
+        // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
+        // request stay warm and are reused by the next, evicted on idle/memory pressure.
+        let host = HostMachineProfileService().currentProfile()
+        let lifecycleManager = RuntimeLifecycleManager(
+            usableBudgetGB: host.totalMemoryGB.map { max(1, $0 - 3) },
+            estimator: { install in max(0.2, Double(install.sizeBytes) / 1_073_741_824 * 1.3) },
+            loader: { install in try await registry.backend(for: install).loadRuntime(for: install) }
+        )
         let inference = ExternalInferenceService(
             modelStore: modelStore,
             sessionStore: sessionStore,
             cacheStore: cacheStore,
             registry: registry,
+            lifecycleManager: lifecycleManager,
             workspaceRootURL: workspaceRootURL
         )
         let capabilities = ExternalCapabilitiesService(modelStore: modelStore)
