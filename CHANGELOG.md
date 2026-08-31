@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-08-31
+
+### Fixed / Added (Terminal UX + speech, from real-use feedback)
+- **Reasoning is now detected and collapsible.** The parser only recognized an explicit
+  `<think>…</think>`; models like DeepSeek-R1 are primed with `<think>` by their chat template, so the
+  whole chain (and a stray `</think>`) leaked into the answer. It's now correctly split into a
+  **Reasoning** section that collapses to a one-line summary by default; `/think` toggles expansion.
+- **Slash-command autocomplete.** Typing `/` (or `/mo…`) shows a live suggestion panel of matching
+  commands with descriptions.
+- **Configurable, persisted speech models.** `esh config set-speech --tts <id> --stt <id>` persists
+  your choices; `esh audio speak` / `esh audio transcribe` use them by default (explicit `--model`
+  still wins) — set up STT/TTS once and switch between them.
+- The `prompt_cache[0].offset` crash from the screenshots was fixed in 0.9.3 (`ArraysCache` has no
+  `.offset`); upgrading resolves it. qwen3.5-9b has a separate mlx-lm architecture incompatibility the
+  scheduler routes around (measured evidence). Thinking/tools capability resolution is honest per
+  backend.
+
 ## [0.9.5] - 2026-08-31
 
 ### Fixed
