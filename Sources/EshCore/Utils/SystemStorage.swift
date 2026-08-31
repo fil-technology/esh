@@ -17,10 +17,13 @@ public enum SystemStorage {
             return nil
         }
 
-        if let available = values.volumeAvailableCapacityForImportantUsage {
-            return SystemStorageSnapshot(availableBytes: available)
+        // `volumeAvailableCapacityForImportantUsage` is APFS-specific and returns 0 on non-APFS
+        // volumes (e.g. an ExFAT external SSD). Only trust it when positive; otherwise fall back to
+        // the plain available-capacity key, which is accurate on those volumes.
+        if let important = values.volumeAvailableCapacityForImportantUsage, important > 0 {
+            return SystemStorageSnapshot(availableBytes: important)
         }
-        if let available = values.volumeAvailableCapacity {
+        if let available = values.volumeAvailableCapacity, available > 0 {
             return SystemStorageSnapshot(availableBytes: Int64(available))
         }
         return nil
