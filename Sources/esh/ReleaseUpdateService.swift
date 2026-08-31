@@ -161,7 +161,7 @@ enum AppVersionResolver {
 
     private static func candidateVersionFileURLs() -> [URL] {
         var urls: [URL] = []
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let executable = ExecutablePath.resolvedURL()
         var current = executable.deletingLastPathComponent()
 
         while true {
@@ -180,7 +180,7 @@ enum AppVersionResolver {
     }
 
     private static func packagedRootURL() -> URL? {
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let executable = ExecutablePath.resolvedURL()
         let binDirectory = executable.deletingLastPathComponent()
         guard binDirectory.lastPathComponent == "bin" else {
             return nil

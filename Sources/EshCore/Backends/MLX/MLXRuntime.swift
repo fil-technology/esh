@@ -155,7 +155,7 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         RuntimePathResolver.pythonExecutableURL(
             configuredPath: bridge.configuration.pythonExecutablePath,
             environment: ProcessInfo.processInfo.environment,
-            executablePath: CommandLine.arguments.first,
+            executablePath: ExecutablePath.resolvedPath,
             sourceFilePath: #filePath
         )
     }
@@ -164,7 +164,7 @@ public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
         try RuntimePathResolver.helperScriptURL(
             configuredPath: bridge.configuration.helperScriptPath,
             environment: ProcessInfo.processInfo.environment,
-            executablePath: CommandLine.arguments.first,
+            executablePath: ExecutablePath.resolvedPath,
             sourceFilePath: #filePath
         )
     }

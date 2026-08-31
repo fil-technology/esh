@@ -144,8 +144,7 @@ enum AudioSpeechGenerator {
     }
 
     private static func ensureMLXMetalLibrary(currentDirectoryURL: URL) throws {
-        guard let executablePath = CommandLine.arguments.first else { return }
-        let executableDirectory = URL(fileURLWithPath: executablePath)
+        let executableDirectory = ExecutablePath.resolvedURL()
             .deletingLastPathComponent()
         let colocatedLibrary = executableDirectory.appendingPathComponent("mlx.metallib")
         let fallbackLibrary = executableDirectory.appendingPathComponent("default.metallib")

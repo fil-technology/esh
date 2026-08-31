@@ -112,7 +112,7 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
 
     private static func defaultResolveExecutable() throws -> URL {
         let env = ProcessInfo.processInfo.environment
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let executable = ExecutablePath.resolvedURL()
         let bundledCandidate = executable
             .deletingLastPathComponent()
             .deletingLastPathComponent()

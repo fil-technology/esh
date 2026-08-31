@@ -47,7 +47,7 @@ public struct MLXBridge: Sendable {
         RuntimePathResolver.pythonExecutableURL(
             configuredPath: configuration.pythonExecutablePath,
             environment: ProcessInfo.processInfo.environment,
-            executablePath: CommandLine.arguments.first,
+            executablePath: ExecutablePath.resolvedPath,
             sourceFilePath: #filePath
         )
     }
@@ -56,7 +56,7 @@ public struct MLXBridge: Sendable {
         try RuntimePathResolver.helperScriptURL(
             configuredPath: configuration.helperScriptPath,
             environment: ProcessInfo.processInfo.environment,
-            executablePath: CommandLine.arguments.first,
+            executablePath: ExecutablePath.resolvedPath,
             sourceFilePath: #filePath
         )
     }
