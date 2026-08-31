@@ -16,7 +16,7 @@ adapt onto it, never the reverse.
 | **Capability resolution** | Every classified option carries native/transformed/approximated/ignored/rejected + a human detail. Strict + any rejection → the request fails (`ExternalInferenceService`), not a silent unconstrained fallback. | resolver suite + `strictJSONSchemaIsRejected` |
 | **Tools** | Canonical `EshToolDefinition` / `EshToolChoice` / `EshToolCall` on request+response. Requested tools are **honestly reported `.rejected`** (no native function-calling on the local runtime yet; `esh agent` orchestrates tools separately) — not silently dropped. | contract round-trip tests |
 | **Reasoning** | Explicit thinking toggle resolves per backend: MLX `.applied` (passed into the model chat template as `enable_thinking`); llama.cpp/ONNX `.ignored` (no toggle; model/template decides, thinking inline). Only reported when the caller sets it. | `reasoningIsAppliedOnMLX`, `reasoningIsIgnoredOnGGUFNotFakedAsApplied`, `reasoningNotReportedWhenCallerDidNotAskToToggle` |
-| **Usage accounting** | `EshUsage` on the response: only counters the runtime actually reports are populated (`contextUsed` from runtime metrics); `available` lists measured counters. Local monetary cost = 0 with explicit `costProvenance`, kept distinct from resource usage. No fabricated token counts. | contract round-trip; `EshUsage.available` |
+| **Usage accounting** | `EshUsage` on the response: measured `inputTokens`/`outputTokens`/`totalTokens` (MLX bridge now emits `promptTokens`/`generationTokens` from the runtime's `GenerationResponse`), plus `contextUsed`. Total derived only when both halves are measured. Local monetary cost = 0 with explicit `costProvenance`, kept distinct from resource usage. No fabricated counts — llama.cpp leaves token counts nil. | **real MLX inference**: `usage` reports `inputTokens/outputTokens/totalTokens` end-to-end |
 | **Streaming events** | Canonical `EshStreamEvent` envelope (`textDelta`/`reasoningDelta`/`toolCall`/`usage`/`done`/`failed`) + `ChatService.streamEvents` adapting the real runtime text stream: `.textDelta` per chunk, terminal `.done`/`.failed`, cancellation surfaced as a thrown `CancellationError`. Only genuinely observed events emitted (text today); richer events reserved for producers that supply them. | `StreamEventTests`: deltas→done, empty-chunk suppression, error→terminal `.failed` |
 | **Execution metadata** | `ExecutionProfile` reflecting the KV/prompt-cache strategy that actually ran is attached to every response (from 0.7.0). | `OptimizationTests`, response round-trip |
 | **Backward compatibility** | Additive optional fields; pre-M8 infer request JSON still decodes (`decodeIfPresent` throughout). | `legacyRequestWithoutResponseFormatStillDecodes` |
@@ -52,10 +52,16 @@ adapt onto it, never the reverse.
 - **Cache state as a first-class runtime signal** — runtime reporting KV/prompt-cache hit/miss + cache
   memory back into `ExecutionProfile`/`EshUsage.cachedInputTokens` (currently the profile records the
   chosen strategy, not the realized hit/miss).
-- **Apple Foundation Models as a first-class contract provider** — participate through the same
-  contract with visible availability/reason, explicit on-device vs PCC/cloud distinction, and honest
-  unsupported-capability reporting. (An explicit downloaded-model request must never silently become
-  Apple.)
+- **Apple Foundation Models as a first-class contract provider.** Today `AppleIntelligenceService`
+  is honest and safe as a *separate* provider: availability + reason surfaced (doctor/onboarding/
+  `esh apple`), `onDevice` flagged with PCC called out as a distinct semantic, and `generate()`
+  throws rather than silently degrading when unavailable. It is structurally impossible for an
+  explicit downloaded-model request to become Apple (Apple is not in the backend registry).
+  Remaining: make Apple participate through `ExternalInferenceService`/the canonical contract with
+  honest capability resolution (Apple exposes no custom sampling params or GBNF; guided generation is
+  its own mechanism), a `localOnly` guarantee that provably cannot reach PCC/cloud, and Apple as a
+  measured scheduler candidate. This is a design-consequential addition (how Apple maps onto the
+  contract) — deferred pending that decision, not stubbed.
 - **Conformance harness across backends** — the resolver layer is unit-tested; a cross-backend
   conformance suite driving real inference (text, streaming, strict json_schema on GGUF, unsupported
   structured behavior on MLX, generation params, cancellation, usage accounting) is the next step.
