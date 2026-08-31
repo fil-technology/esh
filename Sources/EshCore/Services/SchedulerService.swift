@@ -22,6 +22,8 @@ public struct SchedulerService: Sendable {
         let paramB: Double
         let fit: ModelFitAssessment
         let warm: Bool
+        /// Local Model Benchmark Lab evidence for this model, when it has been benchmarked on this Mac.
+        let benchmark: ModelBenchmarkEvidence?
     }
 
     /// Convenience: read installed models + Apple availability from the environment.
@@ -43,6 +45,9 @@ public struct SchedulerService: Sendable {
         var rationale: [String] = []
         var warnings: [String] = []
         let context = request.expectedContextTokens ?? defaultContext(for: request.goal)
+        // Local measured evidence (Model Benchmark Lab): lets the scheduler rank on real quality/speed
+        // instead of a parameter-size proxy when a model has been benchmarked on this Mac.
+        let labDataset = ModelBenchmarkLabStore(root: root).load()
 
         let candidates = installs.map { install -> Candidate in
             let caps = capabilities(for: install)
@@ -58,7 +63,8 @@ public struct SchedulerService: Sendable {
             )
             return Candidate(install: install, capabilities: caps, paramB: paramB,
                              fit: fitService.assess(input: fitInput, host: host, root: root),
-                             warm: warmModelIDs.contains(install.id))
+                             warm: warmModelIDs.contains(install.id),
+                             benchmark: labDataset.evidence(for: install.id))
         }
 
         let required = requiredCapabilities(for: request)
@@ -88,6 +94,14 @@ public struct SchedulerService: Sendable {
         let profile = planner.plan(context: optContext, workload: workload(for: request.goal), contextTokens: context, mode: mode)
 
         rationale.append("selected \(chosen.install.id) [\(chosen.install.spec.backend.rawValue)] — fit \(chosen.fit.fitClass.rawValue), ~\(chosen.paramB.clean)B params")
+        if let b = chosen.benchmark, b.stable {
+            let tps = b.performance.decodeTokensPerSecondMedian.map { String(format: "~%.0f tok/s", $0) } ?? "n/a"
+            rationale.append("measured on your Mac (benchmark lab): quality \(b.quality.passed)/\(b.quality.total), \(tps) — ranked on real evidence, not a size guess")
+        }
+        // If any eligible model was measured as broken and skipped, say so — the catalog may still list it.
+        if let broken = eligible.first(where: { ($0.benchmark?.stable == false) }), broken.install.id != chosen.install.id {
+            rationale.append("skipped \(broken.install.id): your benchmark measured it as failing to run on this Mac (catalog lists it, measured evidence overrides)")
+        }
         if chosen.warm { rationale.append("already warm (resident) — answers immediately with no load latency") }
         rationale.append("optimization: \(profile.summaryLine)\(profile.evidenceBacked ? " (evidence-backed)" : "")")
         if !profile.evidenceBacked {
@@ -118,15 +132,45 @@ public struct SchedulerService: Sendable {
 
     private func score(_ c: Candidate, request: CapabilityRequest) -> Double {
         var s = Double(fitRank(c.fit.fitClass)) * 100     // avoid OOM first (dominant term)
+        // Measured evidence trumps guesses: a model the Benchmark Lab measured as FAILING to run on
+        // this Mac must not be preferred over a working one, even if the curated catalog "recommends"
+        // it and its size proxy looks strong.
+        if let b = c.benchmark, b.stable == false {
+            s -= 500
+        }
         let mem = c.fit.estimatedPeakMemoryGB ?? c.paramB
         switch request.quality {
-        case .fast: s -= mem                               // smaller = faster/lighter
-        case .high, .balanced: s += mem                    // larger = better quality (that still fits)
+        case .fast:
+            s -= mem                                        // smaller = faster/lighter
+            if let tps = c.benchmark?.performance.decodeTokensPerSecondMedian, (c.benchmark?.stable ?? false) {
+                s += min(tps / 10, 20)                      // measured decode speed rewards fast requests
+            }
+        case .high, .balanced:
+            if let b = c.benchmark, b.stable {
+                s += measuredQualityScore(b, goal: request.goal) * 30   // measured quality > size proxy
+            } else {
+                s += mem                                    // no measured evidence — size-as-quality proxy
+            }
         }
         // M7: an already-warm model can answer immediately — prefer it on close calls. The bonus is
         // deliberately small (a few GB of quality-size advantage in a cold model still wins).
         if c.warm { s += 10 }
         return s
+    }
+
+    /// Goal-specific measured quality (0...1) from local Benchmark Lab evidence: the matching probe
+    /// category when the goal maps to one, else the overall pass rate.
+    private func measuredQualityScore(_ b: ModelBenchmarkEvidence, goal: CapabilityRequest.Goal) -> Double {
+        let rates = b.quality.categoryPassRate
+        let category: String?
+        switch goal {
+        case .coding: category = "coding"
+        case .reasoning: category = "reasoning"
+        case .structured: category = "structured"
+        case .general: category = nil
+        }
+        if let category, let rate = rates[category] { return rate }
+        return b.quality.total > 0 ? Double(b.quality.passed) / Double(b.quality.total) : 0
     }
 
     private func fitRank(_ fit: ModelFitClass) -> Int {

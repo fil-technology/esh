@@ -111,6 +111,50 @@ struct SchedulerServiceTests {
         #expect(d.rationale.count >= 2)
     }
 
+    // MARK: - Measured benchmark evidence (Scheduler Revalidation)
+
+    private func evidence(_ id: String, stable: Bool, passed: Int, tps: Double?) -> ModelBenchmarkEvidence {
+        ModelBenchmarkEvidence(
+            modelID: id, backend: .mlx,
+            provenance: BenchmarkProvenance(dateISO8601: "t", eshVersion: nil, runtimeVersion: nil,
+                                            hardware: "h", suiteVersion: 1, quantization: nil, contextTokens: nil),
+            performance: BenchmarkPerformance(decodeTokensPerSecondMedian: tps),
+            quality: BenchmarkQuality(passed: passed, total: 5, probes: [
+                BenchmarkProbeResult(id: "coding", category: "coding", passed: passed >= 3)
+            ]),
+            stable: stable)
+    }
+
+    @Test
+    func measuredBrokenModelIsNotPreferredOverAWorkingOne() throws {
+        // A large coder the curated catalog would rank first for a high-quality request, but which the
+        // Benchmark Lab measured as FAILING to run — and a smaller working coder measured as good.
+        let root = PersistenceRoot(rootURL: tempDir())
+        let bigBroken = install(id: "coderBig", name: "Qwen2.5-Coder-14B", gib: 8.0)
+        let smallGood = install(id: "coderSmall", name: "Qwen2.5-Coder-3B", gib: 1.8)
+        _ = try ModelBenchmarkLabStore(root: root).upsert([
+            evidence("coderBig", stable: false, passed: 0, tps: nil),      // measured broken
+            evidence("coderSmall", stable: true, passed: 5, tps: 120)      // measured good
+        ])
+
+        let d = scheduler.decide(request: CapabilityRequest(goal: .coding, quality: .high),
+                                 installs: [bigBroken, smallGood], host: host(gb: 64),
+                                 root: root, appleAvailable: false)
+        #expect(d.selectedModelID == "coderSmall")   // measured evidence overrides the size-proxy guess
+        #expect(d.rationale.contains { $0.contains("measured") })
+    }
+
+    @Test
+    func measuredEvidenceIsSurfacedInRationale() throws {
+        let root = PersistenceRoot(rootURL: tempDir())
+        let coder = install(id: "coder7b", name: "Qwen2.5-Coder-7B", gib: 4.3)
+        _ = try ModelBenchmarkLabStore(root: root).upsert([evidence("coder7b", stable: true, passed: 5, tps: 90)])
+        let d = scheduler.decide(request: CapabilityRequest(goal: .coding, quality: .balanced),
+                                 installs: [coder], host: host(gb: 32), root: root, appleAvailable: false)
+        #expect(d.selectedModelID == "coder7b")
+        #expect(d.rationale.contains { $0.contains("benchmark lab") })
+    }
+
     private func tempDir() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
