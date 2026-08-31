@@ -77,7 +77,10 @@ enum AudioCommand {
     private static func defaultOutputURL(currentDirectoryURL: URL) throws -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let directory = currentDirectoryURL.appendingPathComponent(".esh/audio", isDirectory: true)
+        // Generated audio is an asset: default it under the configured assets root
+        // (~/.esh/audio by default), not the current working directory. Users can still pass an
+        // explicit --out path anywhere. See docs/STORAGE.md.
+        let directory = PersistenceRoot.default().audioURL
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("\(formatter.string(from: Date())).wav")
     }

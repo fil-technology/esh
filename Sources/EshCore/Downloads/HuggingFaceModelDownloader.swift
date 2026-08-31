@@ -36,17 +36,23 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     private let coordinator: DownloadCoordinator
     private let session: URLSession
     private let retryPolicy: NetworkRetryPolicy
+    private let storageRoot: PersistenceRoot
+    private let storageService: StorageService
 
     public init(
         modelStore: ModelStore,
         coordinator: DownloadCoordinator = .init(),
         session: URLSession = .shared,
-        retryPolicy: NetworkRetryPolicy = .default
+        retryPolicy: NetworkRetryPolicy = .default,
+        storageRoot: PersistenceRoot = .default(),
+        storageService: StorageService = StorageService()
     ) {
         self.modelStore = modelStore
         self.coordinator = coordinator
         self.session = session
         self.retryPolicy = retryPolicy
+        self.storageRoot = storageRoot
+        self.storageService = storageService
     }
 
     public func install(
@@ -58,6 +64,10 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         guard source.kind == .huggingFace else {
             throw StoreError.invalidManifest("Hugging Face downloader only supports Hugging Face sources.")
         }
+
+        // Gate on assets-storage availability before any large download so a disconnected
+        // external volume fails clearly instead of silently re-downloading onto the internal disk.
+        try storageService.ensureAssetsAvailable(root: storageRoot)
 
         let reporter = ClosureProgressReporter(callback: progress)
         reporter.emit(DownloadState(phase: .resolving, message: "Resolving model metadata"))

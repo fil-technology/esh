@@ -1,24 +1,58 @@
 import Foundation
 
 public struct PersistenceRoot: Sendable {
+    /// Internal state root (config, sessions, benchmarks, runtime, metadata). Never relocated.
     public let rootURL: URL
+    /// Root under which large/relocatable assets live (models, caches, audio, temp). Defaults to
+    /// `rootURL`; can point at an external volume so heavy assets live off the internal disk while
+    /// lightweight config/state stays internal. See docs/STORAGE.md.
+    public let assetsRootURL: URL
+
+    // State (internal)
     public let sessionsURL: URL
-    public let cachesURL: URL
-    public let modelsURL: URL
     public let benchmarksURL: URL
 
+    // Assets (relocatable)
+    public let cachesURL: URL
+    public let modelsURL: URL
+    public let audioURL: URL
+    public let tempURL: URL
+
+    /// Alias for `rootURL`, for call sites that want to be explicit about the internal state root.
+    public var stateRootURL: URL { rootURL }
+
+    /// True when assets are configured to live somewhere other than the internal state root.
+    public var usesExternalAssets: Bool {
+        rootURL.standardizedFileURL != assetsRootURL.standardizedFileURL
+    }
+
     public init(rootURL: URL) {
-        self.rootURL = rootURL
-        self.sessionsURL = rootURL.appendingPathComponent("sessions", isDirectory: true)
-        self.cachesURL = rootURL.appendingPathComponent("caches", isDirectory: true)
-        self.modelsURL = rootURL.appendingPathComponent("models", isDirectory: true)
-        self.benchmarksURL = rootURL.appendingPathComponent("benchmarks", isDirectory: true)
+        self.init(stateRootURL: rootURL, assetsRootURL: rootURL)
+    }
+
+    public init(stateRootURL: URL, assetsRootURL: URL) {
+        self.rootURL = stateRootURL
+        self.assetsRootURL = assetsRootURL
+        self.sessionsURL = stateRootURL.appendingPathComponent("sessions", isDirectory: true)
+        self.benchmarksURL = stateRootURL.appendingPathComponent("benchmarks", isDirectory: true)
+        self.cachesURL = assetsRootURL.appendingPathComponent("caches", isDirectory: true)
+        self.modelsURL = assetsRootURL.appendingPathComponent("models", isDirectory: true)
+        self.audioURL = assetsRootURL.appendingPathComponent("audio", isDirectory: true)
+        self.tempURL = assetsRootURL.appendingPathComponent("tmp", isDirectory: true)
     }
 
     public static func `default`() -> PersistenceRoot {
+        let stateRoot = resolveStateRoot()
+        let assetsRoot = resolveAssetsRoot(stateRoot: stateRoot)
+        return PersistenceRoot(stateRootURL: stateRoot, assetsRootURL: assetsRoot)
+    }
+
+    /// Resolve the internal state root, applying the `ESH_HOME`/`LLMCACHE_HOME` overrides and the
+    /// one-time `~/.llmcache` → `~/.esh` migration.
+    public static func resolveStateRoot() -> URL {
         if let override = ProcessInfo.processInfo.environment["ESH_HOME"] ?? ProcessInfo.processInfo.environment["LLMCACHE_HOME"],
            !override.isEmpty {
-            return PersistenceRoot(rootURL: URL(fileURLWithPath: override, isDirectory: true))
+            return URL(fileURLWithPath: override, isDirectory: true)
         }
 
         let fileManager = FileManager.default
@@ -32,7 +66,23 @@ public struct PersistenceRoot: Sendable {
             eshRoot: eshRoot
         )
 
-        return PersistenceRoot(rootURL: eshRoot)
+        return eshRoot
+    }
+
+    /// Resolve the assets root from (1) `ESH_ASSETS_HOME` env, (2) persisted `storage.json`,
+    /// otherwise the internal state root (zero-configuration default). Note: this returns the
+    /// *configured* path even if an external volume is currently disconnected — callers that are
+    /// about to write large assets must gate on `StorageService.availability(...)` first so a
+    /// missing volume produces a clear error instead of a silent internal fallback.
+    public static func resolveAssetsRoot(stateRoot: URL) -> URL {
+        if let override = ProcessInfo.processInfo.environment["ESH_ASSETS_HOME"], !override.isEmpty {
+            return PathResolving.directoryURL(from: override)
+        }
+        let config = StorageConfigStore(stateRootURL: stateRoot).load()
+        if let assetsRoot = config.assetsRoot, !assetsRoot.trimmingCharacters(in: .whitespaces).isEmpty {
+            return PathResolving.directoryURL(from: assetsRoot)
+        }
+        return stateRoot
     }
 
     private static func migrateLegacyRootIfNeeded(

@@ -33,7 +33,7 @@ private struct CLI {
         }
 
         let modelStore = FileModelStore(root: root)
-        let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
+        let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore, storageRoot: root)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
         let modelCatalogService = ModelCatalogService(
             localCatalog: LocalModelCatalog(store: modelStore),
@@ -50,6 +50,8 @@ private struct CLI {
             try await BenchmarkCommand.run(arguments: Array(command.dropFirst()))
         case "config":
             try ConfigCommand.run(arguments: Array(command.dropFirst()), root: root)
+        case "storage":
+            try StorageCommand.run(arguments: Array(command.dropFirst()), root: root)
         case "doctor":
             try DoctorCommand.run()
         case "engines":
@@ -102,7 +104,7 @@ private struct CLI {
         }
 
         let modelStore = FileModelStore(root: root)
-        let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore)
+        let modelDownloader = HuggingFaceModelDownloader(modelStore: modelStore, storageRoot: root)
         let modelService = ModelService(store: modelStore, downloader: modelDownloader)
         let modelCatalogService = ModelCatalogService(
             localCatalog: LocalModelCatalog(store: modelStore),
@@ -416,6 +418,10 @@ private struct CLI {
               esh config init [--force]
               esh config show
               esh config path
+              esh storage show [--json]
+              esh storage set <path> [--no-move]
+              esh storage use-internal [--no-move]
+              esh storage doctor [--json]
               esh engines list
               esh engines doctor <llama.cpp|mlx>
               esh validate <model-path-or-installed-id> [--engine llama.cpp|mlx] [--json]

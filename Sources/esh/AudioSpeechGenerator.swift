@@ -42,7 +42,13 @@ enum AudioSpeechGenerator {
         try ensureMLXMetalLibrary(currentDirectoryURL: currentDirectoryURL)
         try ensureMetalDeviceAvailable()
 
-        let modelCacheURL = currentDirectoryURL.appendingPathComponent(".esh/tts-models", isDirectory: true)
+        // TTS voice weights are large assets: keep them under the configured assets root
+        // (default ~/.esh/audio/tts-models), NOT under the current working directory. Gate on
+        // external-volume availability so a disconnected SSD fails clearly instead of silently
+        // re-downloading multi-GB weights onto the internal disk.
+        let root = PersistenceRoot.default()
+        try StorageService().ensureAssetsAvailable(root: root)
+        let modelCacheURL = root.audioURL.appendingPathComponent("tts-models", isDirectory: true)
         try FileManager.default.createDirectory(at: modelCacheURL, withIntermediateDirectories: true)
         setenv("HF_HUB_CACHE", modelCacheURL.path, 1)
         let modelStore = TTSModelStore(cacheRoots: [modelCacheURL])
