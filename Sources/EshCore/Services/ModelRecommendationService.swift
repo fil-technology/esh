@@ -28,6 +28,10 @@ public struct ModelRecommendationService: Sendable {
         let hwClass = HardwareClass(totalMemoryGB: host.totalMemoryGB ?? 16)
         let context = contextFor(profile)
         let store = OptimizationProfileStore(root: root)
+        // Local measured evidence from the Model Benchmark Lab (perf + deterministic quality), keyed by
+        // install id. Consulted alongside the M1 optimization profile store — one recommendation
+        // engine, two evidence sources; not a duplicate benchmark system.
+        let labDataset = ModelBenchmarkLabStore(root: root).load()
         // Map each catalog repoID -> installed model id(s), so local benchmark evidence (keyed by
         // install id) can be matched back to a catalog recommendation.
         let installs = (try? FileModelStore(root: root).listInstalls()) ?? []
@@ -40,6 +44,7 @@ public struct ModelRecommendationService: Sendable {
             let model: RecommendedModel
             let fit: ModelFitAssessment
             let localTPS: Double?
+            let labEvidence: ModelBenchmarkEvidence?
             let score: Double
         }
 
@@ -50,16 +55,22 @@ public struct ModelRecommendationService: Sendable {
             if fit.fitClass == .unlikely { return nil }                 // discoverable elsewhere, not recommended
             if fit.fitClass == .tight && !includeTight && profile != .bestQuality { return nil }
             let installIDs = installIDsByRepo[model.repoID.lowercased()] ?? []
+            let lab = installIDs.compactMap { labDataset.evidence(for: $0) }.first
+            // Prefer optimization-store TPS; fall back to the lab's measured decode TPS.
             let localTPS = localDecodeTPS(installIDs: installIDs, store: store)
+                ?? lab?.performance.decodeTokensPerSecondMedian
             let score = score(profile: profile, model: model, fit: fit, localTPS: localTPS)
-            return Scored(model: model, fit: fit, localTPS: localTPS, score: score)
+            return Scored(model: model, fit: fit, localTPS: localTPS, labEvidence: lab, score: score)
         }
 
         let ranked = candidates.sorted { $0.score > $1.score }.prefix(limit)
         return ranked.enumerated().map { index, s in
-            let evidence: RecommendationEvidence = s.localTPS != nil ? .measuredLocal : .estimated
+            let evidence: RecommendationEvidence = (s.localTPS != nil || s.labEvidence != nil) ? .measuredLocal : .estimated
             var reasons = [profileReason(profile, model: s.model, fit: s.fit)]
             if let tps = s.localTPS { reasons.append(String(format: "your local benchmark: ~%.1f tok/s decode", tps)) }
+            if let lab = s.labEvidence {
+                reasons.append("benchmark lab: quality \(lab.quality.passed)/\(lab.quality.total) measured on your Mac")
+            }
             reasons.append("fit: \(s.fit.fitClass.rawValue) on this \(hwClass.displayName) Mac")
             return CuratedRecommendation(
                 modelID: s.model.id, repoID: s.model.repoID, backend: s.model.backend,

@@ -7,6 +7,10 @@ enum BenchmarkCommand {
             try showHistory()
             return
         }
+        if arguments.first == "lab" {
+            try await BenchmarkLabCommand.run(arguments: Array(arguments.dropFirst()), root: PersistenceRoot.default())
+            return
+        }
 
         let sessionIdentifier = try CommandSupport.requiredValue(flag: "--session", in: arguments)
         let modelIdentifier = CommandSupport.optionalValue(flag: "--model", in: arguments)

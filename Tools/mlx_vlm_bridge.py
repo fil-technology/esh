@@ -51,6 +51,15 @@ def _emit_json_line(payload: dict[str, Any]) -> None:
         sys.stdout.write(line)
         sys.stdout.flush()
 
+def _cache_offset(prompt_cache, fallback: int) -> int:
+    """Context-token count from a prompt cache. Newer mlx-lm cache types (e.g. ArraysCache) do not
+    expose `.offset`; fall back to the processed prompt length rather than crashing."""
+    if not prompt_cache:
+        return int(fallback)
+    off = getattr(prompt_cache[0], "offset", None)
+    return int(off) if off is not None else int(fallback)
+
+
 
 def _import_mlx_vlm():
     try:
@@ -798,7 +807,7 @@ def _generate_with_loaded_model(
     )
 
     metrics = {
-        "contextTokens": int(prompt_cache[0].offset) if prompt_cache else prompt_token_count,
+        "contextTokens": _cache_offset(prompt_cache, prompt_token_count),
         "ttftMilliseconds": (
             (last_response.prompt_tokens / last_response.prompt_tps) * 1000
             if last_response is not None and last_response.prompt_tps
@@ -1007,7 +1016,7 @@ def mlx_build_cache() -> None:
         {"snapshot": snapshot, "rendered_prompt": rendered_prompt},
     )
     metrics = {
-        "contextTokens": int(prompt_cache[0].offset) if prompt_cache else len(prompt_tokens),
+        "contextTokens": _cache_offset(prompt_cache, len(prompt_tokens)),
         "ttftMilliseconds": elapsed * 1000,
         "tokensPerSecond": len(prompt_tokens) / elapsed if prompt_tokens else None,
         "memoryBytes": int(mx.get_peak_memory()),
