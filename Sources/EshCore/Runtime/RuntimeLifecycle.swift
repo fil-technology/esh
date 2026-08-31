@@ -11,6 +11,14 @@ public enum RuntimeResidency: String, Codable, Sendable {
     case handleCached = "handle-cached"
 }
 
+/// A runtime that can truthfully report its own residency + health (e.g. a persistent worker that
+/// knows whether its weights are still loaded). The lifecycle manager prefers this over a static
+/// probe so a crashed/unloaded worker is never reported as weights-resident.
+public protocol ResidencyReporting {
+    var residency: RuntimeResidency { get }
+    var isHealthy: Bool { get }
+}
+
 /// Lifecycle state of a model runtime in the warm pool.
 public enum ModelRuntimeState: String, Codable, Sendable {
     case unloaded    // not resident

@@ -39,9 +39,17 @@ def _dump_json(payload: dict[str, Any]) -> None:
     json.dump(payload, sys.stdout, separators=(",", ":"))
 
 
+import threading as _threading
+
+_EMIT_LOCK = _threading.Lock()
+
+
 def _emit_json_line(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(payload, separators=(",", ":")) + "\n"
+    # Serialize writes so the persistent worker's reader/generator threads never interleave a line.
+    with _EMIT_LOCK:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def _import_mlx_vlm():
@@ -685,11 +693,24 @@ def doctor() -> None:
     )
 
 
-def mlx_generate() -> None:
-    mx, _, stream_generate, KVCache, make_prompt_cache, load = _import_mlx_lm()
-    request = _load_json()
-    model, tokenizer = _load_mlx_model(load, request["modelPath"])
+def _generate_with_loaded_model(
+    mx,
+    stream_generate,
+    KVCache,
+    make_prompt_cache,
+    model,
+    tokenizer,
+    request,
+    on_token,
+    should_cancel=None,
+) -> dict:
+    """Run one generation against an ALREADY-LOADED model/tokenizer.
 
+    Shared by the one-shot path (`mlx_generate`) and the persistent worker (`mlx_serve`) so both
+    behave identically. `on_token(text)` is called per token; `should_cancel()` (optional) is polled
+    each step so the persistent worker can interrupt. Returns {"text", "metrics", "kvMode"} instead of
+    emitting a done event, leaving event framing to the caller.
+    """
     messages = [
         {"role": message["role"], "content": message["text"]}
         for message in request["session"]["messages"]
@@ -732,6 +753,7 @@ def mlx_generate() -> None:
     prompt_token_count = len(prompt_tokens)
     reply_parts = []
     last_response = None
+    cancelled = False
 
     for response in stream_generate(
         model=model,
@@ -744,7 +766,10 @@ def mlx_generate() -> None:
         last_response = response
         if response.text:
             reply_parts.append(response.text)
-            _emit_json_line({"event": "token", "text": response.text})
+            on_token(response.text)
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
         if response.finish_reason is not None:
             break
 
@@ -789,10 +814,146 @@ def mlx_generate() -> None:
             int(last_response.generation_tokens) if last_response is not None else None
         ),
         "finishReason": (
-            last_response.finish_reason if last_response is not None else None
+            "cancelled"
+            if cancelled
+            else (last_response.finish_reason if last_response is not None else None)
         ),
     }
-    _emit_json_line({"event": "done", "text": reply, "metrics": metrics, "kvMode": effective_kv_mode})
+    return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
+
+
+def mlx_generate() -> None:
+    mx, _, stream_generate, KVCache, make_prompt_cache, load = _import_mlx_lm()
+    request = _load_json()
+    model, tokenizer = _load_mlx_model(load, request["modelPath"])
+    result = _generate_with_loaded_model(
+        mx,
+        stream_generate,
+        KVCache,
+        make_prompt_cache,
+        model,
+        tokenizer,
+        request,
+        on_token=lambda text: _emit_json_line({"event": "token", "text": text}),
+    )
+    _emit_json_line(
+        {"event": "done", "text": result["text"], "metrics": result["metrics"], "kvMode": result["kvMode"]}
+    )
+
+
+def mlx_serve() -> None:
+    """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
+
+    Protocol (newline-delimited JSON):
+      stdin  : first line `{"op":"init","modelPath":...,"modelID":...}`; then
+               `{"id","op":"generate","request":{...}}`, `{"id","op":"cancel"}`,
+               `{"op":"ping"}`, `{"op":"shutdown"}`.
+      stdout : `{"event":"ready","loadMs","memoryBytes","model"}` once loaded;
+               per request `{"id","event":"token","text"}` … `{"id","event":"done","metrics","kvMode"}`
+               or `{"id","event":"error","message"}`; `{"event":"pong"}`.
+    Model weights stay resident for the worker's lifetime → true residency. stdin EOF (parent death)
+    ends the loop, so no orphan workers survive esh.
+    """
+    import queue as _queue
+
+    mx, _, stream_generate, KVCache, make_prompt_cache, load = _import_mlx_lm()
+
+    init_line = sys.stdin.readline()
+    if not init_line:
+        return
+    try:
+        init = json.loads(init_line)
+    except Exception as exc:  # noqa: BLE001
+        _emit_json_line({"event": "error", "message": f"bad init line: {exc}"})
+        raise SystemExit(1)
+
+    load_start = time.time()
+    try:
+        model, tokenizer = _load_mlx_model(load, init["modelPath"])
+    except Exception as exc:  # noqa: BLE001
+        _emit_json_line({"event": "error", "message": f"model load failed: {exc}"})
+        raise SystemExit(1)
+    load_ms = (time.time() - load_start) * 1000.0
+    _emit_json_line(
+        {
+            "event": "ready",
+            "loadMs": load_ms,
+            "memoryBytes": int(mx.get_peak_memory()),
+            "model": init.get("modelID"),
+        }
+    )
+
+    request_queue: "_queue.Queue" = _queue.Queue()
+    cancel_lock = _threading.Lock()
+    cancel_ids: set = set()
+    stop = _threading.Event()
+
+    def _reader() -> None:
+        try:
+            for raw in sys.stdin:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                op = msg.get("op")
+                if op == "cancel":
+                    with cancel_lock:
+                        cancel_ids.add(msg.get("id"))
+                elif op == "ping":
+                    _emit_json_line({"event": "pong"})
+                elif op == "shutdown":
+                    break
+                elif op == "generate":
+                    request_queue.put(msg)
+        finally:
+            # stdin closed (parent died) or explicit shutdown → stop the worker.
+            stop.set()
+            request_queue.put(None)
+
+    reader_thread = _threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
+    while True:
+        msg = request_queue.get()
+        if msg is None or stop.is_set():
+            break
+        req_id = msg.get("id")
+        request = msg.get("request", {})
+
+        def _should_cancel(_id=req_id) -> bool:
+            with cancel_lock:
+                return _id in cancel_ids
+
+        try:
+            result = _generate_with_loaded_model(
+                mx,
+                stream_generate,
+                KVCache,
+                make_prompt_cache,
+                model,
+                tokenizer,
+                request,
+                on_token=lambda text, _id=req_id: _emit_json_line(
+                    {"id": _id, "event": "token", "text": text}
+                ),
+                should_cancel=_should_cancel,
+            )
+            _emit_json_line(
+                {
+                    "id": req_id,
+                    "event": "done",
+                    "metrics": result["metrics"],
+                    "kvMode": result["kvMode"],
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            _emit_json_line({"id": req_id, "event": "error", "message": str(exc)})
+        finally:
+            with cancel_lock:
+                cancel_ids.discard(req_id)
 
 
 def mlx_build_cache() -> None:
@@ -1077,6 +1238,7 @@ def main() -> None:
             "turboquant-decompress",
             "mlx-build-cache",
             "mlx-generate",
+            "mlx-serve",
             "mlx-validate-model",
             "mlx-validate-config",
             "mlx-export-cache",
@@ -1096,6 +1258,8 @@ def main() -> None:
         turboquant_decompress(args.bits, args.seed)
     elif args.command == "mlx-generate":
         mlx_generate()
+    elif args.command == "mlx-serve":
+        mlx_serve()
     elif args.command == "mlx-build-cache":
         mlx_build_cache()
     elif args.command == "mlx-validate-model":

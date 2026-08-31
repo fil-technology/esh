@@ -13,4 +13,13 @@ public enum JSONCoding {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
+
+    /// Compact, single-line encoder for newline-delimited protocols (e.g. the persistent MLX worker),
+    /// where the default `.prettyPrinted` output would break line framing.
+    public static let compactEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
 }

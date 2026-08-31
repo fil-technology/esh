@@ -208,6 +208,15 @@ public actor RuntimeLifecycleManager {
         return true
     }
 
+    /// Clean shutdown: unload every resident runtime, terminating any persistent workers so none are
+    /// orphaned. Call this on host teardown (`esh serve`/chat exit). Unloads regardless of active
+    /// requests — this is a shutdown, not an eviction.
+    public func unloadAll() {
+        for resident in Array(residents.values) {
+            unloadResident(resident)
+        }
+    }
+
     /// Mark warm models idle if they've been unused past the idle timeout, and evict them.
     /// Returns the ids evicted.
     @discardableResult
@@ -291,7 +300,9 @@ public actor RuntimeLifecycleManager {
         let infos = residents.values.map { r in
             ResidentModelInfo(
                 modelID: r.install.id, backend: r.install.spec.backend, state: r.state.rawValue,
-                residency: residencyProbe(r.install).rawValue,
+                // Prefer the runtime's own truthful residency (a persistent worker knows if its
+                // weights are still loaded); fall back to the static probe otherwise.
+                residency: residencyFor(r).rawValue,
                 estimatedMemoryGB: r.estimatedGB, measuredMemoryBytes: r.measuredBytes,
                 activeRequests: r.activeRequests, loadCount: r.loadCount,
                 lastUsedISO8601: formatter.string(from: r.lastUsed)
@@ -305,6 +316,15 @@ public actor RuntimeLifecycleManager {
             maxResidentModels: config.maxResidentModels,
             maxConcurrentRequests: config.maxConcurrentRequests
         )
+    }
+
+    /// Truthful residency for a resident: the runtime's own report when it can self-report (a
+    /// persistent worker that knows whether its weights are still loaded), else the static probe.
+    private func residencyFor(_ resident: Resident) -> RuntimeResidency {
+        if let reporter = resident.runtime as? ResidencyReporting {
+            return reporter.isHealthy ? reporter.residency : .handleCached
+        }
+        return residencyProbe(resident.install)
     }
 
     /// Ids of currently resident models (warm/active/idle) — for Scheduler awareness.

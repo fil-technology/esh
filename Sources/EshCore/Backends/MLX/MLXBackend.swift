@@ -5,20 +5,54 @@ public struct MLXBackend: InferenceBackend, RemoteModelConfigValidating, Sendabl
     public let runtimeVersion: String
     private let bridge: MLXBridge
     private let locator: MLXModelLocator
+    /// When true, `loadRuntime` returns a persistent, weights-resident worker runtime
+    /// (`MLXPersistentRuntime`) instead of the per-request subprocess runtime. Enabled for long-lived
+    /// hosts (warm pool / serve / chat); one-shot CLI leaves it off.
+    private let persistent: Bool
 
     public init(
         runtimeVersion: String = "mlx-vlm-0.5.0+mlx-lm-bridge-v3",
         bridge: MLXBridge = .init(),
-        locator: MLXModelLocator = .init()
+        locator: MLXModelLocator = .init(),
+        persistent: Bool = false
     ) {
         self.runtimeVersion = runtimeVersion
         self.bridge = bridge
         self.locator = locator
+        self.persistent = persistent
     }
 
     public func loadRuntime(for install: ModelInstall) async throws -> BackendRuntime {
         _ = try locator.resolveModelPath(for: install)
+        if persistent {
+            return try await loadPersistentRuntime(for: install)
+        }
         return MLXRuntime(bridge: bridge, install: install)
+    }
+
+    private func loadPersistentRuntime(for install: ModelInstall) async throws -> BackendRuntime {
+        let environment = ProcessInfo.processInfo.environment
+        let pythonURL = RuntimePathResolver.pythonExecutableURL(
+            configuredPath: bridge.configuration.pythonExecutablePath,
+            environment: environment,
+            executablePath: ExecutablePath.resolvedPath,
+            sourceFilePath: #filePath
+        )
+        let bridgeURL = try RuntimePathResolver.helperScriptURL(
+            configuredPath: bridge.configuration.helperScriptPath,
+            environment: environment,
+            executablePath: ExecutablePath.resolvedPath,
+            sourceFilePath: #filePath
+        )
+        let worker = MLXWorkerProcess()
+        try await worker.start(
+            pythonURL: pythonURL,
+            bridgeScriptURL: bridgeURL,
+            modelPath: install.installPath,
+            modelID: install.id
+        )
+        let ready = worker.readyInfo ?? .init(loadMilliseconds: 0, memoryBytes: nil)
+        return MLXPersistentRuntime(worker: worker, bridge: bridge, install: install, readyInfo: ready)
     }
 
     public func capabilityReport(for install: ModelInstall) -> BackendCapabilityReport {

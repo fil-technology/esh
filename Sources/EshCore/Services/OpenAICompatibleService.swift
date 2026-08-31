@@ -765,10 +765,22 @@ public struct OpenAICompatibleService: Sendable {
         // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
         // request stay warm and are reused by the next, evicted on idle/memory pressure.
         let host = HostMachineProfileService().currentProfile()
+        // Persistent MLX residency (opt-in until benchmarks justify making it the default). When on,
+        // MLX installs load through a persistent, weights-resident worker owned by this same
+        // lifecycle manager; everything else keeps the per-request runtime.
+        let persistentMLX = ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1"
         let lifecycleManager = RuntimeLifecycleManager(
             usableBudgetGB: host.totalMemoryGB.map { max(1, $0 - 3) },
             estimator: { install in max(0.2, Double(install.sizeBytes) / 1_073_741_824 * 1.3) },
-            loader: { install in try await registry.backend(for: install).loadRuntime(for: install) }
+            loader: { install in
+                if persistentMLX, install.spec.backend == .mlx {
+                    return try await MLXBackend(persistent: true).loadRuntime(for: install)
+                }
+                return try await registry.backend(for: install).loadRuntime(for: install)
+            },
+            residencyProbe: { install in
+                (persistentMLX && install.spec.backend == .mlx) ? .weightsResident : .handleCached
+            }
         )
         let inference = ExternalInferenceService(
             modelStore: modelStore,
