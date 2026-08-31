@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-08-31
+
+### Fixed
+- **Text-to-speech works out of the box.** The historical default TTS model (Marvis) fails to load on
+  the current TTSMLX version (RoPE-key mismatch), so `esh audio speak` with no `--model` now prefers a
+  known-working default (`Soprano-80M`, verified). This closes the full **audio → STT → LLM → TTS**
+  loop end-to-end. Marvis stays selectable as a model-specific known issue (SPEECH_REPORT.md).
+
 ## [0.9.4] - 2026-08-31
 
 ### Added
