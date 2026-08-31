@@ -1,0 +1,67 @@
+# M8 — Inference Contract v2 Report
+
+Status of the esh-native inference contract on branch `codex/m8-contract` (targets 0.9.0). This
+report separates **implemented + verified**, **backend-specific limitations**, **approximated**, and
+**remaining** — so nothing is called complete merely because the Swift types exist.
+
+The contract is the single canonical representation; the OpenAI/Anthropic/Ollama compatibility layers
+adapt onto it, never the reverse.
+
+## Implemented + verified (unit-tested, build green, 240 tests)
+
+| Area | What | Verification |
+|---|---|---|
+| **Structured output — native** | On GGUF (llama.cpp), `json` / `json_schema` / `grammar` resolve to `.applied` and are enforced by native constrained decoding (`--json-schema` / `--grammar`). Strict callers are **satisfied natively, not rejected**. | `CapabilityResolverTests`: `ggufJSONSchemaIsAppliedNativelyCarryingTheSchema`, `ggufStrictJSONSchemaIsAppliedNotRejected`, `ggufGrammarIsAppliedNativelyWhenProvided` |
+| **Structured output — honest fallback** | On MLX/ONNX (no native constrained decoding), non-strict json/json_schema is `.approximated` via a labeled prompt instruction; **strict is `.rejected`**, never silently approximated. | `strictJSONIsRejectedNotApproximated`, `onnxHasNoNativeConstrainedDecoding` |
+| **Capability resolution** | Every classified option carries native/transformed/approximated/ignored/rejected + a human detail. Strict + any rejection → the request fails (`ExternalInferenceService`), not a silent unconstrained fallback. | resolver suite + `strictJSONSchemaIsRejected` |
+| **Tools** | Canonical `EshToolDefinition` / `EshToolChoice` / `EshToolCall` on request+response. Requested tools are **honestly reported `.rejected`** (no native function-calling on the local runtime yet; `esh agent` orchestrates tools separately) — not silently dropped. | contract round-trip tests |
+| **Reasoning** | Explicit thinking toggle resolves per backend: MLX `.applied` (passed into the model chat template as `enable_thinking`); llama.cpp/ONNX `.ignored` (no toggle; model/template decides, thinking inline). Only reported when the caller sets it. | `reasoningIsAppliedOnMLX`, `reasoningIsIgnoredOnGGUFNotFakedAsApplied`, `reasoningNotReportedWhenCallerDidNotAskToToggle` |
+| **Usage accounting** | `EshUsage` on the response: only counters the runtime actually reports are populated (`contextUsed` from runtime metrics); `available` lists measured counters. Local monetary cost = 0 with explicit `costProvenance`, kept distinct from resource usage. No fabricated token counts. | contract round-trip; `EshUsage.available` |
+| **Execution metadata** | `ExecutionProfile` reflecting the KV/prompt-cache strategy that actually ran is attached to every response (from 0.7.0). | `OptimizationTests`, response round-trip |
+| **Backward compatibility** | Additive optional fields; pre-M8 infer request JSON still decodes (`decodeIfPresent` throughout). | `legacyRequestWithoutResponseFormatStillDecodes` |
+
+## Backend-specific limitations (documented, not hidden)
+
+- **Native constrained decoding is GGUF-only.** MLX and ONNX honestly approximate/reject. MLX
+  logit-processor constrained decoding is a future upgrade; until then MLX strict structured output
+  is rejected, by design.
+- **Reasoning-token usage is not separately observable** on llama.cpp or the MLX bridge, so
+  `EshUsage.reasoningTokens` stays `nil` rather than being invented.
+- **Tool calls are not produced by the runtime** (`toolCalls` is nil); tool orchestration lives in
+  `esh agent`. The contract models tools so adapters and future native tool-calling map cleanly.
+
+## Not yet verified end-to-end (honest gap)
+
+- **GGUF native constrained-decoding e2e smoke test is NOT run on this machine.** The wiring
+  (`CapabilityResolver` → `GenerationConfig.jsonSchema/grammar` → `llama-cli --json-schema/--grammar`)
+  is implemented and unit-verified, and `llama-cli` is present with the flags, but **no GGUF model is
+  installed locally** (only MLX/safetensors), so a live constrained generation has not been executed.
+  Tracked follow-up: install a small GGUF (e.g. qwen2.5-0.5b Q4, ~350 MB) and assert schema-conformant
+  output. Not auto-downloaded here due to download-permission policy and disk pressure (~13 GB free).
+
+## Remaining for full M8
+
+- **Streaming event model** — one canonical incremental event stream (`textDelta` / `reasoningDelta`
+  / `toolCall` / `usage` / `done` / `error`) consumed by serve/Web Chat/Terminal UX. Today the native
+  path streams text chunks; the normalized event envelope is not yet defined.
+- **Attachments / multimodal** typed inputs (images/documents/audio) with honest unsupported
+  reporting. Deliberately deferred rather than blanket-rejected, because the MLX-VLM bridge *can* do
+  vision for VLM models — needs per-model capability resolution to avoid mis-reporting.
+- **Cache state as a first-class runtime signal** — runtime reporting KV/prompt-cache hit/miss + cache
+  memory back into `ExecutionProfile`/`EshUsage.cachedInputTokens` (currently the profile records the
+  chosen strategy, not the realized hit/miss).
+- **Apple Foundation Models as a first-class contract provider** — participate through the same
+  contract with visible availability/reason, explicit on-device vs PCC/cloud distinction, and honest
+  unsupported-capability reporting. (An explicit downloaded-model request must never silently become
+  Apple.)
+- **Conformance harness across backends** — the resolver layer is unit-tested; a cross-backend
+  conformance suite driving real inference (text, streaming, strict json_schema on GGUF, unsupported
+  structured behavior on MLX, generation params, cancellation, usage accounting) is the next step.
+
+## Verdict
+
+M8 is **advanced but not complete**. The headline honesty guarantee is met: **native constrained
+decoding is real on GGUF and strict callers are satisfied natively, while backends without it reject
+rather than pretend.** Tools, usage, and reasoning are modeled with truthful capability resolution.
+Streaming events, attachments, realized cache state, Apple-as-provider, and the cross-backend
+conformance harness remain — and a live GGUF constrained-decoding smoke test is still pending.

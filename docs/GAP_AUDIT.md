@@ -14,7 +14,7 @@ not started, so nothing downstream is falsely treated as finished. Verified agai
 | M5 Onboarding + Doctor | **complete (v0.2/0.3)** | `esh onboard`, `doctor --json` |
 | M6 Update system | **SLICE** | only `esh update check` (notify-only). Living catalog / versioning / rollback / channels **not done** |
 | **M7 Runtime Lifecycle / Warm Pool** | **done (0.8.0)** | `RuntimeLifecycleManager`: registry, states, load dedup, budget + idle/pressure eviction, bounded concurrency + priority, cancellation; wired into `esh serve`; scheduler is warm-aware. Follow-up: persistent MLX bridge for weight-residency (RUNTIME_LIFECYCLE_REPORT.md) |
-| **M8 Inference Contract v2** | **SLICE (v0.5.0)** | only `response_format` + capability resolution (applied/transformed/ignored/rejected). See gaps below |
+| **M8 Inference Contract v2** | **ADVANCED (0.9.0 branch)** | native constrained decoding on GGUF (strict json_schema/grammar `.applied`), honest approximate/reject on MLX/ONNX, canonical tools + normalized usage + reasoning resolution. Remaining: streaming events, attachments, realized cache state, Apple-as-provider, cross-backend conformance harness, live GGUF e2e smoke. See `M8_CONTRACT_REPORT.md` |
 | M8.5 Web Chat | **NOT STARTED** | |
 | **M9 Adaptive Scheduler** | **v1 slice (v0.6.0)** | selection + rationale works, but consumes only heuristic capability metadata + fit + M1 evidence; no warm-pool awareness, no benchmark-lab dataset yet |
 | Model Benchmark Lab | **NOT STARTED** (this milestone) | candidate discovery done (research); harness reuse + curated dataset pending |
