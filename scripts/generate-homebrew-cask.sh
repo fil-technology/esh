@@ -19,7 +19,7 @@ cask "esh" do
   desc "Local-first LLM tool for Apple Silicon"
   homepage "https://github.com/fil-technology/esh"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
   depends_on formula: "python"
 
   binary "esh-macos-#{version}/bin/esh", target: "esh"

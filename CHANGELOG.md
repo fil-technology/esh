@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-31
+
+### Fixed
+- **Critical: packaged-binary runtime discovery when invoked as a bare command.** Bundled-runtime
+  resolution (MLX `mlx_vlm_bridge.py`, `llama-cli`, TurboQuant helper, TTS metallib) and `VERSION`
+  lookup were keyed off `CommandLine.arguments[0]`. Under a PATH/shim invocation — the normal
+  `esh …` Homebrew case — `argv[0]` is often the bare command name and resolves against the current
+  working directory, so the packaged root came back `nil`: `ESH_MLX_VLM_BRIDGE` was never set and
+  MLX inference failed pointing at a build-machine path (`/Users/runner/work/esh/…`), while
+  `esh version` reported `unknown`. All executable-relative lookups now resolve the true image path
+  via `_NSGetExecutablePath`. Verified end-to-end: bare `esh` from an unrelated directory now
+  resolves the version and runs MLX inference (0.8.0 fails the same invocation).
+- Homebrew cask: use the non-deprecated `depends_on macos: :ventura` symbol form.
+
 ## [0.8.0] - 2026-08-31
 
 ### Added
