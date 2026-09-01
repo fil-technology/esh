@@ -209,7 +209,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -265,6 +265,15 @@ function renderView(){ const app=$('#app'); app.innerHTML='';
   if(S.view==='settings'){ app.appendChild(renderSettings()); return; }
   app.appendChild(renderChat());
   if(S.voice) app.appendChild(renderVoice());
+  if(S.chatMenu) app.appendChild(renderChatMenu());
+}
+function renderChatMenu(){
+  const m=S.chatMenu; const w=170, h=84;
+  const x=Math.min(m.x, window.innerWidth-w-8), y=Math.min(m.y, window.innerHeight-h-8);
+  const p=el('div',{cls:'pop'}); p.style.cssText+='position:fixed;left:'+x+'px;top:'+y+'px;width:'+w+'px;padding:6px 0;z-index:60';
+  p.innerHTML=`<div class="menurow" data-act="renameChat" data-arg="${esch(m.id)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Rename</div>
+    <div class="menurow" data-act="deleteChat" data-arg="${esch(m.id)}" style="color:var(--amber)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/></svg>Delete</div>`;
+  return p;
 }
 // Make non-native interactive controls reachable + labeled for keyboard and screen-reader users.
 function a11yPass(){ document.querySelectorAll('[data-act]').forEach(e=>{ if(e.tagName!=='BUTTON'&&e.tagName!=='A'){
@@ -292,6 +301,12 @@ const ACT={
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ S.current=id; render(); },
+  renameChat:(id)=>{ S.chatMenu=null; const ch=S.chats[id]; if(!ch)return; const nt=prompt('Rename chat', ch.title||'New chat'); if(nt!=null){ const v=nt.trim(); if(v){ ch.title=v.slice(0,80); saveChats(); } } render(); },
+  deleteChat:(id)=>{ S.chatMenu=null; const ch=S.chats[id]; if(!ch)return; if(!confirm('Delete “'+((ch.title||'New chat').slice(0,40))+'”? This can’t be undone.'))return;
+    delete S.chats[id]; saveChats();
+    if(S.current===id){ const rest=Object.values(S.chats).sort((a,b)=>b.created-a.created); if(rest.length){ S.current=rest[0].id; } else { newChat(); return; } }
+    render(); },
+  closeChatMenu:()=>{ S.chatMenu=null; render(); },
   startVoice:()=>startVoice(),
   endVoice:()=>{ endVoiceLoop(); render(); },
   voiceText:()=>{ endVoiceLoop(); S.focusInput=true; render(); },
@@ -330,11 +345,13 @@ document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); c
   const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
   if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
+  if(S.chatMenu && !e.target.closest('.pop')){ S.chatMenu=null; render(); if(!t)return; }
   if(!t)return; const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
-    if(S.detail){ S.detail=null; render(); }
+    if(S.chatMenu){ S.chatMenu=null; render(); }
+    else if(S.detail){ S.detail=null; render(); }
     else if(S.execOpen){ S.execOpen=false; render(); }
     else if(S.pickerOpen||S.engineOpen||S.attachOpen||S.effortOpen){ closeAll(); render(); }
     else if(S.voice){ ACT.endVoice(); }
@@ -343,6 +360,9 @@ document.addEventListener('keydown',e=>{
   }
   if((e.key==='Enter'||e.key===' ')){ const t=document.activeElement; if(t&&t.getAttribute&&t.getAttribute('data-act')&&t.tagName!=='TEXTAREA'&&t.tagName!=='INPUT'){ e.preventDefault(); const a=t.getAttribute('data-act'); if(ACT[a])ACT[a](t.getAttribute('data-arg')); } }
 });
+// Right-click a chat in the sidebar → a small Rename / Delete menu at the cursor.
+document.addEventListener('contextmenu',e=>{ const item=e.target.closest('.chatitem'); if(!item)return; e.preventDefault();
+  const id=item.getAttribute('data-arg'); S.chatMenu={id, x:e.clientX, y:e.clientY}; render(); });
 
 /* ---------- chat view ---------- */
 function renderChat(){
@@ -934,13 +954,16 @@ let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null
 },40); }
 
 /* ---------- speech: real mic -> STT -> LLM -> TTS voice loop ---------- */
-async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return null;
+// Synthesize speech for `text` and return the audio Blob (or null). Sends the chosen TTS model/voice/
+// language. Used both by the one-shot speak() and the voice loop's sentence pipeline.
+async function speakBlob(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return null;
   const body={input:clean.slice(0,2000)};
   const tts=S.config&&S.config.defaults&&S.config.defaults.ttsModel; if(tts)body.model=tts;
   if(S.prefs.ttsVoice)body.voice=S.prefs.ttsVoice;
   if(S.prefs.ttsLanguage)body.language=S.prefs.ttsLanguage;
   try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(!r.ok)return null; const b=await r.blob(); const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }catch(e){ return null; } }
+    if(!r.ok)return null; return await r.blob(); }catch(e){ return null; } }
+async function speak(text){ const b=await speakBlob(text); if(!b)return null; const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
 function clearVoiceReveal(){ if(S._vsi){ clearInterval(S._vsi); S._vsi=null; } }
 function stopVAD(){ if(S._vad){ cancelAnimationFrame(S._vad); S._vad=null; } if(S.voiceAC){ try{S.voiceAC.close()}catch(e){} S.voiceAC=null; } }
@@ -1004,31 +1027,50 @@ async function finishVoiceTurn(){
   S.voiceHeard=text; render();  // utterance settles into the muted quote
   const c=cur()||(newChat(),cur());
   c.messages.push({id:uid(),role:'user',content:text}); saveChats();
-  // Resolve Auto through the Scheduler, then run inference (non-streaming for the voice turn).
+  // Resolve Auto through the Scheduler.
   let model=S.modelSel;
   if(model==='Auto'){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced'; const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc&&sc.selectedModelID){ S.schedule=sc; model=sc.selectedModelID; } }
-  const t0=performance.now(); let reply='';
+  const t0=performance.now();
   const vsys=(S.prefs.systemInstr||'').trim();
   const vmsgs=(vsys?[{role:'system',content:vsys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})));
-  try{ const rr=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model==='Auto'?undefined:model,messages:vmsgs,max_tokens:512})});
-    const j=await rr.json(); reply=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''; }catch(e){ reply='[error] '+e.message; }
-  const answer=splitThink(reply).answer||reply;
-  const secs=Math.max(0.1,(performance.now()-t0)/1000);
-  const tps=Math.max(1,Math.round((answer.length/4)/secs));
-  // Every finished exchange is committed to the transcript with a voice footer.
-  const meta='voice · '+secs.toFixed(1)+'s · '+tps+' tok/s';
-  // Speak, reveal the answer in sync, then commit the turn (once) and listen again.
-  S.voice='speaking'; S.voiceAnswer=''; render();
-  const audio=await speak(reply); S.voiceAudio=audio;
-  let committed=false;
-  const commitOnce=()=>{ if(committed)return; committed=true; clearVoiceReveal(); S.voiceAnswer=answer;
-    c.messages.push({id:uid(),role:'assistant',content:reply,reasoning:looksReasoning(model),meta:meta}); saveChats();
+  // Pipeline for fast time-to-first-audio: stream the reply and synthesize + play it sentence-by-
+  // sentence, so speaking begins after the FIRST sentence instead of the whole answer (and each
+  // sentence's TTS overlaps the previous one's playback). A turn id lets an interrupt abort cleanly.
+  const turn=(S._vturnId=(S._vturnId||0)+1);
+  const alive=()=>S._vturnId===turn;
+  let full='', enqLen=0, shown='', genDone=false, committed=false, playing=false; const queue=[];
+  const paintV=()=>{ const n=document.getElementById('vanswer'); if(n)n.textContent=S.voiceAnswer; else if(S.voice==='speaking')render(); };
+  const commitOnce=()=>{ if(committed||!alive())return; committed=true;
+    const answer=splitThink(full).answer||full; const secs=Math.max(0.1,(performance.now()-t0)/1000);
+    const tps=Math.max(1,Math.round((answer.length/4)/secs));
+    c.messages.push({id:uid(),role:'assistant',content:full,reasoning:looksReasoning(model),meta:'voice · '+secs.toFixed(1)+'s · '+tps+' tok/s'}); saveChats();
     if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voiceAudio=null;
     if(S.voice==='speaking') startVoice(); };
-  const dur=Math.max(1.5,answer.split(/\s+/).length*0.34);  // reading-estimate fallback
-  if(audio){ audio.onloadedmetadata=()=>{ if(!committed&&isFinite(audio.duration)&&audio.duration>0) revealAnswer(answer,audio.duration,commitOnce); };
-    audio.onended=commitOnce; }
-  revealAnswer(answer,dur,commitOnce);
+  const playNext=()=>{ if(playing||!alive())return; const item=queue.shift();
+    if(!item){ if(genDone)commitOnce(); return; }
+    playing=true;
+    item.blobP.then(blob=>{ if(!alive()){ playing=false; return; }
+      if(S.voice!=='speaking'){ S.voice='speaking'; render(); }
+      shown=(shown?shown+' ':'')+item.text; S.voiceAnswer=shown; paintV();
+      if(blob){ const a=new Audio(URL.createObjectURL(blob)); S.voiceAudio=a;
+        a.onended=()=>{ playing=false; playNext(); }; a.onerror=()=>{ playing=false; playNext(); };
+        a.play().catch(()=>{ playing=false; playNext(); }); }
+      else { playing=false; setTimeout(()=>{ if(alive())playNext(); }, 220); } }); };
+  const enqueue=(chunk)=>{ chunk=(chunk||'').trim(); if(!chunk)return; queue.push({text:chunk, blobP:speakBlob(chunk)}); playNext(); };
+  // Emit complete sentences from the answer portion (never the <think> reasoning) as they stream in.
+  const pump=(force)=>{ const ans=splitThink(full).answer||''; let rest=ans.slice(enqLen), mt;
+    while((mt=rest.match(/^([\s\S]*?[.!?\n]+)(\s|$)/))){ enqueue(mt[1]); enqLen+=mt[0].length; rest=ans.slice(enqLen); }
+    if(force){ const tail=ans.slice(enqLen).trim(); if(tail){ enqueue(tail); enqLen=ans.length; } } };
+  try{
+    const resp=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model==='Auto'?undefined:model,messages:vmsgs,stream:true,max_tokens:512})});
+    if(!resp.ok||!resp.body) throw new Error('HTTP '+resp.status);
+    const rd=resp.body.getReader(), dec=new TextDecoder(); let buf='';
+    while(true){ const {value,done}=await rd.read(); if(done||!alive())break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
+      for(const line of lines){ const s=line.trim(); if(!s.startsWith('data:'))continue; const d=s.slice(5).trim(); if(d==='[DONE]')continue;
+        try{ const j=JSON.parse(d); if(j.esh_execution)continue; const del=j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content||''; if(del){ full+=del; pump(false); } }catch(e){} } }
+  }catch(e){ if(!full)full='[error] '+e.message; }
+  genDone=true; pump(true);
+  if(!queue.length && !playing) commitOnce();
 }
 function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 function onFiles(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;

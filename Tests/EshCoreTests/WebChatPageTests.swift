@@ -169,6 +169,25 @@ struct WebChatPageTests {
     }
 
     @Test
+    func voiceLoopStreamsAndSpeaksPerSentenceForFastFirstAudio() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // The voice turn streams the reply and synthesizes/plays it sentence-by-sentence.
+        #expect(html.contains("function speakBlob("))
+        #expect(html.contains("blobP:speakBlob(chunk)"))
+        // The voice inference is streamed (not a single blocking completion).
+        #expect(html.contains("stream:true,max_tokens:512"))
+    }
+
+    @Test
+    func chatsHaveRightClickRenameAndDelete() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("addEventListener('contextmenu'"))
+        #expect(html.contains("function renderChatMenu("))
+        #expect(html.contains("renameChat"))
+        #expect(html.contains("deleteChat"))
+    }
+
+    @Test
     func composerKeepsFocusAfterSending() {
         let html = WebChatPage.html(toolVersion: nil)
         // After a send completes, focus returns to the input (focusInput re-armed), and the trailing

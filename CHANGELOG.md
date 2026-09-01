@@ -20,6 +20,12 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   the composer.
 
 ### Added
+- **Faster voice replies.** The voice loop now streams the answer and synthesizes/plays it
+  sentence-by-sentence, so speaking begins after the first sentence instead of after the whole reply
+  (each sentence's TTS overlaps the previous one's playback). Time-to-first-audio drops from
+  full-generation + full-synthesis to roughly one sentence. (esh already uses TTSMLX for synthesis; a
+  persistent/warm TTS synthesizer to cut the per-call model-load floor is a possible follow-up.)
+- **Rename/delete chats.** Right-click a conversation in the sidebar for a Rename / Delete menu.
 - **Voice model selection.** Settings → Voice now has functional dropdowns fed by the real audio
   catalog (`GET /v1/audio/models`): **Voice model** (Soprano, Pocket TTS, Orpheus, VyvoTTS, Qwen3 TTS —
   known-broken models like Marvis are excluded), **Voice** (the selected model's real speaker voices),
