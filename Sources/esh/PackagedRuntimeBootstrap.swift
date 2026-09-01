@@ -137,10 +137,18 @@ enum PackagedRuntimeBootstrap {
     }
 
     private static func setLlamaEnvironmentIfAvailable(rootURL: URL) {
-        let bundledLlamaURL = rootURL.appendingPathComponent("share/esh/bin/llama-cli")
-        guard FileManager.default.isExecutableFile(atPath: bundledLlamaURL.path) else {
-            return
+        // The package bundles a self-contained `llama-completion` (static ggml +
+        // Metal, no dlopen, no Homebrew) built by scripts/build-llama.sh. It is the
+        // non-interactive completion binary the GGUF backend drives; point the
+        // runtime at it explicitly. (`llama-cli` kept as a fallback for older
+        // installs that still ship it.)
+        let binDir = rootURL.appendingPathComponent("share/esh/bin")
+        for name in ["llama-completion", "llama-cli"] {
+            let candidate = binDir.appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                setenv("ESH_LLAMA_CPP_CLI", candidate.path, 0)
+                return
+            }
         }
-        setenv("ESH_LLAMA_CPP_CLI", bundledLlamaURL.path, 0)
     }
 }

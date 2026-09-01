@@ -31,9 +31,23 @@ cp "$(esh::repo_root)/Tools/mlx_vlm_bridge.py" "$PAYLOAD_DIR/Tools/mlx_vlm_bridg
 cp "$(esh::repo_root)/Tools/triattention_runtime.py" "$PAYLOAD_DIR/Tools/triattention_runtime.py"
 cp "$(esh::repo_root)/Tools/python-requirements.txt" "$PAYLOAD_DIR/Tools/python-requirements.txt"
 
-LLAMA_CLI_PATH="$(esh::resolve_llama_cli)" || esh::die "llama-cli is required to package GGUF support. Install llama.cpp or set ESH_LLAMA_CPP_CLI."
+# Bundle a self-contained llama.cpp completion binary (static ggml + embedded
+# Metal, no dlopen, no Homebrew/openssl deps) so GGUF works on a clean machine.
+# CI builds it once and passes ESH_LLAMA_BIN_DIR; a local packaging run builds it
+# on demand. Never fall back to the Homebrew binary — it dlopens compute backends
+# from /opt/homebrew and is not relocatable into a notarized package.
 mkdir -p "$PAYLOAD_DIR/bin"
-cp "$LLAMA_CLI_PATH" "$PAYLOAD_DIR/bin/llama-cli"
+LLAMA_BIN_DIR="${ESH_LLAMA_BIN_DIR:-}"
+if [[ -z "$LLAMA_BIN_DIR" || ! -x "$LLAMA_BIN_DIR/llama-completion" ]]; then
+  LLAMA_BIN_DIR="$DIST_DIR/llama-build/bin"
+  "$(esh::repo_root)/scripts/build-llama.sh" "$LLAMA_BIN_DIR"
+fi
+[[ -x "$LLAMA_BIN_DIR/llama-completion" ]] || esh::die "build-llama.sh did not produce a self-contained llama-completion."
+# Guard: refuse to package a non-relocatable binary (Homebrew/ggml/@rpath deps).
+if otool -L "$LLAMA_BIN_DIR/llama-completion" | tail -n +2 | grep -Eiq '@rpath|/opt/homebrew|libggml|libllama|libmtmd'; then
+  esh::die "llama-completion has non-relocatable dependencies; refusing to package. Run scripts/build-llama.sh."
+fi
+cp "$LLAMA_BIN_DIR/llama-completion" "$PAYLOAD_DIR/bin/llama-completion"
 
 "$(esh::bootstrap_python)" -m venv --copies "$ROOT_DIR/python"
 ESH_LAYOUT_MODE="package" \
@@ -41,7 +55,7 @@ ESH_APP_ROOT="$ROOT_DIR" \
 ESH_PAYLOAD_ROOT="$PAYLOAD_DIR" \
   esh::install_python_deps
 
-chmod +x "$ROOT_DIR/esh" "$ROOT_DIR/bin/esh" "$PAYLOAD_DIR/scripts/run.sh" "$PAYLOAD_DIR/scripts/smoke-test-package.sh" "$PAYLOAD_DIR/scripts/verify-env.sh" "$PAYLOAD_DIR/bin/llama-cli"
+chmod +x "$ROOT_DIR/esh" "$ROOT_DIR/bin/esh" "$PAYLOAD_DIR/scripts/run.sh" "$PAYLOAD_DIR/scripts/smoke-test-package.sh" "$PAYLOAD_DIR/scripts/verify-env.sh" "$PAYLOAD_DIR/bin/llama-completion"
 
 (
   cd "$DIST_DIR"

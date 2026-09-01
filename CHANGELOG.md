@@ -6,6 +6,36 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.4] - 2026-09-01
+
+**Release candidate — GGUF packaging fix.** Packaged validation of rc.3 found GGUF inference broken
+on the notarized artifact: the bundled `llama-cli` crashed at dyld (its dylibs were not bundled) and,
+deeper, modern Homebrew llama.cpp/ggml dlopens its compute backends (Metal/CPU/BLAS) from
+`/opt/homebrew` at runtime — so GGUF could never work on a clean machine. A behavioral change after
+rc.3, so a new RC (rc.3 stays immutable). MLX, Apple Foundation Models, speech, and the web client are
+unchanged from rc.3.
+
+### Fixed
+- **GGUF works from the packaged, notarized build.** The release now bundles a **self-contained
+  `llama-completion`** built from a pinned llama.cpp revision (`b8660`) with static ggml, embedded
+  Metal shaders, and dynamic backend loading **disabled** (`GGML_BACKEND_DL=OFF`) — no dlopen, no
+  Homebrew, no OpenSSL. It links only system frameworks (Metal/MetalKit/Accelerate/Foundation), so
+  GGUF generation runs with Metal acceleration on any Apple Silicon Mac with zero external
+  dependencies. Verified in a clean environment: correct output, Metal active, ~46 tok/s on an M1 Pro,
+  no per-call latency regression (the first GGUF call on a machine pays a one-time Metal shader
+  compile; steady-state Metal load is ~0.01 s).
+- The packaged runtime now points at the bundled `llama-completion` (the non-interactive completion
+  binary the GGUF backend drives) instead of the interactive `llama-cli`, which recent llama.cpp
+  builds reject for one-shot completion.
+
+### Changed — build & CI
+- New `scripts/build-llama.sh` builds the self-contained binary; `scripts/package-release.sh` bundles
+  it (and refuses to package a binary with any non-relocatable dependency). CI and the release
+  workflow build it (cached on the pinned revision) instead of `brew install llama.cpp`.
+- The packaged smoke test now guards the GGUF runtime directly — the bundled binary must exist, be
+  relocatable (no `@rpath`/Homebrew/ggml/llama deps), and launch without a dyld crash. This is the
+  check that would have caught the rc.3 regression.
+
 ## [2.0.0-rc.3] - 2026-09-01
 
 **Release candidate — composer redesign.** A behavioral/visual change after rc.2, so a new RC

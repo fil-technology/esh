@@ -57,7 +57,13 @@ esh::bridge_script() {
 }
 
 esh::bundled_llama_cli() {
-  echo "$(esh::app_root)/share/esh/bin/llama-cli"
+  # The package bundles a self-contained `llama-completion` (see scripts/build-llama.sh).
+  local bin_dir; bin_dir="$(esh::app_root)/share/esh/bin"
+  if [[ -x "$bin_dir/llama-completion" ]]; then
+    echo "$bin_dir/llama-completion"
+  else
+    echo "$bin_dir/llama-cli"
+  fi
 }
 
 esh::resolve_llama_cli() {

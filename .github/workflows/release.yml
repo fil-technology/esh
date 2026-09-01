@@ -43,8 +43,26 @@ jobs:
         with:
           xcode-version: "latest-stable"
 
-      - name: Install llama.cpp
-        run: brew install llama.cpp
+      # Build a self-contained llama.cpp (static ggml + embedded Metal, no dlopen,
+      # no Homebrew/openssl) instead of `brew install llama.cpp`. The Homebrew
+      # binary dlopens its compute backends from /opt/homebrew and is not
+      # relocatable into a notarized package (see scripts/build-llama.sh). Cached
+      # on the build script's contents (which pins the llama.cpp revision).
+      - name: Cache self-contained llama.cpp
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: dist/llama-build/bin
+          key: llama-static-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh') }}
+
+      - name: Build self-contained llama.cpp (static, Metal, no dlopen)
+        if: steps.cache-llama.outputs.cache-hit != 'true'
+        run: |
+          chmod +x ./scripts/build-llama.sh
+          ./scripts/build-llama.sh "$PWD/dist/llama-build/bin"
+
+      - name: Point packaging at the bundled llama.cpp
+        run: echo "ESH_LLAMA_BIN_DIR=$PWD/dist/llama-build/bin" >> "$GITHUB_ENV"
 
       - name: Resolve release version
         id: version
