@@ -318,6 +318,58 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
+    func audioTranscriptionRoutesToTranscribeClosure() async throws {
+        let service = OpenAICompatibleService(
+            infer: { _ in throw OpenAICompatibleError.invalidRequest("Unexpected text inference.") },
+            installedModels: { [] },
+            transcribe: { request in
+                #expect(request.audio == "QUJD")
+                return OpenAIAudioTranscriptionResponse(
+                    text: "hello world",
+                    model: request.model ?? "parakeet",
+                    language: request.language
+                )
+            }
+        )
+        let response = try await service.audioTranscription(
+            .init(audio: "QUJD", model: "custom-stt", language: "en", filename: "clip.wav")
+        )
+        #expect(response.text == "hello world")
+        #expect(response.model == "custom-stt")
+        #expect(response.language == "en")
+    }
+
+    @Test
+    func audioTranscriptionWithoutModelReportsInstallGuidance() async throws {
+        // No `transcribe` closure wired → honest "install a speech model" error, never a fake result.
+        let service = OpenAICompatibleService(
+            infer: { _ in throw OpenAICompatibleError.invalidRequest("Unexpected text inference.") },
+            installedModels: { [] }
+        )
+        await #expect(throws: OpenAICompatibleError.self) {
+            _ = try await service.audioTranscription(.init(audio: "QUJD", model: nil, language: nil, filename: nil))
+        }
+    }
+
+    @Test
+    func handlerRoutesAudioTranscription() async throws {
+        let handler = OpenAICompatibleHTTPHandler(
+            service: OpenAICompatibleService(
+                infer: { _ in throw OpenAICompatibleError.invalidRequest("Unexpected text inference.") },
+                installedModels: { [] },
+                transcribe: { _ in OpenAIAudioTranscriptionResponse(text: "transcribed", model: "parakeet") }
+            )
+        )
+        let body = Data(#"{"audio":"QUJD","filename":"c.wav"}"#.utf8)
+        let response = try await handler.handle(
+            .init(method: "POST", path: "/v1/audio/transcriptions", headers: [:], body: body)
+        )
+        #expect(response.statusCode == 200)
+        let decoded = try JSONCoding.decoder.decode(OpenAIAudioTranscriptionResponse.self, from: response.body)
+        #expect(decoded.text == "transcribed")
+    }
+
+    @Test
     func chatCompletionsIgnoresUnsupportedContentPartsWhenTextIsPresent() async throws {
         let requestData = Data(
             """

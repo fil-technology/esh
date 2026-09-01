@@ -35,10 +35,11 @@ enum WebCommand {
             audioModels: OpenAICompatibleAudioCatalog.ttsModels,
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
-            }
+            },
+            transcribe: SpeechEndpointSupport.transcribeClosure()
         )
         // No bearer token: the browser page needs unauthenticated same-origin access to the API.
-        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil)
+        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
         server.start()
 
