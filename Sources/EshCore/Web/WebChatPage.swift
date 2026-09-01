@@ -107,7 +107,8 @@ public enum WebChatPage {
   .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(32,30,27,.7); margin-top:5px; }
   /* Composer */
   .composer{ padding:0 24px 10px; flex-shrink:0; }
-  .cbox{ max-width:640px; margin:0 auto; background:#fff; border:1px solid var(--line2); border-radius:15px; box-shadow:0 1px 2px rgba(32,30,27,.04); padding:11px 14px; display:flex; align-items:center; gap:10px; position:relative; }
+  .cbox{ max-width:640px; margin:0 auto; background:#fff; border:1px solid var(--line2); border-radius:15px; box-shadow:0 1px 2px rgba(32,30,27,.04); padding:11px 14px; display:flex; flex-direction:column; gap:10px; position:relative; }
+  .crow{ display:flex; align-items:center; gap:10px; }
   .cround{ width:26px; height:26px; border:1px solid var(--line2); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; flex-shrink:0; background:none; }
   .cround:hover{ background:rgba(32,30,27,.05); }
   .cinput{ flex:1; border:none; outline:none; font-size:14px; background:transparent; color:var(--ink); resize:none; max-height:160px; line-height:1.4; }
@@ -271,11 +272,11 @@ const ACT={
   newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); render(); },
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
-  togglePicker:()=>{ closeAll('pickerOpen'); render(); },
-  toggleEffort:()=>{ closeAll('effortOpen'); render(); },
+  togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; render(); },
+  toggleEffort:()=>{ const was=S.effortOpen; closeAll(); S.effortOpen=!was; render(); },
   pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); render(); },
-  toggleEngine:()=>{ closeAll('engineOpen'); if(S.engineOpen)refreshEngine(); render(); },
-  toggleAttach:()=>{ closeAll('attachOpen'); render(); },
+  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen)refreshEngine(); render(); },
+  toggleAttach:()=>{ const was=S.attachOpen; closeAll(); S.attachOpen=!was; render(); },
   pickModel:(v)=>{ S.modelSel=v; closeAll(); if(v==='Auto')refreshSchedule(); render(); },
   pickOptimize:(v)=>{ S.optimize=v; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
@@ -312,7 +313,12 @@ const ACT={
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
 function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; if(open)S[open]=true; }
-document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); if(!t)return; const a=t.getAttribute('data-act'); const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
+document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); const a=t&&t.getAttribute('data-act');
+  // Outside-click closes any open popover, unless the click is inside a popover or on the chip/button
+  // that owns it (those toggles handle their own open/close).
+  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
+  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); render(); if(!t)return; }
+  if(!t)return; const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
@@ -440,8 +446,21 @@ function renderComposer(){
        if(enterSends&&!e.shiftKey){ e.preventDefault(); send(); }
        else if(!enterSends&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); send(); } };
      const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
-     if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } } },0);
+     if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } }
+     wireEffortSlider(); },0);
   return c;
+}
+// Effort slider: drag the knob (or click anywhere on the track) to change effort. Previews the knob
+// during the drag without a full re-render, and commits the choice on release.
+function wireEffortSlider(){ const sl=document.getElementById('effslider'); if(!sl)return;
+  const stops=['Off','Low','Medium','High']; const knob=document.getElementById('effknob');
+  const idxFromX=cx=>{ const r=sl.getBoundingClientRect(); let f=r.width?(cx-r.left)/r.width:0; f=Math.max(0,Math.min(1,f)); return Math.max(0,Math.min(3,Math.floor(f*4))); };
+  let dragging=false;
+  const preview=cx=>{ const i=idxFromX(cx); if(knob){ knob.style.transition='none'; knob.style.left=((i+0.5)/4*100)+'%'; } };
+  sl.onpointerdown=e=>{ dragging=true; try{sl.setPointerCapture(e.pointerId)}catch(_){} preview(e.clientX); e.preventDefault(); };
+  sl.onpointermove=e=>{ if(dragging)preview(e.clientX); };
+  const end=e=>{ if(!dragging)return; dragging=false; ACT.pickEffort(stops[idxFromX(e.clientX)]); };
+  sl.onpointerup=end; sl.onpointercancel=end;
 }
 function updateSendState(){ const b=document.querySelector('#sendbtn'); if(!b)return; const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
   b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
@@ -497,10 +516,10 @@ function renderEffort(){
     const on=s===cur; labels+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;text-align:center;font-size:10.5px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'};font-weight:${on?'600':'400'}">${s}</div>`; });
   const inner=`<div style="display:flex;align-items:baseline;gap:9px"><span style="font-size:15px;font-weight:600">Effort</span><span style="font-size:13.5px;color:var(--muted)">${esch(cur)}</span></div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:16px 0 4px"><span>Faster</span><span>Smarter</span></div>
-    <div style="position:relative;height:30px">
-      <div style="position:absolute;left:10px;right:10px;top:13px;height:4px;background:rgba(32,30,27,.1);border-radius:2px"></div>
+    <div id="effslider" style="position:relative;height:30px;cursor:pointer;touch-action:none">
+      <div style="position:absolute;left:10px;right:10px;top:13px;height:4px;background:rgba(32,30,27,.1);border-radius:2px;pointer-events:none"></div>
       <div style="position:absolute;inset:0;display:flex">${dots}</div>
-      <span style="position:absolute;top:4px;left:${pct};transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid rgba(32,30,27,.18);box-shadow:0 1px 5px rgba(32,30,27,.28);pointer-events:none;transition:left .15s"></span>
+      <span id="effknob" style="position:absolute;top:4px;left:${pct};transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid rgba(32,30,27,.18);box-shadow:0 1px 5px rgba(32,30,27,.28);pointer-events:none;transition:left .12s"></span>
     </div>
     <div style="display:flex;margin-top:2px">${labels}</div>
     <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;min-height:34px">${esch(hint)}</div>`;

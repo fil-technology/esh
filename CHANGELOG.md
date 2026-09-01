@@ -20,6 +20,10 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   the composer.
 
 ### Fixed
+- **Composer layout + controls.** The composer is now a column so the input fills the row and the model
+  (`Auto ▾`) and effort chips sit flush-right (they no longer float mid-bar). The chips toggle closed on
+  re-click and any open popover closes on an outside click, and the effort slider is now draggable
+  (not click-only).
 - **Hands-free voice.** The voice loop now advances automatically — listening ends on a short pause
   (silence detection), then think → speak → listen, with no tapping required (tapping the circle to
   finish early / the wave to interrupt still works). Falls back to tap-to-finish if the Web Audio API

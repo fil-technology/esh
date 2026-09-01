@@ -82,6 +82,15 @@ struct WebChatPageTests {
         #expect(html.contains("Smarter"))
         // The header no longer carries a model button.
         #expect(html.contains("class=\"modelbtn\"") == false)
+        // The composer is a column so the input fills the row and the chips sit flush-right.
+        #expect(html.contains("flex-direction:column"))
+        // Chips toggle closed on re-click, and any open popover closes on an outside click.
+        #expect(html.contains("const was=S.pickerOpen; closeAll(); S.pickerOpen=!was"))
+        #expect(html.contains("!e.target.closest('.pop')"))
+        // The effort slider is draggable, not click-only.
+        #expect(html.contains("function wireEffortSlider("))
+        #expect(html.contains("setPointerCapture"))
+        #expect(html.contains("onpointermove"))
     }
 
     @Test
