@@ -130,7 +130,24 @@ public enum WebChatPage {
   .paneitem{ padding:7px 14px; font-size:13px; border-radius:7px; cursor:pointer; color:var(--muted); }
   .paneitem.on{ background:rgba(32,30,27,.06); font-weight:500; color:var(--ink); }
   .warnbox{ border:1px solid rgba(176,118,31,.35); border-radius:9px; padding:11px 14px; font-size:12.5px; line-height:1.5; color:rgba(32,30,27,.8); }
-  .membar{ height:4px; background:rgba(32,30,27,.08); border-radius:2px; } .membar>div{ height:4px; background:var(--ink); border-radius:2px; }
+  .membar{ height:4px; background:rgba(32,30,27,.08); border-radius:2px; } .membar>div{ height:4px; background:var(--ink); border-radius:2px; transition:width .3s ease; }
+  /* Fluid interactions */
+  .iconbtn,.modelbtn,.newchat,.chatitem,.menurow,.chip,.cround,.send,.paneitem,.backbtn,.statusbtn,.mrow,.reason summary,.toggle,.btn{ transition:background .14s ease, color .14s ease, opacity .14s ease, border-color .14s ease, transform .12s ease, box-shadow .14s ease; }
+  .send:active,.cround:active,.iconbtn:active{ transform:scale(.9); }
+  .chip:active,.newchat:active,.btn:active{ transform:scale(.97); }
+  .cbox{ transition:box-shadow .16s ease, border-color .16s ease; } .cbox:focus-within{ border-color:rgba(32,30,27,.28); box-shadow:0 2px 10px rgba(32,30,27,.07); }
+  @keyframes eshpop{ from{opacity:0; transform:translateY(-6px) scale(.98)} to{opacity:1; transform:none} }
+  .pop{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); transform-origin:top; }
+  @keyframes eshdrawer{ from{opacity:0; transform:translateX(30px)} to{opacity:1; transform:none} }
+  .rightpanel{ animation:eshdrawer .2s cubic-bezier(.2,.8,.2,1); }
+  @keyframes eshfade{ from{opacity:0} to{opacity:1} }
+  .overlay{ animation:eshfade .15s ease-out; }
+  .modal{ animation:eshpop .2s cubic-bezier(.2,.8,.2,1); }
+  @keyframes eshmsgin{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
+  .msgin{ animation:eshmsgin .26s cubic-bezier(.2,.8,.2,1); }
+  details.reason[open] .rc{ animation:eshfade .22s ease-out; }
+  .empty{ animation:eshfade .3s ease-out; }
+  @media (prefers-reduced-motion:reduce){ *{ animation-duration:.001s !important; transition:none !important; } }
 </style>
 </head>
 <body>
@@ -143,7 +160,8 @@ const ICON={
   plus:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
   mic:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/></svg>',
   up:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
-  back:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg>'
+  back:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg>',
+  stop:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
 };
 let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
@@ -182,7 +200,11 @@ function mdInline(s){ return esc(mathify(s)).replace(/`([^`]+)`/g,'<code>$1</cod
 function md(t){ const parts=t.split(/```/); let o=""; parts.forEach((p,i)=>{ if(i%2){ const nl=p.indexOf('\n'); o+='<pre><code>'+esc(nl>=0?p.slice(nl+1):p)+'</code></pre>'; } else o+=mdInline(p).replace(/\n/g,'<br>'); }); return o; }
 function splitThink(t,o){ o=o||{}; const c=t.indexOf('</think>');
   if(c>=0){ let st=t.indexOf('<think>'); st=st<0?0:st+7; return {reason:t.slice(st,c).trim(), answer:t.slice(c+8).trim(), thinking:false}; }
-  if(t.startsWith('<think>')) return {reason:t.slice(7),answer:'',thinking:true};
+  // Explicit <think> anywhere: everything after it is live reasoning until </think> (content-based, so
+  // a model that reasons despite not being flagged still renders correctly).
+  const op=t.indexOf('<think>');
+  if(op>=0) return {reason:t.slice(op+7), answer:t.slice(0,op).trim(), thinking:true};
+  // Implicit-open reasoning (only a trailing </think>): show live while streaming when expected.
   if(o.expectReasoning&&t) return {reason:t,answer:'',thinking:!!o.streaming}; return {reason:'',answer:t,thinking:false}; }
 function looksReasoning(id){ return /deepseek-?r1|(^|[^a-z])r1([^a-z]|$)|qwq|magistral|thinking|reason/i.test(id||''); }
 function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(32,30,27,.7)'; }
@@ -262,22 +284,23 @@ function renderSidebar(){
   list.forEach(ch=>{ h+=`<div class="chatitem ${ch.id===S.current?'active':''}" data-act="switchChat" data-arg="${ch.id}">${esch(ch.title||'New chat')}</div>`; });
   sb.innerHTML=h; return sb;
 }
+const _seen=new Set();
+function streamInner(){ const s=splitThink(S.streamText,{streaming:true,expectReasoning:S.streamReason}); let inner='';
+  if(s.reason||s.thinking) inner+=`<details class="reason" open><summary class="live">Thinking…</summary><div class="rc">${esch(s.reason)}</div></details>`;
+  if(s.answer) inner+=`<div class="asttext">${md(s.answer)}<span class="caret"></span></div>`;
+  else if(!s.reason) inner+='<div class="asttext"><span class="typing"><i></i><i></i><i></i></span></div>';
+  return inner; }
 function renderLog(){
   const log=el('div',{cls:'log'}); const th=el('div',{cls:'thread'}); const c=cur();
   (c?c.messages:[]).forEach(m=>{ th.appendChild(renderMsg(m)); });
-  if(S.streaming){ const s=splitThink(S.streamText,{streaming:true,expectReasoning:S.streamReason});
-    const d=el('div',{cls:'msg'}); let inner='<div class="asst">';
-    if(s.reason||s.thinking) inner+=`<details class="reason" open><summary class="live">Thinking…</summary><div class="rc">${esch(s.reason)}</div></details>`;
-    if(s.answer) inner+=`<div class="asttext">${md(s.answer)}<span class="caret"></span></div>`;
-    else if(!s.reason) inner+='<div class="asttext"><span class="typing"><i></i><i></i><i></i></span></div>';
-    inner+='</div>'; d.innerHTML=inner; th.appendChild(d);
-  }
+  if(S.streaming){ const d=el('div',{cls:'msg'}); d.innerHTML=`<div class="asst" id="streamwrap">${streamInner()}</div>`; th.appendChild(d); }
   log.appendChild(th);
   setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
   return log;
 }
 function renderMsg(m){
-  const d=el('div',{cls:'msg'});
+  const fresh=m.id&&!_seen.has(m.id); if(m.id)_seen.add(m.id);
+  const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
   if(m.isUser||m.role==='user'){ let a=''; (m.attachments||[]).forEach(x=>{ if(x.kind==='image')a+=`<img src="${x.dataURL}">`; else if(x.kind==='audio')a+=`<audio controls src="${x.dataURL}"></audio>`; });
     d.innerHTML=`<div class="userrow"><div class="userbubble">${md(m.content||'')}${a}</div></div>`; return d; }
   if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div><div class="d">${esch(m.detail||'')}</div></div>`; return d; }
@@ -298,7 +321,7 @@ function renderComposer(){
      <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
      <textarea class="cinput" id="input" rows="1" placeholder="Ask anything…"></textarea>
      <button class="cround" style="border:none" data-act="startVoice" title="Voice">${ICON.mic}</button>
-     <button class="send" id="sendbtn" data-act="send" style="background:var(--ink)">${ICON.up}</button>
+     ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:`<button class="send" id="sendbtn" data-act="send" title="Send" style="background:var(--ink)">${ICON.up}</button>`}
      ${S.attachOpen?renderAttach():''}
      <input type="file" id="filepick" accept="image/*,audio/*" multiple style="display:none">
    </div>
@@ -507,11 +530,16 @@ async function send(){
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
   if(c.title==='New chat'&&text) c.title=text.slice(0,40);
   S.draft=''; if(ta)ta.value='';
-  const model=S.modelSel; const reasoning=looksReasoning(model==='Auto'&&S.schedule?S.schedule.selectedModelID:model);
+  // Auto routing runs through the real Scheduler: send its chosen model explicitly so the server uses
+  // the model the UI shows (and reasoning detection matches the actual model).
+  let resolved=S.modelSel;
+  if(resolved==='Auto'){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced';
+    const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc){ S.schedule=sc; if(sc.selectedModelID) resolved=sc.selectedModelID; } }
+  const reasoning=looksReasoning(resolved);
   S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; saveChats(); render();
   S.controller=new AbortController(); const t0=performance.now();
   const msgs=c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content}));
-  const body={ model: model==='Auto'?undefined:model, messages:msgs, stream:true, max_tokens:2048 };
+  const body={ model: resolved==='Auto'?undefined:resolved, messages:msgs, stream:true, max_tokens:2048 };
   let truncated=false;
   try{
     const resp=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},signal:S.controller.signal,body:JSON.stringify(body)});
@@ -525,14 +553,19 @@ async function send(){
               throttleRender(); } }catch(e){} } } }
   }catch(e){ if(e.name!=='AbortError') S.streamText+='\n[error] '+e.message; }
   const secs=((performance.now()-t0)/1000).toFixed(1);
-  const sel=(model==='Auto'&&S.schedule)?S.schedule.selectedModelID:model;
+  const auto=S.modelSel==='Auto';
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
-    meta:secs+'s'+(S.schedule&&model==='Auto'?' · '+shortModel(sel||''):''),
-    exec:{model:shortModel(sel||model),backend:(S.schedule&&S.schedule.backend)||''}});
+    meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''),
+    exec:{model:shortModel(resolved||S.modelSel),backend:(S.schedule&&S.schedule.backend)||''}});
   S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render();
   if(S.prefs.autoTts) speak(S.streamText);
 }
-let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null; render(); },40); }
+let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
+  // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
+  const sw=document.querySelector('#streamwrap');
+  if(S.streaming&&sw){ sw.innerHTML=streamInner(); const lg=document.querySelector('.log'); if(lg)lg.scrollTop=lg.scrollHeight; }
+  else render();
+},40); }
 
 /* ---------- speech ---------- */
 async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return;
