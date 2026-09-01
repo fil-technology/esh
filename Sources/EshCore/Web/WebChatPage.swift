@@ -54,7 +54,12 @@ public enum WebChatPage {
   .bubble pre { background:var(--panel); padding:10px; border-radius:8px; overflow-x:auto; }
   .bubble code { background:var(--panel); padding:1px 4px; border-radius:4px; }
   details.reason { margin:2px 0 8px; }
-  details.reason summary { color:var(--faint); cursor:pointer; font-size:13px; }
+  details.reason summary { color:var(--faint); cursor:pointer; font-size:13px; list-style:none; }
+  details.reason summary::-webkit-details-marker { display:none; }
+  details.reason summary::before { content:"▸ "; }
+  details.reason[open] summary::before { content:"▾ "; }
+  details.reason summary.live { color:var(--accent); animation:eshpulse 1.4s ease-in-out infinite; }
+  @keyframes eshpulse { 0%,100%{opacity:.55} 50%{opacity:1} }
   details.reason .rc { color:var(--faint); white-space:pre-wrap; border-left:2px solid var(--line); padding-left:10px; margin-top:6px; }
   .tools { margin-left:auto; display:flex; gap:6px; }
   .tools button { padding:2px 8px; font-size:12px; }
@@ -165,8 +170,9 @@ function renderLog(){
     if(m.role==='assistant'){ const s=splitThink(m.content, {streaming:m.streaming, expectReasoning:m.reasoning});
       if(s.reason||s.thinking){ const dt=document.createElement('details'); dt.className='reason';
         dt.open = !!s.thinking;   // expanded while thinking live, collapsed once the answer begins
-        const label = s.thinking ? 'Reasoning (thinking…)' : 'Reasoning';
-        dt.innerHTML='<summary>'+label+'</summary><div class="rc">'+esc(s.reason)+'</div>'; wrap.appendChild(dt); }
+        const label = s.thinking ? 'Thinking…' : (m.thinkMs ? ('Thought for '+m.thinkMs.toFixed(0)+'s') : 'Reasoning');
+        const cls = s.thinking ? ' class="live"' : '';
+        dt.innerHTML='<summary'+cls+'>'+label+'</summary><div class="rc">'+esc(s.reason)+'</div>'; wrap.appendChild(dt); }
       const answer = s.answer || (s.thinking ? '' : m.content);
       if(answer){ bub.innerHTML=renderMarkdown(answer); } else { bub.style.display='none'; }
     } else {
@@ -241,7 +247,10 @@ async function send(){
       while(true){ const {value,done}=await rd.read(); if(done) break;
         buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
         for(const line of lines){ const s=line.trim(); if(!s.startsWith('data:'))continue; const d=s.slice(5).trim(); if(d==='[DONE]')continue;
-          try{ const j=JSON.parse(d); const delta=j.choices?.[0]?.delta?.content||''; if(delta){ out.content+=delta; bubbleRefresh(); } }catch(e){} } }
+          try{ const j=JSON.parse(d); const delta=j.choices?.[0]?.delta?.content||''; if(delta){ out.content+=delta;
+            // Record how long the model spent thinking (until </think>) for a "Thought for Ns" summary.
+            if(out.thinkMs===undefined && out.reasoning && out.content.includes('</think>')) out.thinkMs=(performance.now()-t0)/1000;
+            bubbleRefresh(); } }catch(e){} } }
     }
     const secs=((performance.now()-t0)/1000).toFixed(1); $('#meta').textContent=secs+'s · '+out.content.length+' chars';
     if($('#autotts').value==='on') speak(out.content);

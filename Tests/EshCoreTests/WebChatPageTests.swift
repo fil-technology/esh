@@ -37,7 +37,8 @@ struct WebChatPageTests {
         // (shown as an expanded "thinking…" section during streaming, not leaked into the answer).
         #expect(html.contains("</think>"))
         #expect(html.contains("details"))
-        #expect(html.contains("thinking…"))
+        #expect(html.contains("Thinking…"))            // live label while a reasoning model thinks
+        #expect(html.contains("Thought for "))         // ChatGPT-style collapsed summary with elapsed time
         #expect(html.contains("looksLikeReasoningModel"))
         #expect(html.contains("expectReasoning"))
         // Speech: text-to-speech playback + speech-to-text upload.
