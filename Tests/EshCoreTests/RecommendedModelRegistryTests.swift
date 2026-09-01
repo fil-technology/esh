@@ -46,6 +46,43 @@ struct RecommendedModelRegistryTests {
     }
 
     @Test
+    func brokenQwen35ModelsAreNeverRecommended() {
+        let registry = RecommendedModelRegistry()
+        // The MLX Qwen3.5 hybrid family crashes on the current mlx-lm; none may be recommended,
+        // even when experimental models are included.
+        let brokenMLXIDs: Set<String> = [
+            "qwen-3-5-9b", "qwen-3-5-9b-optiq", "qwen-3-5-2b",
+            "qwen-3-5-0-8b", "qwen-3-5-0-8b-optiq", "qwen-3-5-27b-opus-distilled"
+        ]
+        for useCase in RecommendedModelRegistry.UseCase.allCases {
+            let recommended = registry.recommend(useCase: useCase, limit: 100, includeExperimental: true)
+                .map(\.id)
+            for id in brokenMLXIDs {
+                #expect(recommended.contains(id) == false, "\(id) must not be recommended for \(useCase)")
+            }
+        }
+        // They remain in the full catalog listing, but flagged incompatible (honest, not hidden).
+        let catalog = registry.list()
+        for id in brokenMLXIDs {
+            let entry = catalog.first { $0.id == id }
+            #expect(entry?.status == .incompatible, "\(id) must be classified .incompatible")
+        }
+    }
+
+    @Test
+    func flagshipDefaultIsAVerifiedWorkingModel() {
+        let registry = RecommendedModelRegistry()
+        let defaults = registry.list(tag: "default")
+        // No known-broken model may carry the "default" flagship tag.
+        #expect(defaults.contains { $0.id == "qwen-3-5-9b" } == false)
+        #expect(defaults.contains { $0.id == "qwen-3-5-9b-gguf" } == false)
+        // The MLX flagship default is Llama 3.1 8B (standard, not-known-broken architecture).
+        let flagship = registry.resolve(alias: "llama-3-1-8b")
+        #expect(flagship?.status == .recommended)
+        #expect(flagship?.tags.contains("default") == true)
+    }
+
+    @Test
     func resolvesAliasRepoAndRecommendedPrefix() {
         let registry = RecommendedModelRegistry()
 

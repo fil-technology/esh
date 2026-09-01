@@ -4,6 +4,17 @@ import Metal
 import TTSMLX
 
 enum AudioSpeechGenerator {
+    /// TTS models known not to run through the current TTSMLX build. Marvis fails to load with a
+    /// RoPE-key mismatch. These are filtered from the advertised audio catalog and rejected with a
+    /// clear message if requested explicitly — never presented as usable, never crashed into.
+    static let knownIncompatibleTTSModelIDs: Set<String> = [
+        "Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit"
+    ]
+
+    static func isKnownIncompatibleTTSModel(_ id: String) -> Bool {
+        knownIncompatibleTTSModelIDs.contains { $0.caseInsensitiveCompare(id) == .orderedSame }
+    }
+
     struct SynthesisRequest {
         var text: String
         var model: String?
@@ -142,6 +153,11 @@ enum AudioSpeechGenerator {
                 || model.displayName.lowercased() == normalized
                 || model.id.components(separatedBy: "/").last?.lowercased() == normalized
         }) {
+            if isKnownIncompatibleTTSModel(model.id) {
+                throw StoreError.invalidManifest(
+                    "TTS model \(model.id) is currently incompatible with this build (fails to load) and is not available. Try a working model such as mlx-community/Soprano-80M-bf16."
+                )
+            }
             return model
         }
 
