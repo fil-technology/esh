@@ -6,10 +6,27 @@ import EshCore
 /// client). Returned `Data` is JSON encoded once here and passed through the HTTP handler verbatim.
 enum WebExperienceData {
     static func provider(root: PersistenceRoot, toolVersion: String?) -> (@Sendable (WebDataRequest) async throws -> Data) {
-        { request in
+        let installs = InstallManager(root: root)
+        return { request in
             let enc = JSONEncoder()
             enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             switch (request.method, request.path) {
+            case ("POST", "/v1/models/install"):
+                let body = (try? JSONDecoder().decode(InstallStart.self, from: request.body)) ?? InstallStart()
+                let repoID = resolveRepoID(id: body.id, repoID: body.repoID)
+                guard let repoID else { throw OpenAICompatibleError.invalidRequest("Provide a model id or repoID to install.") }
+                await installs.start(repoID: repoID, variant: body.variant)
+                return try enc.encode(["repoID": repoID, "status": "started"])
+            case ("GET", "/v1/models/install"):
+                let repoID = resolveRepoID(id: request.query["id"], repoID: request.query["repo"] ?? request.query["repoID"]) ?? (request.query["repo"] ?? "")
+                guard let status = await installs.status(repoID: repoID) else {
+                    return try enc.encode(["repoID": repoID, "phase": "idle"])
+                }
+                return try enc.encode(status)
+            case ("POST", "/v1/models/install/cancel"):
+                let body = (try? JSONDecoder().decode(InstallStart.self, from: request.body)) ?? InstallStart()
+                if let repoID = resolveRepoID(id: body.id, repoID: body.repoID) { await installs.cancel(repoID: repoID) }
+                return try enc.encode(["status": "cancelled"])
             case ("GET", "/v1/doctor"), ("GET", "/v1/engine"), ("GET", "/v1/onboarding"):
                 // DoctorReport already composes host, storage, engines, models, and Apple state —
                 // the canonical truth for onboarding and the engine inspector.
@@ -62,6 +79,14 @@ enum WebExperienceData {
                 throw OpenAICompatibleError.notFound("No web-data route for \(request.method) \(request.path)")
             }
         }
+    }
+
+    /// Resolve a catalog alias (or a raw HF repo id) to the concrete repo id the downloader needs.
+    private static func resolveRepoID(id: String?, repoID: String?) -> String? {
+        if let repoID, !repoID.isEmpty { return repoID }
+        guard let id, !id.isEmpty else { return nil }
+        if let model = RecommendedModelRegistry().resolve(alias: id) { return model.repoID }
+        return id.contains("/") ? id : nil
     }
 
     // MARK: - Catalog composition
@@ -134,6 +159,13 @@ struct WebCatalogModel: Encodable {
 struct WebCatalog: Encodable {
     var models: [WebCatalogModel]
     var measuredNote: String
+}
+
+/// Body for POST /v1/models/install and /cancel — a catalog id or a raw HF repo id.
+private struct InstallStart: Decodable {
+    var id: String?
+    var repoID: String?
+    var variant: String?
 }
 
 /// Partial settings patch the UI can POST to `/v1/config` — only these canonical keys are accepted.

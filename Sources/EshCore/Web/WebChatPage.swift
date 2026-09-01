@@ -167,7 +167,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{} };
+        onbStep:0, voice:null, prefs:{}, installing:{} };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -245,6 +245,8 @@ const ACT={
   openDetail:(id)=>{ S.detail=id; render(); },
   closeDetail:()=>{ S.detail=null; render(); },
   install:(id)=>{ ACT.openDetail(id); },
+  doInstall:(id)=>startInstall(id),
+  cancelInstall:(id)=>{ const m=catModel(id); if(m){ fetch('/v1/models/install/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); } delete S.installing[id]; render(); },
   attach:()=>{ document.getElementById('filepick').click(); S.attachOpen=false; render(); },
   removeAtt:(i)=>{ S.pendingAtts.splice(+i,1); render(); },
   micUpload:()=>micUpload(),
@@ -421,6 +423,27 @@ function renderExec(){
 }
 function kvrow(k,v,mono){ return `<div class="kv"><span class="k">${k}</span><span ${mono?'class="mono" style="font-size:12px"':''}>${esch(String(v))}</span></div>`; }
 
+/* ---------- install (start + poll progress, thin over /v1/models/install) ---------- */
+function catModel(id){ return (S.catalog&&S.catalog.models||[]).find(x=>x.id===id); }
+function fmtBytes(b){ if(!b)return ''; if(b<1048576)return (b/1024).toFixed(0)+' KB'; if(b<1073741824)return (b/1048576).toFixed(0)+' MB'; return (b/1073741824).toFixed(1)+' GB'; }
+async function startInstall(id){
+  S.installing[id]={phase:'resolving',bytesDownloaded:0,percent:0}; render();
+  try{ await fetch('/v1/models/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); }catch(e){ S.installing[id]={phase:'failed',error:'Could not start install'}; render(); return; }
+  const poll=async()=>{ if(!S.installing[id])return; try{ const st=await (await fetch('/v1/models/install?id='+encodeURIComponent(id))).json(); S.installing[id]=st;
+      if(st.phase==='installed'){ setTimeout(()=>{ delete S.installing[id]; refreshCatalog(); },600); render(); return; }
+      if(st.phase==='failed'||st.phase==='cancelled'){ render(); return; } }catch(e){}
+    render(); setTimeout(poll,700); };
+  setTimeout(poll,500);
+}
+function installCell(m){ const st=S.installing[m.id];
+  if(st){ if(st.phase==='failed') return `<span style="font-size:12px;color:var(--amber)">Failed</span>`;
+    const pct=st.percent||0; const label=st.totalBytes?(pct+'%'):fmtBytes(st.bytesDownloaded);
+    return `<span style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end"><span style="width:60px;height:4px;background:rgba(32,30,27,.1);border-radius:2px"><span style="display:block;width:${pct}%;height:4px;background:var(--ink);border-radius:2px;transition:width .3s"></span></span><span class="mono" style="font-size:10.5px;color:var(--muted)">${esch(label||'…')}</span><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="padding:0;font-size:12px" title="Cancel">✕</span></span>`; }
+  if(m.installed) return '<span style="font-size:12px;color:var(--muted)">Installed ✓</span>';
+  if(m.status==='incompatible') return '<span style="font-size:12px;color:var(--amber)">Incompatible</span>';
+  return `<span style="font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline" data-act="doInstall" data-arg="${m.id}">Install</span>`;
+}
+
 /* ---------- models browser ---------- */
 function renderModels(){
   const v=el('div'); v.style.cssText='flex:1;display:flex;flex-direction:column;min-height:0';
@@ -432,7 +455,6 @@ function renderModels(){
   const cat=S.catalog; if(!cat){ h+='<div style="padding:24px;color:var(--muted);font-size:13px">Loading catalog…</div>'; }
   else { (cat.models||[]).forEach(m=>{
     const speed=m.measured?(m.tokensPerSecond?m.tokensPerSecond.toFixed(0)+' tok/s ●':'measured ●'):(m.status==='incompatible'?'—':'estimate');
-    const right=m.installed?'<span style="font-size:12px;color:var(--muted);text-align:right">Installed ✓</span>':(m.status==='incompatible'?'<span style="font-size:12px;color:var(--amber);text-align:right">Incompatible</span>':`<span style="font-size:12px;text-align:right;font-weight:500;cursor:pointer;text-decoration:underline" data-act="install" data-arg="${m.id}">Install</span>`);
     const shortDesc=(m.capabilities||[]).map(cap=>({chat:'General',coding:'Coding',reasoning:'Reasoning',toolCalling:'Tools','tool-calling':'Tools',vision:'Vision'}[cap]||cap)).join(' · ');
     h+=`<div class="mrow">
       <div class="mleft" data-act="openDetail" data-arg="${m.id}"><div class="mname">${esch(m.name)} ${m.badge?`<span style="font-size:11px;font-weight:500;margin-left:6px;color:var(--muted)">★</span>`:''}</div><div class="mdesc">${esch(shortDesc)} · ${m.parameterSize}</div></div>
@@ -440,7 +462,7 @@ function renderModels(){
         <span class="mfit" style="color:${fitColor(m.fitClass)}">${fitLabel(m.fitClass)}</span>
         <span class="mmem mono" style="font-size:12px;color:var(--muted)">~${m.estimatedMemoryGB} GB</span>
         <span class="mspeed mono" style="font-size:12px;color:var(--muted)">${esch(speed)}</span>
-        <span class="maction">${right}</span>
+        <span class="maction">${installCell(m)}</span>
       </div></div>`; });
     h+=`<div style="padding:10px 24px;font-size:11px;color:var(--faint)">${esch(cat.measuredNote||'')}</div>`;
   }
@@ -471,8 +493,13 @@ function renderDetail(){
   if(tight) h+=`<div class="warnbox" style="margin:14px 26px 0">Expected memory is high for this Mac. It will run, but generation may slow and other apps may be paged out. A lower-memory quantization is suggested first.</div>`;
   if(m.status==='incompatible') h+=`<div class="warnbox" style="margin:14px 26px 0;border-color:rgba(176,118,31,.5)">This model is not compatible with the current runtime and cannot be installed.</div>`;
   h+=`<div style="display:flex;align-items:center;gap:14px;padding:18px 26px 20px">`;
-  if(m.installed) h+='<span style="font-size:13px;color:var(--muted)">Installed ✓</span>';
-  else if(m.status!=='incompatible') h+=`<button class="btn" data-act="install" data-arg="${m.id}">${tight?'Install anyway':'Install'}</button><span style="font-size:12px;color:var(--muted)">${esch(storageDest())}</span>`;
+  const ist=S.installing[m.id];
+  if(ist&&(ist.phase==='downloading'||ist.phase==='resolving'||ist.phase==='verifying')){
+    const pct=ist.percent||0; const lab=ist.totalBytes?(pct+'% of '+fmtBytes(ist.totalBytes)):fmtBytes(ist.bytesDownloaded);
+    h+=`<div style="flex:1;display:flex;flex-direction:column;gap:7px"><div style="height:5px;background:rgba(32,30,27,.08);border-radius:3px"><div style="width:${pct}%;height:5px;background:var(--ink);border-radius:3px;transition:width .3s"></div></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)"><span class="mono">${esch(ist.phase)} · ${esch(lab||'…')}</span><span>${esch(storageDest())}</span></div></div><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="font-size:13px">✕</span>`;
+  } else if(ist&&ist.phase==='failed'){ h+=`<span style="color:var(--amber);font-size:13px">Install failed — ${esch(ist.error||'try again')}</span><button class="btn ghost" data-act="doInstall" data-arg="${m.id}">Retry</button>`; }
+  else if(m.installed) h+='<span style="font-size:13px;color:var(--muted)">Installed ✓</span>';
+  else if(m.status!=='incompatible') h+=`<button class="btn" data-act="doInstall" data-arg="${m.id}">${tight?'Install anyway':'Install'}</button><span style="font-size:12px;color:var(--muted)">${esch(storageDest())}</span>`;
   h+='<span class="sp" style="flex:1"></span></div>';
   md_.innerHTML=h; ov.appendChild(md_); return ov;
 }
