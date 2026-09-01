@@ -133,7 +133,20 @@ public enum WebChatPage {
   .errcard{ border:1px solid var(--line2); border-radius:12px; padding:16px 18px; }
   .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(32,30,27,.7); margin-top:5px; }
   /* Composer */
-  .composer{ padding:0 24px 10px; flex-shrink:0; }
+  .composer{ padding:0 24px 10px; flex-shrink:0; position:relative; }
+  /* Fade the thread out as it scrolls under the composer (transparent → paper) */
+  .composer::before{ content:''; position:absolute; left:0; right:0; top:-54px; height:54px; background:linear-gradient(to bottom, rgba(251,250,248,0), var(--paper) 82%); pointer-events:none; }
+  /* Small screens: the chat sidebar and the settings category list overlay the view (with a backdrop)
+     instead of squeezing it — opened from the top-left toggle / settings. */
+  .sbackdrop{ display:none; }
+  @keyframes eshslidein{ from{ transform:translateX(-100%); opacity:.5 } to{ transform:none; opacity:1 } }
+  @media(max-width:768px){
+    .sidebar{ position:absolute; top:0; left:0; bottom:0; z-index:60; width:250px; max-width:82vw; background:var(--paper); box-shadow:2px 0 28px rgba(32,30,27,.20); animation:eshslidein .18s cubic-bezier(.2,.8,.2,1); }
+    .sbackdrop{ display:block; position:absolute; inset:0; background:rgba(32,30,27,.28); z-index:55; animation:eshfade .15s ease-out; }
+    .settingsbody{ flex-direction:column !important; }
+    .paneside{ width:100% !important; flex-direction:row !important; overflow-x:auto; border-right:none !important; border-bottom:1px solid rgba(32,30,27,.07); gap:4px; padding:10px 12px; }
+    .paneitem{ white-space:nowrap; flex-shrink:0; }
+  }
   .cbox{ max-width:640px; margin:0 auto; background:#fff; border:1px solid var(--line2); border-radius:15px; box-shadow:0 1px 2px rgba(32,30,27,.04); padding:11px 14px; display:flex; flex-direction:column; gap:10px; position:relative; }
   .crow{ display:flex; align-items:center; gap:10px; }
   .cround{ width:26px; height:26px; border:1px solid var(--line2); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; flex-shrink:0; background:none; }
@@ -457,7 +470,7 @@ function renderChat(){
     <button class="iconbtn" data-act="openSettings" title="Settings">${ICON.settings}</button>`;
   wrap.appendChild(tb);
   const body=el('div',{cls:'body'});
-  if(S.sidebarOpen) body.appendChild(renderSidebar());
+  if(S.sidebarOpen){ body.appendChild(renderSidebar()); body.appendChild(el('div',{cls:'sbackdrop','data-act':'toggleSidebar'})); }
   const main=el('div',{cls:'main'});
   const c=cur(); const has=c&&(c.messages.length||S.streaming);
   if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); S._logNode=null; S._logSig=''; }
@@ -871,7 +884,7 @@ function renderSettings(){
   const panes=['General','Intelligence','Models','Voice','Performance','Storage','Privacy','Advanced'];
   let side=''; panes.forEach(p=>{ side+=`<div class="paneitem ${p===S.settingsPane?'on':''}" data-act="pickPane" data-arg="${p}">${p}</div>`; });
   v.innerHTML=`<div class="viewhead" style="padding-bottom:16px"><button class="backbtn" data-act="backChat">${ICON.back}Chat</button><span style="font-size:17px;font-weight:600">Settings</span></div>
-    <div style="flex:1;display:flex;border-top:1px solid var(--line);min-height:0">
+    <div class="settingsbody" style="flex:1;display:flex;border-top:1px solid var(--line);min-height:0">
       <div class="paneside">${side}</div>
       <div style="flex:1;padding:22px 32px;overflow-y:auto">${renderPane()}</div></div>`;
   return v;
@@ -1259,6 +1272,8 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 
 /* ---------- boot ---------- */
 loadChats(); loadPrefs();
+// On small screens the sidebar overlays the chat, so start it collapsed regardless of the saved pref.
+if(window.innerWidth<=768) S.sidebarOpen=false;
 if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id;
 S.focusInput=true;
 // First run (no prior prefs and no history) → show onboarding once, then remember.

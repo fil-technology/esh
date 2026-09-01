@@ -213,6 +213,20 @@ struct WebChatPageTests {
     }
 
     @Test
+    func composerHasAScrimAndSmallScreensOverlayTheSidebar() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // A gradient scrim fades the thread out as it scrolls under the composer.
+        #expect(html.contains(".composer::before"))
+        #expect(html.contains("linear-gradient(to bottom, rgba(251,250,248,0)"))
+        // On small screens the sidebar overlays the chat (absolute + backdrop), and the settings
+        // category list becomes a horizontal scroller.
+        #expect(html.contains("@media(max-width:768px)"))
+        #expect(html.contains("sbackdrop"))
+        #expect(html.contains("settingsbody"))
+        #expect(html.contains("window.innerWidth<=768"))
+    }
+
+    @Test
     func chatRendersRicherMarkdownWithSelfContainedHighlighting() {
         let html = WebChatPage.html(toolVersion: nil)
         // Block markdown (headings, lists, blockquotes) + a small in-house highlighter — no CDN/deps.
