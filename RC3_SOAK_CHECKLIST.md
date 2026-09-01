@@ -22,7 +22,7 @@ Legend — Pkg = packaged validation required at tag time.
 | 12 | Couldn't choose voice model/voice/language | Settings → Voice | Static labels, not wired | Real dropdowns from `/v1/audio/models` (TTS model/voice/language) + Parakeet/custom STT | e22f35a | ✓ | ✓ | yes |
 | 13 | Voice "takes too long to speak out" | Voice reply latency | Non-streaming reply + full-reply TTS (≈gen+full-synth) | Stream reply; synthesize+play sentence-by-sentence | d429f0c | env-limited (mic) | ✓ | yes |
 | 14 | No way to rename/delete chats | Sidebar | Missing | Right-click → Rename / Delete menu | d429f0c | ✓ | ✓ | no |
-| 15 | (Approved feature exception) Message queue | Shift+Enter to line up follow-ups | New feature | Shift+Enter enqueues; queued pills; auto-send in order; Stop doesn't auto-continue | 529d559 | ✓ | ✓ | yes |
+| 15 | (Approved feature exception) Message queue | Line up follow-ups | New feature | Queue via **Option+Enter / Cmd+Shift+Enter** + a discoverable queue button while generating; conventional keys preserved (Enter=send, Shift+Enter=newline, Cmd+Enter=send); pills; auto-send in order; Stop doesn't auto-continue | 529d559, 5ec6fc8 | ✓ | ✓ | yes |
 | 16 | Voice overlay flashed transparent on each state change | Enter voice; state changes | `.voicewrap` replayed its fade on every render | Fade gated to an `.enter` class (entry only) | e4434ff | ✓ | ✓ | yes |
 | 17 | (Approved feature) Record audio by long-pressing the mic | Hold the mic button | New feature | Hold=record → playable audio attachment; tap=voice mode; sent clip plays in chat | e4434ff | ✓ | env-limited (mic) | yes |
 | 18 | Native `<audio controls>` player (off-brand) | Attach/send audio | Used the system player | Custom on-brand player (play/pause, progress, seek, mono time) in composer + bubble | b25e356 | ✓ | ✓ | yes |
@@ -30,7 +30,7 @@ Legend — Pkg = packaged validation required at tag time.
 | 20 | Whole view flickered when opening/closing a popover | Open/close the model picker over a long thread | Every toggle rebuilt + re-parsed the whole thread (+scroll-jump) | Reuse the log DOM when the conversation is unchanged (`logSig`) | b25e356 | ✓ | ✓ | yes |
 | 21 | Code blocks/markdown were plain and unstyled | Ask for code | Minimal in-house markdown; no highlighting | Richer block markdown + a self-contained syntax highlighter (warm palette) — **Shiki not usable** (self-contained/no-CDN) | 622f8e8 | ✓ | ✓ | yes |
 | 22 | Composer had a hard edge; thread didn't fade under it | Scroll a long thread | No scrim | Transparent→paper gradient scrim above the composer (`.composer::before`) | 4ff100d | ✓ | ✓ | yes |
-| 23 | Small screens squeezed the chat with the sidebar | Narrow window | Sidebar/settings were fixed columns | ≤768px: sidebar overlays with a backdrop (toggle-opened, starts collapsed); settings categories become a horizontal scroller; desktop unchanged | 4ff100d | ✓ (375px) | ✓ | yes |
+| 23 | Small screens squeezed the chat with the sidebar | Narrow window | Sidebar/settings were fixed columns | ≤768px: sidebar overlays **full-width** (toggle-opened, starts collapsed; topbar toggle closes it); settings categories become a horizontal scroller; desktop unchanged | 4ff100d, 5ec6fc8 | ✓ (375px) | ✓ | yes |
 | — | Warm-TTS (per-call model reload) | Voice latency | Reload lives in `mlx-audio-swift`/TTSMLX; not esh-local | **Cross-repo:** spec delivered for a TTSMLX loaded-model cache + esh dep bump; the streamed sentence-pipeline (#13) is the esh-local win | _cross-repo, pending_ | — | — | n/a |
 
 ## Notes
