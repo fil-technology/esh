@@ -6,6 +6,41 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.2] - 2026-09-01
+
+**Release candidate — the approved 2.0 Web Experience.** A faithful, warm-paper redesign of `esh web`
+into the primary browser interface, implemented as a **thin client** over canonical esh endpoints
+(no routing/fit/scheduler/policy logic in the browser).
+
+### Added — Web Experience
+- **Design language:** warm paper (#fbfaf8) + graphite ink (#201e1b), inline SVG icons (no emoji),
+  IBM Plex Mono for technical data, amber only for warnings.
+- **Canonical data endpoints:** `GET /v1/engine` (host/memory/storage/engines/Apple), `GET /v1/schedule`
+  (Scheduler decision + rationale), `GET /v1/catalog` + `/v1/catalog/{id}` (recommended catalog with
+  real ModelFitService fit + measured-vs-estimated), `GET`/`POST /v1/config`, and
+  `POST /v1/models/install` (+ status/cancel).
+- **Onboarding** on first run with real Mac detection; **model picker** with Auto routed through the
+  real Scheduler (shows the live pick); **model browser** with honest fit + gating (incompatible
+  models shown, never installable) + install with live progress/cancel/error/retry.
+- **Per-response execution truth:** a final `esh_execution` SSE frame carries the real ExecutionProfile
+  (server TTFT, output tokens, residency, KV/prompt-cache strategy, optimizer). The Execution panel
+  and **"Why this model?"** show the actual response, not a re-simulation.
+- **Engine Inspector** and **Storage** view from real `/v1/engine` data; **Settings** persist
+  canonically to config (perf mode) with browser-local presentation prefs only.
+- **Real voice loop:** mic → STT (`/v1/audio/transcriptions`) → LLM → TTS (`/v1/audio/speech`), with
+  honest degradation when the mic or a speech model is unavailable.
+- **Attachments** as prototype-faithful chips (sent when the model supports them, never silently
+  dropped); **degraded model-failure** card (what happened / what still works / what to do);
+  streaming with live reasoning, math rendering, typing indicator, stop, and token-limit note.
+- **Fluid animations** (popup/drawer/modal entrances, one-time message fade-in, hover/press) and
+  **accessibility basics** (keyboard nav, Escape-to-close, focusable + ARIA-labeled controls,
+  `prefers-reduced-motion`).
+
+### Notes
+- Full voice (real mic + STT) and packaged `esh web` are validated on the notarized RC artifact.
+- `qwen3.5` remains catalog-gated (`.incompatible`); observed generating malformed output via the
+  persistent worker path — flagged for the compatibility review.
+
 ## [2.0.0-rc.1] - 2026-09-01
 
 **Release candidate — not production-stable 2.0.** Published as a GitHub prerelease; the stable
