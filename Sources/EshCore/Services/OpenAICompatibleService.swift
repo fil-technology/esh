@@ -758,6 +758,22 @@ public struct OpenAIErrorResponse: Codable, Hashable, Sendable {
     }
 }
 
+/// A request to a 2.0 Web Experience data endpoint. The esh executable's provider switches on
+/// `path` and composes JSON from the canonical services.
+public struct WebDataRequest: Sendable {
+    public var method: String
+    public var path: String
+    public var query: [String: String]
+    public var body: Data
+
+    public init(method: String, path: String, query: [String: String] = [:], body: Data = Data()) {
+        self.method = method
+        self.path = path
+        self.query = query
+        self.body = body
+    }
+}
+
 public struct OpenAICompatibleService: Sendable {
     private let inferClosure: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse
     /// Optional incremental token stream; when present, streaming chat completions emit real per-token
@@ -769,6 +785,10 @@ public struct OpenAICompatibleService: Sendable {
     /// Optional speech-to-text (STT). When present, POST /v1/audio/transcriptions transcribes posted
     /// audio bytes; when nil the route reports that no speech model is available.
     private let transcribeClosure: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)?
+    /// Optional provider for the 2.0 Web Experience data endpoints (engine status, schedule/why,
+    /// catalog+fit, config). Returns raw JSON so the esh executable composes it from the canonical
+    /// services (thin-client rule: no runtime/policy logic in the web layer or the browser).
+    private let webDataClosure: (@Sendable (WebDataRequest) async throws -> Data)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -778,7 +798,8 @@ public struct OpenAICompatibleService: Sendable {
         speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
         },
-        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil
+        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
+        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -786,6 +807,7 @@ public struct OpenAICompatibleService: Sendable {
         self.audioModelsClosure = audioModels
         self.speechClosure = speech
         self.transcribeClosure = transcribe
+        self.webDataClosure = webData
     }
 
     public init(
@@ -799,7 +821,8 @@ public struct OpenAICompatibleService: Sendable {
         speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
         },
-        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil
+        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
+        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil
     ) {
         // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
         // request stay warm and are reused by the next, evicted on idle/memory pressure.
@@ -842,8 +865,17 @@ public struct OpenAICompatibleService: Sendable {
             },
             audioModels: audioModels,
             speech: speech,
-            transcribe: transcribe
+            transcribe: transcribe,
+            webData: webData
         )
+    }
+
+    /// Serve a 2.0 Web Experience data endpoint (engine/schedule/catalog/config). Returns JSON `Data`.
+    public func webData(_ request: WebDataRequest) async throws -> Data {
+        guard let webDataClosure else {
+            throw OpenAICompatibleError.notFound("Web Experience data endpoints are not available in this process.")
+        }
+        return try await webDataClosure(request)
     }
 
     public func chatCompletions(_ request: OpenAIChatCompletionsRequest) async throws -> OpenAIChatCompletionsResponse {

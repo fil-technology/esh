@@ -81,6 +81,18 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 let decoded = try JSONCoding.decoder.decode(OpenAIAudioTranscriptionRequest.self, from: request.body)
                 let response = try await service.audioTranscription(decoded)
                 return try jsonResponse(statusCode: 200, payload: response)
+            // 2.0 Web Experience data endpoints — thin JSON over the canonical services.
+            case ("GET", "/v1/engine"), ("GET", "/v1/schedule"), ("GET", "/v1/catalog"),
+                 ("GET", "/v1/config"), ("GET", "/v1/doctor"), ("GET", "/v1/onboarding"),
+                 ("POST", "/v1/config"):
+                let data = try await service.webData(WebDataRequest(
+                    method: request.method.uppercased(), path: path,
+                    query: queryItems(from: request.path), body: request.body))
+                return jsonDataResponse(data)
+            case ("GET", let p) where p.hasPrefix("/v1/catalog/"):
+                let data = try await service.webData(WebDataRequest(
+                    method: "GET", path: p, query: queryItems(from: request.path), body: request.body))
+                return jsonDataResponse(data)
             case ("GET", "/v1/tools"):
                 return try jsonResponse(statusCode: 200, payload: service.tools())
             case ("GET", "/api/tags"):
@@ -143,6 +155,25 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             headers: jsonHeaders(contentLength: body.count),
             body: body
         )
+    }
+
+    /// Wrap already-encoded JSON `Data` (from the web-data provider) in a 200 response.
+    private func jsonDataResponse(_ body: Data) -> OpenAICompatibleHTTPResponse {
+        OpenAICompatibleHTTPResponse(statusCode: 200, headers: jsonHeaders(contentLength: body.count), body: body)
+    }
+
+    /// Parse `?a=b&c=d` query items from a raw request path (percent-decoded).
+    private func queryItems(from rawPath: String) -> [String: String] {
+        guard let q = rawPath.firstIndex(of: "?") else { return [:] }
+        let query = rawPath[rawPath.index(after: q)...]
+        var out: [String: String] = [:]
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            let key = String(kv[0]).removingPercentEncoding ?? String(kv[0])
+            let value = kv.count > 1 ? (String(kv[1]).removingPercentEncoding ?? String(kv[1])) : ""
+            out[key] = value
+        }
+        return out
     }
 
     /// A streaming SSE response: the server sends headers, then writes chunks from `provider` as they
