@@ -188,8 +188,11 @@ enum AppVersionResolver {
         return binDirectory.deletingLastPathComponent()
     }
 
-    private static func isSemver(_ value: String) -> Bool {
-        let parts = value.split(separator: ".")
+    static func isSemver(_ value: String) -> Bool {
+        // Accept X.Y.Z and SemVer pre-releases like X.Y.Z-rc.1: validate the numeric core, allow an
+        // optional pre-release suffix after the first hyphen.
+        let core = value.split(separator: "-", maxSplits: 1).first.map(String.init) ?? value
+        let parts = core.split(separator: ".")
         guard parts.count == 3 else { return false }
         return parts.allSatisfy { Int($0) != nil }
     }
