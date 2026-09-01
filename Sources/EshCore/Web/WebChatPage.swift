@@ -49,7 +49,7 @@ public enum WebChatPage {
   .modelbtn{ font-size:13px; color:rgba(32,30,27,.8); padding:5px 10px; border-radius:7px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:5px; border:none; background:none; }
   .modelbtn:hover{ background:rgba(32,30,27,.05); }
   /* Layout */
-  .body{ flex:1; display:flex; min-height:0; }
+  .body{ flex:1; display:flex; min-height:0; position:relative; }
   .sidebar{ width:220px; border-right:1px solid rgba(32,30,27,.06); padding:14px 10px; display:flex; flex-direction:column; gap:2px; flex-shrink:0; overflow-y:auto; }
   .newchat{ display:flex; align-items:center; justify-content:center; gap:8px; padding:7px 12px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; border:1px solid var(--line2); margin-bottom:10px; background:none; }
   .newchat:hover{ background:rgba(32,30,27,.03); }
@@ -102,8 +102,8 @@ public enum WebChatPage {
   .radio{ width:14px; height:14px; border-radius:50%; box-sizing:border-box; flex-shrink:0; border:1.5px solid rgba(32,30,27,.3); }
   .radio.on{ border:4.5px solid var(--ink); }
   .sep{ height:1px; background:rgba(32,30,27,.07); margin:4px 0; }
-  /* Right panel (execution) */
-  .rightpanel{ width:340px; border-left:1px solid var(--line); overflow-y:auto; flex-shrink:0; background:var(--paper); }
+  /* Right panel (execution) — an overlay drawer so it never squeezes the chat at narrow widths */
+  .rightpanel{ position:absolute; top:0; right:0; bottom:0; width:340px; max-width:88vw; border-left:1px solid var(--line2); overflow-y:auto; background:var(--paper); z-index:45; box-shadow:-12px 0 36px rgba(32,30,27,.10); }
   .kv{ display:flex; justify-content:space-between; font-size:12.5px; } .kv .k{ color:var(--muted); }
   .panelhead{ display:flex; align-items:center; padding:16px 20px 12px; font-size:14px; font-weight:600; }
   /* Views: models + settings */
