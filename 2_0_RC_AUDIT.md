@@ -265,6 +265,40 @@ This is a genuine environment risk for building/packaging on this machine and is
   it now **hides `.incompatible` models by default** (6 hidden), still available via `--all`. A command
   named "recommended" no longer surfaces models that cannot run.
 
-**Next: Phases H–S. Several (H TTY, I live browser, J live mic, K clean machine, L migration, M SSD
-torture, P multi-hour stress) are environment-limited and will be built/hardened + unit-tested with
-the interactive gap labeled; N/O/Q/R (catalog, security/privacy, API/SemVer, docs) are verifiable.**
+---
+
+## 13. Phases H–S (2026-09-01)
+
+### Verifiable phases — DONE
+- **N (update/catalog):** `esh update check` verified notify-only (`autoInstall:false`, no
+  self-download/exec). ✅
+- **O (security/privacy):** `2_0_SECURITY_PRIVACY_REVIEW.md`; no telemetry, loopback-default,
+  bearer-token; implemented + verified body-size cap (spoofed huge Content-Length → 400) and
+  wildcard-bind warning. ✅
+- **Q (API/SemVer):** `2_0_API_SEMVER_CONTRACT.md` — stable HTTP/CLI/config surfaces, deprecation
+  policy. ✅
+- **R (docs):** `docs/ROADMAP_STATUS.md` rewritten to match reality. ✅
+- **P (stress, short):** `2_0_STRESS_REPORT.md` — 8 concurrent → all 200, stable, no orphans. ✅
+  (multi-hour soak env-limited)
+- **L (migration):** `2_0_MIGRATION_REPORT.md` — config/data forward-compat verified against a
+  months-old `~/.esh`. ✅ (packaged cross-version upgrade matrix env-limited)
+
+### Environment-limited phases — built + unit-tested, interactive gap labeled (never claimed verified)
+- **H (Terminal UX real TTY):** thinking parse, slash suggestions, status line are implemented and
+  unit-tested (`ThinkingParser`, `SlashCommandCatalog`, `TerminalStatusFormatting`). **Real TTY
+  interaction not exercised** (non-interactive session).
+- **I (Web Chat live browser):** server-side fully verified (`/web`, streaming, TTS, STT plumbing).
+  **Live browser rendering/interaction not exercised.**
+- **J (Speech production):** TTS verified (real WAV); STT endpoint/plumbing verified. **Real
+  transcription needs bundled `mlx_audio` (packaged binary); live mic capture is browser-side —
+  both env-limited.**
+- **K (fresh machine / clean user):** **not possible in this environment.** Onboarding/doctor code +
+  tests exist; a genuine clean-machine run is a pre-GA checklist item.
+- **M (external-SSD torture):** basic SSD use exercised (models on SSD, import, generation). The
+  **internal-disk-full `errno=28`** during linking is a real, documented risk. Multi-hour SSD torture
+  env-limited.
+
+### Phase S — release candidate
+See `2_0_RELEASE_REPORT.md` for the final gate, RC readiness, the exact cut steps, and the honest
+list of what an owner + real environment must still validate before GA. **The RC tag is an
+outward-facing publish and is left for the owner to cut** (version-story reconciliation + tag push).
