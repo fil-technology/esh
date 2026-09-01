@@ -209,7 +209,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, queue:[] };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -297,7 +297,8 @@ const ACT={
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
-  send:()=>send(), stop:()=>{ if(S.controller)S.controller.abort(); },
+  send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); },
+  removeQueued:(i)=>{ if(S.queue)S.queue.splice(+i,1); S.focusInput=true; render(); },
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ S.current=id; render(); },
@@ -462,6 +463,7 @@ function renderComposer(){
   const si=statusInfo();
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   c.innerHTML=`<div class="cbox">
+     ${(S.queue&&S.queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
        <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
@@ -481,8 +483,10 @@ function renderComposer(){
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
      ta.onkeydown=e=>{ if(e.key!=='Enter')return; const enterSends=S.prefs.sendEnter!==false;
-       if(enterSends&&!e.shiftKey){ e.preventDefault(); send(); }
-       else if(!enterSends&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); send(); } };
+       // Shift+Enter queues the message (auto-sends in order when the assistant is free).
+       if(e.shiftKey){ e.preventDefault(); enqueueDraft(); return; }
+       if(enterSends){ e.preventDefault(); send(); }
+       else if(e.metaKey||e.ctrlKey){ e.preventDefault(); send(); } };
      const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
      if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } }
      wireEffortSlider(); },0);
@@ -502,6 +506,13 @@ function wireEffortSlider(){ const sl=document.getElementById('effslider'); if(!
 }
 function updateSendState(){ const b=document.querySelector('#sendbtn'); if(!b)return; const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
   b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
+function renderQueue(){ let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
+  h+='<div style="font:500 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">Queued · '+S.queue.length+'</div>';
+  S.queue.forEach((q,i)=>{ h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px">
+    <span style="width:6px;height:6px;border-radius:50%;background:var(--faint);flex-shrink:0"></span>
+    <span style="flex:1;min-width:0;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(q)}</span>
+    <span class="iconbtn" data-act="removeQueued" data-arg="${i}" style="padding:2px;font-size:12px" title="Remove">✕</span></div>`; });
+  return h+'</div>'; }
 function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
   S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
     h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
@@ -944,8 +955,16 @@ async function send(){
   if(_rt){ clearTimeout(_rt); _rt=null; }   // drop any trailing throttle so it can't rebuild + steal focus
   S.streaming=false; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
   if(S.prefs.autoTts) speak(S.streamText);
+  // Process the next queued message, unless the user just hit Stop.
+  if(S._stopQueue){ S._stopQueue=false; } else { maybeSendQueue(); }
 }
 function sendText(t){ if(!t)return; const ta=document.querySelector('#input'); if(ta)ta.value=t; S.draft=t; send(); }
+// Message queue: Shift+Enter enqueues the draft; queued messages auto-send in order once the assistant
+// is free. Enqueuing while idle kicks off processing immediately (so a lone Shift+Enter still sends).
+function enqueueDraft(){ const ta=document.querySelector('#input'); const t=((ta?ta.value:S.draft)||'').trim(); if(!t)return;
+  S.queue=S.queue||[]; S.queue.push(t); S.draft=''; if(ta){ ta.value=''; ta.style.height='auto'; }
+  S.focusInput=true; render(); maybeSendQueue(); }
+function maybeSendQueue(){ if(S.streaming||S.controller)return; if(!S.queue||!S.queue.length)return; const next=S.queue.shift(); render(); sendText(next); }
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');

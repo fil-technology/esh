@@ -20,6 +20,9 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   the composer.
 
 ### Added
+- **Message queue.** Press **Shift+Enter** to queue a follow-up while the assistant is responding;
+  queued messages show as removable pills and auto-send in order once it's free (a manual **Stop** does
+  not auto-continue the queue).
 - **Faster voice replies.** The voice loop now streams the answer and synthesizes/plays it
   sentence-by-sentence, so speaking begins after the first sentence instead of after the whole reply
   (each sentence's TTS overlaps the previous one's playback). Time-to-first-audio drops from

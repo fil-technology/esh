@@ -179,6 +179,19 @@ struct WebChatPageTests {
     }
 
     @Test
+    func messageQueueEnqueuesOnShiftEnterAndAutoSends() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Shift+Enter enqueues; the queue auto-sends in order when the assistant is free.
+        #expect(html.contains("if(e.shiftKey){ e.preventDefault(); enqueueDraft(); return; }"))
+        #expect(html.contains("function enqueueDraft("))
+        #expect(html.contains("function maybeSendQueue("))
+        #expect(html.contains("function renderQueue("))
+        #expect(html.contains("removeQueued"))
+        // A manual Stop must not auto-continue the queue.
+        #expect(html.contains("S._stopQueue"))
+    }
+
+    @Test
     func chatsHaveRightClickRenameAndDelete() {
         let html = WebChatPage.html(toolVersion: nil)
         #expect(html.contains("addEventListener('contextmenu'"))
