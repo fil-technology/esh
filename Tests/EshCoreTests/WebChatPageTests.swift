@@ -68,6 +68,23 @@ struct WebChatPageTests {
     }
 
     @Test
+    func modelAndEffortControlsLiveInTheComposer() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // The model picker and effort control are chips in the composer (progressive disclosure at the
+        // point of use), not in the top-right header.
+        #expect(html.contains("class=\"cchip\" data-act=\"togglePicker\""))
+        #expect(html.contains("data-act=\"toggleEffort\""))
+        #expect(html.contains("function effortWord("))
+        #expect(html.contains("function renderEffort("))
+        // Effort is the reasoning control surfaced here: Off disables reasoning; Low/Medium/High reason.
+        #expect(html.contains("pickEffort"))
+        #expect(html.contains("Faster"))
+        #expect(html.contains("Smarter"))
+        // The header no longer carries a model button.
+        #expect(html.contains("class=\"modelbtn\"") == false)
+    }
+
+    @Test
     func contextualStatusLineSurfacesTheMomentAndOpensEngine() {
         let html = WebChatPage.html(toolVersion: nil)
         #expect(html.contains("function statusInfo("))

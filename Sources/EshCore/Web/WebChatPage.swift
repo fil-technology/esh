@@ -112,6 +112,13 @@ public enum WebChatPage {
   .cround:hover{ background:rgba(32,30,27,.05); }
   .cinput{ flex:1; border:none; outline:none; font-size:14px; background:transparent; color:var(--ink); resize:none; max-height:160px; line-height:1.4; }
   .send{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; flex-shrink:0; border:none; }
+  /* In-composer controls: model chip + effort chip + divider before mic/send (progressive disclosure lives here) */
+  .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(32,30,27,.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(32,30,27,.05); }
+  .cchip:hover{ background:rgba(32,30,27,.09); }
+  .cchip .chev{ font-size:8px; color:var(--faint); }
+  .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(32,30,27,.05); }
+  .cchip .lbl{ max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+  .cdiv{ width:1px; height:16px; background:var(--line2); flex-shrink:0; }
   .statusrow{ display:flex; justify-content:center; margin-top:8px; }
   .statusbtn{ display:flex; align-items:center; gap:7px; font:400 11px var(--mono); color:var(--muted); cursor:pointer; border:none; background:none; }
   .statusbtn:hover{ color:var(--ink); }
@@ -196,7 +203,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{} };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -265,6 +272,8 @@ const ACT={
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
   togglePicker:()=>{ closeAll('pickerOpen'); render(); },
+  toggleEffort:()=>{ closeAll('effortOpen'); render(); },
+  pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); render(); },
   toggleEngine:()=>{ closeAll('engineOpen'); if(S.engineOpen)refreshEngine(); render(); },
   toggleAttach:()=>{ closeAll('attachOpen'); render(); },
   pickModel:(v)=>{ S.modelSel=v; closeAll(); if(v==='Auto')refreshSchedule(); render(); },
@@ -302,14 +311,14 @@ const ACT={
   goPane:(p)=>{ S.settingsPane=p; render(); },
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
-function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; if(open)S[open]=true; }
+function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); if(!t)return; const a=t.getAttribute('data-act'); const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     if(S.detail){ S.detail=null; render(); }
     else if(S.execOpen){ S.execOpen=false; render(); }
-    else if(S.pickerOpen||S.engineOpen||S.attachOpen){ closeAll(); render(); }
+    else if(S.pickerOpen||S.engineOpen||S.attachOpen||S.effortOpen){ closeAll(); render(); }
     else if(S.voice){ ACT.endVoice(); }
     else if(S.view==='models'||S.view==='settings'){ S.view='chat'; render(); }
     return;
@@ -322,9 +331,10 @@ function renderChat(){
   const wrap=el('div',{cls:'app-inner'}); wrap.style.cssText='flex:1;display:flex;flex-direction:column;min-height:0';
   // top bar
   const tb=el('div',{cls:'topbar'});
+  // Header stays minimal: sidebar + brand + settings. The model picker and effort control live in the
+  // composer (progressive disclosure at the point of use), matching the approved design.
   tb.innerHTML=`<button class="iconbtn" data-act="toggleSidebar" title="Sidebar">${ICON.sidebar}</button>
     <span class="brand">esh</span><span class="sp"></span>
-    <button class="modelbtn" data-act="togglePicker">${esch(S.modelSel)}<span style="font-size:9px;color:var(--faint)">▾</span></button>
     <button class="iconbtn" data-act="openSettings" title="Settings">${ICON.settings}</button>`;
   wrap.appendChild(tb);
   const body=el('div',{cls:'body'});
@@ -334,7 +344,6 @@ function renderChat(){
   if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); }
   else main.appendChild(renderLog());
   main.appendChild(renderComposer());
-  if(S.pickerOpen) main.appendChild(renderPicker());
   if(S.engineOpen) main.appendChild(renderEngine());
   body.appendChild(main);
   if(S.execOpen) body.appendChild(renderExec());
@@ -407,15 +416,21 @@ function statusInfo(){
 function renderComposer(){
   const c=el('div',{cls:'composer'});
   const si=statusInfo();
+  const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   c.innerHTML=`<div class="cbox">
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
        <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
        <textarea class="cinput" id="input" rows="1" placeholder="Ask anything…"></textarea>
+       <button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
+       <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
+       <span class="cdiv"></span>
        <button class="cround" style="border:none" data-act="startVoice" title="Voice">${ICON.mic}</button>
        ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
+     ${S.pickerOpen?renderPicker():''}
+     ${S.effortOpen?renderEffort():''}
      <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
@@ -439,7 +454,7 @@ function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;m
   return h+'</div>'; }
 function renderAttach(){
   const note=S.modelSel==='Auto'?'Auto — resolved per request':S.modelSel;
-  return `<div class="pop" style="left:0;bottom:56px;width:230px;padding:6px 0">
+  return `<div class="pop" style="left:0;bottom:calc(100% + 10px);width:230px;padding:6px 0">
     <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:4px"></span>Photo or image</div>
     <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:2px"></span>Document or text</div>
     <div class="menurow" data-act="micUpload"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:50%"></span>Audio file (transcribe)</div>
@@ -451,7 +466,6 @@ function pickRow(label,sel,act,arg,right){
   return `<div class="pickrow ${sel?'sel':''}" data-act="${act}" data-arg="${esch(arg)}"><span>${esch(label)}</span><span class="sp" style="flex:1"></span>${right||''}${sel?'<span class="ck">✓</span>':''}</div>`;
 }
 function renderPicker(){
-  const p=el('div',{cls:'pop'}); p.style.cssText+='top:6px;right:48px;width:300px;padding:8px 0';
   const auto=S.modelSel==='Auto';
   // Auto card (same row family, roomier).
   let h=`<div class="pickrow ${auto?'sel':''}" style="padding:10px 12px;flex-direction:column;align-items:stretch;gap:2px" data-act="pickModel" data-arg="Auto">
@@ -468,9 +482,30 @@ function renderPicker(){
   h+='<div class="menuhead">Optimize for</div>';
   ['Balanced','Quality','Speed','Low Memory'].forEach(o=>{ h+=pickRow(o,o===S.optimize,'pickOptimize',o); });
   h+='<div class="sep"></div><div class="pickrow" data-act="openModels"><span>Browse models…</span></div><div class="pickrow" data-act="openModels"><span>Manage models…</span></div>';
-  p.innerHTML=h; return p;
+  return '<div class="pop" style="right:0;bottom:calc(100% + 10px);width:320px;padding:10px 0">'+h+'</div>';
 }
 function shortModel(id){ return id.replace(/^mlx-community--/,'').replace(/^bartowski--/,'').replace(/-4bit$/,'').replace(/-instruct/i,''); }
+// The effort chip is the reasoning control at the point of use — synced with Settings → Intelligence.
+// "Off" means reasoning off; Low/Medium/High mean reason (Auto), with the level as the effort.
+function effortWord(){ const r=S.prefs.reasoning||'Auto'; return r==='Off'?'Off':(S.prefs.effort||'Medium'); }
+function renderEffort(){
+  const stops=['Off','Low','Medium','High'], cur=effortWord();
+  const idx=cur==='Off'?0:{Low:1,Medium:2,High:3}[cur]; const pct=((idx+0.5)/4*100)+'%';
+  const hint={Off:'Answers immediately — no reasoning pass.',Low:'A quick reasoning pass for everyday questions.',Medium:'Balanced thinking time. The default.',High:'Takes noticeably longer to think. Best for hard problems.'}[cur];
+  let dots='',labels='';
+  stops.forEach(s=>{ dots+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="width:5px;height:5px;border-radius:50%;background:rgba(32,30,27,.25)"></span></div>`;
+    const on=s===cur; labels+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;text-align:center;font-size:10.5px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'};font-weight:${on?'600':'400'}">${s}</div>`; });
+  const inner=`<div style="display:flex;align-items:baseline;gap:9px"><span style="font-size:15px;font-weight:600">Effort</span><span style="font-size:13.5px;color:var(--muted)">${esch(cur)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:16px 0 4px"><span>Faster</span><span>Smarter</span></div>
+    <div style="position:relative;height:30px">
+      <div style="position:absolute;left:10px;right:10px;top:13px;height:4px;background:rgba(32,30,27,.1);border-radius:2px"></div>
+      <div style="position:absolute;inset:0;display:flex">${dots}</div>
+      <span style="position:absolute;top:4px;left:${pct};transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid rgba(32,30,27,.18);box-shadow:0 1px 5px rgba(32,30,27,.28);pointer-events:none;transition:left .15s"></span>
+    </div>
+    <div style="display:flex;margin-top:2px">${labels}</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;min-height:34px">${esch(hint)}</div>`;
+  return '<div class="pop" style="right:0;bottom:calc(100% + 10px);width:290px;padding:18px 20px;box-sizing:border-box">'+inner+'</div>';
+}
 function volLabel(path){ if(!path)return 'Model storage'; const m=path.match(/\/Volumes\/([^/]+)/); return m?m[1]:'Internal storage'; }
 function gb(bytes){ return (bytes/1073741824).toFixed(bytes<10737418240?1:0)+' GB'; }
 function renderEngine(){

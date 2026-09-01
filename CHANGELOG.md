@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.3] - 2026-09-01
+
+**Release candidate — composer redesign.** A behavioral/visual change after rc.2, so a new RC
+(rc.2 stays immutable).
+
+### Changed — composer (matches the approved v2 design)
+- **The model picker moved into the composer** as a chip (`Auto ▾`), and the top-right header is now
+  just sidebar + brand + settings. The picker popup opens upward, anchored to the composer.
+- **New Effort chip** beside it opens a Faster↔Smarter popover (Off / Low / Medium / High). It is the
+  reasoning control at the point of use, synced with Settings → Intelligence: **Off** disables the
+  reasoning pass; Low/Medium/High reason. This also fixes the mic/send controls looking orphaned in
+  the composer.
+
 ## [2.0.0-rc.2] - 2026-09-01
 
 **Release candidate — the approved 2.0 Web Experience.** A faithful, warm-paper redesign of `esh web`
