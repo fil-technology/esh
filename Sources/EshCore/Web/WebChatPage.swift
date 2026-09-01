@@ -42,7 +42,11 @@ public enum WebChatPage {
   @keyframes eshtype{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1);opacity:1}}
   @keyframes eshdot{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-4px);opacity:1}}
   /* Voice — full conversational loop (listening → thinking → speaking → listening) */
-  .voicewrap{ position:absolute; inset:0; background:var(--paper); display:flex; flex-direction:column; z-index:60; animation:eshfade .2s ease-out; }
+  /* Fade in only on ENTER (via .enter), never on every state change — otherwise the whole overlay
+     flashes transparent each listening→thinking→speaking transition. */
+  .voicewrap{ position:absolute; inset:0; background:var(--paper); display:flex; flex-direction:column; z-index:60; }
+  .voicewrap.enter{ animation:eshfade .22s ease-out; }
+  .vlabel,.vquote,.vanswer,.vlive{ animation:eshfade .18s ease-out; }
   .vstage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; padding:0 40px; }
   .vlabel{ font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
   .vlive{ font-size:17px; font-weight:500; line-height:1.5; max-width:560px; text-align:center; letter-spacing:-.01em; }
@@ -308,12 +312,12 @@ const ACT={
     if(S.current===id){ const rest=Object.values(S.chats).sort((a,b)=>b.created-a.created); if(rest.length){ S.current=rest[0].id; } else { newChat(); return; } }
     render(); },
   closeChatMenu:()=>{ S.chatMenu=null; render(); },
-  startVoice:()=>startVoice(),
+  startVoice:()=>{ if(S._micHold){ S._micHold=false; return; } S._voiceFadeIn=true; startVoice(); },
   endVoice:()=>{ endVoiceLoop(); render(); },
   voiceText:()=>{ endVoiceLoop(); S.focusInput=true; render(); },
   voiceFinish:()=>{ stopListening(); },
   voiceInterrupt:()=>{ clearVoiceReveal(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
-  voiceRetry:()=>startVoice(),
+  voiceRetry:()=>{ S._voiceFadeIn=true; startVoice(); },
   speak:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m)speak(m.content); },
   pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); render(); },
   toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
@@ -463,6 +467,7 @@ function renderComposer(){
   const si=statusInfo();
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   c.innerHTML=`<div class="cbox">
+     ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
      ${(S.queue&&S.queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
@@ -471,7 +476,7 @@ function renderComposer(){
        <button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
        <span class="cdiv"></span>
-       <button class="cround" style="border:none" data-act="startVoice" title="Voice">${ICON.mic}</button>
+       <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
        ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
@@ -489,7 +494,7 @@ function renderComposer(){
        else if(e.metaKey||e.ctrlKey){ e.preventDefault(); send(); } };
      const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
      if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } }
-     wireEffortSlider(); },0);
+     wireEffortSlider(); wireMicHold(); },0);
   return c;
 }
 // Effort slider: drag the knob (or click anywhere on the track) to change effort. Previews the knob
@@ -504,6 +509,34 @@ function wireEffortSlider(){ const sl=document.getElementById('effslider'); if(!
   const end=e=>{ if(!dragging)return; dragging=false; ACT.pickEffort(stops[idxFromX(e.clientX)]); };
   sl.onpointerup=end; sl.onpointercancel=end;
 }
+// Mic button: a quick tap opens voice mode (data-act click); pressing and holding records an audio clip
+// that is attached (playable) and, once sent, plays back in the chat.
+function wireMicHold(){ const mic=document.getElementById('micbtn'); if(!mic)return; let holdT=null;
+  mic.onpointerdown=e=>{ if(S._recording)return; S._recCancel=false; holdT=setTimeout(()=>{ holdT=null; startAudioRecording(); }, 380); };
+  const end=()=>{ if(holdT){ clearTimeout(holdT); holdT=null; return; }  // released before the long-press → normal tap (click opens voice)
+    S._micHold=true;  // a long-press happened: suppress the click that would open voice mode
+    if(S._recording) stopAudioRecording(); else S._recCancel=true; };
+  mic.onpointerup=end; mic.onpointerleave=end; mic.onpointercancel=end; }
+function fmtDur(ms){ const s=Math.max(0,Math.round(ms/1000)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+async function startAudioRecording(){
+  try{ const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    if(S._recCancel){ stream.getTracks().forEach(t=>t.stop()); S._recCancel=false; return; }  // released during arming
+    S._recStream=stream; S._recChunks=[]; const rec=new MediaRecorder(stream); S._recRec=rec;
+    rec.ondataavailable=e=>{ if(e.data&&e.data.size)S._recChunks.push(e.data); };
+    rec.onstop=()=>finishAudioRecording();
+    rec.start(); S._recording=true; S._recStart=performance.now(); render();
+    S._recTimer=setInterval(()=>{ const el=document.getElementById('rectime'); if(el)el.textContent=fmtDur(performance.now()-S._recStart); },250);
+  }catch(e){ S._recording=false; S._micHold=false; render(); }
+}
+function stopAudioRecording(){ try{ if(S._recRec&&S._recRec.state!=='inactive')S._recRec.stop(); }catch(e){} }
+function finishAudioRecording(){
+  if(S._recTimer){ clearInterval(S._recTimer); S._recTimer=null; }
+  if(S._recStream){ S._recStream.getTracks().forEach(t=>t.stop()); S._recStream=null; }
+  const dur=performance.now()-(S._recStart||performance.now());
+  const blob=new Blob(S._recChunks||[],{type:(S._recRec&&S._recRec.mimeType)||'audio/webm'});
+  const r=new FileReader(); r.onload=()=>{ S.pendingAtts.push({kind:'audio', name:'Recording', size:fmtDur(dur), mime:blob.type, dataURL:r.result});
+    S._recording=false; S.focusInput=true; render(); }; r.readAsDataURL(blob);
+}
 function updateSendState(){ const b=document.querySelector('#sendbtn'); if(!b)return; const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
   b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
 function renderQueue(){ let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
@@ -515,10 +548,18 @@ function renderQueue(){ let h='<div style="display:flex;flex-direction:column;ga
   return h+'</div>'; }
 function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
   S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
-    h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
-      <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
-      <span style="min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${esch(a.name)}</div><div class="mono" style="font-size:10.5px;color:var(--muted)">${esch(a.size||'')}</div></span>
-      <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`; });
+    if(a.kind==='audio'){
+      // A recorded/attached audio clip — playable right in the composer before sending.
+      h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 8px">
+        <span style="width:26px;height:26px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
+        <audio controls src="${a.dataURL}" style="height:32px;max-width:220px"></audio>
+        <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
+    } else {
+      h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
+        <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
+        <span style="min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${esch(a.name)}</div><div class="mono" style="font-size:10.5px;color:var(--muted)">${esch(a.size||'')}</div></span>
+        <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
+    } });
   return h+'</div>'; }
 function renderAttach(){
   const note=S.modelSel==='Auto'?'Auto — resolved per request':S.modelSel;
@@ -856,7 +897,7 @@ function renderOnboarding(){
 
 /* ---------- voice (full conversational loop) ---------- */
 function renderVoice(){
-  const v=el('div',{cls:'voicewrap'});
+  const v=el('div',{cls:'voicewrap'+(S._voiceFadeIn?' enter':'')}); S._voiceFadeIn=false;
   if(S.voice==='error'){
     v.innerHTML=`<div class="vstage"><div style="max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px">
       <span style="width:52px;height:52px;border-radius:50%;background:rgba(32,30,27,.05);display:flex;align-items:center;justify-content:center;color:rgba(32,30,27,.55)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/><path d="M4 4l16 16"/></svg></span>

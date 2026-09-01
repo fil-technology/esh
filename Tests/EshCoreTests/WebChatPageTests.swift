@@ -179,6 +179,29 @@ struct WebChatPageTests {
     }
 
     @Test
+    func voiceOverlayFadesOnEnterNotOnEveryStateChange() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // The fade-in is gated to an .enter class set only on entry, so the whole overlay does not
+        // flash transparent on each listening→thinking→speaking transition.
+        #expect(html.contains(".voicewrap.enter{ animation:eshfade"))
+        #expect(html.contains("S._voiceFadeIn"))
+        // Base .voicewrap must NOT carry the animation itself.
+        #expect(html.contains(".voicewrap{ position:absolute; inset:0; background:var(--paper); display:flex; flex-direction:column; z-index:60; }"))
+    }
+
+    @Test
+    func micLongPressRecordsAPlayableAudioAttachment() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Hold the mic to record; the clip attaches and plays in the composer and in the chat.
+        #expect(html.contains("function wireMicHold("))
+        #expect(html.contains("function startAudioRecording("))
+        #expect(html.contains("hold to record audio"))
+        #expect(html.contains("release to attach"))
+        // Audio attachments render an inline <audio> player (composer chip + sent bubble).
+        #expect(html.contains("<audio controls src=\"${a.dataURL}\""))
+    }
+
+    @Test
     func messageQueueEnqueuesOnShiftEnterAndAutoSends() {
         let html = WebChatPage.html(toolVersion: nil)
         // Shift+Enter enqueues; the queue auto-sends in order when the assistant is free.
