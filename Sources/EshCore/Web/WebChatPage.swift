@@ -233,6 +233,7 @@ const ACT={
   pickOptimize:(v)=>{ S.optimize=v; refreshSchedule(); render(); },
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
+  copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ if(S.controller)S.controller.abort(); },
   switchChat:(id)=>{ S.current=id; render(); },
   startVoice:()=>{ S.voice='listening'; render(); },
@@ -390,21 +391,33 @@ function renderEngine(){
 function renderExec(){
   const m=cur()?cur().messages.find(x=>x.id===S.execMsgId):null;
   const p=el('div',{cls:'rightpanel'});
-  const sch=S.schedule||{}; const why=(sch.rationale||[]);
+  const ex=m&&m.exec||{}; const pr=ex.profile||{}; const sch=ex.schedule||{}; const why=(sch.rationale||[]);
+  const src=ex.profile?'server':'measured in-browser';
   let h=`<div class="panelhead">Execution<span class="sp" style="flex:1"></span><span class="iconbtn" data-act="closeExec" style="font-size:13px">✕</span></div>
     <div style="padding:0 20px 8px;display:flex;flex-direction:column;gap:9px">`;
-  const ex=m&&m.exec||{};
-  h+=kvrow('Model',ex.model||shortModel(sch.selectedModelID||S.modelSel));
-  h+=kvrow('Backend',ex.backend||sch.backend||'—',true);
-  h+=kvrow('Mode','Auto · '+S.optimize);
+  h+=kvrow('Model',ex.model||shortModel(S.modelSel));
+  h+=kvrow('Backend',ex.backend||'—',true);
+  h+=kvrow('Mode',(ex.schedule?('Auto · '+(ex.optimize||'Balanced')):'Manual'));
+  if(ex.ttftMs) h+=kvrow('Time to first token',ex.ttftMs+' ms',true);
+  h+=kvrow('Total time',((ex.totalMs||0)/1000).toFixed(1)+' s',true);
   if(ex.tps) h+=kvrow('Generation',ex.tps.toFixed(0)+' tok/s',true);
-  if(ex.tokens) h+=kvrow('Tokens',ex.tokens,true);
-  if(m&&m.meta) h+=kvrow('Latency',m.meta);
-  h+=`</div><div style="margin:10px 20px 0;border-top:1px solid rgba(32,30,27,.07);padding:14px 0 4px;font-size:13px;font-weight:600">Why this model?</div>
+  h+=kvrow('Output tokens',ex.outTok||'—',true);
+  if(pr.inputTokens!=null) h+=kvrow('Input tokens',pr.inputTokens,true);
+  if(pr.reasoningTokens!=null) h+=kvrow('Reasoning tokens',pr.reasoningTokens,true);
+  if(pr.cachedTokens!=null) h+=kvrow('Cached tokens',pr.cachedTokens,true);
+  if(pr.contextTokens!=null) h+=kvrow('Context',pr.contextTokens+(pr.contextWindow?(' / '+pr.contextWindow):''),true);
+  if(pr.residency) h+=kvrow('Residency',pr.residency);
+  if(pr.promptCache) h+=kvrow('Prompt cache',pr.promptCache);
+  if(pr.optimization||sch.performanceMode) h+=kvrow('Optimizer',pr.optimization||sch.performanceMode);
+  h+=`<div style="font:400 10.5px var(--mono);color:var(--faint);margin-top:2px">${src} · $0 · on-device</div>`;
+  h+='</div>';
+  h+=`<div style="margin:10px 20px 0;border-top:1px solid rgba(32,30,27,.07);padding:14px 0 4px;font-size:13px;font-weight:600">Why this model?</div>
      <div style="padding:6px 20px 14px;display:flex;flex-direction:column;gap:7px;font-size:12.5px;line-height:1.45;color:rgba(32,30,27,.8)">`;
-  why.slice(0,6).forEach(r=>{ h+=`<div style="display:flex;gap:8px"><span>·</span>${esch(r)}</div>`; });
-  if(!why.length) h+='<div style="color:var(--muted)">Select Auto to see the scheduler rationale.</div>';
-  h+='</div>'; p.innerHTML=h; return p;
+  if(why.length){ why.slice(0,6).forEach(r=>{ h+=`<div style="display:flex;gap:8px"><span>·</span>${esch(r)}</div>`; }); }
+  else h+='<div style="color:var(--muted)">This response used the model you selected manually.</div>';
+  h+='</div>';
+  if(ex.profile) h+=`<div class="menurow" style="border-top:1px solid rgba(32,30,27,.07);font:400 11px var(--mono)" data-act="copyExec" data-arg="${m.id}">Copy ExecutionProfile JSON</div>`;
+  p.innerHTML=h; return p;
 }
 function kvrow(k,v,mono){ return `<div class="kv"><span class="k">${k}</span><span ${mono?'class="mono" style="font-size:12px"':''}>${esch(String(v))}</span></div>`; }
 
@@ -556,23 +569,33 @@ async function send(){
   S.controller=new AbortController(); const t0=performance.now();
   const msgs=c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content}));
   const body={ model: resolved==='Auto'?undefined:resolved, messages:msgs, stream:true, max_tokens:2048 };
-  let truncated=false;
+  let truncated=false, ttft=0, execProfile=null;
   try{
     const resp=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},signal:S.controller.signal,body:JSON.stringify(body)});
     if(!resp.ok||!resp.body){ S.streamText='error: HTTP '+resp.status; }
     else{ const rd=resp.body.getReader(),dec=new TextDecoder(); let buf='';
       while(true){ const {value,done}=await rd.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
         for(const line of lines){ const s=line.trim(); if(!s.startsWith('data:'))continue; const d=s.slice(5).trim(); if(d==='[DONE]')continue;
-          try{ const j=JSON.parse(d); if(j.choices&&j.choices[0]&&j.choices[0].finish_reason==='length')truncated=true;
-            const del=j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content||''; if(del){ S.streamText+=del;
+          try{ const j=JSON.parse(d); if(j.esh_execution){ execProfile=j.esh_execution; continue; }
+            if(j.choices&&j.choices[0]&&j.choices[0].finish_reason==='length')truncated=true;
+            const del=j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content||''; if(del){ if(!ttft)ttft=performance.now()-t0; S.streamText+=del;
               if(S.streamThinkMs===undefined&&reasoning&&S.streamText.includes('</think>'))S.streamThinkMs=(performance.now()-t0)/1000;
               throttleRender(); } }catch(e){} } } }
   }catch(e){ if(e.name!=='AbortError') S.streamText+='\n[error] '+e.message; }
-  const secs=((performance.now()-t0)/1000).toFixed(1);
+  const totalMs=performance.now()-t0; const secs=(totalMs/1000).toFixed(1);
   const auto=S.modelSel==='Auto';
+  // Per-response execution truth: prefer the server's real ExecutionProfile (esh_execution event);
+  // fall back to client-measured timing. Snapshot the scheduler decision that actually ran.
+  const answerLen=(splitThink(S.streamText).answer||S.streamText).length;
+  const outTok=execProfile&&execProfile.outputTokens||Math.max(1,Math.round(S.streamText.length/4));
+  const genMs=Math.max(1,totalMs-(ttft||0));
+  const exec={ model:shortModel(resolved||S.modelSel), fullModel:resolved||S.modelSel,
+    backend:(execProfile&&execProfile.backend)||(S.schedule&&S.schedule.backend)||'',
+    ttftMs:Math.round(ttft), totalMs:Math.round(totalMs), outTok:outTok,
+    tps:execProfile&&execProfile.tokensPerSecond||(outTok/(genMs/1000)),
+    profile:execProfile, schedule:auto?S.schedule:null, optimize:S.optimize };
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
-    meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''),
-    exec:{model:shortModel(resolved||S.modelSel),backend:(S.schedule&&S.schedule.backend)||''}});
+    meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''), exec:exec});
   S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render();
   if(S.prefs.autoTts) speak(S.streamText);
 }
