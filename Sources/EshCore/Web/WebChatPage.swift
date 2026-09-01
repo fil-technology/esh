@@ -176,7 +176,7 @@ function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}c
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function cur(){ return S.chats[S.current]; }
-function newChat(){ const id=uid(); S.chats[id]={id,title:"New chat",messages:[],created:Date.now()}; S.current=id; saveChats(); render(); }
+function newChat(){ const id=uid(); S.chats[id]={id,title:"New chat",messages:[],created:Date.now()}; S.current=id; S.pendingAtts=[]; S.draft=''; S.focusInput=true; saveChats(); render(); }
 
 /* ---------- API ---------- */
 async function api(path){ try{ const r=await fetch(path); if(!r.ok) return null; return await r.json(); }catch(e){ return null; } }
@@ -245,6 +245,7 @@ const ACT={
   closeDetail:()=>{ S.detail=null; render(); },
   install:(id)=>{ ACT.openDetail(id); },
   attach:()=>{ document.getElementById('filepick').click(); S.attachOpen=false; render(); },
+  removeAtt:(i)=>{ S.pendingAtts.splice(+i,1); render(); },
   micUpload:()=>micUpload(),
   toggleTts:()=>{ S.prefs.autoTts=!S.prefs.autoTts; savePrefs(); render(); }
 };
@@ -318,19 +319,33 @@ function renderComposer(){
   const c=el('div',{cls:'composer'});
   const eng=S.engine; const statusLabel=eng?(eng.status==='ok'?'Local · Private · Ready':'Local · Degraded'):'Local · …';
   c.innerHTML=`<div class="cbox">
-     <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
-     <textarea class="cinput" id="input" rows="1" placeholder="Ask anything…"></textarea>
-     <button class="cround" style="border:none" data-act="startVoice" title="Voice">${ICON.mic}</button>
-     ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:`<button class="send" id="sendbtn" data-act="send" title="Send" style="background:var(--ink)">${ICON.up}</button>`}
+     ${S.pendingAtts.length?renderChips():''}
+     <div style="display:flex;align-items:center;gap:10px">
+       <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
+       <textarea class="cinput" id="input" rows="1" placeholder="Ask anything…"></textarea>
+       <button class="cround" style="border:none" data-act="startVoice" title="Voice">${ICON.mic}</button>
+       ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+     </div>
      ${S.attachOpen?renderAttach():''}
-     <input type="file" id="filepick" accept="image/*,audio/*" multiple style="display:none">
+     <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine"><span class="dot"></span>${esch(statusLabel)}</button></div>`;
-  setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||''; ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; };
+  setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
+     ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
      ta.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } };
-     const fp=$('#filepick'); if(fp) fp.onchange=onFiles; } },0);
+     const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
+     if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } } },0);
   return c;
 }
+function updateSendState(){ const b=document.querySelector('#sendbtn'); if(!b)return; const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
+  b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
+function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
+  S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
+    h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
+      <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
+      <span style="min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${esch(a.name)}</div><div class="mono" style="font-size:10.5px;color:var(--muted)">${esch(a.size||'')}</div></span>
+      <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`; });
+  return h+'</div>'; }
 function renderAttach(){
   const note=S.modelSel==='Auto'?'Auto — resolved per request':S.modelSel;
   return `<div class="pop" style="left:0;bottom:56px;width:230px;padding:6px 0">
@@ -501,12 +516,13 @@ function renderOnboarding(){
       <div style="font-size:21px;font-weight:600;margin-top:4px">${esch(host.chipDescription||'Apple Silicon')}</div>
       <div style="font-size:13.5px;color:var(--muted)">${host.totalMemoryGB||'?'} GB unified memory</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:20px;font-size:13px">
-        ${apple?'<div style="display:flex;gap:9px"><span>✓</span>Apple Intelligence available</div>':''}
-        ${eng.map(x=>`<div style="display:flex;gap:9px"><span>${x.ready?'✓':'○'}</span>${x.id} ${x.ready?'ready':'not detected'}</div>`).join('')}</div>
+        ${apple?'<div style="display:flex;gap:9px;align-items:center"><span style="color:var(--ink)">✓</span>Apple Intelligence available</div>':''}
+        ${eng.filter(x=>x.ready).map(x=>`<div style="display:flex;gap:9px;align-items:center"><span style="color:var(--ink)">✓</span>${esch(x.id)} ready</div>`).join('')}
+        ${(S.engine&&S.engine.storage&&S.engine.storage.external)?`<div style="display:flex;gap:9px;align-items:center"><span style="color:var(--ink)">✓</span>${esch(S.engine.storage.label||'External SSD')} detected</div>`:''}</div>
       <button class="btn" style="margin-top:24px" onclick="S.onbStep=2;render()">Continue</button></div>`; }
   else { v.innerHTML=`<div style="width:380px"><div style="font-size:17px;font-weight:600;margin-bottom:16px">You're ready</div>
       <div style="font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:18px">Apple Intelligence gives you a zero-download start. Browse and install local models any time from the model picker.</div>
-      <button class="btn" onclick="S.view='chat';S.onbStep=0;render()">Start chatting</button></div>`; }
+      <button class="btn" onclick="S.prefs.onboarded=true;savePrefs();S.view='chat';S.onbStep=0;S.focusInput=true;render()">Start chatting</button></div>`; }
   return v;
 }
 
@@ -571,7 +587,10 @@ let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null
 async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return;
   try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:clean.slice(0,2000)})});
     if(!r.ok)return; const b=await r.blob(); new Audio(URL.createObjectURL(b)).play(); }catch(e){} }
-function onFiles(e){ for(const f of e.target.files){ const r=new FileReader(); r.onload=()=>{ const kind=f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':'other'; S.pendingAtts.push({kind,name:f.name,dataURL:r.result}); }; r.readAsDataURL(f); } e.target.value=''; }
+function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+function onFiles(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;
+  files.forEach(f=>{ const r=new FileReader(); r.onload=()=>{ const kind=f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':'document';
+    S.pendingAtts.push({kind,name:f.name,size:fmtSize(f.size),mime:f.type,dataURL:r.result}); if(--pending===0)render(); }; r.readAsDataURL(f); }); e.target.value=''; }
 function micUpload(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='audio/*';
   inp.onchange=async ev=>{ const f=ev.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=async()=>{ try{ const resp=await fetch('/v1/audio/transcriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:r.result.split(',')[1],filename:f.name})}); if(resp.ok){ const d=await resp.json(); const ta=$('#input'); if(ta){ta.value+=(d.text||'');S.draft=ta.value;} } }catch(e){} }; r.readAsDataURL(f); }; inp.click(); }
 
@@ -579,6 +598,9 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 /* ---------- boot ---------- */
 loadChats(); loadPrefs();
 if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id;
+S.focusInput=true;
+// First run (no prior prefs and no history) → show onboarding once, then remember.
+if(!S.prefs.onboarded && Object.values(S.chats).every(c=>!c.messages.length)){ S.view='onboarding'; S.onbStep=0; }
 refreshModels(); refreshEngine(); refreshSchedule();
 render();
 </script>
