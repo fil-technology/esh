@@ -215,13 +215,18 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ const app=$('#app'); app.innerHTML='';
+function render(){ renderView(); a11yPass(); }
+function renderView(){ const app=$('#app'); app.innerHTML='';
   if(S.view==='onboarding'){ app.appendChild(renderOnboarding()); return; }
   if(S.view==='models'){ app.appendChild(renderModels()); if(S.detail) app.appendChild(renderDetail()); return; }
   if(S.view==='settings'){ app.appendChild(renderSettings()); return; }
   app.appendChild(renderChat());
   if(S.voice) app.appendChild(renderVoice());
 }
+// Make non-native interactive controls reachable + labeled for keyboard and screen-reader users.
+function a11yPass(){ document.querySelectorAll('[data-act]').forEach(e=>{ if(e.tagName!=='BUTTON'&&e.tagName!=='A'){
+    if(!e.hasAttribute('tabindex'))e.setAttribute('tabindex','0'); if(!e.hasAttribute('role'))e.setAttribute('role','button'); }
+  if(!e.getAttribute('aria-label')){ const t=e.getAttribute('title')||e.textContent.trim(); if(t)e.setAttribute('aria-label',t.slice(0,60)); } }); }
 function el(tag,attrs,html){ const e=document.createElement(tag); if(attrs) for(const k in attrs){ if(k==='cls')e.className=attrs[k]; else if(k==='on')e.onclick=attrs[k]; else e.setAttribute(k,attrs[k]); } if(html!=null)e.innerHTML=html; return e; }
 
 /* ---------- action delegation (thin client: handlers are named, wired by data-act) ---------- */
@@ -262,6 +267,18 @@ const ACT={
 };
 function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); if(!t)return; const a=t.getAttribute('data-act'); const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
+// Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(S.detail){ S.detail=null; render(); }
+    else if(S.execOpen){ S.execOpen=false; render(); }
+    else if(S.pickerOpen||S.engineOpen||S.attachOpen){ closeAll(); render(); }
+    else if(S.voice){ ACT.endVoice(); }
+    else if(S.view==='models'||S.view==='settings'){ S.view='chat'; render(); }
+    return;
+  }
+  if((e.key==='Enter'||e.key===' ')){ const t=document.activeElement; if(t&&t.getAttribute&&t.getAttribute('data-act')&&t.tagName!=='TEXTAREA'&&t.tagName!=='INPUT'){ e.preventDefault(); const a=t.getAttribute('data-act'); if(ACT[a])ACT[a](t.getAttribute('data-arg')); } }
+});
 
 /* ---------- chat view ---------- */
 function renderChat(){
