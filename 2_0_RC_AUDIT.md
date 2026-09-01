@@ -242,4 +242,29 @@ one point). A link step failed with `ld: write() failed, errno=28 (No space left
 removed **my own** downloaded scratch GGUF (the imported SSD copy was retained; no user data touched).
 This is a genuine environment risk for building/packaging on this machine and is flagged for Phase M/P.
 
-**Next: Phase E — persistent residency hardening; Phase F — scheduler real-scenario validation.**
+---
+
+## 12. Phases E / F / G (2026-09-01) — validated on real runtime
+
+### Phase E — persistent MLX residency → **verified**
+- Cold request: **1.81 s**; warm/resident request: **0.18 s** → **~10× warm speedup** (weights stay
+  resident across requests via the `mlx-serve` worker).
+- Worker runs as a child of the server (`python …/mlx_vlm_bridge.py mlx-serve`).
+- **No orphans:** killing the server leaves zero bridge processes (clean stdin-EOF shutdown).
+
+### Phase F — scheduler real-scenario validation → **verified**
+- `esh schedule --goal general --quality high` selected `llama-3.2-3b` and **explicitly skipped the
+  broken qwen3.5**: *"skipped mlx-community--qwen3.5-9b-mlx-4bit: your benchmark measured it as failing
+  to run on this Mac (catalog lists it, measured evidence overrides)."*
+- Measured-evidence routing is real (benchmark lab: quality 5/5, ~106 tok/s for the picked model) and
+  is a second, independent safety net over the Phase B catalog gating.
+
+### Phase G — recommendation validation → **verified + hardened**
+- `esh schedule`/`--for-this-mac` use `recommend()` which already excludes `.incompatible`.
+- Hardened the plain `esh model recommended` listing (was `list()`-based, showing incompatible rows):
+  it now **hides `.incompatible` models by default** (6 hidden), still available via `--all`. A command
+  named "recommended" no longer surfaces models that cannot run.
+
+**Next: Phases H–S. Several (H TTY, I live browser, J live mic, K clean machine, L migration, M SSD
+torture, P multi-hour stress) are environment-limited and will be built/hardened + unit-tested with
+the interactive gap labeled; N/O/Q/R (catalog, security/privacy, API/SemVer, docs) are verifiable.**

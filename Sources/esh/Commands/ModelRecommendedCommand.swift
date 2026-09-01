@@ -77,8 +77,17 @@ enum ModelRecommendedCommand {
 
         let profile = try profileValue.map(resolveProfile)
         let tier = try tierValue.map(resolveTier)
-        let models = service.listRecommended(profile: profile, tier: tier, backend: backend, tag: tag)
+        let all = service.listRecommended(profile: profile, tier: tier, backend: backend, tag: tag)
+        // A command named "recommended" must not surface models that cannot run. Hide
+        // `.incompatible` entries by default (they stay visible with `--all` for transparency).
+        let showAll = arguments.contains("--all")
+        let models = showAll ? all : all.filter { $0.status != .incompatible }
         printTable(models)
+        let hidden = all.count - models.count
+        if hidden > 0 {
+            print("")
+            print("(\(hidden) model(s) hidden as incompatible with the current runtime — show them with `--all`)")
+        }
     }
 
     /// Whether a --profile value is a hardware-aware use case that is NOT one of the legacy
