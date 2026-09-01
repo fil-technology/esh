@@ -17,6 +17,11 @@ rc.4; no engine or packaging changes (the rc.4 GGUF fix stands).
   folder to rename or delete it (deleting a folder returns its chats to Recent, never deletes them).
 - **Inline rename.** Renaming a chat or folder now edits the title **in place** — a focused input,
   Enter to commit, Escape to cancel — instead of a popup dialog.
+- **Mini read-aloud player.** Playing a message aloud now shows a compact player above the composer —
+  a synth/loading state, play/pause, a live progress bar, and a stop button.
+- **Audio transcription is shown as a caption.** A sent voice clip shows a "Transcribing…" indicator
+  while speech-to-text runs, then its transcription appears as a muted caption under the clip — clearly
+  distinct from text you typed. (The model still receives the transcript.)
 
 ### Changed — web chat
 - **Assistant replies no longer speak automatically.** Text chat was auto-playing every response as
@@ -35,6 +40,10 @@ rc.4; no engine or packaging changes (the rc.4 GGUF fix stands).
   the entrance animation can't shift it sideways.
 - **Streaming cursor sits inline.** The blinking cursor now appears at the end of the last line of the
   streaming reply instead of dropping onto its own line below the text.
+- **A model that can't load now shows a friendly card.** When a selected model fails to load (for
+  example its files are no longer on disk), the chat shows a clear "This model isn't available" card
+  with **Try again** / **Continue with Auto** — instead of a raw `[error]` line rendered as a normal
+  reply (with a read-aloud button).
 
 ## [2.0.0-rc.4] - 2026-09-01
 

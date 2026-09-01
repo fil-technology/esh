@@ -395,4 +395,46 @@ struct WebChatPageTests {
         let html = WebChatPage.html(toolVersion: nil)
         #expect(html.contains(".userbubble{ background:var(--userbubble); border-radius:13px; padding:6px 13px;"))
     }
+
+    // Soak (rc.5): a model that fails to load (e.g. files missing) streams an
+    // "[error] …" reply; it renders as the friendly error card, not a normal
+    // message with a read-aloud button.
+    @Test
+    func modelLoadErrorsRenderAsAFriendlyCard() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("rawAns.match(/^\\[error\\]"))
+        #expect(html.contains("This model isn’t available"))
+        #expect(html.contains("install path does not exist"))
+        // Uses the isError card path (with Try again / Continue with Auto).
+        #expect(html.contains("isError:true, model:shortModel(resolved||S.modelSel), lastUser:text"))
+    }
+
+    // Soak (rc.5): a sent audio clip shows a "Transcribing…" indicator, then its
+    // transcription as a caption (not as text the user typed); the model still
+    // receives the transcript.
+    @Test
+    func audioTranscriptionShowsAsACaptionWithIndicator() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("userMsg.transcribing=true"))
+        #expect(html.contains("Transcribing…"))
+        #expect(html.contains("class=\"transcap"))
+        #expect(html.contains("userMsg.transcript=tr"))
+        // attText feeds the transcript to the model.
+        #expect(html.contains("if(m.transcript&&m.transcript.trim()) s+=m.transcript.trim();"))
+    }
+
+    // Soak (rc.5): read-aloud shows a mini player above the composer — loading,
+    // play/pause, progress, and stop.
+    @Test
+    func readAloudHasAMiniPlayerAboveTheComposer() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function renderMiniPlayer()"))
+        #expect(html.contains("class=\"miniplayer\""))
+        #expect(html.contains("data-act=\"speakToggle\""))
+        #expect(html.contains("data-act=\"speakStop\""))
+        #expect(html.contains("id=\"mpfill\""))
+        #expect(html.contains("function updateMiniProgress("))
+        // It's rendered as part of the composer.
+        #expect(html.contains("${renderMiniPlayer()}<div class=\"cbox\">"))
+    }
 }

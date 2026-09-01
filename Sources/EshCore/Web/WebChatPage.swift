@@ -132,6 +132,8 @@ public enum WebChatPage {
   .asttext img{ max-width:100%; border-radius:10px; margin:6px 0; display:block; } .asttext audio{ width:100%; margin:6px 0; }
   .userbubble img{ max-width:220px; border-radius:10px; margin:2px 0 6px; display:block; } .userbubble audio{ width:220px; margin:2px 0 6px; }
   .attwrap{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+  .transcap{ font-size:12.5px; color:var(--muted); line-height:1.45; font-style:italic; padding-top:2px; }
+  .transcap.loading{ display:flex; align-items:center; gap:8px; font-style:normal; color:var(--faint); }
   .attpill{ display:flex; align-items:center; gap:8px; background:var(--paper); border:1px solid var(--line2); border-radius:9px; padding:6px 10px 6px 6px; }
   .attpill .ai{ width:26px; height:26px; border-radius:6px; background:var(--ink); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .attpill .an{ display:flex; flex-direction:column; min-width:0; } .attpill .an b{ font-size:12px; font-weight:600; max-width:170px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -156,6 +158,16 @@ public enum WebChatPage {
   .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(32,30,27,.7); margin-top:5px; }
   /* Composer */
   .composer{ padding:0 24px 10px; flex-shrink:0; position:relative; }
+  .miniplayer{ display:flex; align-items:center; gap:10px; padding:8px 12px; margin-bottom:8px; border:1px solid var(--line2); border-radius:12px; background:var(--paper); box-shadow:0 2px 10px rgba(32,30,27,.05); }
+  .mpbtn{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex-shrink:0; border:none; border-radius:8px; background:var(--panel2); color:var(--ink); cursor:pointer; padding:0; }
+  .mpbtn:hover{ background:rgba(32,30,27,.08); }
+  .mpmeta{ flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .mplbl{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mptrack{ height:4px; border-radius:2px; background:rgba(32,30,27,.10); overflow:hidden; }
+  .mpfill{ height:100%; width:0%; background:var(--ink); border-radius:2px; }
+  .mptime{ font-size:11px; color:var(--faint); flex-shrink:0; }
+  .mpspin{ width:16px; height:16px; flex-shrink:0; box-sizing:border-box; border:2px solid rgba(32,30,27,.15); border-top-color:var(--ink); border-radius:50%; animation:eshspin .7s linear infinite; margin:7px; }
+  @keyframes eshspin{ to{ transform:rotate(360deg); } }
   /* Fade the thread out as it scrolls under the composer (transparent → paper) */
   .composer::before{ content:''; position:absolute; left:0; right:0; top:-54px; height:54px; background:linear-gradient(to bottom, rgba(251,250,248,0), var(--paper) 82%); pointer-events:none; }
   /* Small screens: the chat sidebar and the settings category list overlay the view (with a backdrop)
@@ -269,6 +281,8 @@ const ICON={
   queue:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11"/><path d="M4 12h9"/><path d="M4 17h7"/><path d="M18 13v7"/><path d="M14.5 16.5h7"/></svg>',
   keyboard:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="7" width="18" height="11" rx="2.5"/><path d="M7 11h.5"/><path d="M11.75 11h.5"/><path d="M16.5 11h.5"/><path d="M8 14.5h8"/></svg>',
   xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>',
+  play:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>',
+  pause:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
   speaker:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
   folder:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   folderPlus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>',
@@ -461,6 +475,8 @@ const ACT={
   voiceInterrupt:()=>{ clearVoiceReveal(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
   voiceRetry:()=>{ S._voiceFadeIn=true; startVoice(); },
   speakMsg:(id)=>{ const c=cur(); const m=c&&c.messages.find(x=>x.id===id); if(!m)return; if(S._speakId===id){ stopSpeak(); render(); } else { speakMessage(m); } },
+  speakToggle:()=>{ const a=S._speakAudio; if(!a)return; if(a.paused)a.play().catch(()=>{}); else a.pause(); render(); },
+  speakStop:()=>{ stopSpeak(); render(); },
   pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); render(); },
   toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
   pickTtsModel:(id)=>{ S.voiceDrop=null; postConfig({ttsModel:id}).then(()=>render()); render(); },
@@ -656,7 +672,12 @@ function renderMsg(m){
       else if(x.kind==='audio')a+=`<div style="margin:2px 0 6px">${audioPlayer(x.dataURL,(m.id||'m')+'-'+ix)}</div>`;
       else a+=`<div class="attpill"><span class="ai"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></span><span class="an"><b>${esch(x.name||'file')}</b><span class="mono" style="font-size:10px;color:var(--muted)">${esch(x.size||'')}</span></span></div>`;
     });
-    const body=(a?`<div class="attwrap">${a}</div>`:'')+(m.content?md(m.content):'');
+    // Audio: a "Transcribing…" indicator while STT runs, then the transcription as
+    // a muted caption — distinct from text the user actually typed.
+    const cap = m.transcribing
+      ? `<div class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>Transcribing…</div>`
+      : (m.transcript ? `<div class="transcap">${esch(m.transcript)}</div>` : '');
+    const body=(a?`<div class="attwrap">${a}</div>`:'')+cap+(m.content?md(m.content):'');
     d.innerHTML=`<div class="userrow"><div class="userbubble">${body}</div></div>`; return d; }
   if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div>
     <div class="d">${esch(m.detail||'')}</div>
@@ -703,11 +724,23 @@ function statusInfo(){
   const c=cur(); if(c&&c.messages.length) return {label:'Local · '+name+' warm',amber:false};
   return {label:'Local · Private · Ready',amber:false};
 }
+// Mini read-aloud player above the composer while a reply is being spoken: it
+// shows synth/loading, play-pause, a progress bar, and a close/stop button.
+function renderMiniPlayer(){
+  if(!S._speakAudio && !S._speakLoading) return '';
+  const loading=!!S._speakLoading; const playing=!!(S._speakAudio && !S._speakAudio.paused);
+  const btn = loading ? `<span class="mpspin"></span>` : `<button class="mpbtn" data-act="speakToggle" title="${playing?'Pause':'Play'}">${playing?ICON.pause:ICON.play}</button>`;
+  return `<div class="miniplayer">${btn}
+     <div class="mpmeta"><span class="mplbl">${loading?'Preparing audio…':'Reading aloud'}</span>
+       <div class="mptrack"><div class="mpfill" id="mpfill"></div></div></div>
+     <span class="mptime mono" id="mptime">0:00</span>
+     <button class="mpbtn" data-act="speakStop" title="Stop">${ICON.xmark}</button></div>`;
+}
 function renderComposer(){
   const c=el('div',{cls:'composer'});
   const si=statusInfo();
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
-  c.innerHTML=`<div class="cbox">
+  c.innerHTML=`${renderMiniPlayer()}<div class="cbox">
      ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
      ${(cur()&&cur().queue&&cur().queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
@@ -1204,7 +1237,7 @@ function renderVoice(){
 
 /* ---------- send + streaming ---------- */
 // Decode text/document attachments to plain text for the model (never images/audio).
-function attText(m){ let s=''; (m.attachments||[]).forEach(x=>{ if(x.kind!=='image'&&x.kind!=='audio'&&x.dataURL){ try{ const b64=(x.dataURL.split(',')[1]||''); const txt=decodeURIComponent(escape(atob(b64))); if(txt.trim()) s+='\n\n[Attached file: '+(x.name||'file')+']\n'+txt.slice(0,20000); }catch(e){} } }); return s; }
+function attText(m){ let s=''; if(m.transcript&&m.transcript.trim()) s+=m.transcript.trim(); (m.attachments||[]).forEach(x=>{ if(x.kind!=='image'&&x.kind!=='audio'&&x.dataURL){ try{ const b64=(x.dataURL.split(',')[1]||''); const txt=decodeURIComponent(escape(atob(b64))); if(txt.trim()) s+='\n\n[Attached file: '+(x.name||'file')+']\n'+txt.slice(0,20000); }catch(e){} } }); return s; }
 // Transcribe audio attachments (STT) so a recorded voice message becomes text the model can answer.
 async function transcribeAtts(atts){ const out=[];
   for(const a of (atts||[])){ if(a.kind!=='audio'||!a.dataURL)continue;
@@ -1224,7 +1257,15 @@ async function send(queued){
   if(!queued){ S.draft=''; if(ta)ta.value=''; } S.focusInput=true; render();
   // An audio attachment with no text: transcribe it so the model has text to answer (it can't hear
   // audio); the clip stays playable in the bubble.
-  if(!text && atts.some(a=>a.kind==='audio')){ const tr=await transcribeAtts(atts); if(tr){ text=tr; userMsg.content=tr; if(c.title==='New chat')c.title=tr.slice(0,40); saveChats(); render(); } }
+  if(!text && atts.some(a=>a.kind==='audio')){
+    userMsg.transcribing=true; render();                       // show a "Transcribing…" indicator
+    const tr=await transcribeAtts(atts);
+    userMsg.transcribing=false;
+    // Keep the clip as the message; show the transcription as a caption (not as
+    // typed text). The model still receives it via attText().
+    if(tr){ userMsg.transcript=tr; if(c.title==='New chat')c.title=tr.slice(0,40); }
+    saveChats(); render();
+  }
   // Nothing the model can act on (audio-only + transcription empty/unavailable) → keep the message
   // playable, but don't send an empty conversation to the model.
   if(!((userMsg.content||'')+attText(userMsg)).trim()){ saveChats(); return; }
@@ -1278,6 +1319,20 @@ async function send(queued){
     ttftMs:(execProfile&&execProfile.ttftMs)||Math.round(ttft), totalMs:Math.round(totalMs), outTok:outTok,
     tps:execProfile&&execProfile.tokensPerSecond||(outTok/(genMs/1000)),
     profile:execProfile, schedule:auto?S.schedule:null, optimize:S.optimize };
+  // A backend/load failure arrives as streamed "[error] …" content (not an HTTP
+  // error), so it would otherwise render as a normal reply with a read-aloud
+  // button. Detect it and show the friendly error card (with Try again / Continue
+  // with Auto) instead — e.g. a model whose files are no longer on disk.
+  const rawAns=(splitThink(S.streamText).answer||S.streamText).trim();
+  const errM=rawAns.match(/^\[error\]\s*([\s\S]+)$/i);
+  if(errM){ let detail=errM[1].trim(); let title=(auto?'The model':shortModel(resolved||S.modelSel))+' couldn’t respond';
+    if(/install path does not exist|Model install path/i.test(detail)){ title='This model isn’t available'; detail='Its files aren’t on this Mac anymore. Reinstall it from the model browser, or continue with Auto.'; }
+    c.messages.push({id:uid(),role:'assistant',isError:true, model:shortModel(resolved||S.modelSel), lastUser:text, title, detail});
+    if(_rt){ clearTimeout(_rt); _rt=null; }
+    S.streaming=false; S.genChatId=null; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
+    if(S._stopQueue){ S._stopQueue=false; } else { maybeSendQueue(c.id); }
+    return;
+  }
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
     meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''), exec:exec});
   if(_rt){ clearTimeout(_rt); _rt=null; }   // drop any trailing throttle so it can't rebuild + steal focus
@@ -1320,19 +1375,23 @@ async function speakBlob(text){ const clean=splitThink(text).answer||text; if(!c
 function stopSpeak(){
   const a=S._speakAudio;
   if(a){ try{ a.pause(); }catch(e){} if(a._url)URL.revokeObjectURL(a._url); S._speakAudio=null; }
-  S._speakId=null; S._speakLoading=false;
+  S._speakId=null; S._speakLoading=false; S._speakChatId=null;
 }
+function fmtT(s){ if(!isFinite(s)||s<0)s=0; const m=Math.floor(s/60), ss=Math.floor(s%60); return m+':'+(ss<10?'0':'')+ss; }
+function updateMiniProgress(a){ if(!a)return; const fill=document.getElementById('mpfill'), t=document.getElementById('mptime');
+  const d=a.duration||0, c=a.currentTime||0; if(fill)fill.style.width=(d?Math.min(100,c/d*100):0)+'%'; if(t)t.textContent=fmtT(c); }
 async function speakMessage(m){
   stopSpeak();
   const text=(splitThink(m.content).answer||m.content||'').trim(); if(!text)return;
-  S._speakId=m.id; S._speakLoading=true; render();
+  S._speakId=m.id; S._speakChatId=S.current; S._speakLoading=true; render();
   let b=null; try{ b=await speakBlob(text); }catch(e){}
   if(S._speakId!==m.id) return;                 // superseded or stopped mid-synthesis
   if(!b){ S._speakId=null; S._speakLoading=false; render(); return; }
   const url=URL.createObjectURL(b); const a=new Audio(url); a._url=url;
   S._speakAudio=a; S._speakLoading=false;
-  const done=()=>{ if(S._speakAudio===a){ URL.revokeObjectURL(url); S._speakAudio=null; S._speakId=null; render(); } };
+  const done=()=>{ if(S._speakAudio===a){ URL.revokeObjectURL(url); S._speakAudio=null; S._speakId=null; S._speakChatId=null; render(); } };
   a.onended=done; a.onerror=done;
+  a.ontimeupdate=()=>updateMiniProgress(a);     // live progress bar in the mini player
   render(); a.play().catch(()=>{});
 }
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
