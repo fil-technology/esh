@@ -344,4 +344,55 @@ struct WebChatPageTests {
         // (which animates transform to none) can't shift it sideways.
         #expect(html.contains("margin-left:-170px"))
     }
+
+    // Soak (rc.5): the streaming cursor sits inline at the end of the last block,
+    // not dropped onto its own line below the text.
+    @Test
+    func streamingCaretIsInlineNotOnItsOwnLine() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains(".asttext.streaming>:last-child::after"))
+        #expect(html.contains("class=\"asttext streaming\""))
+        // The old trailing caret span (which dropped below block content) is gone.
+        #expect(html.contains("md(s.answer)}<span class=\\\"caret\\\">") == false)
+    }
+
+    // Soak (rc.5): chats can be organized into folders — collapsible, renamable,
+    // deletable, and drop targets for drag-and-drop.
+    @Test
+    func chatsCanBeOrganizedIntoFolders() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function loadFolders()"))
+        #expect(html.contains("function saveFolders()"))
+        #expect(html.contains("data-act=\"newFolder\""))
+        #expect(html.contains("data-act=\"toggleFolder\""))
+        #expect(html.contains("renameFolder"))
+        #expect(html.contains("deleteFolder"))
+        #expect(html.contains("function moveChatToFolder("))
+        // Chats are draggable and folders/Recent are drop targets.
+        #expect(html.contains("draggable=\"true\""))
+        #expect(html.contains("data-drop-root"))
+        #expect(html.contains("dropover"))
+        // Deleting a folder returns its chats to Recent (doesn't delete them).
+        #expect(html.contains("delete ch.folderId"))
+    }
+
+    // Soak (rc.5): renaming a chat/folder edits the title inline (focused input,
+    // Enter to commit) rather than through a popup prompt().
+    @Test
+    func renameIsInlineNotAPopup() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function startRename("))
+        #expect(html.contains("function commitRename()"))
+        #expect(html.contains("id=\"renameinput\""))
+        #expect(html.contains("function wireSidebar()"))
+        // No more prompt()-based chat rename.
+        #expect(html.contains("prompt('Rename chat'") == false)
+    }
+
+    // Soak (rc.5): user message bubbles are compact (reduced vertical padding).
+    @Test
+    func userBubblesAreCompact() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains(".userbubble{ background:var(--userbubble); border-radius:13px; padding:6px 13px;"))
+    }
 }

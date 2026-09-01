@@ -8,8 +8,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [2.0.0-rc.5] - 2026-09-01
 
-**Release candidate — web chat soak fixes.** Web-client polish found while soaking rc.4; no engine or
-packaging changes (the rc.4 GGUF fix stands).
+**Release candidate — web chat soak fixes.** Web-client polish and organization found while soaking
+rc.4; no engine or packaging changes (the rc.4 GGUF fix stands).
+
+### Added — web chat
+- **Folders for chats.** Group conversations into collapsible folders: create one with the new-folder
+  button beside "New chat", **drag chats into a folder** (or back out to Recent), and right-click a
+  folder to rename or delete it (deleting a folder returns its chats to Recent, never deletes them).
+- **Inline rename.** Renaming a chat or folder now edits the title **in place** — a focused input,
+  Enter to commit, Escape to cancel — instead of a popup dialog.
 
 ### Changed — web chat
 - **Assistant replies no longer speak automatically.** Text chat was auto-playing every response as
@@ -17,13 +24,17 @@ packaging changes (the rc.4 GGUF fix stands).
   per-message**: a small read-aloud button under each assistant message plays that reply on demand and
   shows loading → playing state; the automatic "Read responses aloud" toggle is removed. One clip
   plays at a time and its audio URL is released when it ends or is stopped, so repeated use never
-  leaks memory.
+  leaks memory. (Voice mode still speaks automatically, as before.)
+- **Tighter message layout.** User message bubbles use less vertical padding, the assistant footer
+  (read-aloud + timing) is more compact, and the read-aloud icon is aligned to the text.
 
 ### Fixed — web chat
 - **Popovers no longer "jump" while a reply streams.** The menu entrance animation was replaying on
   every full re-render (streaming start/end) instead of only when the popover opens; it now animates
   once, on the open transition. The Engine panel also centers with a margin instead of a transform, so
   the entrance animation can't shift it sideways.
+- **Streaming cursor sits inline.** The blinking cursor now appears at the end of the last line of the
+  streaming reply instead of dropping onto its own line below the text.
 
 ## [2.0.0-rc.4] - 2026-09-01
 

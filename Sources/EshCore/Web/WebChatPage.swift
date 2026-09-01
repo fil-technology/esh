@@ -83,14 +83,33 @@ public enum WebChatPage {
   .chatitem{ padding:7px 12px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.75); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chatitem:hover{ background:rgba(32,30,27,.04); }
   .chatitem.active{ background:rgba(32,30,27,.05); color:var(--ink); }
+  .chatitem[draggable="true"]{ cursor:pointer; }
+  .chatitem.dragging{ opacity:.4; }
+  .sbhead{ display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+  .sbhead .newchat{ flex:1; margin-bottom:0; }
+  .nfbtn{ width:34px; height:34px; flex-shrink:0; border:1px solid var(--line2); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:none; cursor:pointer; }
+  .nfbtn:hover{ background:rgba(32,30,27,.03); color:var(--ink); }
+  .folderrow{ display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.82); cursor:pointer; user-select:none; }
+  .folderrow:hover{ background:rgba(32,30,27,.04); }
+  .folderrow.dropover{ background:rgba(32,30,27,.10); box-shadow:inset 0 0 0 1px var(--line2); }
+  .fchev{ display:inline-flex; width:12px; flex-shrink:0; transition:transform .15s; color:var(--faint); }
+  .fchev.open{ transform:rotate(90deg); }
+  .ficon{ display:inline-flex; flex-shrink:0; color:var(--muted); }
+  .fname{ flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fcount{ font:400 10px var(--mono); color:var(--faint); }
+  .folderchats{ margin-left:13px; padding-left:8px; border-left:1px solid var(--line); display:flex; flex-direction:column; gap:2px; margin-top:2px; }
+  .folderempty{ padding:5px 10px; font-size:11px; color:var(--faint); font-style:italic; }
+  .rootchats{ display:flex; flex-direction:column; gap:2px; min-height:10px; border-radius:6px; }
+  .rootchats.dropover, .sgroup.dropover{ background:rgba(32,30,27,.06); box-shadow:inset 0 0 0 1px var(--line2); }
+  .renameinput{ width:100%; box-sizing:border-box; border:1px solid rgba(32,30,27,.35); border-radius:6px; padding:5px 8px; font-size:13px; font-family:inherit; color:var(--ink); background:var(--paper); outline:none; }
   .main{ flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
   .empty{ flex:1; display:flex; align-items:center; justify-content:center; padding-bottom:60px; font-size:26px; font-weight:500; letter-spacing:-.02em; }
   .log{ flex:1; overflow-y:auto; padding:28px 24px; }
   .thread{ max-width:640px; margin:0 auto; display:flex; flex-direction:column; gap:22px; }
   .msg{ display:flex; flex-direction:column; gap:10px; }
   .userrow{ display:flex; justify-content:flex-end; }
-  .userbubble{ background:var(--userbubble); border-radius:14px; padding:10px 14px; font-size:14px; line-height:1.5; max-width:70%; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .asst{ display:flex; flex-direction:column; gap:9px; }
+  .userbubble{ background:var(--userbubble); border-radius:13px; padding:6px 13px; font-size:14px; line-height:1.45; max-width:70%; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .asst{ display:flex; flex-direction:column; gap:6px; }
   .reason{ font-size:12px; color:var(--muted); }
   .reason summary{ cursor:pointer; list-style:none; color:var(--faint); }
   .reason summary::-webkit-details-marker{ display:none; }
@@ -127,6 +146,9 @@ public enum WebChatPage {
   .metaline{ font:400 11px var(--mono); color:var(--faint); cursor:pointer; align-self:flex-start; }
   .metaline:hover{ color:var(--ink); text-decoration:underline; }
   .caret{ display:inline-block; width:8px; height:15px; background:var(--ink); vertical-align:-2px; margin-left:2px; animation:eshblink 1s infinite; }
+  /* Streaming cursor sits inline at the END of the last rendered block (paragraph,
+     list item, code line) instead of dropping to its own line below the text. */
+  .asttext.streaming>:last-child::after{ content:''; display:inline-block; width:7px; height:14px; background:var(--ink); vertical-align:-2px; margin-left:2px; border-radius:1px; animation:eshblink 1s infinite; }
   .typing{ display:inline-flex; gap:5px; align-items:center; padding:3px 2px; }
   .typing i{ width:7px; height:7px; border-radius:50%; background:var(--faint); animation:eshtype 1.2s infinite ease-in-out both; }
   .typing i:nth-child(2){ animation-delay:.16s } .typing i:nth-child(3){ animation-delay:.32s }
@@ -216,8 +238,9 @@ public enum WebChatPage {
      re-renders that happen while a popover stays open (e.g. during streaming) — a
      re-triggered entrance read as the menu "jumping". */
   .pop{ transform-origin:top; } .pop.opening{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); }
-  .asstfoot{ display:flex; align-items:center; gap:8px; align-self:flex-start; }
-  .sbtn{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:7px; border:none; background:none; color:var(--faint); cursor:pointer; padding:0; transition:color .12s, background .12s; }
+  .asstfoot{ display:flex; align-items:center; gap:4px; align-self:flex-start; margin-left:-5px; }
+  .sbtn{ display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:none; background:none; color:var(--faint); cursor:pointer; padding:0; transition:color .12s, background .12s; }
+  .sbtn svg{ width:14px; height:14px; }
   .sbtn:hover{ color:var(--ink); background:var(--panel2); } .sbtn.on{ color:var(--ink); } .sbtn.load{ animation:eshpulse 1s ease-in-out infinite; }
   @keyframes eshdrawer{ from{opacity:0; transform:translateX(30px)} to{opacity:1; transform:none} }
   .rightpanel{ animation:eshdrawer .2s cubic-bezier(.2,.8,.2,1); }
@@ -234,7 +257,7 @@ public enum WebChatPage {
 <body>
 <div class="app" id="app"><!-- rendered by JS --></div>
 <script>
-const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1";
+const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1", FOLD="esh.folders.v1";
 const ICON={
   sidebar:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg>',
   settings:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 17h16"/><circle cx="9.5" cy="7" r="2.4"/><circle cx="14.5" cy="17" r="2.4"/></svg>',
@@ -246,17 +269,23 @@ const ICON={
   queue:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11"/><path d="M4 12h9"/><path d="M4 17h7"/><path d="M18 13v7"/><path d="M14.5 16.5h7"/></svg>',
   keyboard:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="7" width="18" height="11" rx="2.5"/><path d="M7 11h.5"/><path d="M11.75 11h.5"/><path d="M16.5 11h.5"/><path d="M8 14.5h8"/></svg>',
   xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>',
-  speaker:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>'
+  speaker:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  folder:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  folderPlus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>',
+  chevr:'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
 };
 let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, genChatId:null };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, genChatId:null,
+        folders:{}, renaming:null };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
 function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
+function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
+function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen; }
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
@@ -359,7 +388,7 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ renderView(); popAnimPass(); a11yPass(); wireAudioPlayers(); }
+function render(){ renderView(); popAnimPass(); wireSidebar(); a11yPass(); wireAudioPlayers(); }
 // Play the popover entrance animation only when a popover first opens (the open set
 // changes), not on every full re-render while it stays open — otherwise the menu
 // re-pops on each render (e.g. streaming start/end) and looks like it's jumping.
@@ -377,11 +406,12 @@ function renderView(){ const app=$('#app'); app.innerHTML='';
   if(S.chatMenu) app.appendChild(renderChatMenu());
 }
 function renderChatMenu(){
-  const m=S.chatMenu; const w=170, h=84;
+  const m=S.chatMenu; const isFolder=m.type==='folder'; const w=170, h=84;
   const x=Math.min(m.x, window.innerWidth-w-8), y=Math.min(m.y, window.innerHeight-h-8);
   const p=el('div',{cls:'pop'}); p.style.cssText+='position:fixed;left:'+x+'px;top:'+y+'px;width:'+w+'px;padding:6px 0;z-index:60';
-  p.innerHTML=`<div class="menurow" data-act="renameChat" data-arg="${esch(m.id)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Rename</div>
-    <div class="menurow" data-act="deleteChat" data-arg="${esch(m.id)}" style="color:var(--amber)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/></svg>Delete</div>`;
+  const renameAct=isFolder?'renameFolder':'renameChat', deleteAct=isFolder?'deleteFolder':'deleteChat';
+  p.innerHTML=`<div class="menurow" data-act="${renameAct}" data-arg="${esch(m.id)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Rename</div>
+    <div class="menurow" data-act="${deleteAct}" data-arg="${esch(m.id)}" style="color:var(--amber)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/></svg>Delete</div>`;
   return p;
 }
 // Make non-native interactive controls reachable + labeled for keyboard and screen-reader users.
@@ -411,8 +441,14 @@ const ACT={
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
-  switchChat:(id)=>{ S.current=id; render(); },
-  renameChat:(id)=>{ S.chatMenu=null; const ch=S.chats[id]; if(!ch)return; const nt=prompt('Rename chat', ch.title||'New chat'); if(nt!=null){ const v=nt.trim(); if(v){ ch.title=v.slice(0,80); saveChats(); } } render(); },
+  switchChat:(id)=>{ if(S.renaming)return; S.current=id; render(); },
+  renameChat:(id)=>{ S.chatMenu=null; startRename('chat',id); },
+  renameFolder:(id)=>{ S.chatMenu=null; startRename('folder',id); },
+  commitRename:()=>commitRename(),
+  newFolder:()=>{ const id=uid(); S.folders[id]={id,name:'New folder',created:Date.now(),collapsed:false}; saveFolders(); startRename('folder',id); },
+  toggleFolder:(id)=>{ if(S.renaming)return; const f=S.folders[id]; if(!f)return; f.collapsed=!f.collapsed; saveFolders(); render(); },
+  deleteFolder:(id)=>{ S.chatMenu=null; const f=S.folders[id]; if(!f)return; if(!confirm('Delete folder “'+((f.name||'Folder').slice(0,40))+'”? Chats inside move back to Recent.'))return;
+    Object.values(S.chats).forEach(ch=>{ if(ch.folderId===id)delete ch.folderId; }); delete S.folders[id]; saveFolders(); saveChats(); render(); },
   deleteChat:(id)=>{ S.chatMenu=null; const ch=S.chats[id]; if(!ch)return; if(!confirm('Delete “'+((ch.title||'New chat').slice(0,40))+'”? This can’t be undone.'))return;
     delete S.chats[id]; saveChats();
     if(S.current===id){ const rest=Object.values(S.chats).sort((a,b)=>b.created-a.created); if(rest.length){ S.current=rest[0].id; } else { newChat(); return; } }
@@ -471,8 +507,11 @@ document.addEventListener('keydown',e=>{
   if((e.key==='Enter'||e.key===' ')){ const t=document.activeElement; if(t&&t.getAttribute&&t.getAttribute('data-act')&&t.tagName!=='TEXTAREA'&&t.tagName!=='INPUT'){ e.preventDefault(); const a=t.getAttribute('data-act'); if(ACT[a])ACT[a](t.getAttribute('data-arg')); } }
 });
 // Right-click a chat in the sidebar → a small Rename / Delete menu at the cursor.
-document.addEventListener('contextmenu',e=>{ const item=e.target.closest('.chatitem'); if(!item)return; e.preventDefault();
-  const id=item.getAttribute('data-arg'); S.chatMenu={id, x:e.clientX, y:e.clientY}; render(); });
+document.addEventListener('contextmenu',e=>{
+  const folder=e.target.closest('.folderrow');
+  if(folder){ e.preventDefault(); S.chatMenu={type:'folder', id:folder.getAttribute('data-folder'), x:e.clientX, y:e.clientY}; render(); return; }
+  const item=e.target.closest('.chatitem[data-chat]'); if(!item)return; e.preventDefault();
+  S.chatMenu={type:'chat', id:item.getAttribute('data-chat'), x:e.clientX, y:e.clientY}; render(); });
 
 /* ---------- chat view ---------- */
 function renderChat(){
@@ -505,6 +544,7 @@ function renderChat(){
   return wrap;
 }
 function esch(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+function escAttr(s){ return esch(s).replace(/"/g,'&quot;'); }
 // A cheap fingerprint of the thread: changes only when the messages actually change (not on popover
 // toggles). During streaming the bubble is patched in place by throttleRender, so the sig stays stable.
 function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messages.length-1];
@@ -513,18 +553,90 @@ function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messa
   // playing → idle) even though the message list itself is unchanged.
   const speakPart=(S._speakId||'')+(S._speakLoading?'L':'');
   return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+((S.streaming&&S.genChatId===S.current)?'S':'')+'|'+speakPart; }
+// A chat row — draggable (into folders) and inline-renamable. When it's the one
+// being renamed, the title becomes a focused input committed on Enter/blur.
+function chatRow(ch){
+  if(S.renaming && S.renaming.type==='chat' && S.renaming.id===ch.id){
+    return `<div class="chatitem active"><input class="renameinput" id="renameinput" data-rename="chat" data-arg="${ch.id}" value="${escAttr(ch.title||'')}" maxlength="80"></div>`;
+  }
+  return `<div class="chatitem ${ch.id===S.current?'active':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}">${esch(ch.title||'New chat')}</div>`;
+}
+function folderRow(f, chats){
+  const collapsed=!!f.collapsed;
+  const titleHTML = (S.renaming && S.renaming.type==='folder' && S.renaming.id===f.id)
+    ? `<input class="renameinput" id="renameinput" data-rename="folder" data-arg="${f.id}" value="${escAttr(f.name||'')}" maxlength="60">`
+    : `<span class="fname">${esch(f.name||'Folder')}</span><span class="fcount">${chats.length||''}</span>`;
+  let h=`<div class="folderrow" data-folder="${f.id}" data-act="toggleFolder" data-arg="${f.id}">
+      <span class="fchev ${collapsed?'':'open'}">${ICON.chevr}</span>
+      <span class="ficon">${ICON.folder}</span>${titleHTML}</div>`;
+  if(!collapsed){ h+=`<div class="folderchats">`; chats.forEach(ch=>{ h+=chatRow(ch); }); if(!chats.length) h+=`<div class="folderempty">Drop chats here</div>`; h+=`</div>`; }
+  return h;
+}
 function renderSidebar(){
   const sb=el('div',{cls:'sidebar'});
-  let h=`<button class="newchat" data-act="newChat">${ICON.plus}New chat</button>`;
-  const list=Object.values(S.chats).sort((a,b)=>b.created-a.created);
-  if(list.length) h+='<div class="sgroup" style="margin-top:0">Recent</div>';
-  list.forEach(ch=>{ h+=`<div class="chatitem ${ch.id===S.current?'active':''}" data-act="switchChat" data-arg="${ch.id}">${esch(ch.title||'New chat')}</div>`; });
+  const byCreated=(a,b)=>b.created-a.created;
+  const folders=Object.values(S.folders).sort(byCreated);
+  const all=Object.values(S.chats).sort(byCreated);
+  const ungrouped=all.filter(ch=>!ch.folderId || !S.folders[ch.folderId]);
+  let h=`<div class="sbhead">
+      <button class="newchat" data-act="newChat">${ICON.plus}New chat</button>
+      <button class="iconbtn nfbtn" data-act="newFolder" title="New folder">${ICON.folderPlus}</button>
+    </div>`;
+  // Folders first (each a drop target), then ungrouped chats under "Recent".
+  folders.forEach(f=>{ const fchats=all.filter(ch=>ch.folderId===f.id); h+=folderRow(f,fchats); });
+  h+=`<div class="sgroup ${folders.length?'':'nofolders'}" data-drop-root="1" style="${folders.length?'':'margin-top:0'}">Recent</div>`;
+  h+=`<div class="rootchats" data-drop-root="1">`;
+  ungrouped.forEach(ch=>{ h+=chatRow(ch); });
+  h+=`</div>`;
   sb.innerHTML=h; return sb;
+}
+// Inline rename: the title becomes a focused input, committed on Enter/blur,
+// cancelled on Escape — no popup dialog.
+function startRename(type,id){ S.renaming={type,id}; render(); }
+function commitRename(){
+  const r=S.renaming; if(!r)return;
+  const inp=document.getElementById('renameinput'); const v=inp?inp.value.trim():'';
+  S.renaming=null;
+  if(v){
+    if(r.type==='chat'){ const ch=S.chats[r.id]; if(ch){ ch.title=v.slice(0,80); saveChats(); } }
+    else { const f=S.folders[r.id]; if(f){ f.name=v.slice(0,60); saveFolders(); } }
+  }
+  render();
+}
+function cancelRename(){ if(!S.renaming)return; S.renaming=null; render(); }
+function moveChatToFolder(chatId,folderId){
+  const ch=S.chats[chatId]; if(!ch)return;
+  if(folderId){ ch.folderId=folderId; const f=S.folders[folderId]; if(f)f.collapsed=false; }
+  else delete ch.folderId;
+  saveChats(); saveFolders(); render();
+}
+// Wire the sidebar's imperative bits after each render: focus the rename input and
+// bind its commit/cancel keys; make chats draggable into folders / back to Recent.
+function wireSidebar(){
+  const inp=document.getElementById('renameinput');
+  if(inp && !inp._wired){ inp._wired=true;
+    inp.focus(); try{ inp.select(); }catch(e){}
+    inp.onkeydown=e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); commitRename(); } else if(e.key==='Escape'){ e.preventDefault(); cancelRename(); } };
+    inp.onblur=()=>commitRename();
+    inp.onclick=e=>e.stopPropagation();
+  }
+  document.querySelectorAll('.chatitem[draggable="true"]').forEach(it=>{ if(it._dnd)return; it._dnd=true;
+    it.addEventListener('dragstart',e=>{ S._dragChat=it.getAttribute('data-chat'); e.dataTransfer.effectAllowed='move'; try{ e.dataTransfer.setData('text/plain',S._dragChat); }catch(_){} it.classList.add('dragging'); });
+    it.addEventListener('dragend',()=>{ S._dragChat=null; it.classList.remove('dragging'); document.querySelectorAll('.dropover').forEach(x=>x.classList.remove('dropover')); });
+  });
+  const targets=[];
+  document.querySelectorAll('.folderrow').forEach(f=>targets.push([f,f.getAttribute('data-folder')]));
+  document.querySelectorAll('[data-drop-root]').forEach(r=>targets.push([r,null]));
+  targets.forEach(([elm,fid])=>{ if(elm._dnd)return; elm._dnd=true;
+    elm.addEventListener('dragover',e=>{ if(!S._dragChat)return; e.preventDefault(); e.dataTransfer.dropEffect='move'; elm.classList.add('dropover'); });
+    elm.addEventListener('dragleave',()=>elm.classList.remove('dropover'));
+    elm.addEventListener('drop',e=>{ e.preventDefault(); elm.classList.remove('dropover'); if(S._dragChat)moveChatToFolder(S._dragChat,fid); });
+  });
 }
 const _seen=new Set();
 function streamInner(){ const s=splitThink(S.streamText,{streaming:true,expectReasoning:S.streamReason}); let inner='';
   if(s.reason||s.thinking) inner+=`<details class="reason" open><summary class="live">Thinking…</summary><div class="rc">${esch(s.reason)}</div></details>`;
-  if(s.answer) inner+=`<div class="asttext">${md(s.answer)}<span class="caret"></span></div>`;
+  if(s.answer) inner+=`<div class="asttext streaming">${md(s.answer)}</div>`;
   else if(!s.reason) inner+='<div class="asttext"><span class="typing"><i></i><i></i><i></i></span></div>';
   return inner; }
 function renderLog(){
@@ -1340,7 +1452,7 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 
 
 /* ---------- boot ---------- */
-loadChats(); loadPrefs();
+loadChats(); loadPrefs(); loadFolders();
 // On small screens the sidebar overlays the chat, so start it collapsed regardless of the saved pref.
 if(window.innerWidth<=768) S.sidebarOpen=false;
 if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id;
