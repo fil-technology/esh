@@ -591,7 +591,7 @@ async function send(){
   const genMs=Math.max(1,totalMs-(ttft||0));
   const exec={ model:shortModel(resolved||S.modelSel), fullModel:resolved||S.modelSel,
     backend:(execProfile&&execProfile.backend)||(S.schedule&&S.schedule.backend)||'',
-    ttftMs:Math.round(ttft), totalMs:Math.round(totalMs), outTok:outTok,
+    ttftMs:(execProfile&&execProfile.ttftMs)||Math.round(ttft), totalMs:Math.round(totalMs), outTok:outTok,
     tps:execProfile&&execProfile.tokensPerSecond||(outTok/(genMs/1000)),
     profile:execProfile, schedule:auto?S.schedule:null, optimize:S.optimize };
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,

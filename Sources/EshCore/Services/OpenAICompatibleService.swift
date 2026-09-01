@@ -1014,8 +1014,15 @@ public struct OpenAICompatibleService: Sendable {
                         thinkingStartToken: request.thinkingStartToken, thinkingEndToken: request.thinkingEndToken,
                         kvBits: request.kvBits, kvQuantScheme: request.kvQuantScheme,
                         kvGroupSize: request.kvGroupSize, quantizedKVStart: request.quantizedKVStart))
+                let execSentinel = "\u{01}ESHEXEC:"
                 for try await chunk in streamClosure(external) where chunk.isEmpty == false {
-                    emit(.init(role: nil, content: chunk), finish: nil)
+                    if chunk.hasPrefix(execSentinel) {
+                        // Final per-response execution telemetry — pass through as an esh_execution SSE frame.
+                        let json = String(chunk.dropFirst(execSentinel.count))
+                        write(Data("data: {\"esh_execution\":\(json)}\n\n".utf8))
+                    } else {
+                        emit(.init(role: nil, content: chunk), finish: nil)
+                    }
                 }
                 emit(.init(role: nil, content: nil), finish: "stop")
             } catch {

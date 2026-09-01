@@ -1,5 +1,19 @@
 import Foundation
 
+/// The per-response execution telemetry emitted at the end of a chat stream (as a sentinel frame),
+/// surfaced by the Web Experience Execution panel. Only fields the runtime actually reports — never
+/// fabricated.
+public struct StreamExecutionEvent: Encodable, Sendable {
+    public var model: String
+    public var backend: String
+    public var residency: String?
+    public var outputTokens: Int
+    public var ttftMs: Int?
+    public var promptCache: String?
+    public var kvCache: String?
+    public var optimization: String?
+}
+
 public struct ExternalInferenceService: Sendable {
     private let modelStore: ModelStore
     private let sessionStore: SessionStore
@@ -104,8 +118,34 @@ public struct ExternalInferenceService: Sendable {
                     let session = try resolveSession(request: request, install: install)
                     if request.cacheArtifactID == nil { try await runtime.prepare(session: session) }
 
+                    let start = ContinuousClock.now
+                    var firstAt: ContinuousClock.Instant? = nil
+                    var outChars = 0
                     for try await chunk in ChatService().streamReply(runtime: runtime, session: session, config: generation) {
+                        if firstAt == nil { firstAt = ContinuousClock.now }
+                        outChars += chunk.count
                         continuation.yield(chunk)
+                    }
+                    // Emit the real per-response ExecutionProfile as a final sentinel frame so the Web
+                    // Experience Execution panel shows server truth (backend, residency, cache strategy)
+                    // rather than a re-simulated Scheduler decision.
+                    var profile = Self.executionProfile(backend: install.spec.backend, modelID: install.id,
+                                                         cacheMode: .automatic, usedPromptCache: request.cacheArtifactID != nil)
+                    if let reporter = runtime as? ResidencyReporting {
+                        profile.residency = (reporter.isHealthy ? reporter.residency : .handleCached).rawValue
+                    }
+                    let ttftMs: Int? = firstAt.map { fa in
+                        let d = start.duration(to: fa)
+                        return Int(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1_000_000_000_000_000)
+                    }
+                    let exec = StreamExecutionEvent(
+                        model: install.id, backend: install.spec.backend.rawValue,
+                        residency: profile.residency, outputTokens: max(1, outChars / 4), ttftMs: ttftMs,
+                        promptCache: profile.selections[OptimizationCategory.promptCache.rawValue],
+                        kvCache: profile.selections[OptimizationCategory.kvCache.rawValue],
+                        optimization: profile.summaryLine)
+                    if let data = try? JSONCoding.compactEncoder.encode(exec), let json = String(data: data, encoding: .utf8) {
+                        continuation.yield("\u{01}ESHEXEC:" + json)
                     }
                     continuation.finish()
                 } catch {
