@@ -2,3 +2,6 @@ mlx>=0.31.2
 mlx-lm>=0.31.3
 mlx-vlm==0.5.0
 safetensors>=0.4,<1
+# On-device speech: STT (parakeet) for voice transcription and TTS playback. Without this the voice
+# loop and /v1/audio/* endpoints report "speech runtime not installed" instead of transcribing.
+mlx-audio>=0.5.1

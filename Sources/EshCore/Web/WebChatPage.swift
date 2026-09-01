@@ -845,7 +845,12 @@ async function finishVoiceTurn(){
   const b64=await blobToB64(blob);
   let text='';
   try{ const r=await fetch('/v1/audio/transcriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:'voice.webm'})});
-    if(!r.ok){ S.voice='error'; S.voiceError='Speech-to-text isn’t available — install a transcription model (esh config set-speech).'; render(); return; }
+    if(!r.ok){ let em=''; try{ em=(((await r.json())||{}).error||{}).message||''; }catch(e){}
+      // Surface the real cause: a missing speech runtime (mlx_audio) reads differently from a missing model.
+      S.voice='error'; S.voiceError=/mlx_audio|not available|No module/i.test(em)
+        ? 'Speech isn’t installed yet — run “esh bootstrap” (installs the on-device speech runtime), then try again.'
+        : (em?('Speech-to-text error: '+em):'Speech-to-text isn’t available — install a transcription model.');
+      render(); return; }
     text=((await r.json()).text||'').trim();
   }catch(e){ S.voice='error'; S.voiceError='Transcription failed: '+e.message; render(); return; }
   if(!text){ startVoice(); return; }  // nothing said — listen again
