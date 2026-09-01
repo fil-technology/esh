@@ -267,6 +267,12 @@ struct WebChatPageTests {
         #expect(html.contains("function maybeSendQueue("))
         #expect(html.contains("function renderQueue("))
         #expect(html.contains("S._stopQueue"))
+        // Per-conversation queue: a queued message runs in the chat it was written in, never the open one.
+        #expect(html.contains("c.queue=c.queue||[]; c.queue.push({text:t, atts:S.pendingAtts.slice()})"))
+        #expect(html.contains("send({chatId:chatId, text:item.text, atts:item.atts})"))
+        #expect(html.contains("S.genChatId=c.id"))
+        // Streaming UI is bound to the generating chat.
+        #expect(html.contains("S.streaming&&S.genChatId===S.current"))
     }
 
     @Test

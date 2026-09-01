@@ -245,7 +245,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, queue:[] };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, genChatId:null };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -392,7 +392,7 @@ const ACT={
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); },
-  removeQueued:(i)=>{ if(S.queue)S.queue.splice(+i,1); S.focusInput=true; render(); },
+  removeQueued:(i)=>{ const c=cur(); if(c&&c.queue)c.queue.splice(+i,1); S.focusInput=true; render(); },
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
@@ -474,7 +474,7 @@ function renderChat(){
   const body=el('div',{cls:'body'});
   if(S.sidebarOpen){ body.appendChild(renderSidebar()); body.appendChild(el('div',{cls:'sbackdrop','data-act':'toggleSidebar'})); }
   const main=el('div',{cls:'main'});
-  const c=cur(); const has=c&&(c.messages.length||S.streaming);
+  const c=cur(); const has=c&&(c.messages.length||(S.streaming&&S.genChatId===S.current));
   if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); S._logNode=null; S._logSig=''; }
   else {
     // Reuse the existing log DOM when the conversation hasn't changed, so opening/closing a popover (or
@@ -495,7 +495,7 @@ function esch(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>
 // toggles). During streaming the bubble is patched in place by throttleRender, so the sig stays stable.
 function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messages.length-1];
   const lastPart=last?(last.id+':'+((last.content||'').length)):'';
-  return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+(S.streaming?'S':''); }
+  return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+((S.streaming&&S.genChatId===S.current)?'S':''); }
 function renderSidebar(){
   const sb=el('div',{cls:'sidebar'});
   let h=`<button class="newchat" data-act="newChat">${ICON.plus}New chat</button>`;
@@ -513,7 +513,7 @@ function streamInner(){ const s=splitThink(S.streamText,{streaming:true,expectRe
 function renderLog(){
   const log=el('div',{cls:'log'}); const th=el('div',{cls:'thread'}); const c=cur();
   (c?c.messages:[]).forEach(m=>{ th.appendChild(renderMsg(m)); });
-  if(S.streaming){ const d=el('div',{cls:'msg'}); d.innerHTML=`<div class="asst" id="streamwrap">${streamInner()}</div>`; th.appendChild(d); }
+  if(S.streaming&&S.genChatId===S.current){ const d=el('div',{cls:'msg'}); d.innerHTML=`<div class="asst" id="streamwrap">${streamInner()}</div>`; th.appendChild(d); }
   log.appendChild(th);
   setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
   return log;
@@ -570,7 +570,7 @@ function renderComposer(){
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   c.innerHTML=`<div class="cbox">
      ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
-     ${(S.queue&&S.queue.length)?renderQueue():''}
+     ${(cur()&&cur().queue&&cur().queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
        <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
@@ -579,7 +579,7 @@ function renderComposer(){
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
        <span class="cdiv"></span>
        <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
-       ${S.streaming?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+       ${(S.streaming&&S.genChatId===S.current)?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
      ${S.pickerOpen?renderPicker():''}
@@ -670,11 +670,14 @@ function updateSendState(){ const hasText=!!(S.draft&&S.draft.trim());
   const q=document.querySelector('#queuebtn'); if(q)q.style.opacity=hasText?'1':'.4';   // reflect draft while generating
   const b=document.querySelector('#sendbtn'); if(!b)return; const on=hasText||!!S.pendingAtts.length;
   b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
-function renderQueue(){ let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
-  h+='<div style="font:500 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">Queued · '+S.queue.length+'</div>';
-  S.queue.forEach((q,i)=>{ h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px">
+function renderQueue(){ const q=(cur()&&cur().queue)||[]; if(!q.length)return '';
+  let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
+  h+='<div style="font:500 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">Queued · '+q.length+'</div>';
+  q.forEach((item,i)=>{ const nAtt=(item.atts&&item.atts.length)||0; const label=item.text||(nAtt?('['+nAtt+' attachment'+(nAtt>1?'s':'')+']'):'(empty)');
+    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px">
     <span style="width:6px;height:6px;border-radius:50%;background:var(--faint);flex-shrink:0"></span>
-    <span style="flex:1;min-width:0;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(q)}</span>
+    <span style="flex:1;min-width:0;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(label)}</span>
+    ${(nAtt&&item.text)?`<span class="mono" style="font-size:10px;color:var(--muted)">+${nAtt}</span>`:''}
     <span class="iconbtn" data-act="removeQueued" data-arg="${i}" style="padding:2px;font-size:12px" title="Remove">✕</span></div>`; });
   return h+'</div>'; }
 function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
@@ -1068,15 +1071,16 @@ async function transcribeAtts(atts){ const out=[];
     try{ const b64=(a.dataURL.split(',')[1]||''); const r=await fetch('/v1/audio/transcriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:'recording.webm'})});
       if(r.ok){ const j=await r.json(); if(j&&j.text&&j.text.trim())out.push(j.text.trim()); } }catch(e){} }
   return out.join(' ').trim(); }
-async function send(){
-  const ta=$('#input'); let text=ta?ta.value.trim():(S.draft||'').trim();
-  if((!text&&!S.pendingAtts.length)||S.controller) return;
-  const c=cur()||(newChat(),cur());
-  const atts=S.pendingAtts.slice(); S.pendingAtts=[];
+// `queued` (optional) = {chatId,text,atts} routes a queued message to its ORIGINAL conversation, so a
+// queued message never executes in whatever chat happens to be open now.
+async function send(queued){
+  let text, atts, c, ta=null;
+  if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
+  else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
   const userMsg=c.messages[c.messages.length-1];
   if(c.title==='New chat'&&text) c.title=text.slice(0,40);
-  S.draft=''; if(ta)ta.value=''; S.focusInput=true; render();
+  if(!queued){ S.draft=''; if(ta)ta.value=''; } S.focusInput=true; render();
   // An audio attachment with no text: transcribe it so the model has text to answer (it can't hear
   // audio); the clip stays playable in the bubble.
   if(!text && atts.some(a=>a.kind==='audio')){ const tr=await transcribeAtts(atts); if(tr){ text=tr; userMsg.content=tr; if(c.title==='New chat')c.title=tr.slice(0,40); saveChats(); render(); } }
@@ -1090,6 +1094,7 @@ async function send(){
     const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc){ S.schedule=sc; if(sc.selectedModelID) resolved=sc.selectedModelID; } }
   let reasoning=looksReasoning(resolved);
   if(S.prefs.reasoning==='Off')reasoning=false; else if(S.prefs.reasoning==='On')reasoning=true;
+  S.genChatId=c.id;   // the generation (and its streaming UI) belongs to THIS conversation
   S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; S.focusInput=true; saveChats(); render();
   S.controller=new AbortController(); const t0=performance.now();
   const sys=(S.prefs.systemInstr||'').trim();
@@ -1118,7 +1123,7 @@ async function send(){
     c.messages.push({id:uid(),role:'assistant',isError:true, model:errorInfo.model, lastUser:text,
       title:errorInfo.model+' couldn’t respond', detail:errorInfo.detail});
     if(_rt){ clearTimeout(_rt); _rt=null; }
-    S.streaming=false; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render(); return;
+    S.streaming=false; S.genChatId=null; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render(); return;
   }
   const totalMs=performance.now()-t0; const secs=(totalMs/1000).toFixed(1);
   const auto=S.modelSel==='Auto';
@@ -1135,18 +1140,22 @@ async function send(){
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
     meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''), exec:exec});
   if(_rt){ clearTimeout(_rt); _rt=null; }   // drop any trailing throttle so it can't rebuild + steal focus
-  S.streaming=false; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
-  if(S.prefs.autoTts) speak(S.streamText);
-  // Process the next queued message, unless the user just hit Stop.
-  if(S._stopQueue){ S._stopQueue=false; } else { maybeSendQueue(); }
+  const spoken=S.streamText;
+  S.streaming=false; S.genChatId=null; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
+  if(S.prefs.autoTts) speak(spoken);
+  // Process the next queued message for THIS conversation, unless the user just hit Stop.
+  if(S._stopQueue){ S._stopQueue=false; } else { maybeSendQueue(c.id); }
 }
 function sendText(t){ if(!t)return; const ta=document.querySelector('#input'); if(ta)ta.value=t; S.draft=t; send(); }
 // Message queue: Shift+Enter enqueues the draft; queued messages auto-send in order once the assistant
 // is free. Enqueuing while idle kicks off processing immediately (so a lone Shift+Enter still sends).
-function enqueueDraft(){ const ta=document.querySelector('#input'); const t=((ta?ta.value:S.draft)||'').trim(); if(!t)return;
-  S.queue=S.queue||[]; S.queue.push(t); S.draft=''; if(ta){ ta.value=''; ta.style.height='auto'; }
-  S.focusInput=true; render(); maybeSendQueue(); }
-function maybeSendQueue(){ if(S.streaming||S.controller)return; if(!S.queue||!S.queue.length)return; const next=S.queue.shift(); render(); sendText(next); }
+function enqueueDraft(){ const ta=document.querySelector('#input'); const t=((ta?ta.value:S.draft)||'').trim();
+  if(!t && !S.pendingAtts.length)return;
+  // The queue lives ON the conversation, so a queued message always runs in the chat it was written in.
+  const c=cur()||(newChat(),cur()); c.queue=c.queue||[]; c.queue.push({text:t, atts:S.pendingAtts.slice()});
+  S.pendingAtts=[]; S.draft=''; if(ta){ ta.value=''; ta.style.height='auto'; }
+  S.focusInput=true; render(); maybeSendQueue(c.id); }
+function maybeSendQueue(chatId){ if(S.streaming||S.controller)return; const c=S.chats[chatId]; if(!c||!c.queue||!c.queue.length)return; const item=c.queue.shift(); render(); send({chatId:chatId, text:item.text, atts:item.atts}); }
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');
