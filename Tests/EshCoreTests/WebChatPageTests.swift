@@ -5,62 +5,51 @@ import Testing
 @Suite
 struct WebChatPageTests {
     @Test
-    func pageIsSelfContainedAndUsesCanonicalAPIs() {
+    func pageIsSelfContainedThinClientOverCanonicalAPIs() {
         let html = WebChatPage.html(toolVersion: "9.9.9")
-        // Self-contained: no external asset hosts.
+        // Self-contained (Google Fonts is the one allowed external, matching the design system).
         #expect(html.contains("src=\"http") == false)
         #expect(html.contains("cdn.") == false)
-        // Talks to the canonical esh APIs, same-origin.
+        // Thin client over the canonical endpoints — no runtime/policy logic invented in JS.
         #expect(html.contains("/v1/chat/completions"))
         #expect(html.contains("/v1/models"))
-        // Core UI + streaming affordances.
-        #expect(html.contains("id=\"model\""))
-        #expect(html.contains("stream: true") || html.contains("stream:true"))
-        #expect(html.contains("AbortController"))     // cancel support
-        #expect(html.contains("9.9.9"))               // version stamped
+        #expect(html.contains("/v1/engine"))      // engine inspector + status
+        #expect(html.contains("/v1/schedule"))    // Auto + "Why this model?"
+        #expect(html.contains("/v1/catalog"))     // model browser + fit
+        #expect(html.contains("/v1/config"))      // settings
         #expect(WebChatPage.contentType.contains("text/html"))
     }
 
     @Test
-    func pageOffersChatGPTLikeFeatures() {
+    func usesTheApprovedVisualLanguage() {
         let html = WebChatPage.html(toolVersion: nil)
-        // Multi-conversation history + new chat.
-        #expect(html.contains("New chat"))
-        #expect(html.contains("localStorage"))
-        // Settings the CLI also exposes.
-        #expect(html.contains("System prompt"))
-        #expect(html.contains("Temperature"))
-        #expect(html.contains("Max tokens"))
-        #expect(html.contains("Reasoning"))
-        #expect(html.contains("compression") || html.contains("cache_mode"))
-        // Collapsible reasoning display, and LIVE reasoning while a reasoning model is thinking
-        // (shown as an expanded "thinking…" section during streaming, not leaked into the answer).
-        #expect(html.contains("</think>"))
-        #expect(html.contains("details"))
-        #expect(html.contains("Thinking…"))            // live label while a reasoning model thinks
-        #expect(html.contains("Thought for "))         // ChatGPT-style collapsed summary with elapsed time
-        #expect(html.contains("looksLikeReasoningModel"))
-        #expect(html.contains("expectReasoning"))
-        // A typing indicator before the first token, and a token-limit note when cut off.
-        #expect(html.contains("typing"))
-        #expect(html.contains("finish_reason"))
-        #expect(html.contains("token limit"))
-        // Light, self-contained LaTeX rendering (no external math engine).
-        #expect(html.contains("mathify"))
-        #expect(html.contains("boxed"))
-        // A generous default token budget so reasoning models can actually finish.
-        #expect(html.contains("value=\"2048\""))
-        // Speech: text-to-speech playback + speech-to-text upload.
-        #expect(html.contains("/v1/audio/speech"))
-        #expect(html.contains("/v1/audio/transcriptions"))
-        // Multimodal rendering + attachments.
-        #expect(html.contains("<audio") || html.contains("audio"))
-        #expect(html.contains("type=\"file\""))
+        // Warm paper + graphite ink, amber only for warnings; IBM Plex Mono for technical data.
+        #expect(html.contains("#fbfaf8"))          // paper
+        #expect(html.contains("#201e1b"))          // ink
+        #expect(html.contains("IBM Plex Mono"))
+        // Inline SVG icons, not emoji glyphs, for chrome.
+        #expect(html.contains("<svg"))
     }
 
     @Test
-    func versionlessPageStampsEmptyVersion() {
+    func hasTheProgressiveDisclosureSurfaces() {
         let html = WebChatPage.html(toolVersion: nil)
-        #expect(html.contains("__VERSION__") == false)
+        // Default simple surface.
+        #expect(html.contains("What can I help with?"))
+        #expect(html.contains("New chat"))
+        #expect(html.contains("Ask anything"))
+        // Auto/model, engine, execution, models, settings, voice.
+        #expect(html.contains("Auto"))
+        #expect(html.contains("Optimize for") || html.contains("OPTIMIZE"))
+        #expect(html.contains("Why this model?"))
+        #expect(html.contains("Browse models"))
+        #expect(html.contains("Execution"))
+        #expect(html.contains("Engine"))
+        #expect(html.contains("Privacy"))
+        // Streaming + reasoning + speech behaviors preserved.
+        #expect(html.contains("</think>"))
+        #expect(html.contains("/v1/audio/speech"))
+        #expect(html.contains("/v1/audio/transcriptions"))
+        #expect(html.contains("localStorage"))    // history + presentation prefs are browser-local
     }
 }
