@@ -40,6 +40,28 @@ public enum WebChatPage {
   @keyframes eshpulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.12);opacity:1}}
   @keyframes eshbar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
   @keyframes eshtype{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1);opacity:1}}
+  @keyframes eshdot{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-4px);opacity:1}}
+  /* Voice — full conversational loop (listening → thinking → speaking → listening) */
+  .voicewrap{ position:absolute; inset:0; background:var(--paper); display:flex; flex-direction:column; z-index:60; animation:eshfade .2s ease-out; }
+  .vstage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; padding:0 40px; }
+  .vlabel{ font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+  .vlive{ font-size:17px; font-weight:500; line-height:1.5; max-width:560px; text-align:center; letter-spacing:-.01em; }
+  .vquote{ font-size:13px; color:var(--faint); line-height:1.5; max-width:520px; text-align:center; }
+  .vanswer{ font-size:14.5px; line-height:1.65; max-width:560px; color:rgba(32,30,27,.85); text-align:center; }
+  .vhint{ font-size:12px; color:var(--faint); min-height:16px; }
+  .vorb{ height:96px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .vpulse{ width:84px; height:84px; border-radius:50%; background:rgba(32,30,27,.07); display:flex; align-items:center; justify-content:center; animation:eshpulse 1.6s ease-in-out infinite; }
+  .vpulse>span{ width:36px; height:36px; border-radius:50%; background:var(--ink); }
+  .vdots{ display:flex; gap:8px; } .vdots i{ width:9px; height:9px; border-radius:50%; background:var(--ink); animation:eshdot 1.1s ease-in-out infinite; }
+  .vwave{ display:flex; align-items:center; gap:4px; cursor:pointer; } .vwave i{ width:4px; border-radius:2px; background:var(--ink); animation:eshbar .9s ease-in-out infinite; }
+  .vctrls{ display:flex; justify-content:center; gap:22px; padding-bottom:36px; }
+  .vctrlcol{ display:flex; flex-direction:column; align-items:center; gap:7px; }
+  .vctrl{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .vctrl.line{ border:1px solid rgba(32,30,27,.14); color:rgba(32,30,27,.7); background:#fff; }
+  .vctrl.line:hover{ background:rgba(32,30,27,.05); }
+  .vctrl.solid{ background:var(--ink); color:var(--paper); } .vctrl.solid:hover{ opacity:.85; }
+  .vctrllbl{ font-size:10.5px; color:var(--faint); }
+  .vfoot{ position:absolute; bottom:14px; left:0; right:0; display:flex; justify-content:center; font:400 10px var(--mono); color:rgba(32,30,27,.35); }
   /* Header */
   .topbar{ display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid rgba(32,30,27,.06); }
   .topbar .brand{ font-weight:600; font-size:15px; letter-spacing:-.01em; }
@@ -102,6 +124,11 @@ public enum WebChatPage {
   .radio{ width:14px; height:14px; border-radius:50%; box-sizing:border-box; flex-shrink:0; border:1.5px solid rgba(32,30,27,.3); }
   .radio.on{ border:4.5px solid var(--ink); }
   .sep{ height:1px; background:rgba(32,30,27,.07); margin:4px 0; }
+  /* Model picker — one consistent row pattern: rounded highlight + right-aligned check on the selected row */
+  .pickrow{ margin:2px 8px; padding:8px 12px; border-radius:9px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:8px; }
+  .pickrow:hover{ background:rgba(32,30,27,.04); }
+  .pickrow.sel{ background:rgba(32,30,27,.06); }
+  .ck{ font-size:12px; line-height:1; } .resdot{ width:5px; height:5px; border-radius:50%; background:var(--ink); flex-shrink:0; }
   /* Right panel (execution) — an overlay drawer so it never squeezes the chat at narrow widths */
   .rightpanel{ position:absolute; top:0; right:0; bottom:0; width:340px; max-width:88vw; border-left:1px solid var(--line2); overflow-y:auto; background:var(--paper); z-index:45; box-shadow:-12px 0 36px rgba(32,30,27,.10); }
   .kv{ display:flex; justify-content:space-between; font-size:12.5px; } .kv .k{ color:var(--muted); }
@@ -161,7 +188,9 @@ const ICON={
   mic:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/></svg>',
   up:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
   back:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg>',
-  stop:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+  stop:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  keyboard:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="7" width="18" height="11" rx="2.5"/><path d="M7 11h.5"/><path d="M11.75 11h.5"/><path d="M16.5 11h.5"/><path d="M8 14.5h8"/></svg>',
+  xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>'
 };
 let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
@@ -171,7 +200,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
-function saveChats(){ try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
+function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen; }
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
@@ -248,9 +277,10 @@ const ACT={
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ S.current=id; render(); },
   startVoice:()=>startVoice(),
-  endVoice:()=>{ stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voice=null; render(); },
+  endVoice:()=>{ endVoiceLoop(); render(); },
+  voiceText:()=>{ endVoiceLoop(); S.focusInput=true; render(); },
   voiceFinish:()=>{ stopListening(); },
-  voiceInterrupt:()=>{ if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
+  voiceInterrupt:()=>{ clearVoiceReveal(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
   voiceRetry:()=>startVoice(),
   speak:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m)speak(m.content); },
   pickPane:(p)=>{ S.settingsPane=p; render(); },
@@ -263,7 +293,14 @@ const ACT={
   attach:()=>{ document.getElementById('filepick').click(); S.attachOpen=false; render(); },
   removeAtt:(i)=>{ S.pendingAtts.splice(+i,1); render(); },
   micUpload:()=>micUpload(),
-  toggleTts:()=>{ S.prefs.autoTts=!S.prefs.autoTts; savePrefs(); render(); }
+  toggleTts:()=>{ S.prefs.autoTts=!S.prefs.autoTts; savePrefs(); render(); },
+  toggleEnter:()=>{ S.prefs.sendEnter=!(S.prefs.sendEnter!==false); savePrefs(); render(); },
+  toggleHistory:()=>{ S.prefs.saveHistory=!(S.prefs.saveHistory!==false); savePrefs(); if(S.prefs.saveHistory)saveChats(); render(); },
+  clearHistory:()=>{ if(!confirm('Clear all conversations stored in this browser?'))return; S.chats={}; try{localStorage.removeItem(LS)}catch(e){} newChat(); },
+  toggleRouting:()=>{ S.prefs.autoRouting=!(S.prefs.autoRouting!==false); savePrefs(); render(); },
+  pickReasoning:(v)=>{ S.prefs.reasoning=v; savePrefs(); render(); },
+  goPane:(p)=>{ S.settingsPane=p; render(); },
+  editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
 function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); if(!t)return; const a=t.getAttribute('data-act'); const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
@@ -349,9 +386,27 @@ function renderMsg(m){
   if(m.meta) h+=`<div class="metaline" data-act="openExec" data-arg="${m.id}">${esch(m.meta)}</div>`;
   h+='</div>'; d.innerHTML=h; return d;
 }
+// The status line under the composer surfaces what matters right now (a degraded storage/engine
+// condition takes priority), and always opens the Engine menu. Real signals only — no fabricated states.
+function statusInfo(){
+  const e=S.engine, st=e&&e.storage||{};
+  // External model storage reports storage.status==='available' when connected; anything else on an
+  // external volume means it's disconnected/degraded — surface that first (real signal, never faked).
+  const extDown=!!(st.external && st.status && st.status!=='available');
+  const engDown=!!(e&&e.status&&e.status!=='ok'&&e.status!=='ready');
+  if(extDown) return {label:'External storage disconnected',amber:true};
+  const name=S.modelSel==='Auto' ? (S.schedule&&S.schedule.selectedModelID?shortModel(S.schedule.selectedModelID):'Auto')
+                                 : (S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
+  if(!e) return {label:'Local · …',amber:false};
+  if(engDown) return {label:'Local · Degraded',amber:true};
+  if(S.streaming) return {label:'Local · '+name+' · generating',amber:false};
+  if(S.modelSel==='Apple Intelligence') return {label:'Local · Apple Intelligence',amber:false};
+  const c=cur(); if(c&&c.messages.length) return {label:'Local · '+name+' warm',amber:false};
+  return {label:'Local · Private · Ready',amber:false};
+}
 function renderComposer(){
   const c=el('div',{cls:'composer'});
-  const eng=S.engine; const statusLabel=eng?(eng.status==='ok'?'Local · Private · Ready':'Local · Degraded'):'Local · …';
+  const si=statusInfo();
   c.innerHTML=`<div class="cbox">
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
@@ -363,10 +418,12 @@ function renderComposer(){
      ${S.attachOpen?renderAttach():''}
      <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
-   <div class="statusrow"><button class="statusbtn" data-act="toggleEngine"><span class="dot"></span>${esch(statusLabel)}</button></div>`;
+   <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
-     ta.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } };
+     ta.onkeydown=e=>{ if(e.key!=='Enter')return; const enterSends=S.prefs.sendEnter!==false;
+       if(enterSends&&!e.shiftKey){ e.preventDefault(); send(); }
+       else if(!enterSends&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); send(); } };
      const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
      if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } } },0);
   return c;
@@ -388,20 +445,29 @@ function renderAttach(){
     <div class="menurow" data-act="micUpload"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:50%"></span>Audio file (transcribe)</div>
     <div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);border-top:1px solid var(--line);margin-top:4px">Shown for ${esch(note)}</div></div>`;
 }
+// One consistent row for the whole picker: rounded highlight + right-aligned check on the selected row,
+// hover tint on the rest (no radios). `right` is optional trailing content before the check.
+function pickRow(label,sel,act,arg,right){
+  return `<div class="pickrow ${sel?'sel':''}" data-act="${act}" data-arg="${esch(arg)}"><span>${esch(label)}</span><span class="sp" style="flex:1"></span>${right||''}${sel?'<span class="ck">✓</span>':''}</div>`;
+}
 function renderPicker(){
   const p=el('div',{cls:'pop'}); p.style.cssText+='top:6px;right:48px;width:300px;padding:8px 0';
   const auto=S.modelSel==='Auto';
-  let h=`<div class="menurow" style="margin:4px 8px;padding:10px 12px;border-radius:9px;background:${auto?'rgba(32,30,27,.06)':'transparent'}" data-act="pickModel" data-arg="Auto">
-     <div style="width:100%"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13.5px;font-weight:600">Auto</span><span class="sp" style="flex:1"></span><span style="font-size:10.5px;color:var(--muted);font-weight:500">Recommended</span>${auto?'<span>✓</span>':''}</div>
-     <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${S.schedule&&S.schedule.selectedModelID?('esh picks per request — now: '+shortModel(S.schedule.selectedModelID)):'esh picks the best model for each request'}</div></div></div>
-   <div class="menuhead">Optimize for</div><div style="padding:2px 20px 8px;display:flex;flex-direction:column;gap:8px;font-size:13px">`;
-  ['Balanced','Quality','Speed','Low Memory'].forEach(o=>{ const on=o===S.optimize;
-    h+=`<div style="display:flex;align-items:center;gap:9px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'}" data-act="pickOptimize" data-arg="${o}"><span class="radio ${on?'on':''}"></span>${o}</div>`; });
-  h+='</div><div class="sep"></div><div class="menuhead">Installed</div>';
-  S.models.forEach(id=>{ const sel=S.modelSel===id; h+=`<div class="menurow" data-act="pickModel" data-arg="${id}">${esch(shortModel(id))}<span class="sp" style="flex:1"></span>${sel?'<span>✓</span>':''}</div>`; });
+  // Auto card (same row family, roomier).
+  let h=`<div class="pickrow ${auto?'sel':''}" style="padding:10px 12px;flex-direction:column;align-items:stretch;gap:2px" data-act="pickModel" data-arg="Auto">
+     <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13.5px;font-weight:600">Auto</span><span class="sp" style="flex:1"></span><span style="font-size:10.5px;color:var(--muted);font-weight:500">Recommended</span>${auto?'<span class="ck">✓</span>':''}</div>
+     <div style="font-size:11.5px;color:var(--muted)">${S.schedule&&S.schedule.selectedModelID?('esh picks per request — now: '+esch(shortModel(S.schedule.selectedModelID))):'esh picks the best model for each request'}</div></div>`;
+  // Installed models (resident dot + check).
+  if(S.models.length){ h+='<div class="menuhead">Installed</div>';
+    S.models.forEach(id=>{ const sel=S.modelSel===id; const resident=S.engine&&S.engine.residentModelID&&(id===S.engine.residentModelID);
+      h+=pickRow(shortModel(id),sel,'pickModel',id, resident?'<span class="resdot" title="Loaded"></span>':''); }); }
+  // Apple Intelligence — built into this Mac.
   const apple=S.engine&&S.engine.appleIntelligence&&S.engine.appleIntelligence.available;
-  if(apple){ h+='<div class="menuhead">Built into this Mac</div>'+`<div class="menurow" data-act="pickModel" data-arg="Apple Intelligence">Apple Intelligence<span class="sp" style="flex:1"></span>${S.modelSel==='Apple Intelligence'?'<span>✓</span>':''}</div>`; }
-  h+='<div class="sep"></div><div class="menurow" data-act="openModels">Browse models…</div><div class="menurow" data-act="openModels">Manage models…</div>';
+  if(apple){ h+='<div class="menuhead">Built into this Mac</div>'+pickRow('Apple Intelligence',S.modelSel==='Apple Intelligence','pickModel','Apple Intelligence'); }
+  // Optimize-for — same highlight+check row pattern (no radios).
+  h+='<div class="menuhead">Optimize for</div>';
+  ['Balanced','Quality','Speed','Low Memory'].forEach(o=>{ h+=pickRow(o,o===S.optimize,'pickOptimize',o); });
+  h+='<div class="sep"></div><div class="pickrow" data-act="openModels"><span>Browse models…</span></div><div class="pickrow" data-act="openModels"><span>Manage models…</span></div>';
   p.innerHTML=h; return p;
 }
 function shortModel(id){ return id.replace(/^mlx-community--/,'').replace(/^bartowski--/,'').replace(/-4bit$/,'').replace(/-instruct/i,''); }
@@ -585,11 +651,35 @@ function renderPane(){
         <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#b5b1a8"></span>Speech ${gb(audioB)}</span></div>
       <div class="mono" style="font-size:11px;color:var(--faint);margin-top:12px">${esch(s.assetsRoot||'')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:14px;line-height:1.5">If the drive disconnects, installed models pause — nothing re-downloads internally without asking.</div></div>`; }
+  if(p==='General'){ const enterOn=S.prefs.sendEnter!==false, histOn=S.prefs.saveHistory!==false; const n=Object.keys(S.chats).length;
+    return `<div style="font-size:15px;font-weight:600;margin-bottom:18px">General</div><div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Send with Enter<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Off uses ⌘/Shift+Enter to send, Enter for a new line</div></span><span class="toggle" data-act="toggleEnter" style="background:${enterOn?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${enterOn?'16px':'2px'}"></span></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Save conversation history<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Stored only in this browser</div></span><span class="toggle" data-act="toggleHistory" style="background:${histOn?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${histOn?'16px':'2px'}"></span></span></div>
+      <div style="border-top:1px solid rgba(32,30,27,.07);padding-top:14px;display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:13.5px">Clear history</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px">${n} conversation${n===1?'':'s'}, stored locally</div></div>
+        <span class="btn ghost" style="padding:7px 14px;font-size:12.5px" data-act="clearHistory">Clear…</span></div></div>`; }
+  if(p==='Intelligence'){ const routeOn=S.prefs.autoRouting!==false; const rz=S.prefs.reasoning||'Auto';
+    const rzHint={Auto:'Reasoning models think when the task benefits — the thought time shows as a collapsed line.',Off:'Responses come straight away, even on reasoning-capable models.',On:'Always reason before answering. Slower, better on hard problems.'}[rz];
+    let seg=''; ['Auto','Off','On'].forEach(o=>{ const on=o===rz; seg+=`<span data-act="pickReasoning" data-arg="${o}" style="padding:7px 18px;cursor:pointer;background:${on?'var(--ink)':'transparent'};color:${on?'#fff':'rgba(32,30,27,.65)'};font-weight:${on?'500':'400'}">${o}</span>`; });
+    return `<div style="font-size:15px;font-weight:600;margin-bottom:18px">Intelligence</div><div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:13.5px">Auto routing</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.45">esh picks the best model per request based on task, memory, and what's already loaded</div></div><span class="toggle" data-act="toggleRouting" style="background:${routeOn?'var(--ink)':'rgba(32,30,27,.2)'};flex-shrink:0;margin-left:20px"><span class="knob" style="left:${routeOn?'16px':'2px'}"></span></span></div>
+      <div><div style="font-size:12px;color:var(--muted);margin-bottom:7px">Reasoning</div><div style="display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden;font-size:12.5px">${seg}</div><div style="font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45">${esch(rzHint)}</div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Default performance</span><span data-act="goPane" data-arg="Performance" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(S.optimize)} <span style="font-size:9px">▸</span></span></div>
+      <div><div style="font-size:12px;color:var(--muted);margin-bottom:7px">System instructions</div><textarea id="sysinstr" data-act="editSysInstr" oninput="ACT.editSysInstr()" placeholder="Optional — applied to every new conversation" style="width:100%;border:1px solid var(--line2);border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.55;color:rgba(32,30,27,.85);min-height:56px;resize:vertical;font-family:inherit;background:#fff">${esch(S.prefs.systemInstr||'')}</textarea><div style="font-size:11px;color:var(--faint);margin-top:6px">Applied to every new conversation</div></div></div>`; }
+  if(p==='Models'){ const ids=S.models||[];
+    let rows=''; ids.forEach(id=>{ const resident=S.engine&&S.engine.residentModelID===id; rows+=`<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esch(shortModel(id))}</div></div>${resident?'<span style="font-size:11px;color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:2px 7px">Loaded</span>':''}<span class="iconbtn" data-act="openModels" style="font-size:12px" title="Manage">▸</span></div>`; });
+    if(!rows) rows='<div style="font-size:12.5px;color:var(--muted);padding:8px 0">No local models installed yet.</div>';
+    const s=e.storage||{};
+    return `<div style="display:flex;align-items:center;margin-bottom:18px;max-width:520px"><span style="font-size:15px;font-weight:600">Models</span><span class="sp" style="flex:1"></span><span class="btn ghost" style="padding:7px 14px;font-size:12.5px" data-act="openModels">Browse models…</span></div>
+      <div style="max-width:520px"><div class="menuhead" style="padding:0 0 4px">Installed</div>${rows}
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;margin-top:18px"><span>Model storage</span><span data-act="goPane" data-arg="Storage" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(volLabel(s.assetsRoot))}${s.freeBytes?(' · '+gb(s.freeBytes)+' free'):''} <span style="font-size:9px">▸</span></span></div></div>`; }
   if(p==='Voice') return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Voice</div>
     <div style="display:flex;flex-direction:column;gap:12px;font-size:13.5px;max-width:440px">
       <div style="display:flex;justify-content:space-between;align-items:center"><span>Read responses aloud</span><span class="toggle" data-act="toggleTts" style="background:${S.prefs.autoTts?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${S.prefs.autoTts?'16px':'2px'}"></span></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span>Language</span><span class="mono" style="font-size:12px;color:var(--muted)">Automatic</span></div>
       <div style="display:flex;justify-content:space-between;align-items:center"><span>Speech-to-text model</span><span class="mono" style="font-size:12px;color:var(--muted)">${esch((S.config&&S.config.defaults&&S.config.defaults.sttModel)||'parakeet (default)')}</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span>Voice (TTS) model</span><span class="mono" style="font-size:12px;color:var(--muted)">${esch((S.config&&S.config.defaults&&S.config.defaults.ttsModel)||'Soprano (default)')}</span></div></div>`;
+      <div style="display:flex;justify-content:space-between;align-items:center"><span>Voice (TTS) model</span><span class="mono" style="font-size:12px;color:var(--muted)">${esch((S.config&&S.config.defaults&&S.config.defaults.ttsModel)||'Soprano (default)')}</span></div></div>
+      <div style="border-top:1px solid rgba(32,30,27,.07);margin-top:16px;padding-top:12px;font-size:12px;color:var(--muted);max-width:440px;line-height:1.5">Tap the mic in the composer for a full voice conversation — it listens, transcribes, answers, and speaks back, committing every turn to the chat.</div>`;
   if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Advanced</div><div style="max-width:480px">
       <div style="display:flex;align-items:center;gap:9px"><span style="font-size:13.5px;font-weight:600">API server</span><span class="sp" style="flex:1"></span><span class="dot"></span><span style="font-size:12px;color:var(--muted)">Running</span></div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px"><span class="mono" style="font-size:12.5px">${esch(srv)}</span></div>
@@ -621,27 +711,35 @@ function renderOnboarding(){
   return v;
 }
 
-/* ---------- voice ---------- */
+/* ---------- voice (full conversational loop) ---------- */
 function renderVoice(){
-  const v=el('div'); v.style.cssText='position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:60;animation:eshfade .2s ease-out';
+  const v=el('div',{cls:'voicewrap'});
   if(S.voice==='error'){
-    v.innerHTML=`<div style="max-width:340px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
+    v.innerHTML=`<div class="vstage"><div style="max-width:340px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
       <div style="font-size:16px;font-weight:600">Voice unavailable</div>
       <div style="font-size:13px;color:var(--muted);line-height:1.5">${esch(S.voiceError||'')}</div>
-      <div style="display:flex;gap:12px"><span class="btn ghost" style="padding:6px 14px" data-act="voiceRetry">Try again</span><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">Back to text</span></div></div>`;
+      <div style="display:flex;gap:12px"><span class="btn ghost" style="padding:6px 14px" data-act="voiceRetry">Try again</span><span class="btn ghost" style="padding:6px 14px" data-act="voiceText">Back to text</span></div></div></div>`;
     return v;
   }
-  if(S.voice==='listening'){
-    v.innerHTML=`<span data-act="voiceFinish" style="width:84px;height:84px;border-radius:50%;background:rgba(32,30,27,.08);display:flex;align-items:center;justify-content:center;cursor:pointer;animation:eshpulse 1.6s ease-in-out infinite"><span style="width:38px;height:38px;border-radius:50%;background:var(--ink)"></span></span>
-      <div style="font-size:16px;font-weight:500">Listening…</div><div style="font-size:12px;color:var(--faint)">Tap the circle when you're done</div>`;
-  } else if(S.voice==='thinking'){
-    v.innerHTML=`<span class="typing" style="transform:scale(1.7)"><i></i><i></i><i></i></span><div style="font-size:16px;font-weight:500">Thinking…</div>
-      ${S.voiceHeard?`<div style="font-size:13px;color:var(--muted);max-width:320px;text-align:center;font-style:italic">"${esch(S.voiceHeard)}"</div>`:''}`;
-  } else {
-    let bars=''; [14,30,20,36,16,26,12].forEach((hh,i)=>bars+=`<span style="width:4px;height:${hh}px;border-radius:2px;background:var(--ink);animation:eshbar .9s ${i*.12}s ease-in-out infinite"></span>`);
-    v.innerHTML=`<div data-act="voiceInterrupt" style="display:flex;align-items:center;gap:4px;height:44px;cursor:pointer">${bars}</div><div style="font-size:16px;font-weight:500">Speaking</div><div style="font-size:12px;color:var(--faint)">Tap to interrupt · everything is transcribed into the chat</div>`;
-  }
-  v.innerHTML+=`<div style="display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--muted)"><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">Back to text</span><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">End voice chat</span></div>`;
+  const label={listening:'Listening',thinking:'Thinking',speaking:'Speaking'}[S.voice]||'';
+  // Orb: pulsing circle (listening) → three dots (thinking) → waveform (speaking).
+  let orb='';
+  if(S.voice==='listening') orb=`<div class="vorb" data-act="voiceFinish" title="Tap when you're done"><span class="vpulse"><span></span></span></div>`;
+  else if(S.voice==='thinking') orb=`<div class="vorb"><span class="vdots"><i></i><i style="animation-delay:.18s"></i><i style="animation-delay:.36s"></i></span></div>`;
+  else { let bars=''; [14,30,20,36,16,26,12].forEach((hh,i)=>bars+=`<i style="height:${hh}px;animation-delay:${i*.12}s"></i>`);
+    orb=`<div class="vorb"><span class="vwave" data-act="voiceInterrupt" title="Tap to interrupt">${bars}</span></div>`; }
+  // Transcript: live utterance with caret while listening, muted quote once it settles, streamed answer while speaking.
+  let mid='';
+  if(S.voice==='listening'){ if(S.voiceHeard) mid=`<div class="vlive">${esch(S.voiceHeard)}<span class="caret"></span></div>`; }
+  else if(S.voiceHeard){ mid=`<div class="vquote">"${esch(S.voiceHeard)}"</div>`; }
+  const ans=(S.voice==='speaking'&&S.voiceAnswer)?`<div class="vanswer">${esch(S.voiceAnswer)}</div>`:'';
+  const hint=S.voice==='listening'?'Tap the circle when you’re done':(S.voice==='speaking'?'Tap the wave to interrupt':'');
+  v.innerHTML=`<div class="vstage">${orb}<div class="vlabel">${label}</div>${mid}${ans}<div class="vhint">${esch(hint)}</div></div>
+    <div class="vctrls">
+      <div class="vctrlcol"><span class="vctrl line" data-act="voiceText" title="Back to text">${ICON.keyboard}</span><span class="vctrllbl">Text</span></div>
+      <div class="vctrlcol"><span class="vctrl solid" data-act="endVoice" title="End voice chat">${ICON.xmark}</span><span class="vctrllbl">End</span></div>
+    </div>
+    <div class="vfoot">Everything is transcribed into the chat</div>`;
   return v;
 }
 
@@ -659,10 +757,12 @@ async function send(){
   let resolved=S.modelSel;
   if(resolved==='Auto'){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced';
     const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc){ S.schedule=sc; if(sc.selectedModelID) resolved=sc.selectedModelID; } }
-  const reasoning=looksReasoning(resolved);
+  let reasoning=looksReasoning(resolved);
+  if(S.prefs.reasoning==='Off')reasoning=false; else if(S.prefs.reasoning==='On')reasoning=true;
   S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; saveChats(); render();
   S.controller=new AbortController(); const t0=performance.now();
-  const msgs=c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content}));
+  const sys=(S.prefs.systemInstr||'').trim();
+  const msgs=(sys?[{role:'system',content:sys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})));
   const body={ model: resolved==='Auto'?undefined:resolved, messages:msgs, stream:true, max_tokens:2048 };
   let truncated=false, ttft=0, execProfile=null;
   let errorInfo=null;
@@ -716,8 +816,10 @@ async function speak(text){ const clean=splitThink(text).answer||text; if(!clean
   try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:clean.slice(0,2000)})});
     if(!r.ok)return null; const b=await r.blob(); const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }catch(e){ return null; } }
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
+function clearVoiceReveal(){ if(S._vsi){ clearInterval(S._vsi); S._vsi=null; } }
+function endVoiceLoop(){ clearVoiceReveal(); stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voiceAudio=null; S.voice=null; S.voiceHeard=''; S.voiceAnswer=''; }
 async function startVoice(){
-  S.voice='listening'; S.voiceError=null; render();
+  clearVoiceReveal(); S.voice='listening'; S.voiceError=null; S.voiceHeard=''; S.voiceAnswer=''; render();
   try{
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     S.voiceStream=stream; S.recChunks=[];
@@ -728,8 +830,17 @@ async function startVoice(){
   }catch(e){ S.voice='error'; S.voiceError='Microphone unavailable — grant access to use voice.'; render(); }
 }
 function stopListening(){ try{ if(S.recorder&&S.recorder.state!=='inactive')S.recorder.stop(); }catch(e){} if(S.voiceStream){ S.voiceStream.getTracks().forEach(t=>t.stop()); S.voiceStream=null; } }
+// Reveal the answer text word-by-word roughly in step with the spoken audio, then commit the turn and
+// return to listening. `dur` is the audio duration in seconds when known (otherwise a reading estimate).
+function revealAnswer(reply,dur,commit){
+  clearVoiceReveal(); S.voiceAnswer=''; const words=reply.split(/\s+/).filter(Boolean);
+  if(!words.length){ commit(); return; }
+  const step=Math.max(45,Math.min(320,(dur*1000)/words.length)); let i=0;
+  S._vsi=setInterval(()=>{ i++; if(i>=words.length){ clearVoiceReveal(); S.voiceAnswer=reply; render(); commit(); }
+    else { S.voiceAnswer=words.slice(0,i).join(' '); if(S.voice==='speaking')render(); } },step);
+}
 async function finishVoiceTurn(){
-  S.voice='thinking'; render();
+  S.voice='thinking'; S.voiceAnswer=''; render();
   const blob=new Blob(S.recChunks,{type:(S.recorder&&S.recorder.mimeType)||'audio/webm'});
   const b64=await blobToB64(blob);
   let text='';
@@ -738,23 +849,34 @@ async function finishVoiceTurn(){
     text=((await r.json()).text||'').trim();
   }catch(e){ S.voice='error'; S.voiceError='Transcription failed: '+e.message; render(); return; }
   if(!text){ startVoice(); return; }  // nothing said — listen again
-  S.voiceHeard=text;
+  S.voiceHeard=text; render();  // utterance settles into the muted quote
   const c=cur()||(newChat(),cur());
-  c.messages.push({id:uid(),role:'user',content:text});
-  saveChats();
+  c.messages.push({id:uid(),role:'user',content:text}); saveChats();
   // Resolve Auto through the Scheduler, then run inference (non-streaming for the voice turn).
   let model=S.modelSel;
   if(model==='Auto'){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced'; const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc&&sc.selectedModelID){ S.schedule=sc; model=sc.selectedModelID; } }
-  let reply='';
-  try{ const rr=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model==='Auto'?undefined:model,messages:c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})),max_tokens:512})});
+  const t0=performance.now(); let reply='';
+  const vsys=(S.prefs.systemInstr||'').trim();
+  const vmsgs=(vsys?[{role:'system',content:vsys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})));
+  try{ const rr=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model==='Auto'?undefined:model,messages:vmsgs,max_tokens:512})});
     const j=await rr.json(); reply=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''; }catch(e){ reply='[error] '+e.message; }
-  c.messages.push({id:uid(),role:'assistant',content:reply,reasoning:looksReasoning(model)});
-  saveChats();
-  // Speak the answer, show the speaking state, then listen again.
-  S.voice='speaking'; render();
+  const answer=splitThink(reply).answer||reply;
+  const secs=Math.max(0.1,(performance.now()-t0)/1000);
+  const tps=Math.max(1,Math.round((answer.length/4)/secs));
+  // Every finished exchange is committed to the transcript with a voice footer.
+  const meta='voice · '+secs.toFixed(1)+'s · '+tps+' tok/s';
+  // Speak, reveal the answer in sync, then commit the turn (once) and listen again.
+  S.voice='speaking'; S.voiceAnswer=''; render();
   const audio=await speak(reply); S.voiceAudio=audio;
-  if(audio){ audio.onended=()=>{ if(S.voice==='speaking')startVoice(); }; }
-  else { startVoice(); }
+  let committed=false;
+  const commitOnce=()=>{ if(committed)return; committed=true; clearVoiceReveal(); S.voiceAnswer=answer;
+    c.messages.push({id:uid(),role:'assistant',content:reply,reasoning:looksReasoning(model),meta:meta}); saveChats();
+    if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voiceAudio=null;
+    if(S.voice==='speaking') startVoice(); };
+  const dur=Math.max(1.5,answer.split(/\s+/).length*0.34);  // reading-estimate fallback
+  if(audio){ audio.onloadedmetadata=()=>{ if(!committed&&isFinite(audio.duration)&&audio.duration>0) revealAnswer(answer,audio.duration,commitOnce); };
+    audio.onended=commitOnce; }
+  revealAnswer(answer,dur,commitOnce);
 }
 function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 function onFiles(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;

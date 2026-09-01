@@ -36,6 +36,21 @@ into the primary browser interface, implemented as a **thin client** over canoni
   **accessibility basics** (keyboard nav, Escape-to-close, focusable + ARIA-labeled controls,
   `prefers-reduced-motion`).
 
+### Refined
+- **Model picker** now uses one consistent row pattern — rounded highlight + right-aligned check on
+  the selected row, hover tint on the rest — across Auto, Installed, Apple Intelligence, and
+  Optimize-for (radios removed), in the approved section order.
+- **Status line under the composer** is contextual: it surfaces what matters right now (e.g. amber
+  “External storage disconnected”, “Local · <model> · generating”, “… warm”, “Local · Private · Ready”)
+  from real engine/storage signals, and still opens the Engine menu.
+- **Voice is a full conversational loop** — listening (pulsing circle) → thinking (three dots, the
+  utterance settles into a muted quote) → speaking (waveform + the answer streams in sync), then back
+  to listening. Two round 44px controls (keyboard = back to text, dark X = end); every finished
+  exchange is committed to the transcript with a `voice · Xs · Y tok/s` footer.
+- **Settings** completed to all eight panes: General (Send-with-Enter, Save history, Clear history),
+  Intelligence (Auto routing, Reasoning, System instructions applied per new conversation), Models
+  (installed list + storage), plus Voice/Performance/Storage/Privacy/Advanced.
+
 ### Notes
 - Full voice (real mic + STT) and packaged `esh web` are validated on the notarized RC artifact.
 - `qwen3.5` remains catalog-gated (`.incompatible`); observed generating malformed output via the

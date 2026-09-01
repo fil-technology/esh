@@ -52,4 +52,61 @@ struct WebChatPageTests {
         #expect(html.contains("/v1/audio/transcriptions"))
         #expect(html.contains("localStorage"))    // history + presentation prefs are browser-local
     }
+
+    @Test
+    func picker2UsesOneConsistentRowPatternNoRadios() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // The picker is a single row family (rounded highlight + right-aligned check), built by pickRow().
+        #expect(html.contains("function pickRow("))
+        #expect(html.contains(".pickrow"))
+        // Optimize-for is rendered through the same pickRow pattern, not a radio control.
+        #expect(html.contains("pickRow(o,o===S.optimize,'pickOptimize'"))
+        // The picker sections match the approved layout order.
+        #expect(html.contains("Installed"))
+        #expect(html.contains("Built into this Mac"))
+        #expect(html.contains("Manage models"))
+    }
+
+    @Test
+    func contextualStatusLineSurfacesTheMomentAndOpensEngine() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function statusInfo("))
+        // Real signals only: external-storage disconnect, generating, warm, ready.
+        #expect(html.contains("External storage disconnected"))
+        #expect(html.contains("· generating"))
+        #expect(html.contains(" warm"))
+        #expect(html.contains("Local · Private · Ready"))
+        // Still opens the same Engine menu.
+        #expect(html.contains("data-act=\"toggleEngine\""))
+    }
+
+    @Test
+    func voiceIsAFullConversationalLoop() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Listening → Thinking → Speaking states with orb/dots/waveform.
+        #expect(html.contains(".vpulse"))
+        #expect(html.contains(".vdots"))
+        #expect(html.contains(".vwave"))
+        // Two round 44px controls (keyboard = back to text, dark X = end) and the transcript footer.
+        #expect(html.contains("ICON.keyboard"))
+        #expect(html.contains("Everything is transcribed into the chat"))
+        // Every finished exchange is committed with a voice footer.
+        #expect(html.contains("'voice · '"))
+        // The loop is real: mic → STT → LLM → TTS.
+        #expect(html.contains("getUserMedia"))
+        #expect(html.contains("MediaRecorder"))
+    }
+
+    @Test
+    func settingsHasEveryPane() {
+        let html = WebChatPage.html(toolVersion: nil)
+        for pane in ["General", "Intelligence", "Models", "Voice", "Performance", "Storage", "Privacy", "Advanced"] {
+            #expect(html.contains(pane))
+        }
+        // General + Intelligence controls that actually change client behavior.
+        #expect(html.contains("Send with Enter"))
+        #expect(html.contains("Save conversation history"))
+        #expect(html.contains("Auto routing"))
+        #expect(html.contains("System instructions"))
+    }
 }
