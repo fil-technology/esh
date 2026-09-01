@@ -140,11 +140,11 @@ public struct RecommendedModelRegistry: Sendable {
             tier: .good,
             estimatedMemoryGB: 5.6,
             totalDiskSizeGB: 5.2,
-            tags: ["default", "balanced", "general-purpose"],
-            summary: "Balanced first-choice local assistant for everyday chat, drafting, and research.",
+            tags: ["balanced", "general-purpose"],
+            summary: "Qwen 3.5 9B (MLX). GATED for 2.0: the Qwen3.5 hybrid/SSM path crashes on the current mlx-lm (create_attention_mask signature mismatch), so esh does not run it. Reclassify to .recommended once mlx-lm ships a compatible hybrid implementation.",
             contextWindow: 262144,
             capabilities: [.chat, .coding, .reasoning, .toolCalling],
-            status: .recommended,
+            status: .incompatible,
             sortOrder: 0
         ),
         RecommendedModel(
@@ -157,8 +157,8 @@ public struct RecommendedModelRegistry: Sendable {
             tier: .good,
             estimatedMemoryGB: 13.5,
             totalDiskSizeGB: 13.3,
-            tags: ["general-purpose", "coding", "agentic"],
-            summary: "Balanced built-in default for everyday chat, coding, and agentic tasks.",
+            tags: ["default", "balanced", "general-purpose", "coding", "agentic"],
+            summary: "Flagship first-choice local assistant for everyday chat, coding, and agentic tasks — a standard, well-supported architecture. Best on higher-RAM Macs; esh's model-fit gate will steer smaller Macs to a lighter recommended model.",
             contextWindow: 32768,
             capabilities: [.chat, .coding, .toolCalling],
             status: .recommended,
@@ -212,7 +212,7 @@ public struct RecommendedModelRegistry: Sendable {
             summary: "High-throughput mid-size option with strong instruction following and VLM support.",
             contextWindow: 262144,
             capabilities: [.chat, .coding, .reasoning, .toolCalling],
-            status: .experimental,
+            status: .incompatible,
             sortOrder: 4
         ),
         RecommendedModel(
@@ -243,7 +243,7 @@ public struct RecommendedModelRegistry: Sendable {
             estimatedMemoryGB: 4.8,
             totalDiskSizeGB: 4.5,
             tags: ["agentic", "general-purpose", "roleplay"],
-            summary: "Efficient general-purpose small model for broad local usage.",
+            summary: "Efficient general-purpose small model for broad local usage — a standard, well-supported architecture and a lighter alternative to the flagship default.",
             contextWindow: 131072,
             capabilities: [.chat, .toolCalling],
             status: .recommended,
@@ -297,7 +297,7 @@ public struct RecommendedModelRegistry: Sendable {
             summary: "Fast small generalist when you want noticeably better quality than tiny models without much extra cost.",
             contextWindow: 262144,
             capabilities: [.chat, .toolCalling],
-            status: .recommended,
+            status: .incompatible,
             sortOrder: 9
         ),
         RecommendedModel(
@@ -365,7 +365,7 @@ public struct RecommendedModelRegistry: Sendable {
             summary: "Ultra-light model for background helpers, formatting, and fast automation loops.",
             contextWindow: 262144,
             capabilities: [.chat],
-            status: .experimental,
+            status: .incompatible,
             sortOrder: 13
         ),
         RecommendedModel(
@@ -382,7 +382,7 @@ public struct RecommendedModelRegistry: Sendable {
             summary: "Tiny helper preset for ultra-fast chat, formatting, and background assistant tasks.",
             contextWindow: 262144,
             capabilities: [.chat],
-            status: .recommended,
+            status: .incompatible,
             sortOrder: 14
         ),
         RecommendedModel(
@@ -416,7 +416,7 @@ public struct RecommendedModelRegistry: Sendable {
             summary: "Large distilled reasoning preset aimed at higher-quality chain-of-thought style tasks.",
             contextWindow: 262144,
             capabilities: [.chat, .reasoning],
-            status: .experimental,
+            status: .incompatible,
             sortOrder: 16
         ),
         RecommendedModel(
@@ -463,12 +463,12 @@ public struct RecommendedModelRegistry: Sendable {
             tier: .good,
             estimatedMemoryGB: 6.2,
             totalDiskSizeGB: 5.5,
-            tags: ["gguf", "default", "balanced"],
-            summary: "GGUF fallback for a strong all-around local assistant through llama.cpp.",
+            tags: ["gguf", "balanced"],
+            summary: "GGUF Qwen 3.5 9B via llama.cpp. Experimental for 2.0: the Qwen3.5 hybrid architecture is unverified through llama.cpp in this build; not claimed as a verified-compatible default.",
             backend: .gguf,
             contextWindow: 262144,
             capabilities: [.chat, .coding, .reasoning, .toolCalling],
-            status: .recommended,
+            status: .experimental,
             sortOrder: 19
         ),
         RecommendedModel(

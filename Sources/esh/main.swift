@@ -607,7 +607,7 @@ private struct CLI {
                 "llama-3-2-3b",
                 "qwen-2-5-coder-7b",
                 "mistral-small-24b",
-                "qwen-3-5-9b-optiq"
+                "llama-3-1-8b"
             ]
             : [
                 "llama-3-2-3b-gguf",

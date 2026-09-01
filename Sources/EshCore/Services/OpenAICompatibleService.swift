@@ -623,6 +623,34 @@ public struct OpenAIAudioSpeechRequest: Codable, Hashable, Sendable {
     }
 }
 
+public struct OpenAIAudioTranscriptionRequest: Codable, Hashable, Sendable {
+    /// Base64-encoded audio bytes (WAV/MP3/etc). The browser client posts this from a FileReader
+    /// data URL (the part after the comma).
+    public var audio: String
+    public var model: String?
+    public var language: String?
+    public var filename: String?
+
+    enum CodingKeys: String, CodingKey {
+        case audio
+        case model
+        case language
+        case filename
+    }
+}
+
+public struct OpenAIAudioTranscriptionResponse: Codable, Hashable, Sendable {
+    public var text: String
+    public var model: String?
+    public var language: String?
+
+    public init(text: String, model: String? = nil, language: String? = nil) {
+        self.text = text
+        self.model = model
+        self.language = language
+    }
+}
+
 public struct OpenAIAudioSpeechResponse: Hashable, Sendable {
     public var audioData: Data
     public var contentType: String
@@ -738,6 +766,9 @@ public struct OpenAICompatibleService: Sendable {
     private let installedModelsClosure: @Sendable () throws -> [ExternalInstalledModelCapability]
     private let audioModelsClosure: @Sendable () throws -> [OpenAIAudioModel]
     private let speechClosure: @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse
+    /// Optional speech-to-text (STT). When present, POST /v1/audio/transcriptions transcribes posted
+    /// audio bytes; when nil the route reports that no speech model is available.
+    private let transcribeClosure: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -746,13 +777,15 @@ public struct OpenAICompatibleService: Sendable {
         audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
         speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
-        }
+        },
+        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
         self.installedModelsClosure = installedModels
         self.audioModelsClosure = audioModels
         self.speechClosure = speech
+        self.transcribeClosure = transcribe
     }
 
     public init(
@@ -765,7 +798,8 @@ public struct OpenAICompatibleService: Sendable {
         audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
         speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
-        }
+        },
+        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil
     ) {
         // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
         // request stay warm and are reused by the next, evicted on idle/memory pressure.
@@ -807,7 +841,8 @@ public struct OpenAICompatibleService: Sendable {
                 try capabilities.describe(toolVersion: toolVersion).installedModels
             },
             audioModels: audioModels,
-            speech: speech
+            speech: speech,
+            transcribe: transcribe
         )
     }
 
@@ -1211,6 +1246,18 @@ public struct OpenAICompatibleService: Sendable {
         normalized.input = trimmedInput
         normalized.responseFormat = "wav"
         return try await speechClosure(normalized)
+    }
+
+    public func audioTranscription(_ request: OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse {
+        guard let transcribeClosure else {
+            throw OpenAICompatibleError.unsupported(
+                "Speech-to-text is not available. Install a transcription model (e.g. `esh model install mlx-community/parakeet-tdt-0.6b-v2`) and set it with `esh config set-speech --stt <model>`."
+            )
+        }
+        guard request.audio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            throw OpenAICompatibleError.invalidRequest("Audio payload must not be empty.")
+        }
+        return try await transcribeClosure(request)
     }
 
     public func ollamaTags() throws -> OllamaTagsResponse {

@@ -13,7 +13,8 @@ die() {
 [[ -f "$VERSION_FILE" ]] || die "VERSION file is missing."
 
 VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "VERSION must use semantic versioning like 0.1.0."
+# Accept X.Y.Z and SemVer pre-releases like X.Y.Z-rc.1 (used for release candidates).
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "VERSION must use semantic versioning like 0.1.0 or 2.0.0-rc.1."
 
 COMMAND="${1:-show}"
 

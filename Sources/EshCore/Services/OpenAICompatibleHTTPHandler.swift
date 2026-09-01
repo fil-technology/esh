@@ -34,10 +34,12 @@ public struct OpenAICompatibleHTTPResponse: Sendable {
 public struct OpenAICompatibleHTTPHandler: Sendable {
     private let service: OpenAICompatibleService
     private let bearerToken: String?
+    private let toolVersion: String?
 
-    public init(service: OpenAICompatibleService, bearerToken: String? = nil) {
+    public init(service: OpenAICompatibleService, bearerToken: String? = nil, toolVersion: String? = nil) {
         self.service = service
         self.bearerToken = bearerToken
+        self.toolVersion = toolVersion
     }
 
     public func handle(_ request: OpenAICompatibleHTTPRequest) async throws -> OpenAICompatibleHTTPResponse {
@@ -53,11 +55,11 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                     statusCode: 200,
                     payload: [
                         "status": "ok",
-                        "routes": "/v1/models,/v1/chat/completions,/v1/responses,/v1/tools,/v1/audio/models,/v1/audio/speech,/api/tags"
+                        "routes": "/web,/v1/models,/v1/chat/completions,/v1/responses,/v1/tools,/v1/audio/models,/v1/audio/speech,/v1/audio/transcriptions,/api/tags"
                     ]
                 )
             case ("GET", "/web"), ("GET", "/chat"):
-                return htmlResponse(WebChatPage.html(toolVersion: nil))
+                return htmlResponse(WebChatPage.html(toolVersion: toolVersion))
             case ("GET", "/v1/models"):
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):
@@ -75,6 +77,10 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                         "x-esh-audio-sample-rate": "\(response.sampleRate)"
                     ]
                 )
+            case ("POST", "/v1/audio/transcriptions"):
+                let decoded = try JSONCoding.decoder.decode(OpenAIAudioTranscriptionRequest.self, from: request.body)
+                let response = try await service.audioTranscription(decoded)
+                return try jsonResponse(statusCode: 200, payload: response)
             case ("GET", "/v1/tools"):
                 return try jsonResponse(statusCode: 200, payload: service.tools())
             case ("GET", "/api/tags"):

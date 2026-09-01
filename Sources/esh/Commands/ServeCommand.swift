@@ -15,8 +15,18 @@ enum ServeCommand {
 
         let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let host = CommandSupport.optionalValue(flag: "--host", in: arguments) ?? "127.0.0.1"
-        let port = try resolvePort(arguments: arguments)
+        let requestedPort = try resolvePort(arguments: arguments)
         let apiKey = resolveAPIKey(arguments: arguments)
+
+        // Handle "Address already in use" gracefully rather than failing to bind and hanging.
+        let port: UInt16
+        switch PortConflictResolver.resolve(host: host, port: requestedPort) {
+        case .useRequested: port = requestedPort
+        case .useAlternate(let alternate): port = alternate
+        case .cancelled:
+            print("esh serve cancelled — port \(requestedPort) is in use.")
+            return
+        }
 
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
@@ -26,16 +36,23 @@ enum ServeCommand {
             audioModels: OpenAICompatibleAudioCatalog.ttsModels,
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
-            }
+            },
+            transcribe: SpeechEndpointSupport.transcribeClosure()
         )
-        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey)
+        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
 
         server.start()
+        if host == "0.0.0.0" || host == "::" {
+            fputs("warning: binding to \(host) exposes the API — and any loaded model — to other machines on the network.\n", stderr)
+            if apiKey == nil {
+                fputs("warning: no --api-key set; anyone who can reach this port can use it. Pass --api-key <token> to require auth.\n", stderr)
+            }
+        }
         let redactedAuth = apiKey == nil ? "disabled" : "enabled"
         print("esh OpenAI-compatible server listening on http://\(host):\(port)")
         print("auth: \(redactedAuth)")
-        print("routes: GET /health, GET /v1/models, GET /v1/tools, GET /v1/audio/models, GET /api/tags, POST /v1/audio/speech, POST /v1/chat/completions, POST /v1/responses")
+        print("routes: GET /health, GET /web, GET /v1/models, GET /v1/tools, GET /v1/audio/models, GET /api/tags, POST /v1/audio/speech, POST /v1/audio/transcriptions, POST /v1/chat/completions, POST /v1/responses")
         print("press Ctrl+C to stop")
 
         let signalHandler = SignalHandler()

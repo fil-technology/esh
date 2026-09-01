@@ -15,9 +15,20 @@ enum WebCommand {
         guard unexpected.isEmpty else { throw StoreError.invalidManifest(usage) }
 
         let host = CommandSupport.optionalValue(flag: "--host", in: arguments) ?? "127.0.0.1"
-        let port: UInt16 = CommandSupport.optionalValue(flag: "--port", in: arguments)
+        let requestedPort: UInt16 = CommandSupport.optionalValue(flag: "--port", in: arguments)
             .flatMap { UInt16($0) } ?? defaultPort
         let open = !arguments.contains("--no-open")
+
+        // Handle "Address already in use" gracefully: offer to stop an existing esh server on this
+        // port, move to a free port, or cancel (auto-selects a free port when non-interactive).
+        let port: UInt16
+        switch PortConflictResolver.resolve(host: host, port: requestedPort) {
+        case .useRequested: port = requestedPort
+        case .useAlternate(let alternate): port = alternate
+        case .cancelled:
+            print("esh web cancelled — port \(requestedPort) is in use.")
+            return
+        }
         let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 
         // Keep MLX models weights-resident across requests so streaming starts immediately instead of
@@ -35,10 +46,11 @@ enum WebCommand {
             audioModels: OpenAICompatibleAudioCatalog.ttsModels,
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
-            }
+            },
+            transcribe: SpeechEndpointSupport.transcribeClosure()
         )
         // No bearer token: the browser page needs unauthenticated same-origin access to the API.
-        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil)
+        let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
         server.start()
 
