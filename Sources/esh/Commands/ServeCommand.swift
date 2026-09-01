@@ -37,7 +37,8 @@ enum ServeCommand {
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
             },
-            transcribe: SpeechEndpointSupport.transcribeClosure()
+            transcribe: SpeechEndpointSupport.transcribeClosure(),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion)
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)

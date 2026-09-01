@@ -47,7 +47,8 @@ enum WebCommand {
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
             },
-            transcribe: SpeechEndpointSupport.transcribeClosure()
+            transcribe: SpeechEndpointSupport.transcribeClosure(),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion)
         )
         // No bearer token: the browser page needs unauthenticated same-origin access to the API.
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil, toolVersion: toolVersion)
