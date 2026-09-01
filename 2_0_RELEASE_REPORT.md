@@ -47,13 +47,26 @@ latest public stable before this RC was `v0.9.7`. The 0.9.8 work is folded into 
 | Docs truthful | ✅ done |
 | Concurrency stability (short) | ✅ 8/8, stable |
 
-### Still open before **GA** (honest — env-limited or owner-only)
+### Validated during RC staging (2026-09-01)
+- **A1 version story** — reconciled (see top): 0.9.8 unreleased, folded into RC; no standalone v0.9.8.
+- **Live browser interaction (I) — VALIDATED in a real browser** against the served Web Chat: open/
+  render, model switching, streaming, send, conversation history (create/list/switch/**persist across
+  reload** via localStorage), **reasoning collapse + expand** (DeepSeek-R1: "17 plus 26 equals 43"
+  with a collapsible ▶/▼ Reasoning section), settings panel (system prompt/temperature/max-tokens/
+  reasoning/cache/auto-TTS), **TTS** (synthesizing→ready), and usage/ExecutionProfile display
+  ("Ns · N chars"). The page footer shows `esh v2.0.0-rc.1`. Only file-dialog flows (attachment/STT
+  upload) need an OS picker not drivable here; the STT endpoint itself is verified via curl.
+- **Fresh environment (K) — VALIDATED (config isolation)** via `ESH_HOME`/`ESH_ASSETS_HOME`: fresh
+  state root resolves correctly, `model list` handles empty state, `onboard status` reports fresh
+  state (chip/memory/engines detected), `model recommended` shows the Mistral flagship with no
+  qwen3.5. No existing state/config silently required. *(Packaged-binary-without-source remains for the
+  RC artifact — the dev build still needs the source tree for the MLX Python bridge.)*
+
+### Still open before **GA** (env-limited or requires the packaged RC artifact)
 | Item | Why still open |
 |---|---|
-| **A1 version story** | `main` says 0.9.8 but latest published is v0.9.7; 0.9.8 never tagged. Must reconcile to the 2.0 line before cutting the RC. |
-| Live browser interaction (I) | non-interactive session |
-| Live mic capture + real STT transcription (J) | needs bundled `mlx_audio` + a mic |
-| Fresh clean-machine run (K) | needs a second/clean machine |
+| Live mic capture + real STT transcription (J) | needs bundled `mlx_audio` (packaged RC) + a mic |
+| Packaged binary without source (K, remainder) | verify on the notarized RC artifact |
 | Packaged cross-version upgrade (L) | needs historical released binaries |
 | Multi-hour soak + large-model pressure (P) | needs a longer-running, less disk-constrained host |
 | Host disk pressure (M) | internal Data volume ~full on this host |
