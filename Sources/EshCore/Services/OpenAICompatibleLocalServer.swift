@@ -84,7 +84,11 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
                             headers: ["content-type": "application/json; charset=utf-8"],
                             body: Data(#"{"error":{"message":"Internal server error","type":"server_error"}}"#.utf8)
                         )
-                        self.send(response: response, on: connection)
+                        if response.bodyStream != nil {
+                            self.sendStreaming(response: response, on: connection)
+                        } else {
+                            self.send(response: response, on: connection)
+                        }
                     }
                     return
                 }
@@ -112,6 +116,31 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
         connection.send(content: serialized, completion: .contentProcessed { _ in
             connection.cancel()
         })
+    }
+
+    /// Send headers, then stream body chunks from the response's provider as they arrive, then close.
+    private func sendStreaming(response: OpenAICompatibleHTTPResponse, on connection: NWConnection) {
+        guard let provider = response.bodyStream else { send(response: response, on: connection); return }
+        connection.send(content: serializeHeadersOnly(response: response), completion: .contentProcessed { _ in })
+        Task {
+            await provider { chunk in
+                connection.send(content: chunk, completion: .contentProcessed { _ in })
+            }
+            // Finalize once the last chunk has been handed to the connection.
+            connection.send(content: Data(), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
+    }
+
+    private func serializeHeadersOnly(response: OpenAICompatibleHTTPResponse) -> Data {
+        let reasonPhrase = response.statusCode == 200 ? "OK" : "Error"
+        var payload = Data("HTTP/1.1 \(response.statusCode) \(reasonPhrase)\r\n".utf8)
+        for (name, value) in response.headers.sorted(by: { $0.key < $1.key }) {
+            payload.append(Data("\(name): \(value)\r\n".utf8))
+        }
+        payload.append(Data("\r\n".utf8))
+        return payload
     }
 
     private func parseRequest(from data: Data) throws -> OpenAICompatibleHTTPRequest? {

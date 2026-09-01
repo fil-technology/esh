@@ -18,11 +18,16 @@ public struct OpenAICompatibleHTTPResponse: Sendable {
     public var statusCode: Int
     public var headers: [String: String]
     public var body: Data
+    /// When set, the server sends the headers then streams the body incrementally by calling this with
+    /// a `write` callback per chunk (used for real SSE streaming); `body` is ignored in that case.
+    public var bodyStream: (@Sendable (@escaping @Sendable (Data) -> Void) async -> Void)?
 
-    public init(statusCode: Int, headers: [String: String], body: Data) {
+    public init(statusCode: Int, headers: [String: String], body: Data,
+                bodyStream: (@Sendable (@escaping @Sendable (Data) -> Void) async -> Void)? = nil) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
+        self.bodyStream = bodyStream
     }
 }
 
@@ -77,6 +82,10 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             case ("POST", "/v1/chat/completions"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: request.body)
                 if decoded.stream == true {
+                    // Real incremental SSE when streaming inference is wired; else buffered fallback.
+                    if let provider = service.chatCompletionsStreamProvider(decoded) {
+                        return streamingResponse(provider: provider)
+                    }
                     let body = try await service.chatCompletionsStream(decoded)
                     return streamResponse(body: body)
                 } else {
@@ -127,6 +136,23 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             statusCode: statusCode,
             headers: jsonHeaders(contentLength: body.count),
             body: body
+        )
+    }
+
+    /// A streaming SSE response: the server sends headers, then writes chunks from `provider` as they
+    /// arrive (no content-length; the connection closes at the end).
+    private func streamingResponse(
+        provider: @escaping @Sendable (@escaping @Sendable (Data) -> Void) async -> Void
+    ) -> OpenAICompatibleHTTPResponse {
+        OpenAICompatibleHTTPResponse(
+            statusCode: 200,
+            headers: [
+                "content-type": "text/event-stream; charset=utf-8",
+                "cache-control": "no-cache",
+                "connection": "close"
+            ],
+            body: Data(),
+            bodyStream: provider
         )
     }
 

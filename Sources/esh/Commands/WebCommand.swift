@@ -20,6 +20,13 @@ enum WebCommand {
         let open = !arguments.contains("--no-open")
         let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 
+        // Keep MLX models weights-resident across requests so streaming starts immediately instead of
+        // reloading the model on every message (the long "generating…" pause). Opt out with
+        // ESH_MLX_PERSISTENT=0.
+        if ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == nil {
+            setenv("ESH_MLX_PERSISTENT", "1", 1)
+        }
+
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),

@@ -732,12 +732,16 @@ public struct OpenAIErrorResponse: Codable, Hashable, Sendable {
 
 public struct OpenAICompatibleService: Sendable {
     private let inferClosure: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse
+    /// Optional incremental token stream; when present, streaming chat completions emit real per-token
+    /// SSE deltas instead of chunking a fully-generated response.
+    private let streamClosure: (@Sendable (ExternalInferenceRequest) -> AsyncThrowingStream<String, Error>)?
     private let installedModelsClosure: @Sendable () throws -> [ExternalInstalledModelCapability]
     private let audioModelsClosure: @Sendable () throws -> [OpenAIAudioModel]
     private let speechClosure: @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
+        stream: (@Sendable (ExternalInferenceRequest) -> AsyncThrowingStream<String, Error>)? = nil,
         installedModels: @escaping @Sendable () throws -> [ExternalInstalledModelCapability],
         audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
         speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
@@ -745,6 +749,7 @@ public struct OpenAICompatibleService: Sendable {
         }
     ) {
         self.inferClosure = infer
+        self.streamClosure = stream
         self.installedModelsClosure = installedModels
         self.audioModelsClosure = audioModels
         self.speechClosure = speech
@@ -794,6 +799,9 @@ public struct OpenAICompatibleService: Sendable {
         self.init(
             infer: { request in
                 try await inference.infer(request: request)
+            },
+            stream: { request in
+                inference.inferStream(request: request)
             },
             installedModels: {
                 try capabilities.describe(toolVersion: toolVersion).installedModels
@@ -904,6 +912,50 @@ public struct OpenAICompatibleService: Sendable {
         )
         events.append(Data("data: [DONE]\n\n".utf8))
         return events
+    }
+
+    /// A real incremental SSE provider for streaming chat completions: emits per-token deltas as the
+    /// runtime produces them. Returns nil when no streaming inference is wired (caller falls back to
+    /// the buffered `chatCompletionsStream`).
+    public func chatCompletionsStreamProvider(
+        _ request: OpenAIChatCompletionsRequest
+    ) -> (@Sendable (@escaping @Sendable (Data) -> Void) async -> Void)? {
+        guard let streamClosure else { return nil }
+        let streamID = identifier(prefix: "chatcmpl")
+        let created = unixTimestamp()
+        let model = request.model ?? "esh"
+        return { write in
+            func emit(_ delta: OpenAIChatCompletionsStreamResponse.Delta, finish: String?) {
+                let payload = OpenAIChatCompletionsStreamResponse(
+                    id: streamID, object: "chat.completion.chunk", created: created, model: model,
+                    choices: [.init(index: 0, delta: delta, finishReason: finish)])
+                if let s = try? self.encodedStreamPayload(payload) {
+                    var d = Data(); d.appendSSE(s); write(d)
+                }
+            }
+            emit(.init(role: "assistant", content: ""), finish: nil)
+            do {
+                let messages = try request.messages.map(self.externalMessage(from:))
+                let external = ExternalInferenceRequest(
+                    model: request.model, messages: messages,
+                    generation: GenerationConfig(
+                        maxTokens: request.maxCompletionTokens ?? request.maxTokens ?? GenerationConfig().maxTokens,
+                        temperature: request.temperature ?? GenerationConfig().temperature,
+                        topP: request.topP, topK: request.topK, minP: request.minP,
+                        repetitionPenalty: request.repetitionPenalty, seed: request.seed,
+                        enableThinking: request.enableThinking, thinkingBudget: request.thinkingBudget,
+                        thinkingStartToken: request.thinkingStartToken, thinkingEndToken: request.thinkingEndToken,
+                        kvBits: request.kvBits, kvQuantScheme: request.kvQuantScheme,
+                        kvGroupSize: request.kvGroupSize, quantizedKVStart: request.quantizedKVStart))
+                for try await chunk in streamClosure(external) where chunk.isEmpty == false {
+                    emit(.init(role: nil, content: chunk), finish: nil)
+                }
+                emit(.init(role: nil, content: nil), finish: "stop")
+            } catch {
+                emit(.init(role: nil, content: "\n[error] \(error.localizedDescription)"), finish: "stop")
+            }
+            var done = Data(); done.append(Data("data: [DONE]\n\n".utf8)); write(done)
+        }
     }
 
     public func responses(_ request: OpenAIResponsesRequest) async throws -> OpenAIResponsesResponse {

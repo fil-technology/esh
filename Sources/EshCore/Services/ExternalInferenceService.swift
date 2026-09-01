@@ -59,6 +59,65 @@ public struct ExternalInferenceService: Sendable {
         return try await inferDirect(request: request, install: install, routing: nil)
     }
 
+    /// Incremental token stream for a request — yields visible text chunks as the runtime produces
+    /// them (for streaming API clients / Web Chat). Applies the same capability resolution + native
+    /// structured-output constraints as `infer`; routing/cache-artifact requests are not streamed here
+    /// (callers fall back to buffered `infer`).
+    public func inferStream(request originalRequest: ExternalInferenceRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let work = Task {
+                do {
+                    guard originalRequest.messages.isEmpty == false else {
+                        throw StoreError.invalidManifest("External inference requires at least one message.")
+                    }
+                    let install = try resolveInstall(request: originalRequest)
+                    let backend = backendResolver(install)
+                    let runtime: BackendRuntime
+                    if let manager = lifecycleManager {
+                        runtime = try await manager.acquire(install: install, priority: .interactive)
+                    } else {
+                        runtime = try await backend.loadRuntime(for: install)
+                    }
+                    let manager = lifecycleManager
+                    defer {
+                        if let manager { let id = install.id; Task { await manager.release(modelID: id) } }
+                        else { Task { await runtime.unload() } }
+                    }
+
+                    var request = originalRequest
+                    let outcome = CapabilityResolver().resolve(
+                        responseFormat: request.responseFormat, backend: install.spec.backend,
+                        tools: request.tools, reasoningEnabled: request.generation.enableThinking,
+                        attachments: request.attachments,
+                        modelSupportsVision: install.spec.inputModalities.contains(.image))
+                    if request.responseFormat?.strict == true, outcome.resolution.hasRejections {
+                        let detail = outcome.resolution.first(named: "response_format")?.detail ?? "not supported"
+                        throw StoreError.invalidManifest("Strict structured output rejected: \(detail)")
+                    }
+                    if let augmentation = outcome.systemInstructionAugmentation {
+                        request.messages.insert(ExternalInferenceMessage(role: .system, text: augmentation), at: 0)
+                    }
+                    var generation = request.generation
+                    if let nativeSchema = outcome.nativeJSONSchema { generation.jsonSchema = nativeSchema }
+                    if let nativeGrammar = outcome.nativeGrammar { generation.grammar = nativeGrammar }
+
+                    let session = try resolveSession(request: request, install: install)
+                    if request.cacheArtifactID == nil { try await runtime.prepare(session: session) }
+
+                    for try await chunk in ChatService().streamReply(runtime: runtime, session: session, config: generation) {
+                        continuation.yield(chunk)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { reason in
+                if case .cancelled = reason { work.cancel() }
+            }
+        }
+    }
+
     private func inferDirect(
         request originalRequest: ExternalInferenceRequest,
         install: ModelInstall,
