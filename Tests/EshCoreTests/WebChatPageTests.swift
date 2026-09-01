@@ -249,15 +249,19 @@ struct WebChatPageTests {
     }
 
     @Test
-    func messageQueueEnqueuesOnShiftEnterAndAutoSends() {
+    func messageQueueUsesConventionalKeysAndADiscoverableAction() {
         let html = WebChatPage.html(toolVersion: nil)
-        // Shift+Enter enqueues; the queue auto-sends in order when the assistant is free.
-        #expect(html.contains("if(e.shiftKey){ e.preventDefault(); enqueueDraft(); return; }"))
+        // Conventional chat keys are preserved; queue is Option+Enter or Cmd/Ctrl+Shift+Enter.
+        #expect(html.contains("if(e.altKey || ((e.metaKey||e.ctrlKey)&&e.shiftKey)){ e.preventDefault(); enqueueDraft()"))
+        #expect(html.contains("if(e.shiftKey) return;"))                 // Shift+Enter → new line
+        #expect(html.contains("(e.metaKey||e.ctrlKey)&&!e.shiftKey){ e.preventDefault(); send()"))  // Cmd/Ctrl+Enter → send
+        // A discoverable queue button appears while generating.
+        #expect(html.contains("id=\"queuebtn\""))
+        #expect(html.contains("queueDraft"))
+        // The queue machinery is intact.
         #expect(html.contains("function enqueueDraft("))
         #expect(html.contains("function maybeSendQueue("))
         #expect(html.contains("function renderQueue("))
-        #expect(html.contains("removeQueued"))
-        // A manual Stop must not auto-continue the queue.
         #expect(html.contains("S._stopQueue"))
     }
 

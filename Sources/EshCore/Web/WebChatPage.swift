@@ -141,7 +141,7 @@ public enum WebChatPage {
   .sbackdrop{ display:none; }
   @keyframes eshslidein{ from{ transform:translateX(-100%); opacity:.5 } to{ transform:none; opacity:1 } }
   @media(max-width:768px){
-    .sidebar{ position:absolute; top:0; left:0; bottom:0; z-index:60; width:250px; max-width:82vw; background:var(--paper); box-shadow:2px 0 28px rgba(32,30,27,.20); animation:eshslidein .18s cubic-bezier(.2,.8,.2,1); }
+    .sidebar{ position:absolute; top:0; left:0; right:0; bottom:0; z-index:60; width:100%; max-width:100%; background:var(--paper); box-shadow:none; animation:eshslidein .18s cubic-bezier(.2,.8,.2,1); }
     .sbackdrop{ display:block; position:absolute; inset:0; background:rgba(32,30,27,.28); z-index:55; animation:eshfade .15s ease-out; }
     .settingsbody{ flex-direction:column !important; }
     .paneside{ width:100% !important; flex-direction:row !important; overflow-x:auto; border-right:none !important; border-bottom:1px solid rgba(32,30,27,.07); gap:4px; padding:10px 12px; }
@@ -237,6 +237,7 @@ const ICON={
   up:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
   back:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 18l-6-6 6-6"/></svg>',
   stop:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  queue:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11"/><path d="M4 12h9"/><path d="M4 17h7"/><path d="M18 13v7"/><path d="M14.5 16.5h7"/></svg>',
   keyboard:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="7" width="18" height="11" rx="2.5"/><path d="M7 11h.5"/><path d="M11.75 11h.5"/><path d="M16.5 11h.5"/><path d="M8 14.5h8"/></svg>',
   xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>'
 };
@@ -392,6 +393,7 @@ const ACT={
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); },
   removeQueued:(i)=>{ if(S.queue)S.queue.splice(+i,1); S.focusInput=true; render(); },
+  queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ S.current=id; render(); },
@@ -577,7 +579,7 @@ function renderComposer(){
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
        <span class="cdiv"></span>
        <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
-       ${S.streaming?`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+       ${S.streaming?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
      ${S.pickerOpen?renderPicker():''}
@@ -587,11 +589,15 @@ function renderComposer(){
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
-     ta.onkeydown=e=>{ if(e.key!=='Enter')return; const enterSends=S.prefs.sendEnter!==false;
-       // Shift+Enter queues the message (auto-sends in order when the assistant is free).
-       if(e.shiftKey){ e.preventDefault(); enqueueDraft(); return; }
-       if(enterSends){ e.preventDefault(); send(); }
-       else if(e.metaKey||e.ctrlKey){ e.preventDefault(); send(); } };
+     ta.onkeydown=e=>{ if(e.key!=='Enter')return;
+       // Queue: Option/Alt+Enter, or Cmd/Ctrl+Shift+Enter (auto-sends in order when the assistant is free).
+       if(e.altKey || ((e.metaKey||e.ctrlKey)&&e.shiftKey)){ e.preventDefault(); enqueueDraft(); return; }
+       // Cmd/Ctrl+Enter always sends (alternative to Enter).
+       if((e.metaKey||e.ctrlKey)&&!e.shiftKey){ e.preventDefault(); send(); return; }
+       // Shift+Enter → new line (conventional): let the textarea handle it.
+       if(e.shiftKey) return;
+       // Plain Enter sends when "Send with Enter" is on; otherwise it's a new line.
+       if(S.prefs.sendEnter!==false){ e.preventDefault(); send(); } };
      const fp=$('#filepick'); if(fp) fp.onchange=onFiles; updateSendState();
      if(S.focusInput&&S.view==='chat'){ S.focusInput=false; ta.focus(); } }
      wireEffortSlider(); wireMicHold(); },0);
@@ -657,7 +663,9 @@ function finishAudioRecording(){
   const r=new FileReader(); r.onload=()=>{ S.pendingAtts.push({kind:'audio', name:'Recording', size:fmtDur(dur), mime:blob.type, dataURL:r.result});
     S._recording=false; S.focusInput=true; render(); }; r.readAsDataURL(blob);
 }
-function updateSendState(){ const b=document.querySelector('#sendbtn'); if(!b)return; const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
+function updateSendState(){ const hasText=!!(S.draft&&S.draft.trim());
+  const q=document.querySelector('#queuebtn'); if(q)q.style.opacity=hasText?'1':'.4';   // reflect draft while generating
+  const b=document.querySelector('#sendbtn'); if(!b)return; const on=hasText||!!S.pendingAtts.length;
   b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
 function renderQueue(){ let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
   h+='<div style="font:500 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">Queued · '+S.queue.length+'</div>';
