@@ -196,3 +196,50 @@ Tests: `brokenQwen35ModelsAreNeverRecommended`, `flagshipDefaultIsAVerifiedWorki
 suite 304/304 green.
 
 **Next: Phase C — cross-backend conformance suite + capability matrix.**
+
+---
+
+## 10. Phase C — cross-backend conformance + capability matrix (2026-09-01)
+
+The conformance suite already existed and is comprehensive (`M8ConformanceTests`,
+`CapabilityResolverTests`, `BackendCapabilityTests`). Added `reasoningIsIgnoredHonestlyOnAppleAndOnnx`
+to round out per-backend reasoning coverage. Produced **`2_0_COMPATIBILITY_MATRIX.md`** documenting
+the test-backed honesty of the resolver across MLX/GGUF/Apple/ONNX. 35 conformance tests pass.
+
+---
+
+## 11. Phase D — GGUF validation (2026-09-01) — found + fixed blocker B3
+
+`llama-cli` **is** installed (`/opt/homebrew/bin`), so GGUF was validatable here. Downloaded a small
+GGUF (Qwen2.5-0.5B, ~491 MB), imported via `esh model import`, and ran it through esh's GGUF backend.
+
+### BLOCKER B3 (P0) — esh's GGUF path hangs on current llama.cpp → **CLOSED**
+
+- **Real behavior (verified):** the current llama.cpp build (b8660) **removed `--no-conversation`
+  from `llama-cli`** ("`--no-conversation is not supported by llama-cli / please use llama-completion
+  instead`"). esh's `LlamaCppRuntime` passed `--no-conversation`, so `llama-cli` fell into interactive
+  conversation mode and **hung forever on the `>` prompt** — every GGUF generation through esh would
+  hang. (The model itself was fine; it printed the answer then waited for interactive input.)
+- **Fix (`LlamaCppBackend.swift`):**
+  - Executable resolution now **prefers `llama-completion`** (the non-interactive tool the split
+    introduced), falling back to `llama-cli` for older installs.
+  - Completion args extracted to a testable `completionArguments(...)`; added `--no-display-prompt`
+    (stdout = generated tokens only) alongside `--no-conversation --simple-io`.
+  - Strip llama.cpp's `[end of text]` EOS marker from streamed output.
+- **Verified end-to-end through esh (not raw llama.cpp):**
+  - Text: `esh infer` → `"outputText": " OK…"` (no hang).
+  - **Native strict JSON constrained decoding:** `--response-format json --strict` →
+    `capabilityResolution.response_format = applied` ("json enforced natively via constrained decoding
+    on gguf") and `outputText = {"name": "John Doe", "age": 35}` — valid JSON, exactly the GGUF
+    differentiator the capability matrix claims.
+- **Tests:** new `LlamaCppBackendTests` (4) lock in the non-interactive flags, native constrained
+  decoding wiring, sampling pass-through, and the runtime-not-found message.
+
+### Environment note (real constraint)
+
+The host's **internal Data volume is essentially full** (431 GiB used of 460 GiB; ~158 MiB free at
+one point). A link step failed with `ld: write() failed, errno=28 (No space left on device)` until I
+removed **my own** downloaded scratch GGUF (the imported SSD copy was retained; no user data touched).
+This is a genuine environment risk for building/packaging on this machine and is flagged for Phase M/P.
+
+**Next: Phase E — persistent residency hardening; Phase F — scheduler real-scenario validation.**

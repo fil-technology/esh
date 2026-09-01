@@ -3,7 +3,7 @@ import Foundation
 public struct LlamaCppBackend: InferenceBackend, Sendable {
     public let kind: BackendKind = .gguf
     public let runtimeVersion: String
-    public static let runtimeNotFoundMessage = "llama.cpp runtime not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-cli` path."
+    public static let runtimeNotFoundMessage = "llama.cpp runtime not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-completion` (preferred) or `llama-cli` path."
     private let executableResolver: @Sendable () throws -> URL
 
     public init(
@@ -113,31 +113,40 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
     private static func defaultResolveExecutable() throws -> URL {
         let env = ProcessInfo.processInfo.environment
         let executable = ExecutablePath.resolvedURL()
-        let bundledCandidate = executable
+        let bundledDir = executable
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("share/esh/bin/llama-cli")
-        let candidates = [
-            env["ESH_LLAMA_CPP_CLI"],
-            env["LLAMA_CPP_CLI"],
-            bundledCandidate.path,
-            "/opt/homebrew/bin/llama-cli",
-            "/usr/local/bin/llama-cli"
-        ].compactMap { $0 }
+            .appendingPathComponent("share/esh/bin")
 
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+        // Prefer the scriptable `llama-completion` binary. Recent llama.cpp builds split the tools:
+        // `llama-cli` is interactive-only and now REJECTS `--no-conversation` ("please use
+        // llama-completion instead"), which would leave esh hanging on the interactive `>` prompt.
+        // `llama-completion` is the non-interactive one. We keep `llama-cli` as a fallback for older
+        // installs where it still runs one-shot completions.
+        let explicit = [env["ESH_LLAMA_CPP_CLI"], env["LLAMA_CPP_CLI"]].compactMap { $0 }
+        for candidate in explicit where FileManager.default.isExecutableFile(atPath: candidate) {
             return URL(fileURLWithPath: candidate)
         }
 
-        let output = try? ProcessRunner.run(
-            executableURL: URL(fileURLWithPath: "/usr/bin/which"),
-            arguments: ["llama-cli"]
-        )
-        if let output, output.exitCode == 0 {
-            let path = String(decoding: output.stdout, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !path.isEmpty {
-                return URL(fileURLWithPath: path)
+        for binary in ["llama-completion", "llama-cli"] {
+            let candidates = [
+                bundledDir.appendingPathComponent(binary).path,
+                "/opt/homebrew/bin/\(binary)",
+                "/usr/local/bin/\(binary)"
+            ]
+            for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+                return URL(fileURLWithPath: candidate)
+            }
+            let output = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/which"),
+                arguments: [binary]
+            )
+            if let output, output.exitCode == 0 {
+                let path = String(decoding: output.stdout, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !path.isEmpty {
+                    return URL(fileURLWithPath: path)
+                }
             }
         }
 
@@ -200,40 +209,9 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                     let start = ContinuousClock.now
                     let process = Process()
                     process.executableURL = executableURL
-                    var arguments = [
-                        "-m", modelURL.path,
-                        "-c", "8192",
-                        "-n", String(config.maxTokens),
-                        "--temp", String(config.temperature),
-                        "--no-conversation",
-                        "--simple-io",
-                        "-p", prompt
-                    ]
-                    if let topP = config.topP {
-                        arguments.append(contentsOf: ["--top-p", String(topP)])
-                    }
-                    if let topK = config.topK {
-                        arguments.append(contentsOf: ["--top-k", String(topK)])
-                    }
-                    if let minP = config.minP {
-                        arguments.append(contentsOf: ["--min-p", String(minP)])
-                    }
-                    if let repetitionPenalty = config.repetitionPenalty {
-                        arguments.append(contentsOf: ["--repeat-penalty", String(repetitionPenalty)])
-                    }
-                    if let seed = config.seed {
-                        arguments.append(contentsOf: ["--seed", String(seed)])
-                    }
-                    // Native constrained decoding (M8). Resolved by CapabilityResolver only for
-                    // backends that genuinely support it; llama.cpp enforces a JSON schema (converted
-                    // to a grammar internally) or a raw GBNF grammar during sampling. JSON schema
-                    // takes precedence when both are somehow present.
-                    if let jsonSchema = config.jsonSchema, !jsonSchema.isEmpty {
-                        arguments.append(contentsOf: ["--json-schema", jsonSchema])
-                    } else if let grammar = config.grammar, !grammar.isEmpty {
-                        arguments.append(contentsOf: ["--grammar", grammar])
-                    }
-                    process.arguments = arguments
+                    process.arguments = LlamaCppRuntime.completionArguments(
+                        modelPath: modelURL.path, prompt: prompt, config: config
+                    )
 
                     let stdoutPipe = Pipe()
                     let stderrPipe = Pipe()
@@ -260,8 +238,11 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
                             self.currentMetrics = Metrics(ttftMilliseconds: milliseconds)
                         }
 
-                        if !text.isEmpty {
-                            continuation.yield(text)
+                        // llama.cpp prints an "[end of text]" EOS marker to stdout at completion; it is
+                        // not part of the model's response, so strip it before yielding.
+                        let cleaned = text.replacingOccurrences(of: "[end of text]", with: "")
+                        if !cleaned.isEmpty {
+                            continuation.yield(cleaned)
                         }
                     }
 
@@ -329,6 +310,46 @@ public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
     }
 
     public func unload() async {}
+
+    /// Build the llama.cpp non-interactive completion arguments. Extracted for testability and to
+    /// keep the one-shot flags in a single place. `--no-conversation` + `--no-display-prompt` +
+    /// `--simple-io` are what make the run non-interactive and keep stdout to just the generated
+    /// tokens (the preferred binary is `llama-completion`; see `defaultResolveExecutable`).
+    static func completionArguments(modelPath: String, prompt: String, config: GenerationConfig) -> [String] {
+        var arguments = [
+            "-m", modelPath,
+            "-c", "8192",
+            "-n", String(config.maxTokens),
+            "--temp", String(config.temperature),
+            "--no-conversation",
+            "--no-display-prompt",
+            "--simple-io",
+            "-p", prompt
+        ]
+        if let topP = config.topP {
+            arguments.append(contentsOf: ["--top-p", String(topP)])
+        }
+        if let topK = config.topK {
+            arguments.append(contentsOf: ["--top-k", String(topK)])
+        }
+        if let minP = config.minP {
+            arguments.append(contentsOf: ["--min-p", String(minP)])
+        }
+        if let repetitionPenalty = config.repetitionPenalty {
+            arguments.append(contentsOf: ["--repeat-penalty", String(repetitionPenalty)])
+        }
+        if let seed = config.seed {
+            arguments.append(contentsOf: ["--seed", String(seed)])
+        }
+        // Native constrained decoding (M8): llama.cpp enforces a JSON schema (converted to a grammar
+        // internally) or a raw GBNF grammar during sampling. JSON schema takes precedence.
+        if let jsonSchema = config.jsonSchema, !jsonSchema.isEmpty {
+            arguments.append(contentsOf: ["--json-schema", jsonSchema])
+        } else if let grammar = config.grammar, !grammar.isEmpty {
+            arguments.append(contentsOf: ["--grammar", grammar])
+        }
+        return arguments
+    }
 
     private func promptText(for session: ChatSession) -> String {
         let normalizedSession = PromptSessionNormalizer().normalized(session: session)

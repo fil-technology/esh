@@ -22,7 +22,7 @@ never silently pretends an unsupported option was honored.
 | Backend | Transport | Runtime state |
 |---|---|---|
 | **MLX** | out-of-process Python bridge (`mlx-lm`/`mlx-vlm`), persistent `mlx-serve` residency | ✅ verified generating this session (Llama 3.2 3B, DeepSeek-R1 7B) |
-| **GGUF** | `llama-cli` (llama.cpp) | 🧪 code present; **no GGUF model installed** → real generation not exercised here (see Phase D) |
+| **GGUF** | `llama-completion` (preferred) / `llama-cli` (llama.cpp) | ✅ **verified this session** (Qwen2.5-0.5B GGUF): text generation + native strict JSON constrained decoding. Required fixing blocker **B3** (see Phase D). |
 | **Apple** | FoundationModels (on-device) | 🧪 provider wired; on-device availability depends on host; `esh apple` route present |
 | **ONNX** | reserved backend kind | not a shipping generation path; included for honest resolver coverage |
 
@@ -65,7 +65,7 @@ never silently pretends an unsupported option was honored.
 | Llama 3.x (3B/8B), Mistral Small 24B, Qwen 2.5 (+Coder), DeepSeek-R1 distill (Qwen), Phi, Gemma | MLX | ✅ recommended (standard architectures). Mistral Small 24B = **flagship default**. |
 | **Qwen 3.5 (all MLX sizes: 9B/2B/0.8B, incl. OptiQ, 27B distilled)** | MLX | ⛔ **incompatible** — reproducible mlx-lm hybrid/SSM crash. Excluded from recommendations; listed-but-flagged in catalog. |
 | Qwen 3.5 9B GGUF | GGUF | 🧪 **experimental** — novel arch unverified via llama.cpp; not a default. |
-| GGUF catalog (Llama 3.2 3B, Qwen2.5 Coder, DeepSeek-R1 14B/7B, Phi) | GGUF | 🧪 recommended entries present; **real GGUF generation unverified** (no model installed). Phase D. |
+| GGUF catalog (Llama 3.2 3B, Qwen2.5 Coder, DeepSeek-R1 14B/7B, Phi) | GGUF | ✅ GGUF runtime path verified (Qwen2.5-0.5B GGUF, text + native strict JSON). Individual catalog entries not each downloaded, but the backend path is proven. |
 
 ---
 
