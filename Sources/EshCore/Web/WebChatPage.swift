@@ -374,20 +374,35 @@ function renderPicker(){
   p.innerHTML=h; return p;
 }
 function shortModel(id){ return id.replace(/^mlx-community--/,'').replace(/^bartowski--/,'').replace(/-4bit$/,'').replace(/-instruct/i,''); }
+function volLabel(path){ if(!path)return 'Model storage'; const m=path.match(/\/Volumes\/([^/]+)/); return m?m[1]:'Internal storage'; }
+function gb(bytes){ return (bytes/1073741824).toFixed(bytes<10737418240?1:0)+' GB'; }
 function renderEngine(){
-  const e=S.engine; const p=el('div',{cls:'pop'}); p.style.cssText+='bottom:56px;left:50%;transform:translateX(-50%);width:330px';
+  const e=S.engine; const p=el('div',{cls:'pop'}); p.style.cssText+='bottom:56px;left:50%;transform:translateX(-50%);width:340px';
   if(!e){ p.innerHTML='<div style="padding:20px;font-size:13px;color:var(--muted)">Loading engine status…</div>'; return p; }
-  const mem=e.host||{}; const memGB=mem.totalMemoryGB||0; const storage=e.storage||{};
-  const engines=(e.engines||[]).map(x=>`<span class="mono" style="font-size:11.5px">${x.id} ${x.ready?'✓':'—'}</span>`).join('');
+  const host=e.host||{}; const st=e.storage||{}; const locs=st.locations||[];
+  const byClass=c=>{ const l=locs.find(x=>x.storageClass===c); return l&&l.sizeBytes||0; };
+  const modelsB=byClass('models'), cachesB=byClass('caches'), audioB=byClass('audio');
+  const used=modelsB+cachesB+audioB; const free=st.freeBytes||0; const total=used+free;
+  const seg=(v)=>total?Math.max(0,(v/total*100)).toFixed(1):0;
+  const engines=(e.engines||[]).filter(x=>x.ready).map(x=>`<span class="mono" style="font-size:11.5px;color:var(--ink)">${esch(x.id)} ✓</span>`).join('');
   let h=`<div class="panelhead"><span class="dot"></span><span style="margin-left:8px">Engine</span><span class="sp" style="flex:1"></span><span class="iconbtn" data-act="toggleEngine" style="font-size:13px">✕</span></div>
     <div style="padding:0 20px 12px;display:flex;flex-direction:column;gap:8px">
-      <div class="kv"><span class="k">Chip</span><span>${esch(mem.chipDescription||'Apple Silicon')}</span></div>
-      <div class="kv"><span class="k">Unified memory</span><span class="mono" style="font-size:12px">${memGB} GB</span></div>
-      <div class="kv"><span class="k">Inference</span><span>On this Mac</span></div>
-      <div class="kv"><span class="k">Storage</span><span>${esch(storage.status||storage.assetsRoot||'—')}</span></div>
+      <div class="kv"><span class="k">Chip</span><span>${esch(host.chipDescription||'Apple Silicon')}</span></div>
+      <div class="kv"><span class="k">Unified memory</span><span class="mono" style="font-size:12px">${host.totalMemoryGB||'?'} GB</span></div>
+      <div class="kv"><span class="k">Inference</span><span style="display:flex;align-items:center;gap:6px"><span class="dot"></span>On this Mac</span></div>
       <div class="kv"><span class="k">Apple Intelligence</span><span>${e.appleIntelligence&&e.appleIntelligence.available?'Available':'Unavailable'}</span></div>
-      <div style="display:flex;gap:14px;margin-top:2px">${engines}</div>
-    </div>`;
+    </div>
+    <div class="menuhead" style="padding-left:20px">Storage · ${esch(volLabel(st.assetsRoot))}${st.external?' (external)':''}</div>
+    <div style="padding:2px 20px 4px">
+      <div class="kv" style="margin-bottom:8px"><span class="k">Free</span><span class="mono" style="font-size:12px">${gb(free)} free</span></div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
+      <div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--ink)"></span>Models ${gb(modelsB)}</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#6f6b64"></span>Caches ${gb(cachesB)}</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#b5b1a8"></span>Speech ${gb(audioB)}</span>
+      </div>
+    </div>
+    <div style="padding:12px 20px 16px;display:flex;gap:14px">${engines}</div>`;
   p.innerHTML=h; return p;
 }
 function renderExec(){
@@ -527,8 +542,17 @@ function renderPane(){
   if(p==='Performance'){ const opts=['Auto','Speed','Balanced','Low Memory']; let h=`<div style="font-size:15px;font-weight:600;margin-bottom:14px">Performance</div><div style="display:flex;flex-direction:column;gap:8px;font-size:13.5px;max-width:440px">`;
     opts.forEach(o=>{ const on=o===S.optimize; h+=`<div style="display:flex;align-items:center;gap:9px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'}" data-act="pickOptimize" data-arg="${o}"><span class="radio ${on?'on':''}"></span>${o}</div>`; });
     h+=`</div><div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;max-width:440px">${({Auto:'esh adapts per request — quality when you wait, speed when you type fast.',Speed:'Prefers smaller resident models and aggressive caching for the fastest replies.',Balanced:'Keeps one model warm and favors quality unless a fast reply is clearly better.','Low Memory':'Unloads models promptly and caps cache size to leave room for other apps.'}[S.optimize])||''}</div>`; return h; }
-  if(p==='Storage'){ const s=e.storage||{}; return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Storage</div><div style="max-width:440px">
-      <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:14px;font-weight:600">${esch(s.label||s.assetsRoot||'Model storage')}</span><span style="font-size:11.5px;color:var(--muted)">${esch(s.status||'')}</span><span class="sp" style="flex:1"></span><span class="mono" style="font-size:12px;color:var(--muted)">${esch(s.freeSpace||'')}</span></div>
+  if(p==='Storage'){ const s=e.storage||{}; const locs=s.locations||[]; const bc=c=>{const l=locs.find(x=>x.storageClass===c);return l&&l.sizeBytes||0;};
+    const modelsB=bc('models'),cachesB=bc('caches'),audioB=bc('audio'),free=s.freeBytes||0,total=modelsB+cachesB+audioB+free;
+    const seg=v=>total?(v/total*100).toFixed(1):0;
+    return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Storage</div><div style="max-width:440px">
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:14px;font-weight:600">${esch(volLabel(s.assetsRoot))}</span><span style="font-size:11.5px;color:var(--muted)">${s.external?'External SSD · Connected':'Internal storage'}</span><span class="sp" style="flex:1"></span><span class="mono" style="font-size:12px;color:var(--muted)">${gb(free)} free</span></div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07);margin:12px 0 10px"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
+      <div style="display:flex;gap:16px;font-size:11.5px;color:var(--muted)">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--ink)"></span>Models ${gb(modelsB)}</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#6f6b64"></span>Caches ${gb(cachesB)}</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#b5b1a8"></span>Speech ${gb(audioB)}</span></div>
+      <div class="mono" style="font-size:11px;color:var(--faint);margin-top:12px">${esch(s.assetsRoot||'')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:14px;line-height:1.5">If the drive disconnects, installed models pause — nothing re-downloads internally without asking.</div></div>`; }
   if(p==='Voice') return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Voice</div>
     <div style="display:flex;flex-direction:column;gap:12px;font-size:13.5px;max-width:440px">
