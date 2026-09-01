@@ -1,7 +1,11 @@
 # esh 2.0.0 — Release Report & RC Readiness (Phase S)
 
 **Date:** 2026-09-01
-**Branch:** `codex/web-chat-rich` (off `main` @ 0.9.8) — **not yet merged/tagged**
+**Status:** merged to `main`; `VERSION = 2.0.0-rc.1`; release pipeline made RC-safe (prerelease flag +
+stable Homebrew cask protected). Awaiting `v2.0.0-rc.1` tag + CI.
+**Version story (reconciled):** `0.9.8` was an unreleased repository version only (never tagged); the
+latest public stable before this RC was `v0.9.7`. The 0.9.8 work is folded into this RC — no standalone
+`v0.9.8` release is created (no user-facing reason to). See `CHANGELOG.md`.
 **Companion docs:** `2_0_RC_AUDIT.md`, `2_0_COMPATIBILITY_MATRIX.md`, `2_0_SECURITY_PRIVACY_REVIEW.md`,
 `2_0_API_SEMVER_CONTRACT.md`, `2_0_STRESS_REPORT.md`, `2_0_MIGRATION_REPORT.md`.
 

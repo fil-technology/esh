@@ -6,6 +6,54 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.1] - 2026-09-01
+
+**Release candidate — not production-stable 2.0.** Published as a GitHub prerelease; the stable
+Homebrew cask is intentionally NOT updated by RC tags, so `brew` stable users are not auto-upgraded.
+
+### Version story
+- `0.9.8` existed only as an **unreleased repository version** (VERSION bump + streaming/residency work
+  on `main`); it was never tagged or distributed. The latest **public stable** release before this RC
+  was **`0.9.7`**. The 0.9.8 work is folded into this RC rather than published as a standalone release.
+
+### Added
+- **Rich, ChatGPT-like Web Chat** (`esh web`): multi-conversation history (localStorage), model picker,
+  settings (system prompt, temperature, max tokens, reasoning, cache/compression, auto-TTS),
+  collapsible reasoning, markdown + image/audio rendering, attachments, per-message TTS, and mic upload.
+- **`POST /v1/audio/transcriptions`** — on-device speech-to-text endpoint (wired to `SpeechToTextService`).
+- **Cross-backend capability matrix** (`2_0_COMPATIBILITY_MATRIX.md`) and 2.0 RC audit/report docs.
+- **Graceful port-conflict handling** for `esh web`/`esh serve`: offer to stop an existing esh server,
+  move to a free port, or cancel (auto-selects a free port when non-interactive) instead of failing.
+
+### Fixed (compatibility blockers)
+- **B1 — no known-broken default/recommended model.** All MLX Qwen 3.5 models (hybrid architecture,
+  reproducibly crash on the current mlx-lm) reclassified `.incompatible` and excluded from
+  recommendations; the flagship default is now **Mistral Small 24B**. `esh model recommended` hides
+  incompatible models by default (`--all` to show).
+- **B2 — Marvis TTS** (fails to load) is filtered from the advertised audio catalog; an explicit
+  request returns an honest 400 instead of crashing.
+- **B3 — GGUF backend works on current llama.cpp.** Recent llama.cpp removed `--no-conversation` from
+  `llama-cli`, which made every GGUF run hang. esh now uses `llama-completion`; verified text
+  generation and native strict JSON-schema constrained decoding end-to-end.
+
+### Security / hardening
+- Request-body size cap (rejects an over-large `Content-Length` with 400).
+- Wildcard-bind warning when serving on `0.0.0.0`/`::` (recommends `--api-key`).
+- Security & privacy review (`2_0_SECURITY_PRIVACY_REVIEW.md`): no telemetry, on-device inference,
+  loopback-by-default. No high-severity findings.
+
+### Verification status
+- **Verified (real runtime):** MLX inference, persistent residency (~10× warm, no orphans), scheduler
+  routing around broken models, GGUF text + strict JSON, TTS (real WAV), 313 automated tests.
+- **Unit-only / plumbing-verified:** STT endpoint (real transcription needs the packaged `mlx_audio`),
+  Terminal UX TTY interaction, Web Chat live-browser interaction.
+- **Environment-limited (not yet validated):** live browser, live mic capture, fresh clean machine,
+  packaged cross-version upgrade, multi-hour soak. See `2_0_RELEASE_REPORT.md`.
+
+### Known incompatible models
+- MLX Qwen 3.5 family (`qwen-3-5-9b`, `-optiq`, `-2b`, `-0-8b`, `-0-8b-optiq`, `-27b-opus-distilled`):
+  crash on current mlx-lm; gated. `qwen-3-5-9b-gguf` is experimental (unverified). Marvis TTS: gated.
+
 ## [0.9.8] - 2026-09-01
 
 ### Fixed
