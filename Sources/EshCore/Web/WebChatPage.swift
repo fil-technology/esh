@@ -240,9 +240,11 @@ const ACT={
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ if(S.controller)S.controller.abort(); },
   switchChat:(id)=>{ S.current=id; render(); },
-  startVoice:()=>{ S.voice='listening'; render(); },
-  endVoice:()=>{ S.voice=null; render(); },
-  voiceNext:()=>{ S.voice=S.voice==='listening'?'speaking':null; render(); },
+  startVoice:()=>startVoice(),
+  endVoice:()=>{ stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voice=null; render(); },
+  voiceFinish:()=>{ stopListening(); },
+  voiceInterrupt:()=>{ if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
+  voiceRetry:()=>startVoice(),
   speak:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m)speak(m.content); },
   pickPane:(p)=>{ S.settingsPane=p; render(); },
   pickFilter:(f)=>{ S.modelsFilter=f; refreshCatalog(); render(); },
@@ -596,11 +598,24 @@ function renderOnboarding(){
 
 /* ---------- voice ---------- */
 function renderVoice(){
-  const v=el('div'); v.style.cssText='position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:60';
-  if(S.voice==='listening'){ v.innerHTML=`<span data-act="voiceNext" style="width:84px;height:84px;border-radius:50%;background:rgba(32,30,27,.08);display:flex;align-items:center;justify-content:center;cursor:pointer;animation:eshpulse 1.6s ease-in-out infinite"><span style="width:38px;height:38px;border-radius:50%;background:var(--ink)"></span></span>
-    <div style="font-size:16px;font-weight:500">Listening…</div><div style="font-size:12px;color:var(--faint)">Tap the circle to finish</div>`; }
-  else { let bars=''; [14,30,20,36,16,26,12].forEach((hh,i)=>bars+=`<span style="width:4px;height:${hh}px;border-radius:2px;background:var(--ink);animation:eshbar .9s ${i*.12}s ease-in-out infinite"></span>`);
-    v.innerHTML=`<div data-act="voiceNext" style="display:flex;align-items:center;gap:4px;height:44px;cursor:pointer">${bars}</div><div style="font-size:16px;font-weight:500">Speaking</div>`; }
+  const v=el('div'); v.style.cssText='position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:60;animation:eshfade .2s ease-out';
+  if(S.voice==='error'){
+    v.innerHTML=`<div style="max-width:340px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
+      <div style="font-size:16px;font-weight:600">Voice unavailable</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.5">${esch(S.voiceError||'')}</div>
+      <div style="display:flex;gap:12px"><span class="btn ghost" style="padding:6px 14px" data-act="voiceRetry">Try again</span><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">Back to text</span></div></div>`;
+    return v;
+  }
+  if(S.voice==='listening'){
+    v.innerHTML=`<span data-act="voiceFinish" style="width:84px;height:84px;border-radius:50%;background:rgba(32,30,27,.08);display:flex;align-items:center;justify-content:center;cursor:pointer;animation:eshpulse 1.6s ease-in-out infinite"><span style="width:38px;height:38px;border-radius:50%;background:var(--ink)"></span></span>
+      <div style="font-size:16px;font-weight:500">Listening…</div><div style="font-size:12px;color:var(--faint)">Tap the circle when you're done</div>`;
+  } else if(S.voice==='thinking'){
+    v.innerHTML=`<span class="typing" style="transform:scale(1.7)"><i></i><i></i><i></i></span><div style="font-size:16px;font-weight:500">Thinking…</div>
+      ${S.voiceHeard?`<div style="font-size:13px;color:var(--muted);max-width:320px;text-align:center;font-style:italic">"${esch(S.voiceHeard)}"</div>`:''}`;
+  } else {
+    let bars=''; [14,30,20,36,16,26,12].forEach((hh,i)=>bars+=`<span style="width:4px;height:${hh}px;border-radius:2px;background:var(--ink);animation:eshbar .9s ${i*.12}s ease-in-out infinite"></span>`);
+    v.innerHTML=`<div data-act="voiceInterrupt" style="display:flex;align-items:center;gap:4px;height:44px;cursor:pointer">${bars}</div><div style="font-size:16px;font-weight:500">Speaking</div><div style="font-size:12px;color:var(--faint)">Tap to interrupt · everything is transcribed into the chat</div>`;
+  }
   v.innerHTML+=`<div style="display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--muted)"><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">Back to text</span><span class="btn ghost" style="padding:6px 14px" data-act="endVoice">End voice chat</span></div>`;
   return v;
 }
@@ -661,10 +676,51 @@ let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null
   else render();
 },40); }
 
-/* ---------- speech ---------- */
-async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return;
+/* ---------- speech: real mic -> STT -> LLM -> TTS voice loop ---------- */
+async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return null;
   try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:clean.slice(0,2000)})});
-    if(!r.ok)return; const b=await r.blob(); new Audio(URL.createObjectURL(b)).play(); }catch(e){} }
+    if(!r.ok)return null; const b=await r.blob(); const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }catch(e){ return null; } }
+function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
+async function startVoice(){
+  S.voice='listening'; S.voiceError=null; render();
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    S.voiceStream=stream; S.recChunks=[];
+    const rec=new MediaRecorder(stream); S.recorder=rec;
+    rec.ondataavailable=e=>{ if(e.data&&e.data.size)S.recChunks.push(e.data); };
+    rec.onstop=()=>finishVoiceTurn();
+    rec.start();
+  }catch(e){ S.voice='error'; S.voiceError='Microphone unavailable — grant access to use voice.'; render(); }
+}
+function stopListening(){ try{ if(S.recorder&&S.recorder.state!=='inactive')S.recorder.stop(); }catch(e){} if(S.voiceStream){ S.voiceStream.getTracks().forEach(t=>t.stop()); S.voiceStream=null; } }
+async function finishVoiceTurn(){
+  S.voice='thinking'; render();
+  const blob=new Blob(S.recChunks,{type:(S.recorder&&S.recorder.mimeType)||'audio/webm'});
+  const b64=await blobToB64(blob);
+  let text='';
+  try{ const r=await fetch('/v1/audio/transcriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:'voice.webm'})});
+    if(!r.ok){ S.voice='error'; S.voiceError='Speech-to-text isn’t available — install a transcription model (esh config set-speech).'; render(); return; }
+    text=((await r.json()).text||'').trim();
+  }catch(e){ S.voice='error'; S.voiceError='Transcription failed: '+e.message; render(); return; }
+  if(!text){ startVoice(); return; }  // nothing said — listen again
+  S.voiceHeard=text;
+  const c=cur()||(newChat(),cur());
+  c.messages.push({id:uid(),role:'user',content:text});
+  saveChats();
+  // Resolve Auto through the Scheduler, then run inference (non-streaming for the voice turn).
+  let model=S.modelSel;
+  if(model==='Auto'){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced'; const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc&&sc.selectedModelID){ S.schedule=sc; model=sc.selectedModelID; } }
+  let reply='';
+  try{ const rr=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model==='Auto'?undefined:model,messages:c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})),max_tokens:512})});
+    const j=await rr.json(); reply=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||''; }catch(e){ reply='[error] '+e.message; }
+  c.messages.push({id:uid(),role:'assistant',content:reply,reasoning:looksReasoning(model)});
+  saveChats();
+  // Speak the answer, show the speaking state, then listen again.
+  S.voice='speaking'; render();
+  const audio=await speak(reply); S.voiceAudio=audio;
+  if(audio){ audio.onended=()=>{ if(S.voice==='speaking')startVoice(); }; }
+  else { startVoice(); }
+}
 function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 function onFiles(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;
   files.forEach(f=>{ const r=new FileReader(); r.onload=()=>{ const kind=f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':'document';
