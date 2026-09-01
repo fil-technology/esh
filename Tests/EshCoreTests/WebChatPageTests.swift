@@ -213,6 +213,20 @@ struct WebChatPageTests {
     }
 
     @Test
+    func chatRendersRicherMarkdownWithSelfContainedHighlighting() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Block markdown (headings, lists, blockquotes) + a small in-house highlighter — no CDN/deps.
+        #expect(html.contains("function mdBlocks("))
+        #expect(html.contains("function highlight("))
+        #expect(html.contains("class=\"mdh"))
+        #expect(html.contains("class=\"mdul\""))
+        #expect(html.contains("hlk"))   // keyword token class
+        // Must stay self-contained (the existing self-contained test also guards this).
+        #expect(html.contains("shiki") == false)
+        #expect(html.contains("cdn.") == false)
+    }
+
+    @Test
     func chatLogIsReusedAcrossPopoverTogglesToAvoidFlicker() {
         let html = WebChatPage.html(toolVersion: nil)
         // Opening/closing a popover must not rebuild + re-parse the whole thread (which flashed).

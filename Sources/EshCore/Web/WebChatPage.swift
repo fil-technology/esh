@@ -98,8 +98,18 @@ public enum WebChatPage {
   .reason summary.live{ color:var(--ink); animation:eshpulse 1.5s ease-in-out infinite; }
   .reason .rc{ color:var(--muted); white-space:pre-wrap; border-left:2px solid var(--line2); padding-left:10px; margin-top:6px; line-height:1.5; }
   .asttext{ font-size:14px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .asttext pre{ background:var(--panel2); padding:10px 12px; border-radius:8px; overflow-x:auto; }
+  .asttext pre{ background:var(--panel2); padding:11px 13px; border-radius:9px; overflow-x:auto; margin:8px 0; border:1px solid var(--line); }
+  .asttext pre code{ background:none; padding:0; font-size:12.5px; line-height:1.55; display:block; white-space:pre; }
   .asttext code{ background:var(--panel2); padding:1px 4px; border-radius:4px; font-family:var(--mono); font-size:12.5px; }
+  /* Markdown blocks + inline */
+  .asttext .mdh{ font-weight:600; line-height:1.3; margin:12px 0 6px; } .asttext .mdh1{ font-size:19px; } .asttext .mdh2{ font-size:16.5px; } .asttext .mdh3{ font-size:15px; } .asttext .mdh4{ font-size:14px; }
+  .asttext .mdp{ margin:7px 0; } .asttext .mdp:first-child{ margin-top:0; }
+  .asttext .mdul,.asttext .mdol{ margin:7px 0; padding-left:22px; } .asttext .mdul li,.asttext .mdol li{ margin:3px 0; }
+  .asttext .mdq{ border-left:2.5px solid var(--line2); margin:8px 0; padding:2px 0 2px 12px; color:var(--muted); }
+  .asttext .mdhr{ border:none; border-top:1px solid var(--line2); margin:14px 0; }
+  .asttext a{ color:var(--ink); text-decoration:underline; text-underline-offset:2px; } .asttext a:hover{ opacity:.7; }
+  /* Lightweight syntax highlighting — restrained warm palette (no teal/blue) */
+  .hlc{ color:rgba(32,30,27,.42); font-style:italic; } .hls{ color:#5f7346; } .hlk{ color:#201e1b; font-weight:600; } .hln{ color:#9a6a30; } .hlt{ color:#6a5a86; }
   .asttext img{ max-width:100%; border-radius:10px; margin:6px 0; display:block; } .asttext audio{ width:100%; margin:6px 0; }
   .userbubble img{ max-width:220px; border-radius:10px; margin:2px 0 6px; display:block; } .userbubble audio{ width:220px; margin:2px 0 6px; }
   .attwrap{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
@@ -255,8 +265,66 @@ function mathify(s){ return s
   .replace(/\\text\{([^{}]*)\}/g,(m,x)=>x)
   .replace(/\\(times|cdot|div|pm|leq|geq|neq|approx|infty|rightarrow|to|alpha|beta|pi|sum)\b/g,(m,c)=>({times:'×',cdot:'·',div:'÷',pm:'±',leq:'≤',geq:'≥',neq:'≠',approx:'≈',infty:'∞',rightarrow:'→',to:'→',alpha:'α',beta:'β',pi:'π',sum:'∑'}[c]||m))
   .replace(/\\left|\\right|\\,|\\;|\\quad/g,' ').replace(/\\\\/g,'\n'); }
-function mdInline(s){ return esc(mathify(s)).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>'); }
-function md(t){ const parts=t.split(/```/); let o=""; parts.forEach((p,i)=>{ if(i%2){ const nl=p.indexOf('\n'); o+='<pre><code>'+esc(nl>=0?p.slice(nl+1):p)+'</code></pre>'; } else o+=mdInline(p).replace(/\n/g,'<br>'); }); return o; }
+function mdInline(s){ s=esc(mathify(s));
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/\*\*([^*]+?)\*\*/g,'<b>$1</b>');
+  s=s.replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g,'$1<em>$2</em>');
+  s=s.replace(/(^|[^_\w])_([^_\n]+?)_(?!\w)/g,'$1<em>$2</em>');
+  s=s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return s; }
+// Lightweight, self-contained syntax highlighter (no dependency). A small scanner emits spans for
+// comments, strings, numbers, and keywords in a restrained warm palette. Not a full parser — enough
+// to make code blocks readable and on-brand.
+const HL_KW={
+  swift:'func var let class struct enum protocol extension guard if else for while repeat return switch case default break continue import public private fileprivate internal static self Self nil true false in throws rethrows async await try do catch where init deinit override some any lazy weak unowned mutating associatedtype typealias defer as is',
+  javascript:'function var let const class return if else for while switch case default break continue import export from new this super null undefined true false async await try catch finally throw typeof instanceof of in do delete void yield extends',
+  typescript:'function var let const class interface type return if else for while switch case default import export from new this null undefined true false async await try catch throw typeof of in extends implements public private readonly enum namespace as keyof',
+  python:'def class return if elif else for while break continue import from as with try except finally raise lambda None True False and or not in is pass yield global nonlocal async await self del assert',
+  rust:'fn let mut const struct enum trait impl pub use mod match if else for while loop return break continue self Self as ref move where async await dyn crate super true false Some None Ok Err',
+  go:'func var const type struct interface map return if else for range switch case default break continue import package go defer chan select nil true false',
+  _default:'function def fn func class struct enum var let const return if else for while switch case import from export public private static true false null nil new void async await try catch throw'
+};
+function highlight(code, lang){
+  lang=(lang||'').toLowerCase(); if(lang==='js')lang='javascript'; if(lang==='ts')lang='typescript'; if(lang==='py')lang='python';
+  const kw={}; (HL_KW[lang]||HL_KW._default).split(' ').forEach(k=>kw[k]=1);
+  const hash=(lang==='python'||lang==='ruby'||lang==='sh'||lang==='bash'||lang==='shell'||lang==='yaml'||lang==='yml');
+  let out='', i=0; const n=code.length;
+  const push=(cls,txt)=>{ out+=cls?('<span class="'+cls+'">'+esc(txt)+'</span>'):esc(txt); };
+  while(i<n){ const ch=code[i];
+    if(!hash && ch==='/' && code[i+1]==='/'){ let j=code.indexOf('\n',i); if(j<0)j=n; push('hlc',code.slice(i,j)); i=j; continue; }
+    if(!hash && ch==='/' && code[i+1]==='*'){ let j=code.indexOf('*/',i); j=j<0?n:j+2; push('hlc',code.slice(i,j)); i=j; continue; }
+    if(hash && ch==='#'){ let j=code.indexOf('\n',i); if(j<0)j=n; push('hlc',code.slice(i,j)); i=j; continue; }
+    if(ch==='"'||ch==="'"||ch==='`'){ let j=i+1; while(j<n){ if(code[j]==='\\'){ j+=2; continue; } if(code[j]===ch){ j++; break; } j++; } push('hls',code.slice(i,j)); i=j; continue; }
+    if(/[0-9]/.test(ch) && !/[A-Za-z_]/.test(code[i-1]||'')){ let j=i; while(j<n&&/[0-9._xXa-fA-F]/.test(code[j]))j++; push('hln',code.slice(i,j)); i=j; continue; }
+    if(/[A-Za-z_$]/.test(ch)){ let j=i; while(j<n&&/[A-Za-z0-9_$]/.test(code[j]))j++; const w=code.slice(i,j); push(kw[w]?'hlk':'', w); i=j; continue; }
+    push('', ch); i++;
+  }
+  return out;
+}
+// Block-level markdown → HTML (headings, lists, blockquotes, hr, paragraphs); inline handled by mdInline.
+function mdBlocks(t){ const lines=t.split('\n'); let out='', i=0;
+  const isSpecial=l=>/^(#{1,4})\s|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>|^\s*(---|\*\*\*|___)\s*$/.test(l);
+  while(i<lines.length){ const line=lines[i];
+    if(/^\s*$/.test(line)){ i++; continue; }
+    let hm=line.match(/^(#{1,4})\s+(.*)$/); if(hm){ out+='<div class="mdh mdh'+hm[1].length+'">'+mdInline(hm[2])+'</div>'; i++; continue; }
+    if(/^\s*(---|\*\*\*|___)\s*$/.test(line)){ out+='<hr class="mdhr">'; i++; continue; }
+    if(/^\s*>\s?/.test(line)){ const q=[]; while(i<lines.length&&/^\s*>\s?/.test(lines[i])){ q.push(lines[i].replace(/^\s*>\s?/,'')); i++; } out+='<blockquote class="mdq">'+mdInline(q.join(' '))+'</blockquote>'; continue; }
+    if(/^\s*[-*+]\s+/.test(line)){ const it=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){ it.push(lines[i].replace(/^\s*[-*+]\s+/,'')); i++; } out+='<ul class="mdul">'+it.map(x=>'<li>'+mdInline(x)+'</li>').join('')+'</ul>'; continue; }
+    if(/^\s*\d+\.\s+/.test(line)){ const it=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ it.push(lines[i].replace(/^\s*\d+\.\s+/,'')); i++; } out+='<ol class="mdol">'+it.map(x=>'<li>'+mdInline(x)+'</li>').join('')+'</ol>'; continue; }
+    const para=[]; while(i<lines.length&&!/^\s*$/.test(lines[i])&&!isSpecial(lines[i])){ para.push(lines[i]); i++; }
+    out+='<p class="mdp">'+mdInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
+  }
+  return out; }
+function md(t){
+  // Split fenced code blocks (```lang\n…```), highlight them, and run block markdown on the rest.
+  const segs=[]; const fence=/```([^\n`]*)\n([\s\S]*?)```/g; let last=0, m;
+  while((m=fence.exec(t))){ segs.push({t:'x',v:t.slice(last,m.index)}); segs.push({t:'c',lang:m[1].trim(),v:m[2].replace(/\n$/,'')}); last=m.index+m[0].length; }
+  segs.push({t:'x',v:t.slice(last)});
+  // Handle a trailing UNCLOSED fence (streaming): render everything after the last ``` as open code.
+  const tail=segs[segs.length-1];
+  if(tail.t==='x'){ const op=tail.v.indexOf('```'); if(op>=0){ const after=tail.v.slice(op+3); const nl=after.indexOf('\n'); const lang=nl>=0?after.slice(0,nl).trim():''; const code=nl>=0?after.slice(nl+1):''; tail.v=tail.v.slice(0,op); segs.push({t:'c',lang,v:code}); } }
+  return segs.map(s=> s.t==='c' ? ('<pre><code>'+highlight(s.v, s.lang)+'</code></pre>') : mdBlocks(s.v) ).join('');
+}
 function splitThink(t,o){ o=o||{}; const c=t.indexOf('</think>');
   if(c>=0){ let st=t.indexOf('<think>'); st=st<0?0:st+7; return {reason:t.slice(st,c).trim(), answer:t.slice(c+8).trim(), thinking:false}; }
   // Explicit <think> anywhere: everything after it is live reasoning until </think> (content-based, so
