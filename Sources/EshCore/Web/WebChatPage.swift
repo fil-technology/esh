@@ -183,7 +183,11 @@ async function api(path){ try{ const r=await fetch(path); if(!r.ok) return null;
 async function refreshEngine(){ S.engine=await api('/v1/engine'); render(); }
 async function refreshModels(){ const d=await api('/v1/models'); S.models=(d&&d.data||[]).map(m=>m.id); }
 async function refreshCatalog(){ S.catalog=await api('/v1/catalog'); render(); }
-async function refreshConfig(){ S.config=await api('/v1/config'); }
+async function refreshConfig(){ S.config=await api('/v1/config');
+  // Cross-client settings live in esh config (not the browser): reflect the persisted performance mode.
+  const pm=S.config&&S.config.defaults&&S.config.defaults.performanceMode;
+  if(pm){ S.optimize={auto:'Balanced',balanced:'Balanced',quality:'Quality',speed:'Speed','low-memory':'Low Memory',memory:'Low Memory'}[pm.toLowerCase()]||S.optimize; } }
+async function postConfig(patch){ try{ const r=await fetch('/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}); if(r.ok)S.config=await r.json(); }catch(e){} }
 async function refreshSchedule(){ const opt={Balanced:'balanced',Quality:'high',Speed:'fast','Low Memory':'balanced'}[S.optimize]||'balanced';
   S.schedule=await api('/v1/schedule?goal=general&quality='+opt); render(); }
 
@@ -230,7 +234,7 @@ const ACT={
   toggleEngine:()=>{ closeAll('engineOpen'); if(S.engineOpen)refreshEngine(); render(); },
   toggleAttach:()=>{ closeAll('attachOpen'); render(); },
   pickModel:(v)=>{ S.modelSel=v; closeAll(); if(v==='Auto')refreshSchedule(); render(); },
-  pickOptimize:(v)=>{ S.optimize=v; refreshSchedule(); render(); },
+  pickOptimize:(v)=>{ S.optimize=v; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
@@ -675,7 +679,7 @@ if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats
 S.focusInput=true;
 // First run (no prior prefs and no history) → show onboarding once, then remember.
 if(!S.prefs.onboarded && Object.values(S.chats).every(c=>!c.messages.length)){ S.view='onboarding'; S.onbStep=0; }
-refreshModels(); refreshEngine(); refreshSchedule();
+refreshModels(); refreshEngine(); refreshSchedule(); refreshConfig().then(render);
 render();
 </script>
 </body>
