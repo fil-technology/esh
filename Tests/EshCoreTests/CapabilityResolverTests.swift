@@ -157,6 +157,16 @@ struct CapabilityResolverTests {
         #expect(outcome.resolution.first(named: "reasoning") == nil)
     }
 
+    @Test
+    func reasoningIsIgnoredHonestlyOnAppleAndOnnx() {
+        for backend in [BackendKind.apple, .onnx] {
+            let outcome = resolver.resolve(responseFormat: nil, backend: backend, reasoningEnabled: true)
+            let opt = outcome.resolution.first(named: "reasoning")
+            #expect(opt?.resolution == .ignored, "\(backend) has no reasoning toggle; must be .ignored not .applied")
+            #expect(opt?.detail?.isEmpty == false)
+        }
+    }
+
     // MARK: - Attachments (multimodal)
 
     @Test
