@@ -112,6 +112,20 @@ struct WebChatPageTests {
         // The loop is real: mic → STT → LLM → TTS.
         #expect(html.contains("getUserMedia"))
         #expect(html.contains("MediaRecorder"))
+        // Hands-free: silence detection auto-advances listening without a tap.
+        #expect(html.contains("function startVAD("))
+        #expect(html.contains("AudioContext"))
+        #expect(html.contains("getByteTimeDomainData"))
+        #expect(html.contains("Just pause when you"))
+    }
+
+    @Test
+    func composerKeepsFocusAfterSending() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // After a send completes, focus returns to the input (focusInput re-armed), and the trailing
+        // throttle render is cancelled so it can't rebuild the composer and steal focus.
+        #expect(html.contains("S.focusInput=true; saveChats(); render();"))
+        #expect(html.contains("clearTimeout(_rt)"))
     }
 
     @Test

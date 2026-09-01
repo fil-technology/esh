@@ -19,6 +19,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   reasoning pass; Low/Medium/High reason. This also fixes the mic/send controls looking orphaned in
   the composer.
 
+### Fixed
+- **Hands-free voice.** The voice loop now advances automatically — listening ends on a short pause
+  (silence detection), then think → speak → listen, with no tapping required (tapping the circle to
+  finish early / the wave to interrupt still works). Falls back to tap-to-finish if the Web Audio API
+  is unavailable.
+- **Composer keeps focus after sending.** Focus returns to the text field once a response completes,
+  so you can type the next message immediately. (A trailing throttle render was rebuilding the
+  composer and dropping focus.)
+
 ## [2.0.0-rc.2] - 2026-09-01
 
 **Release candidate — the approved 2.0 Web Experience.** A faithful, warm-paper redesign of `esh web`

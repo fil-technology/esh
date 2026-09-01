@@ -768,7 +768,7 @@ function renderVoice(){
   if(S.voice==='listening'){ if(S.voiceHeard) mid=`<div class="vlive">${esch(S.voiceHeard)}<span class="caret"></span></div>`; }
   else if(S.voiceHeard){ mid=`<div class="vquote">"${esch(S.voiceHeard)}"</div>`; }
   const ans=(S.voice==='speaking'&&S.voiceAnswer)?`<div class="vanswer">${esch(S.voiceAnswer)}</div>`:'';
-  const hint=S.voice==='listening'?'Tap the circle when you’re done':(S.voice==='speaking'?'Tap the wave to interrupt':'');
+  const hint=S.voice==='listening'?'Just pause when you’re done':(S.voice==='speaking'?'Tap the wave to interrupt':'');
   v.innerHTML=`<div class="vstage">${orb}<div class="vlabel">${label}</div>${mid}${ans}<div class="vhint">${esch(hint)}</div></div>
     <div class="vctrls">
       <div class="vctrlcol"><span class="vctrl line" data-act="voiceText" title="Back to text">${ICON.keyboard}</span><span class="vctrllbl">Text</span></div>
@@ -794,7 +794,7 @@ async function send(){
     const sc=await api('/v1/schedule?goal=general&quality='+opt); if(sc){ S.schedule=sc; if(sc.selectedModelID) resolved=sc.selectedModelID; } }
   let reasoning=looksReasoning(resolved);
   if(S.prefs.reasoning==='Off')reasoning=false; else if(S.prefs.reasoning==='On')reasoning=true;
-  S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; saveChats(); render();
+  S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; S.focusInput=true; saveChats(); render();
   S.controller=new AbortController(); const t0=performance.now();
   const sys=(S.prefs.systemInstr||'').trim();
   const msgs=(sys?[{role:'system',content:sys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})));
@@ -819,7 +819,8 @@ async function send(){
   if(errorInfo && !S.streamText.trim()){
     c.messages.push({id:uid(),role:'assistant',isError:true, model:errorInfo.model, lastUser:text,
       title:errorInfo.model+' couldn’t respond', detail:errorInfo.detail});
-    S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render(); return;
+    if(_rt){ clearTimeout(_rt); _rt=null; }
+    S.streaming=false; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render(); return;
   }
   const totalMs=performance.now()-t0; const secs=(totalMs/1000).toFixed(1);
   const auto=S.modelSel==='Auto';
@@ -835,7 +836,8 @@ async function send(){
     profile:execProfile, schedule:auto?S.schedule:null, optimize:S.optimize };
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
     meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''), exec:exec});
-  S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render();
+  if(_rt){ clearTimeout(_rt); _rt=null; }   // drop any trailing throttle so it can't rebuild + steal focus
+  S.streaming=false; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
   if(S.prefs.autoTts) speak(S.streamText);
 }
 function sendText(t){ if(!t)return; const ta=document.querySelector('#input'); if(ta)ta.value=t; S.draft=t; send(); }
@@ -852,9 +854,28 @@ async function speak(text){ const clean=splitThink(text).answer||text; if(!clean
     if(!r.ok)return null; const b=await r.blob(); const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }catch(e){ return null; } }
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
 function clearVoiceReveal(){ if(S._vsi){ clearInterval(S._vsi); S._vsi=null; } }
-function endVoiceLoop(){ clearVoiceReveal(); stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voiceAudio=null; S.voice=null; S.voiceHeard=''; S.voiceAnswer=''; }
+function stopVAD(){ if(S._vad){ cancelAnimationFrame(S._vad); S._vad=null; } if(S.voiceAC){ try{S.voiceAC.close()}catch(e){} S.voiceAC=null; } }
+function endVoiceLoop(){ stopVAD(); clearVoiceReveal(); stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voiceAudio=null; S.voice=null; S.voiceHeard=''; S.voiceAnswer=''; }
+// Hands-free: auto-end listening after a brief pause once the user has actually spoken. Falls back to
+// the tap-the-circle affordance if the Web Audio API isn't available. Runs only while listening.
+function startVAD(stream){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext; if(!AC)return;
+    const ac=new AC(); S.voiceAC=ac; const src=ac.createMediaStreamSource(stream);
+    const an=ac.createAnalyser(); an.fftSize=512; src.connect(an); const buf=new Uint8Array(an.fftSize);
+    let spoke=false, silenceAt=null; const t0=performance.now();
+    const tick=()=>{ if(S.voice!=='listening'||S.voiceAC!==ac) return;
+      an.getByteTimeDomainData(buf); let sum=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; sum+=v*v; }
+      const rms=Math.sqrt(sum/buf.length), now=performance.now();
+      if(rms>0.045){ spoke=true; silenceAt=null; }
+      else if(spoke){ if(silenceAt===null)silenceAt=now; else if(now-silenceAt>1400){ stopVAD(); stopListening(); return; } }
+      if(now-t0>30000){ stopVAD(); stopListening(); return; }   // safety cap on a single listen
+      S._vad=requestAnimationFrame(tick); };
+    S._vad=requestAnimationFrame(tick);
+  }catch(e){}
+}
 async function startVoice(){
-  clearVoiceReveal(); S.voice='listening'; S.voiceError=null; S.voiceHeard=''; S.voiceAnswer=''; render();
+  stopVAD(); clearVoiceReveal(); S.voice='listening'; S.voiceError=null; S.voiceHeard=''; S.voiceAnswer=''; render();
   try{
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     S.voiceStream=stream; S.recChunks=[];
@@ -862,6 +883,7 @@ async function startVoice(){
     rec.ondataavailable=e=>{ if(e.data&&e.data.size)S.recChunks.push(e.data); };
     rec.onstop=()=>finishVoiceTurn();
     rec.start();
+    startVAD(stream);   // auto-advance when the user pauses — no tapping needed
   }catch(e){ S.voice='error'; S.voiceError='Microphone unavailable — grant access to use voice.'; render(); }
 }
 function stopListening(){ try{ if(S.recorder&&S.recorder.state!=='inactive')S.recorder.stop(); }catch(e){} if(S.voiceStream){ S.voiceStream.getTracks().forEach(t=>t.stop()); S.voiceStream=null; } }
@@ -875,7 +897,7 @@ function revealAnswer(reply,dur,commit){
     else { S.voiceAnswer=words.slice(0,i).join(' '); if(S.voice==='speaking')render(); } },step);
 }
 async function finishVoiceTurn(){
-  S.voice='thinking'; S.voiceAnswer=''; render();
+  stopVAD(); S.voice='thinking'; S.voiceAnswer=''; render();
   const blob=new Blob(S.recChunks,{type:(S.recorder&&S.recorder.mimeType)||'audio/webm'});
   const b64=await blobToB64(blob);
   let text='';
