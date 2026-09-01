@@ -45,3 +45,18 @@ implemented, tested, and (for user-facing work) released. Last reconciled: **202
    API/SemVer contract, stress, and the release candidate.
 2. Reconcile the 0.9.8-unpublished version story into the 2.0 line before cutting `2.0.0-rc.1`.
 3. M6 signed refreshable catalog; M10 bundle `mlx_audio` verification on the packaged binary.
+
+## Post-rc.3 — URGENT (deferred from the release freeze, do right after the RC ships)
+
+1. **Warm-TTS: hold one long-lived `TTSSpeechSynthesizer`.** TTSMLX ≥0.7.0 already caches loaded models
+   (`prepareModel`); esh currently rebuilds the synthesizer per `/v1/audio/speech` call in
+   `Sources/esh/AudioSpeechGenerator.swift`, so the cache is never hit (~2 s reload floor per call).
+   Requires: (a) bump the dependency to the **fork** so TTSMLX 0.8.0 resolves — esh must declare
+   `fil-technology/mlx-audio-swift @exact 0.1.7-tts.1` (not upstream `Blaizzy`, same package identity —
+   the root pin wins), and `from: "0.8.0"` for TTSMLX; (b) keep one shared synthesizer + `TTSModelStore`
+   across calls, `preload` the configured model on `esh web` start, and call `unloadCachedModels()` under
+   memory pressure / on shutdown (respect the unified-memory TTS reserve). Verified locally that the fork
+   **resolves** cleanly (`0.1.7-tts.1`, revision `bb5cda2a`, carries `TTSModelRegistry`); the **build**
+   needs `.build` on APFS (the ExFAT SSD relocation corrupts git for the new checkouts — needs ~15 GB
+   free internal disk, or verify via CI). The esh-side change itself is small and low-risk once it builds.
+   The streamed sentence-by-sentence pipeline already shipped as the esh-local speedup.
