@@ -65,6 +65,14 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          # A SemVer pre-release (e.g. 2.0.0-rc.1) carries a hyphen. Pre-releases are published as a
+          # GitHub prerelease and DO NOT touch the stable Homebrew cask, so `brew upgrade` users on the
+          # stable channel are never auto-upgraded to a release candidate.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build self-contained release package
         run: ./scripts/package-release.sh "${{ steps.version.outputs.version }}"
@@ -188,7 +196,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Esh ${{ steps.version.outputs.version }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
           files: |
             dist/esh-macos-${{ steps.version.outputs.version }}.tar.gz
@@ -197,7 +205,7 @@ jobs:
             dist/esh-macos-${{ steps.version.outputs.version }}.zip.sha256
 
       - name: Check out Homebrew tap
-        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != '' && steps.version.outputs.prerelease != 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         uses: actions/checkout@v4
@@ -207,7 +215,7 @@ jobs:
           path: homebrew-tap
 
       - name: Update Homebrew cask
-        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != '' && steps.version.outputs.prerelease != 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
@@ -229,7 +237,7 @@ jobs:
           EOF
 
       - name: Publish Homebrew tap update
-        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != ''
+        if: github.event_name == 'push' && env.HOMEBREW_TAP_TOKEN != '' && steps.version.outputs.prerelease != 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         working-directory: homebrew-tap
