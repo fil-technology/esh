@@ -258,6 +258,10 @@ struct WebChatPageTests {
         // A discoverable queue button appears while generating.
         #expect(html.contains("id=\"queuebtn\""))
         #expect(html.contains("queueDraft"))
+        // IME/composition safety: Enter during composition must not send or queue.
+        #expect(html.contains("if(e.isComposing || e.keyCode===229 || S._composing) return;"))
+        #expect(html.contains("oncompositionstart"))
+        #expect(html.contains("oncompositionend"))
         // The queue machinery is intact.
         #expect(html.contains("function enqueueDraft("))
         #expect(html.contains("function maybeSendQueue("))

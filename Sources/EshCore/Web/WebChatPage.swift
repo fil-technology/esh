@@ -589,7 +589,10 @@ function renderComposer(){
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
+     ta.oncompositionstart=()=>{ S._composing=true; }; ta.oncompositionend=()=>{ S._composing=false; };
      ta.onkeydown=e=>{ if(e.key!=='Enter')return;
+       // IME/composition safety: while composing (CJK etc.), Enter confirms the candidate — never send/queue.
+       if(e.isComposing || e.keyCode===229 || S._composing) return;
        // Queue: Option/Alt+Enter, or Cmd/Ctrl+Shift+Enter (auto-sends in order when the assistant is free).
        if(e.altKey || ((e.metaKey||e.ctrlKey)&&e.shiftKey)){ e.preventDefault(); enqueueDraft(); return; }
        // Cmd/Ctrl+Enter always sends (alternative to Enter).
