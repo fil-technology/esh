@@ -29,6 +29,8 @@ Legend — Pkg = packaged validation required at tag time.
 | 19 | Audio-only send → "Cannot apply chat template to an empty conversation" | Record audio, send with no text | Empty content sent to the model | Transcribe the clip (STT) for the model; if empty, keep it playable and don't call the model | b25e356 | ✓ | ✓ (logic) | yes |
 | 20 | Whole view flickered when opening/closing a popover | Open/close the model picker over a long thread | Every toggle rebuilt + re-parsed the whole thread (+scroll-jump) | Reuse the log DOM when the conversation is unchanged (`logSig`) | b25e356 | ✓ | ✓ | yes |
 | 21 | Code blocks/markdown were plain and unstyled | Ask for code | Minimal in-house markdown; no highlighting | Richer block markdown + a self-contained syntax highlighter (warm palette) — **Shiki not usable** (self-contained/no-CDN) | 622f8e8 | ✓ | ✓ | yes |
+| 22 | Composer had a hard edge; thread didn't fade under it | Scroll a long thread | No scrim | Transparent→paper gradient scrim above the composer (`.composer::before`) | 4ff100d | ✓ | ✓ | yes |
+| 23 | Small screens squeezed the chat with the sidebar | Narrow window | Sidebar/settings were fixed columns | ≤768px: sidebar overlays with a backdrop (toggle-opened, starts collapsed); settings categories become a horizontal scroller; desktop unchanged | 4ff100d | ✓ (375px) | ✓ | yes |
 | — | Warm-TTS (per-call model reload) | Voice latency | Reload lives in `mlx-audio-swift`/TTSMLX; not esh-local | **Cross-repo:** spec delivered for a TTSMLX loaded-model cache + esh dep bump; the streamed sentence-pipeline (#13) is the esh-local win | _cross-repo, pending_ | — | — | n/a |
 
 ## Notes
