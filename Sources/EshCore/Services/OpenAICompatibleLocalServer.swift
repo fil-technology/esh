@@ -13,6 +13,9 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
     public let host: String
     public let port: UInt16
     private let queue = DispatchQueue(label: "esh.openai-server")
+    /// Maximum accepted request body. Generous for chat + base64 audio (STT) payloads, but bounded so
+    /// a local client cannot grow memory with an enormous declared content-length.
+    static let maxRequestBodyBytes = 64 * 1024 * 1024
 
     public convenience init(host: String, port: UInt16, handler: OpenAICompatibleHTTPHandler) throws {
         try self.init(host: host, port: port, handler: handler.handle)
@@ -170,6 +173,13 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
         }
 
         let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+        // Reject an implausibly large declared body before accumulating it, so a local client cannot
+        // grow server memory with a huge content-length (security review Phase O, rec #3).
+        if contentLength > Self.maxRequestBodyBytes {
+            throw OpenAICompatibleError.invalidRequest(
+                "Request body too large (\(contentLength) bytes; limit \(Self.maxRequestBodyBytes))."
+            )
+        }
         let bodyStart = headerRange.upperBound
         let availableBodyLength = data.count - bodyStart
         guard availableBodyLength >= contentLength else {

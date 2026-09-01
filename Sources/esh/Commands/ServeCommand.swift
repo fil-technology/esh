@@ -33,6 +33,12 @@ enum ServeCommand {
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
 
         server.start()
+        if host == "0.0.0.0" || host == "::" {
+            fputs("warning: binding to \(host) exposes the API — and any loaded model — to other machines on the network.\n", stderr)
+            if apiKey == nil {
+                fputs("warning: no --api-key set; anyone who can reach this port can use it. Pass --api-key <token> to require auth.\n", stderr)
+            }
+        }
         let redactedAuth = apiKey == nil ? "disabled" : "enabled"
         print("esh OpenAI-compatible server listening on http://\(host):\(port)")
         print("auth: \(redactedAuth)")
