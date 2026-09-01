@@ -33,9 +33,13 @@ struct WebChatPageTests {
         #expect(html.contains("Max tokens"))
         #expect(html.contains("Reasoning"))
         #expect(html.contains("compression") || html.contains("cache_mode"))
-        // Collapsible reasoning display.
+        // Collapsible reasoning display, and LIVE reasoning while a reasoning model is thinking
+        // (shown as an expanded "thinking…" section during streaming, not leaked into the answer).
         #expect(html.contains("</think>"))
         #expect(html.contains("details"))
+        #expect(html.contains("thinking…"))
+        #expect(html.contains("looksLikeReasoningModel"))
+        #expect(html.contains("expectReasoning"))
         // Speech: text-to-speech playback + speech-to-text upload.
         #expect(html.contains("/v1/audio/speech"))
         #expect(html.contains("/v1/audio/transcriptions"))

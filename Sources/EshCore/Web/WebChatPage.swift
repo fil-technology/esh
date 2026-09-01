@@ -138,12 +138,20 @@ function renderMarkdown(t){
   parts.forEach((p,i)=>{ if(i%2){ const nl=p.indexOf('\n'); out+='<pre><code>'+esc(nl>=0?p.slice(nl+1):p)+'</code></pre>'; } else out+=mdInline(p).replace(/\n/g,'<br>'); });
   return out;
 }
-function splitThink(t){
+function splitThink(t, opts){
+  opts=opts||{};
   const close=t.indexOf('</think>');
-  if(close<0){ if(t.startsWith('<think>')) return {reason:t.slice(7),answer:'',thinking:true}; return {reason:'',answer:t,thinking:false}; }
-  let start=t.indexOf('<think>'); start=start<0?0:start+7;
-  return {reason:t.slice(start,close).trim(), answer:t.slice(close+8).trim(), thinking:false};
+  if(close>=0){ let start=t.indexOf('<think>'); start=start<0?0:start+7;
+    return {reason:t.slice(start,close).trim(), answer:t.slice(close+8).trim(), thinking:false}; }
+  // Explicit open tag: everything after it is live reasoning until </think> arrives.
+  if(t.startsWith('<think>')) return {reason:t.slice(7), answer:'', thinking:true};
+  // Implicit-open reasoning models (e.g. DeepSeek-R1) emit thinking with only a trailing </think>.
+  // While streaming and reasoning is expected, show the live tokens AS reasoning instead of leaking
+  // them into the answer bubble (they move to the collapsed section once </think> lands).
+  if(opts.streaming && opts.expectReasoning && t) return {reason:t, answer:'', thinking:true};
+  return {reason:'', answer:t, thinking:false};
 }
+function looksLikeReasoningModel(id){ return /deepseek-?r1|(^|[^a-z])r1([^a-z]|$)|qwq|magistral|thinking|reason/i.test(id||''); }
 function renderLog(){
   const log=$('#log'); log.innerHTML="";
   const c=chats[current]; if(!c) return;
@@ -154,9 +162,13 @@ function renderLog(){
       const b=document.createElement('button'); b.textContent='🔊'; b.title='Speak (TTS)'; b.onclick=()=>speak(m.content); t.appendChild(b); who.appendChild(t); }
     wrap.appendChild(who);
     const bub=document.createElement('div'); bub.className='bubble';
-    if(m.role==='assistant'){ const s=splitThink(m.content);
-      if(s.reason){ const dt=document.createElement('details'); dt.className='reason'; dt.innerHTML='<summary>Reasoning</summary><div class="rc">'+esc(s.reason)+'</div>'; wrap.appendChild(dt); }
-      bub.innerHTML=renderMarkdown(s.answer||(s.thinking?'…':m.content));
+    if(m.role==='assistant'){ const s=splitThink(m.content, {streaming:m.streaming, expectReasoning:m.reasoning});
+      if(s.reason||s.thinking){ const dt=document.createElement('details'); dt.className='reason';
+        dt.open = !!s.thinking;   // expanded while thinking live, collapsed once the answer begins
+        const label = s.thinking ? 'Reasoning (thinking…)' : 'Reasoning';
+        dt.innerHTML='<summary>'+label+'</summary><div class="rc">'+esc(s.reason)+'</div>'; wrap.appendChild(dt); }
+      const answer = s.answer || (s.thinking ? '' : m.content);
+      if(answer){ bub.innerHTML=renderMarkdown(answer); } else { bub.style.display='none'; }
     } else {
       bub.innerHTML=renderMarkdown(m.content||'');
       (m.attachments||[]).forEach(a=>{ if(a.kind==='image'){const i=new Image();i.src=a.dataURL;bub.appendChild(i);} else if(a.kind==='audio'){const au=document.createElement('audio');au.controls=true;au.src=a.dataURL;bub.appendChild(au);} });
@@ -209,15 +221,18 @@ async function send(){
   if(c.title==='New chat'&&text) c.title=text.slice(0,40);
   $('#input').value=''; renderChats(); renderLog(); save();
 
-  const out={role:'assistant',content:''}; c.messages.push(out);
+  const model=$('#model').value; const rz=$('#reason').value;
+  // Expect a live reasoning stream when thinking is on, or (in auto) when the model is a reasoning model.
+  const expectReasoning = rz==='on' || (rz!=='off' && looksLikeReasoningModel(model));
+  const out={role:'assistant',content:'',streaming:true,reasoning:expectReasoning}; c.messages.push(out);
   const bubbleRefresh=()=>renderLog();
   $('#status').textContent='generating…'; $('#meta').textContent=''; $('#send').disabled=true; $('#stop').disabled=false;
   controller=new AbortController(); const t0=performance.now();
   const msgs=[]; const sys=$('#sys').value.trim(); if(sys) msgs.push({role:'system',content:sys});
   c.messages.slice(0,-1).forEach(m=>msgs.push({role:m.role,content:m.content}));
-  const body={ model:$('#model').value, messages:msgs, stream:true,
+  const body={ model:model, messages:msgs, stream:true,
     max_tokens:parseInt($('#maxtok').value)||512, temperature:parseFloat($('#temp').value) };
-  const rz=$('#reason').value; if(rz==='on') body.enable_thinking=true; if(rz==='off') body.enable_thinking=false;
+  if(rz==='on') body.enable_thinking=true; if(rz==='off') body.enable_thinking=false;
   const cache=$('#cache').value; if(cache) body.cache_mode=cache;
   try{
     const resp=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify(body)});
@@ -231,6 +246,7 @@ async function send(){
     const secs=((performance.now()-t0)/1000).toFixed(1); $('#meta').textContent=secs+'s · '+out.content.length+' chars';
     if($('#autotts').value==='on') speak(out.content);
   }catch(e){ if(e.name!=='AbortError'){ out.content+='\n[error] '+e.message; } }
+  out.streaming=false;
   $('#status').textContent='ready'; $('#send').disabled=false; $('#stop').disabled=true; controller=null; save(); renderLog();
 }
 
