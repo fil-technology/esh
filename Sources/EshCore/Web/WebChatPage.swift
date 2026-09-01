@@ -212,7 +212,13 @@ public enum WebChatPage {
   .chip:active,.newchat:active,.btn:active{ transform:scale(.97); }
   .cbox{ transition:box-shadow .16s ease, border-color .16s ease; } .cbox:focus-within{ border-color:rgba(32,30,27,.28); box-shadow:0 2px 10px rgba(32,30,27,.07); }
   @keyframes eshpop{ from{opacity:0; transform:translateY(-6px) scale(.98)} to{opacity:1; transform:none} }
-  .pop{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); transform-origin:top; }
+  /* Animate only on the open transition (added by popAnimPass), never on the full
+     re-renders that happen while a popover stays open (e.g. during streaming) — a
+     re-triggered entrance read as the menu "jumping". */
+  .pop{ transform-origin:top; } .pop.opening{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); }
+  .asstfoot{ display:flex; align-items:center; gap:8px; align-self:flex-start; }
+  .sbtn{ display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:7px; border:none; background:none; color:var(--faint); cursor:pointer; padding:0; transition:color .12s, background .12s; }
+  .sbtn:hover{ color:var(--ink); background:var(--panel2); } .sbtn.on{ color:var(--ink); } .sbtn.load{ animation:eshpulse 1s ease-in-out infinite; }
   @keyframes eshdrawer{ from{opacity:0; transform:translateX(30px)} to{opacity:1; transform:none} }
   .rightpanel{ animation:eshdrawer .2s cubic-bezier(.2,.8,.2,1); }
   @keyframes eshfade{ from{opacity:0} to{opacity:1} }
@@ -239,7 +245,8 @@ const ICON={
   stop:'<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
   queue:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11"/><path d="M4 12h9"/><path d="M4 17h7"/><path d="M18 13v7"/><path d="M14.5 16.5h7"/></svg>',
   keyboard:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="7" width="18" height="11" rx="2.5"/><path d="M7 11h.5"/><path d="M11.75 11h.5"/><path d="M16.5 11h.5"/><path d="M8 14.5h8"/></svg>',
-  xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>'
+  xmark:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>',
+  speaker:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>'
 };
 let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
@@ -352,7 +359,15 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ renderView(); a11yPass(); wireAudioPlayers(); }
+function render(){ renderView(); popAnimPass(); a11yPass(); wireAudioPlayers(); }
+// Play the popover entrance animation only when a popover first opens (the open set
+// changes), not on every full re-render while it stays open — otherwise the menu
+// re-pops on each render (e.g. streaming start/end) and looks like it's jumping.
+function popAnimPass(){
+  const key = S.pickerOpen?'picker':S.effortOpen?'effort':S.attachOpen?'attach':S.engineOpen?'engine':S.voiceDrop?('vdrop:'+S.voiceDrop):S.chatMenu?'menu':'';
+  if(key && key!==S._popKey){ document.querySelectorAll('.pop').forEach(p=>p.classList.add('opening')); }
+  S._popKey=key;
+}
 function renderView(){ const app=$('#app'); app.innerHTML='';
   if(S.view==='onboarding'){ app.appendChild(renderOnboarding()); return; }
   if(S.view==='models'){ app.appendChild(renderModels()); if(S.detail) app.appendChild(renderDetail()); return; }
@@ -409,7 +424,7 @@ const ACT={
   voiceFinish:()=>{ stopListening(); },
   voiceInterrupt:()=>{ clearVoiceReveal(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
   voiceRetry:()=>{ S._voiceFadeIn=true; startVoice(); },
-  speak:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m)speak(m.content); },
+  speakMsg:(id)=>{ const c=cur(); const m=c&&c.messages.find(x=>x.id===id); if(!m)return; if(S._speakId===id){ stopSpeak(); render(); } else { speakMessage(m); } },
   pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); render(); },
   toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
   pickTtsModel:(id)=>{ S.voiceDrop=null; postConfig({ttsModel:id}).then(()=>render()); render(); },
@@ -425,7 +440,6 @@ const ACT={
   attach:()=>{ document.getElementById('filepick').click(); S.attachOpen=false; render(); },
   removeAtt:(i)=>{ S.pendingAtts.splice(+i,1); render(); },
   micUpload:()=>micUpload(),
-  toggleTts:()=>{ S.prefs.autoTts=!S.prefs.autoTts; savePrefs(); render(); },
   toggleEnter:()=>{ S.prefs.sendEnter=!(S.prefs.sendEnter!==false); savePrefs(); render(); },
   toggleHistory:()=>{ S.prefs.saveHistory=!(S.prefs.saveHistory!==false); savePrefs(); if(S.prefs.saveHistory)saveChats(); render(); },
   clearHistory:()=>{ if(!confirm('Clear all conversations stored in this browser?'))return; S.chats={}; try{localStorage.removeItem(LS)}catch(e){} newChat(); },
@@ -495,7 +509,10 @@ function esch(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>
 // toggles). During streaming the bubble is patched in place by throttleRender, so the sig stays stable.
 function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messages.length-1];
   const lastPart=last?(last.id+':'+((last.content||'').length)):'';
-  return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+((S.streaming&&S.genChatId===S.current)?'S':''); }
+  // Include read-aloud state so the per-message speak button repaints (loading →
+  // playing → idle) even though the message list itself is unchanged.
+  const speakPart=(S._speakId||'')+(S._speakLoading?'L':'');
+  return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+((S.streaming&&S.genChatId===S.current)?'S':'')+'|'+speakPart; }
 function renderSidebar(){
   const sb=el('div',{cls:'sidebar'});
   let h=`<button class="newchat" data-act="newChat">${ICON.plus}New chat</button>`;
@@ -543,7 +560,17 @@ function renderMsg(m){
   const ans=s.answer||(s.thinking?'':m.content);
   if(ans) h+=`<div class="asttext">${md(ans)}</div>`;
   if(m.truncated) h+=`<div class="reason" style="color:var(--amber)">⚠ Stopped at the token limit — raise Max tokens in Settings.</div>`;
-  if(m.meta) h+=`<div class="metaline" data-act="openExec" data-arg="${m.id}">${esch(m.meta)}</div>`;
+  // Footer: manual "read aloud" control (speech is opt-in, per message — never auto)
+  // plus the execution-inspector meta link.
+  const speakable=(s.answer||m.content||'').trim();
+  if(speakable || m.meta){
+    const speaking=(S._speakId===m.id); const loading=speaking&&S._speakLoading;
+    const sb = speakable
+      ? `<button class="sbtn${speaking?' on':''}${loading?' load':''}" data-act="speakMsg" data-arg="${m.id}" title="${speaking?'Stop':'Read aloud'}" aria-label="${speaking?'Stop reading aloud':'Read aloud'}">${(speaking&&!loading)?ICON.stop:ICON.speaker}</button>`
+      : '';
+    const ml = m.meta ? `<span class="metaline" data-act="openExec" data-arg="${m.id}">${esch(m.meta)}</span>` : '';
+    h+=`<div class="asstfoot">${sb}${ml}</div>`;
+  }
   h+='</div>'; d.innerHTML=h; return d;
 }
 // The status line under the composer surfaces what matters right now (a degraded storage/engine
@@ -749,7 +776,9 @@ function renderEffort(){
 function volLabel(path){ if(!path)return 'Model storage'; const m=path.match(/\/Volumes\/([^/]+)/); return m?m[1]:'Internal storage'; }
 function gb(bytes){ return (bytes/1073741824).toFixed(bytes<10737418240?1:0)+' GB'; }
 function renderEngine(){
-  const e=S.engine; const p=el('div',{cls:'pop'}); p.style.cssText+='bottom:56px;left:50%;transform:translateX(-50%);width:340px';
+  // Center with margin (not transform) so the eshpop entrance animation doesn't
+  // fight the centering and shift the panel sideways.
+  const e=S.engine; const p=el('div',{cls:'pop'}); p.style.cssText+='bottom:56px;left:50%;margin-left:-170px;width:340px';
   if(!e){ p.innerHTML='<div style="padding:20px;font-size:13px;color:var(--muted)">Loading engine status…</div>'; return p; }
   const host=e.host||{}; const st=e.storage||{}; const locs=st.locations||[];
   const byClass=c=>{ const l=locs.find(x=>x.storageClass===c); return l&&l.sizeBytes||0; };
@@ -990,7 +1019,6 @@ function renderVoicePane(){
   const PARA='mlx-community/parakeet-tdt-0.6b-v2'; const curStt=cfg.sttModel||PARA;
   const sttName=curStt===PARA?'Parakeet 0.6B':shortModel(curStt);
   const sttOpts=[{id:PARA,name:'Parakeet 0.6B',sub:'Local · fast · English',selected:curStt===PARA},{id:'__custom__',name:'Custom model…',sub:'Any mlx_audio STT repo',selected:curStt!==PARA}];
-  const aloud=!!S.prefs.autoTts;
   const loading=!S.audioModels;
   return `<div style="font-size:15px;font-weight:600;margin-bottom:8px">Voice</div>
     <div style="display:flex;flex-direction:column;max-width:520px">
@@ -998,8 +1026,8 @@ function renderVoicePane(){
       ${vdropRow('model','Voice model',loading?'Loading…':ttsName,modelOpts,'pickTtsModel')}
       ${vdropRow('stt','Speech-to-text',sttName,sttOpts,'pickSttModel')}
       ${vdropRow('lang','Language',langName,langOpts,'pickTtsLang')}
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0"><span style="font-size:13.5px">Read responses aloud</span><span class="toggle" data-act="toggleTts" style="background:${aloud?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${aloud?'16px':'2px'}"></span></span></div>
     </div>
+    <div style="max-width:520px;font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px">Assistant replies don’t speak automatically — use the <b style="font-weight:600;color:var(--ink)">read-aloud</b> button under any message to hear it.</div>
     <div style="max-width:520px;font-size:12px;color:var(--muted);line-height:1.55;margin-top:6px">Speaking with <b style="font-weight:600;color:var(--ink)">${esch(ttsName)}</b> · listening with <b style="font-weight:600;color:var(--ink)">${esch(sttName)}</b>. All speech stays on this Mac — models download on first use.</div>`;
 }
 
@@ -1074,6 +1102,7 @@ async function transcribeAtts(atts){ const out=[];
 // `queued` (optional) = {chatId,text,atts} routes a queued message to its ORIGINAL conversation, so a
 // queued message never executes in whatever chat happens to be open now.
 async function send(queued){
+  stopSpeak();
   let text, atts, c, ta=null;
   if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
   else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
@@ -1140,9 +1169,8 @@ async function send(queued){
   c.messages.push({id:uid(),role:'assistant',content:S.streamText,reasoning:reasoning,thinkMs:S.streamThinkMs,truncated:truncated,
     meta:secs+'s'+(auto?' · '+shortModel(resolved||''):''), exec:exec});
   if(_rt){ clearTimeout(_rt); _rt=null; }   // drop any trailing throttle so it can't rebuild + steal focus
-  const spoken=S.streamText;
   S.streaming=false; S.genChatId=null; S.streamText=''; S.controller=null; S.focusInput=true; saveChats(); render();
-  if(S.prefs.autoTts) speak(spoken);
+  // Text chat never auto-speaks — use the per-message "read aloud" button instead.
   // Process the next queued message for THIS conversation, unless the user just hit Stop.
   if(S._stopQueue){ S._stopQueue=false; } else { maybeSendQueue(c.id); }
 }
@@ -1165,7 +1193,7 @@ let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null
 
 /* ---------- speech: real mic -> STT -> LLM -> TTS voice loop ---------- */
 // Synthesize speech for `text` and return the audio Blob (or null). Sends the chosen TTS model/voice/
-// language. Used both by the one-shot speak() and the voice loop's sentence pipeline.
+// language. Used both by the per-message read-aloud (speakMessage) and the voice loop's sentence pipeline.
 async function speakBlob(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return null;
   const body={input:clean.slice(0,2000)};
   const tts=S.config&&S.config.defaults&&S.config.defaults.ttsModel; if(tts)body.model=tts;
@@ -1173,7 +1201,28 @@ async function speakBlob(text){ const clean=splitThink(text).answer||text; if(!c
   if(S.prefs.ttsLanguage)body.language=S.prefs.ttsLanguage;
   try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)return null; return await r.blob(); }catch(e){ return null; } }
-async function speak(text){ const b=await speakBlob(text); if(!b)return null; const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }
+// Per-message "read aloud". One audio at a time; object URLs are revoked when
+// playback ends/stops so repeated speaking never leaks memory. Cancel-safe: if the
+// user stops (or starts another) while the blob is still synthesizing, the stale
+// result is dropped.
+function stopSpeak(){
+  const a=S._speakAudio;
+  if(a){ try{ a.pause(); }catch(e){} if(a._url)URL.revokeObjectURL(a._url); S._speakAudio=null; }
+  S._speakId=null; S._speakLoading=false;
+}
+async function speakMessage(m){
+  stopSpeak();
+  const text=(splitThink(m.content).answer||m.content||'').trim(); if(!text)return;
+  S._speakId=m.id; S._speakLoading=true; render();
+  let b=null; try{ b=await speakBlob(text); }catch(e){}
+  if(S._speakId!==m.id) return;                 // superseded or stopped mid-synthesis
+  if(!b){ S._speakId=null; S._speakLoading=false; render(); return; }
+  const url=URL.createObjectURL(b); const a=new Audio(url); a._url=url;
+  S._speakAudio=a; S._speakLoading=false;
+  const done=()=>{ if(S._speakAudio===a){ URL.revokeObjectURL(url); S._speakAudio=null; S._speakId=null; render(); } };
+  a.onended=done; a.onerror=done;
+  render(); a.play().catch(()=>{});
+}
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
 function clearVoiceReveal(){ if(S._vsi){ clearInterval(S._vsi); S._vsi=null; } }
 function stopVAD(){ if(S._vad){ cancelAnimationFrame(S._vad); S._vad=null; } if(S.voiceAC){ try{S.voiceAC.close()}catch(e){} S.voiceAC=null; } }

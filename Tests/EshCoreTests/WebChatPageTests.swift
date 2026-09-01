@@ -305,4 +305,43 @@ struct WebChatPageTests {
         #expect(html.contains("Auto routing"))
         #expect(html.contains("System instructions"))
     }
+
+    // Soak (rc.5): assistant replies never auto-speak — a per-message "read aloud"
+    // button is the only speech trigger in text chat.
+    @Test
+    func readAloudIsManualPerMessageNotAutomatic() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Per-message speak button in the assistant footer, using an inline SVG (no emoji).
+        #expect(html.contains("data-act=\"speakMsg\""))
+        #expect(html.contains("asstfoot"))
+        #expect(html.contains("speaker:'<svg"))
+        // No automatic text-to-speech: the old auto-read toggle and its per-response
+        // call are gone (they surprised users and drove repeated TTS model loads).
+        #expect(html.contains("autoTts") == false)
+        #expect(html.contains("toggleTts") == false)
+        #expect(html.contains("Read responses aloud") == false)
+        #expect(html.contains("Text chat never auto-speaks"))
+        // Read-aloud lifecycle is leak-safe: one audio at a time, object URLs revoked.
+        #expect(html.contains("function stopSpeak()"))
+        #expect(html.contains("async function speakMessage("))
+        #expect(html.contains("URL.revokeObjectURL"))
+        // The speak button's state is part of the log signature so it repaints
+        // (idle → loading → playing) despite the message-list DOM being reused.
+        #expect(html.contains("const speakPart="))
+    }
+
+    // Soak (rc.5): popovers/menus must not re-play their entrance animation on the
+    // full re-renders that happen while they stay open (e.g. streaming start/end) —
+    // that read as the menu "jumping".
+    @Test
+    func popoversAnimateOnlyOnOpenTransition() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function popAnimPass()"))
+        #expect(html.contains(".pop.opening{ animation:eshpop"))
+        // The bare .pop no longer carries the animation unconditionally.
+        #expect(html.contains(".pop{ animation:eshpop") == false)
+        // Engine panel centers with margin, not transform, so the entrance animation
+        // (which animates transform to none) can't shift it sideways.
+        #expect(html.contains("margin-left:-170px"))
+    }
 }

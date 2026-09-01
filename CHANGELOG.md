@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.5] - 2026-09-01
+
+**Release candidate — web chat soak fixes.** Web-client polish found while soaking rc.4; no engine or
+packaging changes (the rc.4 GGUF fix stands).
+
+### Changed — web chat
+- **Assistant replies no longer speak automatically.** Text chat was auto-playing every response as
+  audio (and re-loading the TTS model per response, which grew memory). Speech is now **manual and
+  per-message**: a small read-aloud button under each assistant message plays that reply on demand and
+  shows loading → playing state; the automatic "Read responses aloud" toggle is removed. One clip
+  plays at a time and its audio URL is released when it ends or is stopped, so repeated use never
+  leaks memory.
+
+### Fixed — web chat
+- **Popovers no longer "jump" while a reply streams.** The menu entrance animation was replaying on
+  every full re-render (streaming start/end) instead of only when the popover opens; it now animates
+  once, on the open transition. The Engine panel also centers with a margin instead of a transform, so
+  the entrance animation can't shift it sideways.
+
 ## [2.0.0-rc.4] - 2026-09-01
 
 **Release candidate — GGUF packaging fix.** Packaged validation of rc.3 found GGUF inference broken
