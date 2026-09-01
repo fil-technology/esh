@@ -197,8 +197,27 @@ struct WebChatPageTests {
         #expect(html.contains("function startAudioRecording("))
         #expect(html.contains("hold to record audio"))
         #expect(html.contains("release to attach"))
-        // Audio attachments render an inline <audio> player (composer chip + sent bubble).
-        #expect(html.contains("<audio controls src=\"${a.dataURL}\""))
+        // Audio attachments render a custom on-brand player (no native <audio controls>).
+        #expect(html.contains("function audioPlayer("))
+        #expect(html.contains("function wireAudioPlayers("))
+        #expect(html.contains("class=\"aplayer\""))
+    }
+
+    @Test
+    func audioOnlyMessageIsTranscribedNotSentEmpty() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // A recorded audio with no text is transcribed (so the model gets text); if that yields nothing,
+        // the message is kept playable but no empty conversation is sent to the model.
+        #expect(html.contains("function transcribeAtts("))
+        #expect(html.contains("atts.some(a=>a.kind==='audio')"))
+    }
+
+    @Test
+    func chatLogIsReusedAcrossPopoverTogglesToAvoidFlicker() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Opening/closing a popover must not rebuild + re-parse the whole thread (which flashed).
+        #expect(html.contains("function logSig("))
+        #expect(html.contains("S._logNode && S._logSig===sig"))
     }
 
     @Test

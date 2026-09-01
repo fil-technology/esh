@@ -106,6 +106,14 @@ public enum WebChatPage {
   .attpill{ display:flex; align-items:center; gap:8px; background:var(--paper); border:1px solid var(--line2); border-radius:9px; padding:6px 10px 6px 6px; }
   .attpill .ai{ width:26px; height:26px; border-radius:6px; background:var(--ink); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .attpill .an{ display:flex; flex-direction:column; min-width:0; } .attpill .an b{ font-size:12px; font-weight:600; max-width:170px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* Custom audio player (no native controls) — on-brand play/pause + progress + mono time */
+  .aplayer{ display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:7px 12px 7px 8px; min-width:180px; max-width:260px; }
+  .aplayer .pp{ width:30px; height:30px; border-radius:50%; background:var(--ink); color:var(--paper); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; border:none; }
+  .aplayer .pp:hover{ opacity:.88; } .aplayer .pp svg{ display:block; }
+  .aplayer .track{ flex:1; height:4px; background:rgba(32,30,27,.14); border-radius:2px; position:relative; cursor:pointer; min-width:60px; }
+  .aplayer .fill{ position:absolute; left:0; top:0; height:100%; background:var(--ink); border-radius:2px; width:0%; }
+  .aplayer .knobd{ position:absolute; top:50%; width:9px; height:9px; border-radius:50%; background:var(--ink); transform:translate(-50%,-50%); left:0%; }
+  .aplayer .atime{ font:400 10.5px var(--mono); color:var(--muted); flex-shrink:0; min-width:30px; text-align:right; }
   .metaline{ font:400 11px var(--mono); color:var(--faint); cursor:pointer; align-self:flex-start; }
   .metaline:hover{ color:var(--ink); text-decoration:underline; }
   .caret{ display:inline-block; width:8px; height:15px; background:var(--ink); vertical-align:-2px; margin-left:2px; animation:eshblink 1s infinite; }
@@ -262,7 +270,7 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ renderView(); a11yPass(); }
+function render(){ renderView(); a11yPass(); wireAudioPlayers(); }
 function renderView(){ const app=$('#app'); app.innerHTML='';
   if(S.view==='onboarding'){ app.appendChild(renderOnboarding()); return; }
   if(S.view==='models'){ app.appendChild(renderModels()); if(S.detail) app.appendChild(renderDetail()); return; }
@@ -384,8 +392,14 @@ function renderChat(){
   if(S.sidebarOpen) body.appendChild(renderSidebar());
   const main=el('div',{cls:'main'});
   const c=cur(); const has=c&&(c.messages.length||S.streaming);
-  if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); }
-  else main.appendChild(renderLog());
+  if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); S._logNode=null; S._logSig=''; }
+  else {
+    // Reuse the existing log DOM when the conversation hasn't changed, so opening/closing a popover (or
+    // changing model/effort) doesn't rebuild + re-parse the whole thread (which flashed/scroll-jumped).
+    const sig=logSig();
+    if(S._logNode && S._logSig===sig){ main.appendChild(S._logNode); }
+    else { const lg=renderLog(); S._logNode=lg; S._logSig=sig; main.appendChild(lg); }
+  }
   main.appendChild(renderComposer());
   if(S.engineOpen) main.appendChild(renderEngine());
   body.appendChild(main);
@@ -394,6 +408,11 @@ function renderChat(){
   return wrap;
 }
 function esch(s){ return (s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+// A cheap fingerprint of the thread: changes only when the messages actually change (not on popover
+// toggles). During streaming the bubble is patched in place by throttleRender, so the sig stays stable.
+function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messages.length-1];
+  const lastPart=last?(last.id+':'+((last.content||'').length)):'';
+  return (S.current||'')+'|'+c.messages.length+'|'+lastPart+'|'+(S.streaming?'S':''); }
 function renderSidebar(){
   const sb=el('div',{cls:'sidebar'});
   let h=`<button class="newchat" data-act="newChat">${ICON.plus}New chat</button>`;
@@ -420,9 +439,9 @@ function renderMsg(m){
   const fresh=m.id&&!_seen.has(m.id); if(m.id)_seen.add(m.id);
   const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
   if(m.isUser||m.role==='user'){ let a='';
-    (m.attachments||[]).forEach(x=>{
+    (m.attachments||[]).forEach((x,ix)=>{
       if(x.kind==='image')a+=`<img src="${x.dataURL}">`;
-      else if(x.kind==='audio')a+=`<audio controls src="${x.dataURL}"></audio>`;
+      else if(x.kind==='audio')a+=`<div style="margin:2px 0 6px">${audioPlayer(x.dataURL,(m.id||'m')+'-'+ix)}</div>`;
       else a+=`<div class="attpill"><span class="ai"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></span><span class="an"><b>${esch(x.name||'file')}</b><span class="mono" style="font-size:10px;color:var(--muted)">${esch(x.size||'')}</span></span></div>`;
     });
     const body=(a?`<div class="attwrap">${a}</div>`:'')+(m.content?md(m.content):'');
@@ -518,6 +537,26 @@ function wireMicHold(){ const mic=document.getElementById('micbtn'); if(!mic)ret
     if(S._recording) stopAudioRecording(); else S._recCancel=true; };
   mic.onpointerup=end; mic.onpointerleave=end; mic.onpointercancel=end; }
 function fmtDur(ms){ const s=Math.max(0,Math.round(ms/1000)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+// Custom on-brand audio player (no native <audio controls>). Markup only — wired by wireAudioPlayers().
+function audioPlayer(dataURL,id){ return `<div class="aplayer" data-aud="${esch(id||'')}">
+  <button class="pp" type="button"><svg class="i-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg><svg class="i-pause" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="5" width="4.5" height="14" rx="1.2"/><rect x="13.5" y="5" width="4.5" height="14" rx="1.2"/></svg></button>
+  <div class="track"><div class="fill"></div></div>
+  <span class="atime">0:00</span>
+  <audio preload="metadata" src="${dataURL}" style="display:none"></audio></div>`; }
+function wireAudioPlayers(){ document.querySelectorAll('.aplayer').forEach(p=>{ if(p._w)return; p._w=true;
+  const audio=p.querySelector('audio'), fill=p.querySelector('.fill'), time=p.querySelector('.atime'), track=p.querySelector('.track');
+  const ip=p.querySelector('.i-play'), ipa=p.querySelector('.i-pause');
+  const fmt=s=>{ s=Math.max(0,Math.floor(isFinite(s)?s:0)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+  const setP=on=>{ ip.style.display=on?'none':'block'; ipa.style.display=on?'block':'none'; };
+  let dur=0;
+  const showDur=()=>{ if(audio.duration===Infinity||isNaN(audio.duration)){ const h=()=>{ audio.removeEventListener('timeupdate',h); audio.currentTime=0; dur=audio.duration; if(audio.paused)time.textContent=fmt(dur); }; audio.addEventListener('timeupdate',h); try{ audio.currentTime=1e101; }catch(e){} } else { dur=audio.duration; if(audio.paused)time.textContent=fmt(dur); } };
+  audio.onloadedmetadata=showDur; if(audio.readyState>=1)showDur();
+  p.querySelector('.pp').onclick=()=>{ if(audio.paused){ document.querySelectorAll('.aplayer audio').forEach(a=>{ if(a!==audio)a.pause(); }); audio.play().catch(()=>{}); } else audio.pause(); };
+  audio.onplay=()=>setP(true); audio.onpause=()=>setP(false);
+  audio.onended=()=>{ setP(false); fill.style.width='0%'; time.textContent=fmt(dur); };
+  audio.ontimeupdate=()=>{ const d=dur||audio.duration||0; fill.style.width=(d?Math.min(100,audio.currentTime/d*100):0)+'%'; if(!audio.paused)time.textContent=fmt(d?d-audio.currentTime:audio.currentTime); };
+  track.onclick=e=>{ const r=track.getBoundingClientRect(); const f=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); const d=dur||audio.duration; if(isFinite(d)&&d>0)audio.currentTime=f*d; };
+}); }
 async function startAudioRecording(){
   try{ const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     if(S._recCancel){ stream.getTracks().forEach(t=>t.stop()); S._recCancel=false; return; }  // released during arming
@@ -549,11 +588,8 @@ function renderQueue(){ let h='<div style="display:flex;flex-direction:column;ga
 function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
   S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
     if(a.kind==='audio'){
-      // A recorded/attached audio clip — playable right in the composer before sending.
-      h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 8px">
-        <span style="width:26px;height:26px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
-        <audio controls src="${a.dataURL}" style="height:32px;max-width:220px"></audio>
-        <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
+      // A recorded/attached audio clip — playable right in the composer before sending (custom player).
+      h+=`<div style="display:flex;align-items:center;gap:6px">${audioPlayer(a.dataURL,'pa'+i)}<span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
     } else {
       h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
         <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
@@ -934,14 +970,27 @@ function renderVoice(){
 /* ---------- send + streaming ---------- */
 // Decode text/document attachments to plain text for the model (never images/audio).
 function attText(m){ let s=''; (m.attachments||[]).forEach(x=>{ if(x.kind!=='image'&&x.kind!=='audio'&&x.dataURL){ try{ const b64=(x.dataURL.split(',')[1]||''); const txt=decodeURIComponent(escape(atob(b64))); if(txt.trim()) s+='\n\n[Attached file: '+(x.name||'file')+']\n'+txt.slice(0,20000); }catch(e){} } }); return s; }
+// Transcribe audio attachments (STT) so a recorded voice message becomes text the model can answer.
+async function transcribeAtts(atts){ const out=[];
+  for(const a of (atts||[])){ if(a.kind!=='audio'||!a.dataURL)continue;
+    try{ const b64=(a.dataURL.split(',')[1]||''); const r=await fetch('/v1/audio/transcriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:'recording.webm'})});
+      if(r.ok){ const j=await r.json(); if(j&&j.text&&j.text.trim())out.push(j.text.trim()); } }catch(e){} }
+  return out.join(' ').trim(); }
 async function send(){
-  const ta=$('#input'); const text=ta?ta.value.trim():(S.draft||'').trim();
+  const ta=$('#input'); let text=ta?ta.value.trim():(S.draft||'').trim();
   if((!text&&!S.pendingAtts.length)||S.controller) return;
   const c=cur()||(newChat(),cur());
   const atts=S.pendingAtts.slice(); S.pendingAtts=[];
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
+  const userMsg=c.messages[c.messages.length-1];
   if(c.title==='New chat'&&text) c.title=text.slice(0,40);
-  S.draft=''; if(ta)ta.value='';
+  S.draft=''; if(ta)ta.value=''; S.focusInput=true; render();
+  // An audio attachment with no text: transcribe it so the model has text to answer (it can't hear
+  // audio); the clip stays playable in the bubble.
+  if(!text && atts.some(a=>a.kind==='audio')){ const tr=await transcribeAtts(atts); if(tr){ text=tr; userMsg.content=tr; if(c.title==='New chat')c.title=tr.slice(0,40); saveChats(); render(); } }
+  // Nothing the model can act on (audio-only + transcription empty/unavailable) → keep the message
+  // playable, but don't send an empty conversation to the model.
+  if(!((userMsg.content||'')+attText(userMsg)).trim()){ saveChats(); return; }
   // Auto routing runs through the real Scheduler: send its chosen model explicitly so the server uses
   // the model the UI shows (and reasoning detection matches the actual model).
   let resolved=S.modelSel;
