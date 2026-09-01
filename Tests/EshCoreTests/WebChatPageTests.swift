@@ -116,6 +116,24 @@ struct WebChatPageTests {
     }
 
     @Test
+    func voiceSettingsAreRealDropdownsFromTheAudioCatalog() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Voice model / speaker / language / STT are functional dropdowns fed by the real audio catalog.
+        #expect(html.contains("function renderVoicePane("))
+        #expect(html.contains("function vdropRow("))
+        #expect(html.contains("/v1/audio/models"))
+        #expect(html.contains("pickTtsModel"))
+        #expect(html.contains("pickTtsVoice"))
+        #expect(html.contains("pickSttModel"))
+        // The chosen TTS model/voice/language are sent with each speech request.
+        #expect(html.contains("body.voice=S.prefs.ttsVoice"))
+        // Honesty: the UI must NOT hardcode a fabricated speech-model list — names come from the API.
+        #expect(html.contains("Kokoro") == false)
+        #expect(html.contains("Ember") == false)
+        #expect(html.contains("Whisper Large") == false)
+    }
+
+    @Test
     func contextualStatusLineSurfacesTheMomentAndOpensEngine() {
         let html = WebChatPage.html(toolVersion: nil)
         #expect(html.contains("function statusInfo("))

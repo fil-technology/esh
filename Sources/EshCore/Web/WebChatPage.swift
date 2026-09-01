@@ -209,7 +209,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
-        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false };
+        onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
@@ -225,6 +225,7 @@ async function api(path){ try{ const r=await fetch(path); if(!r.ok) return null;
 async function refreshEngine(){ S.engine=await api('/v1/engine'); render(); }
 async function refreshModels(){ const d=await api('/v1/models'); S.models=(d&&d.data||[]).map(m=>m.id); }
 async function refreshCatalog(){ S.catalog=await api('/v1/catalog'); render(); }
+async function refreshAudioModels(){ const d=await api('/v1/audio/models'); S.audioModels=(d&&d.data)||[]; render(); }
 async function refreshConfig(){ S.config=await api('/v1/config');
   // Cross-client settings live in esh config (not the browser): reflect the persisted performance mode.
   const pm=S.config&&S.config.defaults&&S.config.defaults.performanceMode;
@@ -274,7 +275,7 @@ function el(tag,attrs,html){ const e=document.createElement(tag); if(attrs) for(
 /* ---------- action delegation (thin client: handlers are named, wired by data-act) ---------- */
 const ACT={
   toggleSidebar:()=>{ S.sidebarOpen=!S.sidebarOpen; S.prefs.sidebarOpen=S.sidebarOpen; savePrefs(); render(); },
-  newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); render(); },
+  newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); if(!S.audioModels)refreshAudioModels(); render(); },
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
   togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; if(!S.pickerOpen)S.focusInput=true; render(); },
@@ -298,7 +299,12 @@ const ACT={
   voiceInterrupt:()=>{ clearVoiceReveal(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} startVoice(); },
   voiceRetry:()=>startVoice(),
   speak:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m)speak(m.content); },
-  pickPane:(p)=>{ S.settingsPane=p; render(); },
+  pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); render(); },
+  toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
+  pickTtsModel:(id)=>{ S.voiceDrop=null; postConfig({ttsModel:id}).then(()=>render()); render(); },
+  pickTtsVoice:(id)=>{ S.prefs.ttsVoice=id; savePrefs(); S.voiceDrop=null; render(); },
+  pickTtsLang:(id)=>{ S.prefs.ttsLanguage=id; savePrefs(); S.voiceDrop=null; render(); },
+  pickSttModel:(id)=>{ S.voiceDrop=null; if(id==='__custom__'){ const v=prompt('Speech-to-text model (Hugging Face repo, mlx_audio-compatible):', (S.config&&S.config.defaults&&S.config.defaults.sttModel)||'mlx-community/parakeet-tdt-0.6b-v2'); if(v&&v.trim()){ postConfig({sttModel:v.trim()}).then(()=>render()); } render(); return; } postConfig({sttModel:id}).then(()=>render()); render(); },
   pickFilter:(f)=>{ S.modelsFilter=f; refreshCatalog(); render(); },
   openDetail:(id)=>{ S.detail=id; render(); },
   closeDetail:()=>{ S.detail=null; render(); },
@@ -323,6 +329,7 @@ document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); c
   // that owns it (those toggles handle their own open/close).
   const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
   if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
+  if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
   if(!t)return; const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
 document.addEventListener('keydown',e=>{
@@ -738,19 +745,59 @@ function renderPane(){
     return `<div style="display:flex;align-items:center;margin-bottom:18px;max-width:520px"><span style="font-size:15px;font-weight:600">Models</span><span class="sp" style="flex:1"></span><span class="btn ghost" style="padding:7px 14px;font-size:12.5px" data-act="openModels">Browse models…</span></div>
       <div style="max-width:520px"><div class="menuhead" style="padding:0 0 4px">Installed</div>${rows}
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;margin-top:18px"><span>Model storage</span><span data-act="goPane" data-arg="Storage" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(volLabel(s.assetsRoot))}${s.freeBytes?(' · '+gb(s.freeBytes)+' free'):''} <span style="font-size:9px">▸</span></span></div></div>`; }
-  if(p==='Voice') return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Voice</div>
-    <div style="display:flex;flex-direction:column;gap:12px;font-size:13.5px;max-width:440px">
-      <div style="display:flex;justify-content:space-between;align-items:center"><span>Read responses aloud</span><span class="toggle" data-act="toggleTts" style="background:${S.prefs.autoTts?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${S.prefs.autoTts?'16px':'2px'}"></span></span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span>Language</span><span class="mono" style="font-size:12px;color:var(--muted)">Automatic</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span>Speech-to-text model</span><span class="mono" style="font-size:12px;color:var(--muted)">${esch((S.config&&S.config.defaults&&S.config.defaults.sttModel)||'parakeet (default)')}</span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span>Voice (TTS) model</span><span class="mono" style="font-size:12px;color:var(--muted)">${esch((S.config&&S.config.defaults&&S.config.defaults.ttsModel)||'Soprano (default)')}</span></div></div>
-      <div style="border-top:1px solid rgba(32,30,27,.07);margin-top:16px;padding-top:12px;font-size:12px;color:var(--muted);max-width:440px;line-height:1.5">Tap the mic in the composer for a full voice conversation — it listens, transcribes, answers, and speaks back, committing every turn to the chat.</div>`;
+  if(p==='Voice') return renderVoicePane();
   if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Advanced</div><div style="max-width:480px">
       <div style="display:flex;align-items:center;gap:9px"><span style="font-size:13.5px;font-weight:600">API server</span><span class="sp" style="flex:1"></span><span class="dot"></span><span style="font-size:12px;color:var(--muted)">Running</span></div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px"><span class="mono" style="font-size:12.5px">${esch(srv)}</span></div>
       <div style="padding:12px 0 0;display:flex;gap:14px;font-size:12px;color:rgba(32,30,27,.65)"><span>✓ Native esh</span><span>✓ OpenAI-compatible</span></div>
       <div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5">Structured output, capability resolution and the Request Inspector are surfaced per response in the Execution panel.</div></div>`; }
   return `<div style="font-size:15px;font-weight:600;margin-bottom:10px">${p}</div><div style="font-size:13px;color:var(--muted)">Designed in the canvas — more controls arrive in a later rc.</div>`;
+}
+// A settings dropdown row (label + current-value chip that opens a checkmark menu). Options come from
+// real esh capabilities — never a fabricated list.
+function vdropRow(which,label,valueText,options,act){
+  const open=S.voiceDrop===which;
+  let menu='';
+  if(open){ let rows='';
+    options.forEach(o=>{ rows+=`<div class="pickrow ${o.selected?'sel':''}" data-act="${act}" data-arg="${esch(o.id)}"><span style="display:flex;flex-direction:column;min-width:0"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(o.name)}</span>${o.sub?`<span style="font-size:11px;color:var(--muted)">${esch(o.sub)}</span>`:''}</span><span class="sp" style="flex:1"></span>${o.selected?'<span class="ck">✓</span>':''}</div>`; });
+    menu=`<div class="pop" style="right:0;top:calc(100% + 4px);width:320px;padding:6px 0;max-height:300px;overflow-y:auto">${rows}</div>`;
+  }
+  return `<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
+    <span style="font-size:13.5px">${esch(label)}</span>
+    <button class="cchip" data-act="toggleVoiceDrop" data-arg="${which}" style="background:${open?'rgba(32,30,27,.09)':'rgba(32,30,27,.05)'}"><span class="lbl">${esch(valueText)}</span><span class="chev">▾</span></button>
+    ${menu}</div>`;
+}
+function renderVoicePane(){
+  const cfg=(S.config&&S.config.defaults)||{};
+  const models=S.audioModels||[];
+  // Resolve the active TTS model: configured, else the built-in default (Soprano), else the first.
+  const sel=models.find(m=>m.id===cfg.ttsModel) || models.find(m=>/soprano/i.test(m.id)) || models[0] || null;
+  const ttsName=sel?(sel.display_name||shortModel(sel.id)):(cfg.ttsModel?shortModel(cfg.ttsModel):'Soprano (default)');
+  const modelOpts=models.map(m=>({id:m.id,name:m.display_name||shortModel(m.id),sub:((m.languages||[]).map(l=>l.display_name||l.id).join(', ')||'')||'Local',selected:sel&&m.id===sel.id}));
+  // Speaker voices for the active model (+ Auto). Stored as a browser pref, sent with each speech call.
+  const voices=(sel&&sel.voices)||[]; const curVoice=S.prefs.ttsVoice||'';
+  const voiceOpts=[{id:'',name:'Auto',sub:'Model default',selected:!curVoice}].concat(voices.map(v=>({id:v.id,name:v.display_name||v.id,selected:curVoice===v.id})));
+  const voiceName=curVoice?(voices.find(v=>v.id===curVoice)||{}).display_name||curVoice:(voices.length?'Auto':'Default');
+  // Languages for the active model (+ Automatic).
+  const langs=(sel&&sel.languages)||[]; const curLang=S.prefs.ttsLanguage||'';
+  const langOpts=[{id:'',name:'Automatic',selected:!curLang}].concat(langs.map(l=>({id:l.id,name:l.display_name||l.id,selected:curLang===l.id})));
+  const langName=curLang?(langs.find(l=>l.id===curLang)||{}).display_name||curLang:'Automatic';
+  // STT: the verified default is Parakeet; other mlx_audio STT repos can be set via Custom (downloads on
+  // first use). No fabricated model list.
+  const PARA='mlx-community/parakeet-tdt-0.6b-v2'; const curStt=cfg.sttModel||PARA;
+  const sttName=curStt===PARA?'Parakeet 0.6B':shortModel(curStt);
+  const sttOpts=[{id:PARA,name:'Parakeet 0.6B',sub:'Local · fast · English',selected:curStt===PARA},{id:'__custom__',name:'Custom model…',sub:'Any mlx_audio STT repo',selected:curStt!==PARA}];
+  const aloud=!!S.prefs.autoTts;
+  const loading=!S.audioModels;
+  return `<div style="font-size:15px;font-weight:600;margin-bottom:8px">Voice</div>
+    <div style="display:flex;flex-direction:column;max-width:520px">
+      ${vdropRow('voice','Voice',voiceName,voiceOpts,'pickTtsVoice')}
+      ${vdropRow('model','Voice model',loading?'Loading…':ttsName,modelOpts,'pickTtsModel')}
+      ${vdropRow('stt','Speech-to-text',sttName,sttOpts,'pickSttModel')}
+      ${vdropRow('lang','Language',langName,langOpts,'pickTtsLang')}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0"><span style="font-size:13.5px">Read responses aloud</span><span class="toggle" data-act="toggleTts" style="background:${aloud?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${aloud?'16px':'2px'}"></span></span></div>
+    </div>
+    <div style="max-width:520px;font-size:12px;color:var(--muted);line-height:1.55;margin-top:6px">Speaking with <b style="font-weight:600;color:var(--ink)">${esch(ttsName)}</b> · listening with <b style="font-weight:600;color:var(--ink)">${esch(sttName)}</b>. All speech stays on this Mac — models download on first use.</div>`;
 }
 
 /* ---------- onboarding ---------- */
@@ -888,7 +935,11 @@ let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null
 
 /* ---------- speech: real mic -> STT -> LLM -> TTS voice loop ---------- */
 async function speak(text){ const clean=splitThink(text).answer||text; if(!clean.trim())return null;
-  try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:clean.slice(0,2000)})});
+  const body={input:clean.slice(0,2000)};
+  const tts=S.config&&S.config.defaults&&S.config.defaults.ttsModel; if(tts)body.model=tts;
+  if(S.prefs.ttsVoice)body.voice=S.prefs.ttsVoice;
+  if(S.prefs.ttsLanguage)body.language=S.prefs.ttsLanguage;
+  try{ const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)return null; const b=await r.blob(); const a=new Audio(URL.createObjectURL(b)); a.play(); return a; }catch(e){ return null; } }
 function blobToB64(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+'').split(',')[1]||''); r.readAsDataURL(blob); }); }
 function clearVoiceReveal(){ if(S._vsi){ clearInterval(S._vsi); S._vsi=null; } }

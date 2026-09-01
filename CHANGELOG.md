@@ -19,6 +19,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   reasoning pass; Low/Medium/High reason. This also fixes the mic/send controls looking orphaned in
   the composer.
 
+### Added
+- **Voice model selection.** Settings → Voice now has functional dropdowns fed by the real audio
+  catalog (`GET /v1/audio/models`): **Voice model** (Soprano, Pocket TTS, Orpheus, VyvoTTS, Qwen3 TTS —
+  known-broken models like Marvis are excluded), **Voice** (the selected model's real speaker voices),
+  **Language** (the selected model's real languages, incl. Qwen3 TTS's 15), and **Speech-to-text**
+  (verified Parakeet default + a Custom option for any mlx_audio STT repo). Selections persist (TTS
+  model + STT to esh config; voice/language as browser prefs) and are sent with each speech request; a
+  summary line shows the active pair. No fabricated model names — everything comes from real
+  capabilities, and speech models download on first use.
+
 ### Fixed
 - **Composer layout + controls.** The composer is now a column so the input fills the row and the model
   (`Auto ▾`) and effort chips sit flush-right (they no longer float mid-bar), and pending attachments
