@@ -76,8 +76,12 @@ struct RecommendedModelRegistryTests {
         // No known-broken model may carry the "default" flagship tag.
         #expect(defaults.contains { $0.id == "qwen-3-5-9b" } == false)
         #expect(defaults.contains { $0.id == "qwen-3-5-9b-gguf" } == false)
-        // The MLX flagship default is Llama 3.1 8B (standard, not-known-broken architecture).
-        let flagship = registry.resolve(alias: "llama-3-1-8b")
+        // Every "default"-tagged model must be a non-broken (recommended) entry.
+        for model in defaults {
+            #expect(model.status == .recommended, "flagship \(model.id) must be .recommended, not \(model.status)")
+        }
+        // The MLX flagship default is Mistral Small 24B (standard, not-known-broken architecture).
+        let flagship = registry.resolve(alias: "mistral-small-24b")
         #expect(flagship?.status == .recommended)
         #expect(flagship?.tags.contains("default") == true)
     }

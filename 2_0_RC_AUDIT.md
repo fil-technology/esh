@@ -175,10 +175,10 @@ Changes (`RecommendedModelRegistry.swift`, `main.swift`):
   `status: .incompatible` → excluded from `recommend()` for every use case (verified by test).
   They remain in the full `list()` catalog, flagged incompatible (honest, not hidden), with a
   summary explaining the mlx-lm hybrid crash and the condition to re-enable them.
-- Flagship "default" tag moved off the broken model onto **`llama-3-1-8b`** (Llama 3.1 8B — a
-  standard, not-known-broken architecture; sibling Llama models verified generating this session).
-  This is the one owner-facing product choice; it is reversible in one edit if a different flagship
-  is preferred. *(Surfaced for confirmation.)*
+- Flagship "default" tag moved off the broken model onto **`mistral-small-24b`** (Mistral Small 24B —
+  a standard, not-known-broken architecture), per **owner decision (2026-09-01)**. `llama-3-1-8b`
+  remains a recommended lighter alternative. esh's model-fit gate steers lower-RAM Macs to a lighter
+  recommended model, so a 24B flagship does not strand small machines.
 - Onboarding `starterModels` no longer offers `qwen-3-5-9b-optiq`; offers `llama-3-1-8b` instead.
 - The GGUF `qwen-3-5-9b-gguf` (llama.cpp, different code path, unverified novel arch) downgraded to
   `.experimental` and stripped of the "default" tag — not claimed as a verified-compatible default.
