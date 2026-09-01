@@ -239,6 +239,8 @@ const ACT={
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ if(S.controller)S.controller.abort(); },
+  retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
+  continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ S.current=id; render(); },
   startVoice:()=>startVoice(),
   endVoice:()=>{ stopListening(); if(S.voiceAudio){try{S.voiceAudio.pause()}catch(e){}} S.voice=null; render(); },
@@ -313,7 +315,13 @@ function renderMsg(m){
   const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
   if(m.isUser||m.role==='user'){ let a=''; (m.attachments||[]).forEach(x=>{ if(x.kind==='image')a+=`<img src="${x.dataURL}">`; else if(x.kind==='audio')a+=`<audio controls src="${x.dataURL}"></audio>`; });
     d.innerHTML=`<div class="userrow"><div class="userbubble">${md(m.content||'')}${a}</div></div>`; return d; }
-  if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div><div class="d">${esch(m.detail||'')}</div></div>`; return d; }
+  if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div>
+    <div class="d">${esch(m.detail||'')}</div>
+    <div class="d" style="margin-top:6px">Your conversation is safe — nothing was lost.</div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <span class="btn" style="padding:7px 14px;font-size:12px" data-act="retryLast" data-arg="${esch(m.lastUser||'')}">Try again</span>
+      <span class="btn ghost" style="padding:7px 14px;font-size:12px" data-act="continueAuto" data-arg="${esch(m.lastUser||'')}">Continue with Auto</span>
+    </div></div>`; return d; }
   const s=splitThink(m.content,{streaming:false,expectReasoning:m.reasoning});
   let h='<div class="asst">';
   if(s.reason){ const label=m.thinkMs?('Reasoning · '+Math.round(m.thinkMs)+'s'):'Reasoning';
@@ -640,9 +648,11 @@ async function send(){
   const msgs=c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content}));
   const body={ model: resolved==='Auto'?undefined:resolved, messages:msgs, stream:true, max_tokens:2048 };
   let truncated=false, ttft=0, execProfile=null;
+  let errorInfo=null;
   try{
     const resp=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},signal:S.controller.signal,body:JSON.stringify(body)});
-    if(!resp.ok||!resp.body){ S.streamText='error: HTTP '+resp.status; }
+    if(!resp.ok||!resp.body){ let msg=''; try{ msg=((await resp.json()).error||{}).message||''; }catch(e){}
+      errorInfo={model:shortModel(resolved||S.modelSel), detail:msg||('The server returned HTTP '+resp.status+'.')}; }
     else{ const rd=resp.body.getReader(),dec=new TextDecoder(); let buf='';
       while(true){ const {value,done}=await rd.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
         for(const line of lines){ const s=line.trim(); if(!s.startsWith('data:'))continue; const d=s.slice(5).trim(); if(d==='[DONE]')continue;
@@ -651,7 +661,14 @@ async function send(){
             const del=j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content||''; if(del){ if(!ttft)ttft=performance.now()-t0; S.streamText+=del;
               if(S.streamThinkMs===undefined&&reasoning&&S.streamText.includes('</think>'))S.streamThinkMs=(performance.now()-t0)/1000;
               throttleRender(); } }catch(e){} } } }
-  }catch(e){ if(e.name!=='AbortError') S.streamText+='\n[error] '+e.message; }
+  }catch(e){ if(e.name!=='AbortError' && !S.streamText) errorInfo={model:shortModel(resolved||S.modelSel), detail:e.message}; }
+  // Model-load / runtime failure with no output → a degraded error card (what happened, what still
+  // works, what to do), not a fabricated answer.
+  if(errorInfo && !S.streamText.trim()){
+    c.messages.push({id:uid(),role:'assistant',isError:true, model:errorInfo.model, lastUser:text,
+      title:errorInfo.model+' couldn’t respond', detail:errorInfo.detail});
+    S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render(); return;
+  }
   const totalMs=performance.now()-t0; const secs=(totalMs/1000).toFixed(1);
   const auto=S.modelSel==='Auto';
   // Per-response execution truth: prefer the server's real ExecutionProfile (esh_execution event);
@@ -669,6 +686,7 @@ async function send(){
   S.streaming=false; S.streamText=''; S.controller=null; saveChats(); render();
   if(S.prefs.autoTts) speak(S.streamText);
 }
+function sendText(t){ if(!t)return; const ta=document.querySelector('#input'); if(ta)ta.value=t; S.draft=t; send(); }
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');
