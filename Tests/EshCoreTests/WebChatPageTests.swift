@@ -41,6 +41,15 @@ struct WebChatPageTests {
         #expect(html.contains("Thought for "))         // ChatGPT-style collapsed summary with elapsed time
         #expect(html.contains("looksLikeReasoningModel"))
         #expect(html.contains("expectReasoning"))
+        // A typing indicator before the first token, and a token-limit note when cut off.
+        #expect(html.contains("typing"))
+        #expect(html.contains("finish_reason"))
+        #expect(html.contains("token limit"))
+        // Light, self-contained LaTeX rendering (no external math engine).
+        #expect(html.contains("mathify"))
+        #expect(html.contains("boxed"))
+        // A generous default token budget so reasoning models can actually finish.
+        #expect(html.contains("value=\"2048\""))
         // Speech: text-to-speech playback + speech-to-text upload.
         #expect(html.contains("/v1/audio/speech"))
         #expect(html.contains("/v1/audio/transcriptions"))

@@ -53,6 +53,11 @@ public enum WebChatPage {
   .bubble audio { width:100%; margin:6px 0; }
   .bubble pre { background:var(--panel); padding:10px; border-radius:8px; overflow-x:auto; }
   .bubble code { background:var(--panel); padding:1px 4px; border-radius:4px; }
+  .typing { display:inline-flex; gap:5px; align-items:center; padding:3px 2px; }
+  .typing i { width:7px; height:7px; border-radius:50%; background:var(--faint); animation:eshtype 1.2s infinite ease-in-out both; }
+  .typing i:nth-child(2){ animation-delay:.16s } .typing i:nth-child(3){ animation-delay:.32s }
+  @keyframes eshtype { 0%,80%,100%{ transform:scale(.55); opacity:.4 } 40%{ transform:scale(1); opacity:1 } }
+  .limitnote { max-width:820px; margin:2px auto 0; font-size:12px; color:#e0a94a; }
   details.reason { margin:2px 0 8px; }
   details.reason summary { color:var(--faint); cursor:pointer; font-size:13px; list-style:none; }
   details.reason summary::-webkit-details-marker { display:none; }
@@ -98,7 +103,7 @@ public enum WebChatPage {
     <div class="grid">
       <label>System prompt<textarea id="sys" placeholder="(optional) You are a helpful assistant."></textarea></label>
       <label>Temperature <input id="temp" type="number" step="0.1" min="0" max="2" value="0.7"></label>
-      <label>Max tokens <input id="maxtok" type="number" min="1" value="512"></label>
+      <label>Max tokens <input id="maxtok" type="number" min="1" value="2048"></label>
       <label>Reasoning <select id="reason"><option value="auto">auto</option><option value="on">enabled</option><option value="off">disabled</option></select></label>
       <label>Cache / compression <select id="cache"><option value="">default</option><option value="raw">raw</option><option value="turbo">turbo</option><option value="triattention">triattention</option><option value="auto">auto</option></select></label>
       <label>Speak replies (TTS) <select id="autotts"><option value="off">off</option><option value="on">on</option></select></label>
@@ -136,9 +141,25 @@ function renderChats(){
   });
 }
 function esc(s){ return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
-function mdInline(s){ return esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>'); }
+// Light, self-contained LaTeX→readable pass (no external math engine, so the page stays offline-safe).
+// Strips \[ \] and \( \) delimiters and converts the common commands/symbols models emit.
+function mathify(s){
+  return s
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (m,x)=>' '+x.trim()+' ')
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (m,x)=>x.trim())
+    .replace(/\$\$([\s\S]*?)\$\$/g, (m,x)=>' '+x.trim()+' ')
+    .replace(/\\boxed\{([^{}]*)\}/g, (m,x)=>'【 '+x+' 】')
+    .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (m,a,b)=>'('+a+')/('+b+')')
+    .replace(/\\sqrt\{([^{}]*)\}/g, (m,x)=>'√('+x+')')
+    .replace(/\\text\{([^{}]*)\}/g, (m,x)=>x)
+    .replace(/\\(times|cdot|div|pm|mp|leq|geq|neq|approx|equiv|infty|rightarrow|Rightarrow|leftarrow|to|alpha|beta|gamma|delta|theta|pi|sum|prod|int)\b/g,
+      (m,c)=>({times:'×',cdot:'·',div:'÷',pm:'±',mp:'∓',leq:'≤',geq:'≥',neq:'≠',approx:'≈',equiv:'≡',infty:'∞',rightarrow:'→',Rightarrow:'⇒',leftarrow:'←',to:'→',alpha:'α',beta:'β',gamma:'γ',delta:'δ',theta:'θ',pi:'π',sum:'∑',prod:'∏',int:'∫'}[c]||m))
+    .replace(/\\left|\\right|\\,|\\;|\\!|\\quad|\\qquad/g,' ')
+    .replace(/\\\\/g,'\n');
+}
+function mdInline(s){ return esc(mathify(s)).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>'); }
 function renderMarkdown(t){
-  // fenced code blocks, then inline.
+  // fenced code blocks (left verbatim), then inline markdown + light math on the rest.
   const parts=t.split(/```/); let out="";
   parts.forEach((p,i)=>{ if(i%2){ const nl=p.indexOf('\n'); out+='<pre><code>'+esc(nl>=0?p.slice(nl+1):p)+'</code></pre>'; } else out+=mdInline(p).replace(/\n/g,'<br>'); });
   return out;
@@ -151,9 +172,10 @@ function splitThink(t, opts){
   // Explicit open tag: everything after it is live reasoning until </think> arrives.
   if(t.startsWith('<think>')) return {reason:t.slice(7), answer:'', thinking:true};
   // Implicit-open reasoning models (e.g. DeepSeek-R1) emit thinking with only a trailing </think>.
-  // While streaming and reasoning is expected, show the live tokens AS reasoning instead of leaking
-  // them into the answer bubble (they move to the collapsed section once </think> lands).
-  if(opts.streaming && opts.expectReasoning && t) return {reason:t, answer:'', thinking:true};
+  // When reasoning is expected but no </think> has arrived, the content is reasoning: live
+  // ("thinking") while streaming, or collapsed if it finished (e.g. cut off at the token limit before
+  // producing a final answer) — either way it never belongs in the answer bubble.
+  if(opts.expectReasoning && t) return {reason:t, answer:'', thinking:!!opts.streaming};
   return {reason:'', answer:t, thinking:false};
 }
 function looksLikeReasoningModel(id){ return /deepseek-?r1|(^|[^a-z])r1([^a-z]|$)|qwq|magistral|thinking|reason/i.test(id||''); }
@@ -173,13 +195,18 @@ function renderLog(){
         const label = s.thinking ? 'Thinking…' : (m.thinkMs ? ('Thought for '+m.thinkMs.toFixed(0)+'s') : 'Reasoning');
         const cls = s.thinking ? ' class="live"' : '';
         dt.innerHTML='<summary'+cls+'>'+label+'</summary><div class="rc">'+esc(s.reason)+'</div>'; wrap.appendChild(dt); }
-      const answer = s.answer || (s.thinking ? '' : m.content);
-      if(answer){ bub.innerHTML=renderMarkdown(answer); } else { bub.style.display='none'; }
+      const answer = s.answer;
+      if(answer){ bub.innerHTML=renderMarkdown(answer); }
+      else if(m.streaming && !s.reason){ bub.innerHTML='<span class="typing"><i></i><i></i><i></i></span>'; } // waiting for the first token
+      else { bub.style.display='none'; }
     } else {
       bub.innerHTML=renderMarkdown(m.content||'');
       (m.attachments||[]).forEach(a=>{ if(a.kind==='image'){const i=new Image();i.src=a.dataURL;bub.appendChild(i);} else if(a.kind==='audio'){const au=document.createElement('audio');au.controls=true;au.src=a.dataURL;bub.appendChild(au);} });
     }
-    wrap.appendChild(bub); log.appendChild(wrap);
+    wrap.appendChild(bub);
+    if(m.role==='assistant' && m.truncated){ const n=document.createElement('div'); n.className='limitnote';
+      n.innerHTML='⚠ Stopped at the token limit — raise <b>Max tokens</b> in Settings to let it finish.'; wrap.appendChild(n); }
+    log.appendChild(wrap);
   });
   log.scrollTop=log.scrollHeight;
 }
@@ -232,6 +259,7 @@ async function send(){
   const expectReasoning = rz==='on' || (rz!=='off' && looksLikeReasoningModel(model));
   const out={role:'assistant',content:'',streaming:true,reasoning:expectReasoning}; c.messages.push(out);
   const bubbleRefresh=()=>renderLog();
+  bubbleRefresh(); // show the typing indicator immediately, before the first token arrives
   $('#status').textContent='generating…'; $('#meta').textContent=''; $('#send').disabled=true; $('#stop').disabled=false;
   controller=new AbortController(); const t0=performance.now();
   const msgs=[]; const sys=$('#sys').value.trim(); if(sys) msgs.push({role:'system',content:sys});
@@ -247,7 +275,9 @@ async function send(){
       while(true){ const {value,done}=await rd.read(); if(done) break;
         buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
         for(const line of lines){ const s=line.trim(); if(!s.startsWith('data:'))continue; const d=s.slice(5).trim(); if(d==='[DONE]')continue;
-          try{ const j=JSON.parse(d); const delta=j.choices?.[0]?.delta?.content||''; if(delta){ out.content+=delta;
+          try{ const j=JSON.parse(d);
+            if(j.choices?.[0]?.finish_reason==='length') out.truncated=true; // hit the token limit
+            const delta=j.choices?.[0]?.delta?.content||''; if(delta){ out.content+=delta;
             // Record how long the model spent thinking (until </think>) for a "Thought for Ns" summary.
             if(out.thinkMs===undefined && out.reasoning && out.content.includes('</think>')) out.thinkMs=(performance.now()-t0)/1000;
             bubbleRefresh(); } }catch(e){} } }
