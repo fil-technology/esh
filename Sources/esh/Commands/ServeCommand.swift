@@ -15,8 +15,18 @@ enum ServeCommand {
 
         let currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let host = CommandSupport.optionalValue(flag: "--host", in: arguments) ?? "127.0.0.1"
-        let port = try resolvePort(arguments: arguments)
+        let requestedPort = try resolvePort(arguments: arguments)
         let apiKey = resolveAPIKey(arguments: arguments)
+
+        // Handle "Address already in use" gracefully rather than failing to bind and hanging.
+        let port: UInt16
+        switch PortConflictResolver.resolve(host: host, port: requestedPort) {
+        case .useRequested: port = requestedPort
+        case .useAlternate(let alternate): port = alternate
+        case .cancelled:
+            print("esh serve cancelled — port \(requestedPort) is in use.")
+            return
+        }
 
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
