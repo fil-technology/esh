@@ -91,6 +91,28 @@ struct WebChatPageTests {
         #expect(html.contains("function wireEffortSlider("))
         #expect(html.contains("setPointerCapture"))
         #expect(html.contains("onpointermove"))
+        // Picking a model/effort or closing a popover returns focus to the input.
+        #expect(html.contains("S.focusInput=true; if(v==='Auto')refreshSchedule()"))
+        #expect(html.contains("if(!S.effortOpen)S.focusInput=true"))
+    }
+
+    @Test
+    func attachmentsRenderInTheBubbleAndReachTheModel() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Document/text attachments render as a pill in the sent bubble (not only image/audio).
+        #expect(html.contains(".attpill"))
+        #expect(html.contains("class=\"attwrap\""))
+        // Their text is decoded and appended to the outgoing model message.
+        #expect(html.contains("function attText("))
+        #expect(html.contains("[Attached file: "))
+    }
+
+    @Test
+    func voiceSpeakingUpdatesInPlaceWithoutFlicker() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // The spoken answer updates a single node (#vanswer) rather than re-rendering the whole app.
+        #expect(html.contains("id=\"vanswer\""))
+        #expect(html.contains("getElementById('vanswer')"))
     }
 
     @Test

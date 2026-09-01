@@ -97,6 +97,11 @@ public enum WebChatPage {
   .asttext pre{ background:var(--panel2); padding:10px 12px; border-radius:8px; overflow-x:auto; }
   .asttext code{ background:var(--panel2); padding:1px 4px; border-radius:4px; font-family:var(--mono); font-size:12.5px; }
   .asttext img{ max-width:100%; border-radius:10px; margin:6px 0; display:block; } .asttext audio{ width:100%; margin:6px 0; }
+  .userbubble img{ max-width:220px; border-radius:10px; margin:2px 0 6px; display:block; } .userbubble audio{ width:220px; margin:2px 0 6px; }
+  .attwrap{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+  .attpill{ display:flex; align-items:center; gap:8px; background:var(--paper); border:1px solid var(--line2); border-radius:9px; padding:6px 10px 6px 6px; }
+  .attpill .ai{ width:26px; height:26px; border-radius:6px; background:var(--ink); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .attpill .an{ display:flex; flex-direction:column; min-width:0; } .attpill .an b{ font-size:12px; font-weight:600; max-width:170px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .metaline{ font:400 11px var(--mono); color:var(--faint); cursor:pointer; align-self:flex-start; }
   .metaline:hover{ color:var(--ink); text-decoration:underline; }
   .caret{ display:inline-block; width:8px; height:15px; background:var(--ink); vertical-align:-2px; margin-left:2px; animation:eshblink 1s infinite; }
@@ -272,13 +277,13 @@ const ACT={
   newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); render(); },
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
-  togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; render(); },
-  toggleEffort:()=>{ const was=S.effortOpen; closeAll(); S.effortOpen=!was; render(); },
-  pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); render(); },
-  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen)refreshEngine(); render(); },
+  togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; if(!S.pickerOpen)S.focusInput=true; render(); },
+  toggleEffort:()=>{ const was=S.effortOpen; closeAll(); S.effortOpen=!was; if(!S.effortOpen)S.focusInput=true; render(); },
+  pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); S.focusInput=true; render(); },
+  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen)refreshEngine(); else S.focusInput=true; render(); },
   toggleAttach:()=>{ const was=S.attachOpen; closeAll(); S.attachOpen=!was; render(); },
-  pickModel:(v)=>{ S.modelSel=v; closeAll(); if(v==='Auto')refreshSchedule(); render(); },
-  pickOptimize:(v)=>{ S.optimize=v; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
+  pickModel:(v)=>{ S.modelSel=v; closeAll(); S.focusInput=true; if(v==='Auto')refreshSchedule(); render(); },
+  pickOptimize:(v)=>{ S.optimize=v; S.focusInput=true; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
@@ -317,7 +322,7 @@ document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); c
   // Outside-click closes any open popover, unless the click is inside a popover or on the chip/button
   // that owns it (those toggles handle their own open/close).
   const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
-  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); render(); if(!t)return; }
+  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(!t)return; const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
 document.addEventListener('keydown',e=>{
@@ -382,8 +387,14 @@ function renderLog(){
 function renderMsg(m){
   const fresh=m.id&&!_seen.has(m.id); if(m.id)_seen.add(m.id);
   const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
-  if(m.isUser||m.role==='user'){ let a=''; (m.attachments||[]).forEach(x=>{ if(x.kind==='image')a+=`<img src="${x.dataURL}">`; else if(x.kind==='audio')a+=`<audio controls src="${x.dataURL}"></audio>`; });
-    d.innerHTML=`<div class="userrow"><div class="userbubble">${md(m.content||'')}${a}</div></div>`; return d; }
+  if(m.isUser||m.role==='user'){ let a='';
+    (m.attachments||[]).forEach(x=>{
+      if(x.kind==='image')a+=`<img src="${x.dataURL}">`;
+      else if(x.kind==='audio')a+=`<audio controls src="${x.dataURL}"></audio>`;
+      else a+=`<div class="attpill"><span class="ai"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></span><span class="an"><b>${esch(x.name||'file')}</b><span class="mono" style="font-size:10px;color:var(--muted)">${esch(x.size||'')}</span></span></div>`;
+    });
+    const body=(a?`<div class="attwrap">${a}</div>`:'')+(m.content?md(m.content):'');
+    d.innerHTML=`<div class="userrow"><div class="userbubble">${body}</div></div>`; return d; }
   if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div>
     <div class="d">${esch(m.detail||'')}</div>
     <div class="d" style="margin-top:6px">Your conversation is safe — nothing was lost.</div>
@@ -769,10 +780,12 @@ function renderOnboarding(){
 function renderVoice(){
   const v=el('div',{cls:'voicewrap'});
   if(S.voice==='error'){
-    v.innerHTML=`<div class="vstage"><div style="max-width:340px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
-      <div style="font-size:16px;font-weight:600">Voice unavailable</div>
-      <div style="font-size:13px;color:var(--muted);line-height:1.5">${esch(S.voiceError||'')}</div>
-      <div style="display:flex;gap:12px"><span class="btn ghost" style="padding:6px 14px" data-act="voiceRetry">Try again</span><span class="btn ghost" style="padding:6px 14px" data-act="voiceText">Back to text</span></div></div></div>`;
+    v.innerHTML=`<div class="vstage"><div style="max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px">
+      <span style="width:52px;height:52px;border-radius:50%;background:rgba(32,30,27,.05);display:flex;align-items:center;justify-content:center;color:rgba(32,30,27,.55)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/><path d="M4 4l16 16"/></svg></span>
+      <div style="font-size:17px;font-weight:600">Voice unavailable</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.55">${esch(S.voiceError||'')}</div>
+      <div style="display:flex;gap:10px;margin-top:2px"><button class="btn" style="padding:9px 20px;font-size:13px" data-act="voiceRetry">Try again</button><button class="btn ghost" style="padding:9px 18px;font-size:13px" data-act="voiceText">Back to text</button></div></div></div>
+      <div class="vctrls"><div class="vctrlcol"><span class="vctrl solid" data-act="endVoice" title="End voice chat">${ICON.xmark}</span><span class="vctrllbl">End</span></div></div>`;
     return v;
   }
   const label={listening:'Listening',thinking:'Thinking',speaking:'Speaking'}[S.voice]||'';
@@ -786,7 +799,9 @@ function renderVoice(){
   let mid='';
   if(S.voice==='listening'){ if(S.voiceHeard) mid=`<div class="vlive">${esch(S.voiceHeard)}<span class="caret"></span></div>`; }
   else if(S.voiceHeard){ mid=`<div class="vquote">"${esch(S.voiceHeard)}"</div>`; }
-  const ans=(S.voice==='speaking'&&S.voiceAnswer)?`<div class="vanswer">${esch(S.voiceAnswer)}</div>`:'';
+  // Keep the answer container present through the whole speaking phase so word-by-word reveal can update
+  // just this node (no full re-render → no flicker).
+  const ans=(S.voice==='speaking')?`<div class="vanswer" id="vanswer">${esch(S.voiceAnswer||'')}</div>`:'';
   const hint=S.voice==='listening'?'Just pause when you’re done':(S.voice==='speaking'?'Tap the wave to interrupt':'');
   v.innerHTML=`<div class="vstage">${orb}<div class="vlabel">${label}</div>${mid}${ans}<div class="vhint">${esch(hint)}</div></div>
     <div class="vctrls">
@@ -798,6 +813,8 @@ function renderVoice(){
 }
 
 /* ---------- send + streaming ---------- */
+// Decode text/document attachments to plain text for the model (never images/audio).
+function attText(m){ let s=''; (m.attachments||[]).forEach(x=>{ if(x.kind!=='image'&&x.kind!=='audio'&&x.dataURL){ try{ const b64=(x.dataURL.split(',')[1]||''); const txt=decodeURIComponent(escape(atob(b64))); if(txt.trim()) s+='\n\n[Attached file: '+(x.name||'file')+']\n'+txt.slice(0,20000); }catch(e){} } }); return s; }
 async function send(){
   const ta=$('#input'); const text=ta?ta.value.trim():(S.draft||'').trim();
   if((!text&&!S.pendingAtts.length)||S.controller) return;
@@ -816,7 +833,9 @@ async function send(){
   S.streaming=true; S.streamText=''; S.streamReason=reasoning; S.streamThinkMs=undefined; S.focusInput=true; saveChats(); render();
   S.controller=new AbortController(); const t0=performance.now();
   const sys=(S.prefs.systemInstr||'').trim();
-  const msgs=(sys?[{role:'system',content:sys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:m.content})));
+  // Text/document attachments are decoded and appended to the user message so the model actually sees
+  // the file contents (image/audio are shown in the bubble; vision/transcription is model-dependent).
+  const msgs=(sys?[{role:'system',content:sys}]:[]).concat(c.messages.filter(m=>m.role).map(m=>({role:m.role,content:(m.content||'')+(m.role==='user'?attText(m):'')})));
   const body={ model: resolved==='Auto'?undefined:resolved, messages:msgs, stream:true, max_tokens:2048 };
   let truncated=false, ttft=0, execProfile=null;
   let errorInfo=null;
@@ -912,8 +931,9 @@ function revealAnswer(reply,dur,commit){
   clearVoiceReveal(); S.voiceAnswer=''; const words=reply.split(/\s+/).filter(Boolean);
   if(!words.length){ commit(); return; }
   const step=Math.max(45,Math.min(320,(dur*1000)/words.length)); let i=0;
-  S._vsi=setInterval(()=>{ i++; if(i>=words.length){ clearVoiceReveal(); S.voiceAnswer=reply; render(); commit(); }
-    else { S.voiceAnswer=words.slice(0,i).join(' '); if(S.voice==='speaking')render(); } },step);
+  const paint=()=>{ const node=document.getElementById('vanswer'); if(node&&S.voice==='speaking')node.textContent=S.voiceAnswer; else if(S.voice==='speaking')render(); };
+  S._vsi=setInterval(()=>{ i++; if(i>=words.length){ clearVoiceReveal(); S.voiceAnswer=reply; paint(); commit(); }
+    else { S.voiceAnswer=words.slice(0,i).join(' '); paint(); } },step);
 }
 async function finishVoiceTurn(){
   stopVAD(); S.voice='thinking'; S.voiceAnswer=''; render();

@@ -21,9 +21,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ### Fixed
 - **Composer layout + controls.** The composer is now a column so the input fills the row and the model
-  (`Auto ▾`) and effort chips sit flush-right (they no longer float mid-bar). The chips toggle closed on
-  re-click and any open popover closes on an outside click, and the effort slider is now draggable
-  (not click-only).
+  (`Auto ▾`) and effort chips sit flush-right (they no longer float mid-bar), and pending attachments
+  stack as chips above the input. The chips toggle closed on re-click and any open popover closes on an
+  outside click; the effort slider is draggable (not click-only); and focus returns to the text field
+  after picking a model/effort or closing a popover.
+- **Attachments in chat.** Sent files now show as a pill in the message bubble (documents/text too, not
+  only image/audio), and text/document contents are decoded and included in the model request so the
+  model actually reads the file (verified: it summarized an attached `.txt`).
+- **Voice no longer flickers while speaking.** The spoken answer reveals by updating a single node
+  instead of re-rendering the whole page each word; the voice-error stage got a clearer layout and
+  buttons.
 - **Hands-free voice.** The voice loop now advances automatically — listening ends on a short pause
   (silence detection), then think → speak → listen, with no tapping required (tapping the circle to
   finish early / the wave to interrupt still works). Falls back to tap-to-finish if the Web Audio API
