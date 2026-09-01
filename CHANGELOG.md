@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-09-01
+
+### Fixed
+- **Real incremental streaming for `esh serve` / Web Chat.** Streaming chat completions previously
+  generated the entire response, then chunked it — so the Web Chat showed nothing until generation
+  finished (a long pause on reasoning models). The server now streams tokens as they are produced
+  (per-token SSE deltas written incrementally over the connection). Verified: chunks spread across the
+  whole generation window, not bunched at the end.
+- **`esh web` keeps MLX models weights-resident** (persistent worker) so the first token arrives in
+  ~0.1s instead of after a per-request model reload. Opt out with `ESH_MLX_PERSISTENT=0`.
+
 ## [0.9.7] - 2026-08-31
 
 ### Added
