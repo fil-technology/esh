@@ -6,6 +6,30 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-02
+
+**esh 2.0 — local AI runtime.** Promotion of the `2.0.0-rc.7` tree (behaviorally identical; only this
+version/changelog change). The rc.7 notarized artifact passed full packaged validation across both
+inference backends (see `docs/RC7_PACKAGED_VALIDATION.md`).
+
+Highlights of the 2.0 line (details in the rc entries below):
+
+- **Correct, self-contained GGUF.** GGUF runs through a bundled, static, Metal-accelerated
+  `llama-server` (no Homebrew/openssl dependency) driven over its OpenAI endpoint with the model's own
+  chat template, so chat terminates at the model's native end-of-turn — no runaway, no hand-rolled
+  prompt strings. Native JSON-schema/grammar constrained decoding, streaming, cancellation, caller stop
+  sequences, and true weights residency.
+- **Correct MLX.** The MLX bridge stops at the model's turn/EOS special tokens, so MLX models no longer
+  run away leaking special tokens or hallucinating multi-turn transcripts. Reasoning (`<think>`) is
+  preserved. Per-backend structured-output resolution stays honest (strict schema rejected where a
+  backend can't enforce it natively).
+- **Apple Foundation Models**, on-device speech (STT + TTS), the adaptive scheduler, warm residency,
+  and the self-contained Web Chat (folders, inline rename, per-message read-aloud with a mini player,
+  audio transcription captions, rich markdown + streaming) — all shipped and validated.
+
+### Changed
+- Version promoted from `2.0.0-rc.7` to `2.0.0`. No code changes from rc.7.
+
 ## [2.0.0-rc.7] - 2026-09-02
 
 **Release candidate — MLX chat correctness + web polish.** Soaking rc.6 surfaced a second, independent
