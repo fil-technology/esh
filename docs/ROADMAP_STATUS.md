@@ -18,7 +18,7 @@ implemented, tested, and (for user-facing work) released. Last reconciled: **202
 | **M8.5** Web Chat | ✅ done (server-verified) | WebChatPage.swift, `esh web`; rich ChatGPT-like UX. Live-browser interaction env-limited |
 | **M9** Adaptive Intelligence Scheduler | ✅ done | SchedulerService; measured-evidence routing verified (skips broken models) |
 | **M10** Local Speech Stack | 🟡 TTS done; STT wired | AudioSpeechGenerator (TTS verified), SpeechToTextService + `/v1/audio/transcriptions` (plumbing verified; transcription needs bundled mlx_audio) |
-| **M11** Hardening / 2.0 candidate | 🟡 in progress | 2.0.0 RC program (`2_0_RC_AUDIT.md`); blockers B1/B2/B3 closed; docs/security/stress/RC pending |
+| **M11** Hardening / 2.0 candidate | 🟢 rc.7 packaged-validated | 2.0.0 RC program; blockers closed incl. **GGUF packaging** (rc.4: static self-contained `llama-server`), **GGUF runaway** (rc.6: resident `llama-server` + model-native chat template), **MLX runaway** (rc.7: stop at turn/EOS special tokens). rc.7 notarized artifact validated end-to-end — see `docs/RC7_PACKAGED_VALIDATION.md`. **READY FOR FINAL 2.0.** |
 
 ## Mandatory addenda status
 
@@ -37,7 +37,7 @@ implemented, tested, and (for user-facing work) released. Last reconciled: **202
 |---|---|---|
 | 0.2.0–0.9.7 | stabilization → optimization → contract v2 → residency → scheduler → speech → streaming | ✅ released (v0.9.7 latest published: notarized + Homebrew cask) |
 | 0.9.8 | real incremental SSE streaming + resident web chat | ⚠️ committed to `main` (VERSION=0.9.8) but **not tagged/published** — reconcile in the 2.0 RC (audit finding A1) |
-| 2.0.0 | 2.0 RC program: blockers closed, cross-backend conformance, hardening | 🟡 in progress on `codex/web-chat-rich` |
+| 2.0.0 | 2.0 RC program: blockers closed, cross-backend conformance, hardening | 🟢 rc.7 tagged + packaged/notarized-validated (GGUF + MLX runaway fixed, Metal, no-Homebrew self-contained). Ready to promote to final 2.0. |
 
 ## Next up
 
