@@ -122,7 +122,10 @@ public enum WebChatPage {
   .asttext code{ background:var(--panel2); padding:1px 4px; border-radius:4px; font-family:var(--mono); font-size:12.5px; }
   /* Markdown blocks + inline */
   .asttext .mdh{ font-weight:600; line-height:1.3; margin:12px 0 6px; } .asttext .mdh1{ font-size:19px; } .asttext .mdh2{ font-size:16.5px; } .asttext .mdh3{ font-size:15px; } .asttext .mdh4{ font-size:14px; }
-  .asttext .mdp{ margin:7px 0; } .asttext .mdp:first-child{ margin-top:0; }
+  .asttext .mdp{ margin:7px 0; } .asttext .mdp:first-child{ margin-top:0; } .asttext .mdp:last-child{ margin-bottom:0; }
+  /* The user bubble renders md() too; without this the paragraph keeps the browser
+     default ~14px top/bottom margins, inflating the bubble height. Keep it tight. */
+  .userbubble .mdp{ margin:0; } .userbubble .mdp + .mdp{ margin-top:6px; }
   .asttext .mdul,.asttext .mdol{ margin:7px 0; padding-left:22px; } .asttext .mdul li,.asttext .mdol li{ margin:3px 0; }
   .asttext .mdq{ border-left:2.5px solid var(--line2); margin:8px 0; padding:2px 0 2px 12px; color:var(--muted); }
   .asttext .mdhr{ border:none; border-top:1px solid var(--line2); margin:14px 0; }

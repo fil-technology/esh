@@ -394,6 +394,9 @@ struct WebChatPageTests {
     func userBubblesAreCompact() {
         let html = WebChatPage.html(toolVersion: nil)
         #expect(html.contains(".userbubble{ background:var(--userbubble); border-radius:13px; padding:6px 13px;"))
+        // The bubble renders md(), so the inner paragraph must not keep the browser-default ~14px
+        // top/bottom margins (which inflated the bubble height).
+        #expect(html.contains(".userbubble .mdp{ margin:0;"))
     }
 
     // Soak (rc.5): a model that fails to load (e.g. files missing) streams an
