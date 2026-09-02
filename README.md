@@ -2,15 +2,24 @@
 
 Esh is a local-first LLM tool for Apple Silicon.
 
+> **Current stable: 2.0.0** — `brew install --cask esh` (or `brew upgrade --cask esh`). An adaptive
+> local-intelligence runtime: MLX + GGUF/llama.cpp + Apple Foundation Models, Auto/Scheduler routing,
+> hardware-aware Model Fit with measured-on-this-Mac recommendations, persistent model residency,
+> external-SSD storage, on-device voice (STT/TTS), structured output, reasoning, a self-contained Web
+> Experience, a terminal, and native/OpenAI/Anthropic APIs — all running privately on your Mac. See
+> [`docs/2_0_RELEASE_REPORT.md`](docs/2_0_RELEASE_REPORT.md) and [`CHANGELOG.md`](CHANGELOG.md).
+
 It gives you:
 - local model install and management
-- passive engine detection for MLX and llama.cpp
-- interactive terminal chat
-- stable JSON commands for external callers
-- saved sessions
-- backend-native execution cache export/import
-- TurboQuant cache compression for MLX
-- self-contained release packaging
+- MLX, GGUF/llama.cpp (bundled self-contained `llama-server`), and Apple Foundation Models backends
+- Auto/Scheduler routing with plain-language "Why this model?" and hardware-aware Model Fit
+- persistent model residency (warm pool) and external-SSD storage
+- interactive terminal chat and a self-contained Web Experience (`esh web`)
+- on-device speech: STT + TTS and a server-side voice pipeline
+- structured output (JSON / JSON Schema / grammar) and reasoning
+- stable JSON commands + native/OpenAI/Anthropic-compatible APIs for external callers
+- saved sessions, backend-native execution cache export/import, TurboQuant cache compression for MLX
+- self-contained, notarized release packaging
 
 Today, Esh is a macOS-focused local model orchestrator with MLX and GGUF/llama.cpp backends. It manages, validates, selects, and routes existing runtimes rather than implementing model kernels itself.
 
