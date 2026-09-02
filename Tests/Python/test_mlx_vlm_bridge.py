@@ -62,6 +62,27 @@ KVCache = type(
 
 
 class MLXVLMBridgeTests(unittest.TestCase):
+    def test_stop_markers_catch_turn_and_eos_special_tokens(self):
+        # Regression for the MLX runaway: models like Qwen emit chat/EOS special tokens
+        # as text and mlx-lm does not always stop on them, so generation runs away into a
+        # hallucinated multi-turn transcript. The bridge must detect these markers so the
+        # loop can stop and never surface them.
+        bridge = load_bridge_module()
+        for marker in ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "<|eot_id|>",
+                       "<|start_header_id|>", "<end_of_turn>"]:
+            self.assertEqual(bridge._find_earliest_stop_marker("answer" + marker + "more"), 6,
+                             f"expected to stop at {marker!r}")
+
+    def test_stop_marker_returns_earliest_and_ignores_reasoning_tags(self):
+        bridge = load_bridge_module()
+        # Earliest of several markers.
+        text = "hi <|im_end|> then <|endoftext|>"
+        self.assertEqual(bridge._find_earliest_stop_marker(text), text.index("<|im_end|>"))
+        # No marker → None.
+        self.assertIsNone(bridge._find_earliest_stop_marker("a normal reply with no markers"))
+        # Reasoning tags are NOT stop markers — esh parses <think>…</think>.
+        self.assertIsNone(bridge._find_earliest_stop_marker("<think>reasoning</think> answer"))
+
     def test_bridge_declares_mlx_vlm_0_5_dependency_contract(self):
         bridge = load_bridge_module()
         requirements = (REPOSITORY_ROOT / "Tools" / "python-requirements.txt").read_text(encoding="utf-8")

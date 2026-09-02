@@ -6,6 +6,28 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.7] - 2026-09-02
+
+**Release candidate — MLX chat correctness + web polish.** Soaking rc.6 surfaced a second, independent
+runaway on the **MLX** backend (analogous to the GGUF one fixed in rc.6). A behavioral change after
+rc.6, so a new RC (rc.6 stays immutable). Blocker for final 2.0.
+
+### Fixed
+- **MLX chat no longer runs away / leaks special tokens.** The MLX bridge passed the sampler but **no
+  stop/EOS configuration** to mlx-lm, so models whose turn-end tokens mlx-lm doesn't catch (e.g. Qwen's
+  `<|im_end|>`) ran away emitting chat/EOS special tokens as text (`<|im_start|>`, `<|endoftext|>`) and
+  hallucinating multi-turn transcripts. Generation now stops at the model's turn/EOS special tokens and
+  never surfaces them (buffered so a marker split across streamed chunks is still caught). Reasoning
+  tags (`<think>`/`</think>`) are deliberately preserved — esh parses them. Verified: known-good MLX
+  models (DeepSeek-R1-Distill, Llama-3.2) stream cleanly with no leaked tokens and no fake turns.
+  (Qwen3.5's remaining plain-text rambling is that model's own incompatibility — it is already **gated**
+  from recommendations for 2.0.)
+- **Reasoning block no longer blinks while a reply streams.** The streaming bubble was re-created every
+  ~40 ms, which replayed the reasoning `<details>` fade/pulse animations. It is now patched in place
+  (reasoning text + answer HTML updated on the same nodes), so the "Thinking…" block stays steady.
+- **User message bubbles are compact** (already on `main`): the paragraph inside the bubble kept the
+  browser-default ~14 px top/bottom margins; scoped to `margin:0`.
+
 ## [2.0.0-rc.6] - 2026-09-02
 
 **Release candidate — GGUF chat correctness (runaway-generation blocker).** GGUF replies ran away into

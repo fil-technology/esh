@@ -345,6 +345,20 @@ struct WebChatPageTests {
         #expect(html.contains("margin-left:-170px"))
     }
 
+    // Soak (rc.7): the reasoning block must not blink while a reply streams — the
+    // streaming subtree is patched in place (reasoning text + answer HTML) instead of
+    // being re-created every tick, which replayed the <details> fade/pulse animations.
+    @Test
+    func streamingBubbleIsPatchedInPlaceSoReasoningDoesNotBlink() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function patchStream("))
+        // throttleRender now patches rather than replacing the whole subtree each tick.
+        #expect(html.contains("if(S.streaming&&sw){ patchStream(sw);"))
+        // In-place text updates, not a full innerHTML rebuild every tick.
+        #expect(html.contains("if(rc) rc.textContent=s.reason"))
+        #expect(html.contains("const sameStruct="))
+    }
+
     // Soak (rc.5): the streaming cursor sits inline at the end of the last block,
     // not dropped onto its own line below the text.
     @Test

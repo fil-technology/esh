@@ -1357,9 +1357,22 @@ function maybeSendQueue(chatId){ if(S.streaming||S.controller)return; const c=S.
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');
-  if(S.streaming&&sw){ sw.innerHTML=streamInner(); const lg=document.querySelector('.log'); if(lg)lg.scrollTop=lg.scrollHeight; }
+  if(S.streaming&&sw){ patchStream(sw); const lg=document.querySelector('.log'); if(lg)lg.scrollTop=lg.scrollHeight; }
   else render();
 },40); }
+// Patch the streaming bubble in place. Re-creating the whole subtree each tick replayed
+// the reasoning <details> fade/pulse animations, so the "Thinking…" block blinked. When
+// the structure is unchanged we update just the reasoning text and answer HTML nodes; we
+// only rebuild the subtree when the structure changes (reasoning/answer/typing appears).
+function patchStream(sw){
+  const s=splitThink(S.streamText,{streaming:true,expectReasoning:S.streamReason});
+  const hasReason=!!(s.reason||s.thinking), hasAnswer=!!s.answer, hasTyping=!hasAnswer&&!s.reason;
+  const rc=sw.querySelector('.reason .rc'), at=sw.querySelector('.asttext.streaming'), typing=sw.querySelector('.asttext .typing');
+  const sameStruct=(!!rc===hasReason)&&(!!at===hasAnswer)&&(!!typing===hasTyping);
+  if(!sameStruct){ sw.innerHTML=streamInner(); return; }
+  if(rc) rc.textContent=s.reason||'';
+  if(at) at.innerHTML=md(s.answer);
+}
 
 /* ---------- speech: real mic -> STT -> LLM -> TTS voice loop ---------- */
 // Synthesize speech for `text` and return the audio Blob (or null). Sends the chosen TTS model/voice/

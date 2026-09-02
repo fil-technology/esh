@@ -702,6 +702,31 @@ def doctor() -> None:
     )
 
 
+# Chat-template turn/EOS special tokens. When a model emits one of these as text, its
+# assistant turn is over. mlx-lm does not reliably treat all of them as stop tokens for
+# every model (notably Qwen's <|im_end|>/<|im_start|>), so without this the model runs
+# away emitting them as text and hallucinating a multi-turn transcript. We stop at the
+# first one and never surface it. These are special tokens that never occur in
+# legitimate assistant content (unlike a plain "User:"), so matching them is safe.
+# NB: reasoning tags (<think>/</think>) are deliberately NOT here — esh parses them.
+_MLX_STOP_MARKERS: tuple[str, ...] = (
+    "<|im_start|>", "<|im_end|>", "<|endoftext|>", "<|eot_id|>", "<|eom_id|>",
+    "<|end|>", "<|start_header_id|>", "<|end_header_id|>", "<end_of_turn>",
+    "<|user|>", "<|assistant|>", "<|system|>", "<｜end▁of▁sentence｜>",
+)
+_MLX_MAX_STOP_MARKER_LEN = max(len(marker) for marker in _MLX_STOP_MARKERS)
+
+
+def _find_earliest_stop_marker(text: str) -> int | None:
+    """Index of the earliest chat/EOS special token in `text`, or None."""
+    earliest: int | None = None
+    for marker in _MLX_STOP_MARKERS:
+        index = text.find(marker)
+        if index != -1 and (earliest is None or index < earliest):
+            earliest = index
+    return earliest
+
+
 def _generate_with_loaded_model(
     mx,
     stream_generate,
@@ -767,6 +792,8 @@ def _generate_with_loaded_model(
     reply_parts = []
     last_response = None
     cancelled = False
+    stop_hit = False
+    pending = ""  # buffered tail that could be the start of a split stop marker
 
     for response in stream_generate(
         model=model,
@@ -778,13 +805,36 @@ def _generate_with_loaded_model(
     ):
         last_response = response
         if response.text:
-            reply_parts.append(response.text)
-            on_token(response.text)
+            pending += response.text
+            # Stop at the model's turn/EOS special token so it can't run away into a
+            # hallucinated transcript, and never surface the marker itself.
+            cut = _find_earliest_stop_marker(pending)
+            if cut is not None:
+                clean = pending[:cut]
+                if clean:
+                    reply_parts.append(clean)
+                    on_token(clean)
+                pending = ""
+                stop_hit = True
+                break
+            # Emit everything except a possible partial trailing marker (so a marker
+            # split across streamed chunks is still detected once complete).
+            safe = len(pending) - _MLX_MAX_STOP_MARKER_LEN + 1
+            if safe > 0:
+                chunk = pending[:safe]
+                pending = pending[safe:]
+                reply_parts.append(chunk)
+                on_token(chunk)
         if should_cancel is not None and should_cancel():
             cancelled = True
             break
         if response.finish_reason is not None:
             break
+
+    # No stop marker in the buffered tail → it is clean content; flush it.
+    if not stop_hit and pending:
+        reply_parts.append(pending)
+        on_token(pending)
 
     reply = "".join(reply_parts)
     updated_messages = messages + [{"role": "assistant", "content": reply}]
