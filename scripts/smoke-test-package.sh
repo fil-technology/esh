@@ -69,13 +69,13 @@ echo "smoke: empty installs"
 # the packaged binary directly: it must exist, be relocatable (no @rpath/Homebrew/
 # ggml/llama deps), and actually launch (proving no missing-library dyld crash).
 echo "smoke: bundled llama.cpp runtime (GGUF)"
-LLAMA_BIN="$PACKAGE_ROOT/share/esh/bin/llama-completion"
+LLAMA_BIN="$PACKAGE_ROOT/share/esh/bin/llama-server"
 [[ -x "$LLAMA_BIN" ]] || {
-  echo "error: bundled llama-completion is missing or not executable: $LLAMA_BIN" >&2
+  echo "error: bundled llama-server is missing or not executable: $LLAMA_BIN" >&2
   exit 1
 }
-if otool -L "$LLAMA_BIN" | tail -n +2 | grep -Eiq '@rpath|/opt/homebrew|/usr/local/(opt|Cellar)|libggml|libllama|libmtmd'; then
-  echo "error: bundled llama-completion has non-relocatable dependencies:" >&2
+if otool -L "$LLAMA_BIN" | tail -n +2 | grep -Eiq '@rpath|/opt/homebrew|/usr/local/(opt|Cellar)|libggml|libllama|libmtmd|openssl'; then
+  echo "error: bundled llama-server has non-relocatable dependencies:" >&2
   otool -L "$LLAMA_BIN" >&2
   exit 1
 fi
@@ -84,11 +84,11 @@ LLAMA_VERSION_OUT="$(env -i HOME="$TMP_HOME" PATH="/usr/bin:/bin" "$LLAMA_BIN" -
   # in, so tolerate only GPU-device errors — a missing-dylib dyld crash still fails.
   if [[ "$LLAMA_VERSION_OUT" == *"Library not loaded"* || "$LLAMA_VERSION_OUT" == *"image not found"* ]]; then
     echo "$LLAMA_VERSION_OUT" >&2
-    echo "error: bundled llama-completion failed to load its libraries (dyld)." >&2
+    echo "error: bundled llama-server failed to load its libraries (dyld)." >&2
     exit 1
   fi
   echo "$LLAMA_VERSION_OUT" >&2
-  echo "warning: bundled llama-completion --version returned non-zero (no GPU device in this environment?)." >&2
+  echo "warning: bundled llama-server --version returned non-zero (no GPU device in this environment?)." >&2
 }
 echo "smoke: bundled llama.cpp runtime ok"
 

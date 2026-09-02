@@ -44,6 +44,7 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
     public var kvQuantScheme: String?
     public var kvGroupSize: Int?
     public var quantizedKVStart: Int?
+    public var stop: OpenAIStopSequences?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -66,6 +67,22 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
         case kvQuantScheme = "kv_quant_scheme"
         case kvGroupSize = "kv_group_size"
         case quantizedKVStart = "quantized_kv_start"
+        case stop
+    }
+}
+
+/// OpenAI `stop` accepts either a single string or an array of strings; normalize both to `[String]`.
+public struct OpenAIStopSequences: Codable, Hashable, Sendable {
+    public let values: [String]
+    public init(_ values: [String]) { self.values = values }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let one = try? c.decode(String.self) { values = one.isEmpty ? [] : [one] }
+        else { values = (try? c.decode([String].self)) ?? [] }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(values)
     }
 }
 
@@ -90,6 +107,7 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
     public var kvQuantScheme: String?
     public var kvGroupSize: Int?
     public var quantizedKVStart: Int?
+    public var stop: OpenAIStopSequences?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -112,6 +130,7 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
         case kvQuantScheme = "kv_quant_scheme"
         case kvGroupSize = "kv_group_size"
         case quantizedKVStart = "quantized_kv_start"
+        case stop
     }
 }
 
@@ -904,8 +923,10 @@ public struct OpenAICompatibleService: Sendable {
                 kvBits: request.kvBits,
                 kvQuantScheme: request.kvQuantScheme,
                 kvGroupSize: request.kvGroupSize,
-                quantizedKVStart: request.quantizedKVStart
-            )
+                quantizedKVStart: request.quantizedKVStart,
+                stop: request.stop?.values
+            ),
+            responseFormat: eshResponseFormat(from: request.responseFormat)
         )
         let response = try await inferClosure(external)
         return OpenAIChatCompletionsResponse(
@@ -1013,7 +1034,9 @@ public struct OpenAICompatibleService: Sendable {
                         enableThinking: request.enableThinking, thinkingBudget: request.thinkingBudget,
                         thinkingStartToken: request.thinkingStartToken, thinkingEndToken: request.thinkingEndToken,
                         kvBits: request.kvBits, kvQuantScheme: request.kvQuantScheme,
-                        kvGroupSize: request.kvGroupSize, quantizedKVStart: request.quantizedKVStart))
+                        kvGroupSize: request.kvGroupSize, quantizedKVStart: request.quantizedKVStart,
+                        stop: request.stop?.values),
+                    responseFormat: eshResponseFormat(from: request.responseFormat))
                 let execSentinel = "\u{01}ESHEXEC:"
                 for try await chunk in streamClosure(external) where chunk.isEmpty == false {
                     if chunk.hasPrefix(execSentinel) {
@@ -1069,8 +1092,10 @@ public struct OpenAICompatibleService: Sendable {
                 kvBits: request.kvBits,
                 kvQuantScheme: request.kvQuantScheme,
                 kvGroupSize: request.kvGroupSize,
-                quantizedKVStart: request.quantizedKVStart
-            )
+                quantizedKVStart: request.quantizedKVStart,
+                stop: request.stop?.values
+            ),
+            responseFormat: eshResponseFormat(from: request.responseFormat)
         )
         let response = try await inferClosure(external)
         let responseID = identifier(prefix: "resp")
@@ -1342,10 +1367,41 @@ public struct OpenAICompatibleService: Sendable {
 
     private func validateResponseFormat(_ responseFormat: OpenAIResponseFormat?) throws {
         guard let responseFormat else { return }
-        if responseFormat.type.lowercased() == "json_schema" {
-            throw OpenAICompatibleError.unsupported(
-                "json_schema response_format is parsed but not exposed yet; MLX constrained decoding support is required before Esh can honor it."
-            )
+        // response_format is resolved per-backend at inference time (CapabilityResolver): GGUF enforces
+        // json_schema/json natively via constrained decoding through llama-server, while a backend with
+        // no native constrained decoding honestly rejects a strict request (ExternalInferenceService
+        // throws "Strict structured output rejected") or approximates a non-strict one. So there is no
+        // blanket gate here — only a structural check on the declared type.
+        let type = responseFormat.type.lowercased()
+        let known = ["text", "json_object", "json_schema"]
+        guard known.contains(type) else {
+            throw OpenAICompatibleError.invalidRequest("Unsupported response_format type: \(responseFormat.type)")
+        }
+    }
+
+    /// Convert an OpenAI `response_format` into the canonical `EshResponseFormat` so the per-backend
+    /// CapabilityResolver can enforce it (GGUF constrains natively; other backends reject strict or
+    /// approximate non-strict). Without this the field was parsed but never reached the resolver.
+    private func eshResponseFormat(from responseFormat: OpenAIResponseFormat?) -> EshResponseFormat? {
+        guard let responseFormat else { return nil }
+        switch responseFormat.type.lowercased() {
+        case "text":
+            return EshResponseFormat(kind: .text)
+        case "json_object":
+            return EshResponseFormat(kind: .json)
+        case "json_schema":
+            var schemaString: String?
+            var strict = false
+            if case let .object(obj)? = responseFormat.jsonSchema {
+                if case let .bool(value)? = obj["strict"] { strict = value }
+                if let schemaValue = obj["schema"],
+                   let data = try? JSONEncoder().encode(schemaValue) {
+                    schemaString = String(decoding: data, as: UTF8.self)
+                }
+            }
+            return EshResponseFormat(kind: .jsonSchema, schema: schemaString, strict: strict)
+        default:
+            return nil
         }
     }
 

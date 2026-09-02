@@ -6,6 +6,41 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0-rc.6] - 2026-09-02
+
+**Release candidate — GGUF chat correctness (runaway-generation blocker).** GGUF replies ran away into
+a hallucinated multi-turn `User:/answer` transcript until the token limit, because esh drove
+`llama-completion` with a hand-built `User:/Assistant:` plaintext transcript — not the model's chat
+format — so the model never emitted its native end-of-turn token. A behavioral change after rc.5, so a
+new RC (rc.5 stays immutable). Blocker for final 2.0.
+
+### Fixed
+- **GGUF chat now terminates correctly.** esh drives GGUF through a persistent, resident `llama-server`
+  over its OpenAI-compatible endpoint with **`--jinja`**, so the model's **own embedded chat template**
+  is applied and generation stops at the model's **native end-of-turn** — no esh-side, model-family
+  prompt strings, and no runaway. Verified end-to-end on the model that reproduced it: the exact repro
+  now finishes naturally (`finish_reason: stop`, ~106 tokens) with no fabricated `User:` turns, and a
+  reply that legitimately contains the literal text `User:` is **not** falsely truncated.
+
+### Changed — GGUF backend
+- **Persistent, weights-resident GGUF runtime.** The model loads once and stays resident (like the MLX
+  persistent worker, owned by the same lifecycle manager); repeat requests reuse it (~0.16 s warm) with
+  no per-request model reload.
+- **Native structured output for GGUF.** Strict `json_schema` / `json_object` / GBNF grammars are
+  enforced natively via llama.cpp constrained decoding (a backend without native support still honestly
+  rejects a strict request rather than approximating). The old blanket "json_schema not exposed" gate is
+  removed; `response_format` is now resolved per-backend and forwarded to the runtime.
+- **Caller stop sequences** (`stop`) are honored, in addition to the model's native end-of-turn.
+- Streaming, cancellation (the resident server survives an aborted request), multi-turn history, system
+  prompts, and inline reasoning (`<think>`) all verified through the server path.
+
+### Changed — build & packaging
+- `scripts/build-llama.sh` now builds a self-contained static **`llama-server`** (pinned llama.cpp
+  `b8660`, `GGML_BACKEND_DL=OFF`, embedded Metal, `LLAMA_OPENSSL=OFF`) instead of `llama-completion`;
+  `package-release.sh` bundles it, the packaged smoke test guards it, and the packaged runtime points
+  `ESH_LLAMA_CPP_SERVER` at it. Still fully relocatable — no Homebrew/openssl dependency (rc.4 packaging
+  guarantees preserved).
+
 ## [2.0.0-rc.5] - 2026-09-01
 
 **Release candidate — web chat soak fixes.** Web-client polish and organization found while soaking

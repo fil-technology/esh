@@ -22,6 +22,9 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
     /// them leaves them unset; the resolver never populates them for such a backend.
     public var jsonSchema: String?
     public var grammar: String?
+    /// Caller-supplied stop sequences (OpenAI `stop`). Generation halts when any is produced. This is
+    /// in addition to — never a replacement for — the model's native end-of-turn stop.
+    public var stop: [String]?
 
     public init(
         maxTokens: Int = 512,
@@ -40,7 +43,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         kvGroupSize: Int? = nil,
         quantizedKVStart: Int? = nil,
         jsonSchema: String? = nil,
-        grammar: String? = nil
+        grammar: String? = nil,
+        stop: [String]? = nil
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -59,6 +63,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         self.quantizedKVStart = quantizedKVStart
         self.jsonSchema = jsonSchema
         self.grammar = grammar
+        self.stop = stop
     }
 
     enum CodingKeys: String, CodingKey {
@@ -79,6 +84,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         case quantizedKVStart
         case jsonSchema
         case grammar
+        case stop
     }
 
     enum SnakeCaseCodingKeys: String, CodingKey {
@@ -138,6 +144,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
             ?? snakeContainer.decodeIfPresent(String.self, forKey: .jsonSchema)
         self.grammar = try container.decodeIfPresent(String.self, forKey: .grammar)
             ?? snakeContainer.decodeIfPresent(String.self, forKey: .grammar)
+        self.stop = try container.decodeIfPresent([String].self, forKey: .stop)
     }
 }
 

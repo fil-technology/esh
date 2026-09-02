@@ -137,7 +137,10 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
-    func chatCompletionsRejectsJsonSchemaResponseFormatClearly() async throws {
+    func chatCompletionsForwardsJsonSchemaToTheInferenceLayer() async throws {
+        // json_schema is no longer blanket-rejected. It is forwarded to the inference layer so the
+        // per-backend CapabilityResolver can enforce it natively (GGUF, via llama-server constrained
+        // decoding) or honestly reject a strict request on a backend that can't (e.g. MLX).
         let requestData = Data(
             """
             {
@@ -149,6 +152,7 @@ struct OpenAICompatibleServiceTests {
                 "type": "json_schema",
                 "json_schema": {
                   "name": "answer",
+                  "strict": true,
                   "schema": {
                     "type": "object",
                     "properties": { "answer": { "type": "string" } },
@@ -160,20 +164,26 @@ struct OpenAICompatibleServiceTests {
             """.utf8
         )
         let request = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: requestData)
+        final class Box: @unchecked Sendable { var format: EshResponseFormat? }
+        let box = Box()
         let service = OpenAICompatibleService(
-            infer: { _ in
-                throw OpenAICompatibleError.invalidRequest("Unexpected inference.")
+            infer: { externalRequest in
+                box.format = externalRequest.responseFormat
+                return ExternalInferenceResponse(
+                    modelID: externalRequest.model ?? "demo-model",
+                    backend: .gguf,
+                    integration: .init(mode: "direct"),
+                    outputText: #"{"answer":"ok"}"#,
+                    metrics: .init()
+                )
             },
             installedModels: { [] }
         )
 
-        do {
-            _ = try await service.chatCompletions(request)
-            Issue.record("Expected json_schema response_format to be rejected.")
-        } catch let error as OpenAICompatibleError {
-            #expect(error.localizedDescription.contains("json_schema response_format"))
-            #expect(error.localizedDescription.contains("not exposed"))
-        }
+        _ = try await service.chatCompletions(request)
+        #expect(box.format?.kind == .jsonSchema)
+        #expect(box.format?.strict == true)
+        #expect(box.format?.schema?.contains("\"answer\"") == true)
     }
 
     @Test

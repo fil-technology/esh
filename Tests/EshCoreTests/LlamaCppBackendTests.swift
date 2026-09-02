@@ -4,65 +4,77 @@ import Testing
 
 @Suite
 struct LlamaCppBackendTests {
-    // Regression guard for blocker B3: recent llama.cpp builds split the tools — `llama-cli` is
-    // interactive-only and rejects `--no-conversation`, which left esh hanging on the `>` prompt.
-    // The one-shot completion run MUST use the non-interactive flags (via `llama-completion`).
+    // Regression guard for the GGUF runaway-generation blocker: esh used to hand-build a
+    // "User:/Assistant:" plaintext transcript, which is NOT the model's chat format — so the model
+    // never emitted its native end-of-turn token and ran away into a hallucinated transcript. The
+    // request must instead be an OpenAI `messages` array so llama-server applies the model's own chat
+    // template (`--jinja`) and stops at the native assistant-turn end.
 
-    @Test
-    func completionArgumentsAreNonInteractive() {
-        let args = LlamaCppRuntime.completionArguments(
-            modelPath: "/models/m.gguf",
-            prompt: "User: hi\nAssistant:",
-            config: GenerationConfig(maxTokens: 32, temperature: 0.5)
-        )
-        #expect(args.contains("--no-conversation"))   // do not drop into interactive chat mode
-        #expect(args.contains("--no-display-prompt"))  // stdout = generated tokens only
-        #expect(args.contains("--simple-io"))          // no TTY control sequences
-        #expect(args.contains("-p"))
-        #expect(args.contains("/models/m.gguf"))
-        // Must NOT accidentally request conversation mode.
-        #expect(args.contains("--conversation") == false)
-        #expect(args.contains("-cnv") == false)
+    private func session(_ messages: [(Message.Role, String)]) -> ChatSession {
+        ChatSession(name: "t", messages: messages.map { Message(role: $0.0, text: $0.1) })
+    }
+
+    private func decoded(_ data: Data) -> [String: Any] {
+        (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }
 
     @Test
-    func nativeConstrainedDecodingFlagsAreWired() {
-        let jsonArgs = LlamaCppRuntime.completionArguments(
-            modelPath: "/m.gguf", prompt: "p",
-            config: GenerationConfig(jsonSchema: #"{"type":"object"}"#)
-        )
-        #expect(jsonArgs.contains("--json-schema"))
-        #expect(jsonArgs.contains(#"{"type":"object"}"#))
-
-        let grammarArgs = LlamaCppRuntime.completionArguments(
-            modelPath: "/m.gguf", prompt: "p",
-            config: GenerationConfig(grammar: "root ::= \"yes\" | \"no\"")
-        )
-        #expect(grammarArgs.contains("--grammar"))
-
-        // JSON schema takes precedence when both are somehow present.
-        let bothArgs = LlamaCppRuntime.completionArguments(
-            modelPath: "/m.gguf", prompt: "p",
-            config: GenerationConfig(jsonSchema: #"{"type":"object"}"#, grammar: "root ::= \"x\"")
-        )
-        #expect(bothArgs.contains("--json-schema"))
-        #expect(bothArgs.contains("--grammar") == false)
+    func requestUsesAChatMessagesArrayNotAHandBuiltTranscript() throws {
+        let s = session([(.system, "You are helpful."), (.user, "hi"), (.assistant, "hello"), (.user, "what is Taiwan?")])
+        let body = try LlamaServerRuntime.requestBody(session: s, config: GenerationConfig(maxTokens: 64, temperature: 0.5))
+        let obj = decoded(body)
+        let messages = obj["messages"] as? [[String: String]]
+        #expect(messages != nil)
+        #expect(messages?.count == 4)
+        #expect(messages?.first?["role"] == "system")
+        #expect(messages?.last?["role"] == "user")
+        #expect(messages?.last?["content"] == "what is Taiwan?")
+        // No hand-built role transcript, and streaming is on.
+        #expect(obj["prompt"] == nil)
+        #expect(obj["stream"] as? Bool == true)
+        // Sampling passes through.
+        #expect(obj["max_tokens"] as? Int == 64)
+        #expect((obj["temperature"] as? Double) == 0.5)
     }
 
     @Test
-    func samplingControlsPassThrough() {
-        let args = LlamaCppRuntime.completionArguments(
-            modelPath: "/m.gguf", prompt: "p",
+    func constrainedDecodingPrefersJSONSchemaOverGrammar() throws {
+        let s = session([(.user, "give me json")])
+        let jsonBody = decoded(try LlamaServerRuntime.requestBody(
+            session: s, config: GenerationConfig(jsonSchema: #"{"type":"object"}"#)))
+        let rf = jsonBody["response_format"] as? [String: Any]
+        #expect(rf?["type"] as? String == "json_schema")
+        #expect(jsonBody["grammar"] == nil)
+
+        let grammarBody = decoded(try LlamaServerRuntime.requestBody(
+            session: s, config: GenerationConfig(grammar: "root ::= \"yes\" | \"no\"")))
+        #expect(grammarBody["grammar"] as? String == "root ::= \"yes\" | \"no\"")
+        #expect(grammarBody["response_format"] == nil)
+
+        // JSON schema wins when both are present.
+        let bothBody = decoded(try LlamaServerRuntime.requestBody(
+            session: s, config: GenerationConfig(jsonSchema: #"{"type":"object"}"#, grammar: "root ::= \"x\"")))
+        #expect(bothBody["response_format"] != nil)
+        #expect(bothBody["grammar"] == nil)
+    }
+
+    @Test
+    func samplingAndCallerStopSequencesPassThrough() throws {
+        let s = session([(.user, "count")])
+        let body = decoded(try LlamaServerRuntime.requestBody(
+            session: s,
             config: GenerationConfig(maxTokens: 16, temperature: 0.9, topP: 0.8, topK: 40,
-                                     minP: 0.05, repetitionPenalty: 1.1, seed: 7)
-        )
-        for flag in ["--top-p", "--top-k", "--min-p", "--repeat-penalty", "--seed", "--temp", "-n"] {
-            #expect(args.contains(flag), "missing \(flag)")
-        }
+                                     minP: 0.05, repetitionPenalty: 1.1, seed: 7, stop: ["<END>", "\n\n"])))
+        #expect(body["top_p"] as? Double == 0.8)
+        #expect(body["top_k"] as? Int == 40)
+        #expect(body["min_p"] as? Double == 0.05)
+        #expect(body["repeat_penalty"] as? Double == 1.1)
+        #expect(body["seed"] as? Int == 7)
+        #expect(body["stop"] as? [String] == ["<END>", "\n\n"])
     }
 
     @Test
-    func runtimeNotFoundMessageMentionsCompletionBinary() {
-        #expect(LlamaCppBackend.runtimeNotFoundMessage.contains("llama-completion"))
+    func runtimeNotFoundMessageMentionsTheServer() {
+        #expect(LlamaCppBackend.runtimeNotFoundMessage.contains("llama-server"))
     }
 }

@@ -3,7 +3,7 @@ import Foundation
 public struct LlamaCppBackend: InferenceBackend, Sendable {
     public let kind: BackendKind = .gguf
     public let runtimeVersion: String
-    public static let runtimeNotFoundMessage = "llama.cpp runtime not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your `llama-completion` (preferred) or `llama-cli` path."
+    public static let runtimeNotFoundMessage = "llama.cpp server not found. Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_SERVER to your `llama-server` path."
     private let executableResolver: @Sendable () throws -> URL
 
     public init(
@@ -18,13 +18,18 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
 
     public func loadRuntime(for install: ModelInstall) async throws -> BackendRuntime {
         let modelURL = try locateModelFile(for: install)
-        let executableURL = try resolveExecutable()
-        return LlamaCppRuntime(
-            executableURL: executableURL,
-            modelURL: modelURL,
-            install: install,
-            runtimeVersion: runtimeVersion
-        )
+        let serverURL = try resolveExecutable()
+        // Start a persistent llama-server for this model. It applies the model's own chat template
+        // (--jinja) and stops at the model's native end-of-turn, and stays resident (loaded once) for
+        // the runtime's lifetime — owned by RuntimeLifecycleManager like the MLX persistent worker.
+        let server = try LlamaServerProcess(executableURL: serverURL, modelPath: modelURL.path)
+        do {
+            try await server.start()
+        } catch {
+            server.shutdown()
+            throw error
+        }
+        return LlamaServerRuntime(server: server, install: install)
     }
 
     public func validateChatModel(for install: ModelInstall) throws -> String? {
@@ -118,35 +123,31 @@ public struct LlamaCppBackend: InferenceBackend, Sendable {
             .deletingLastPathComponent()
             .appendingPathComponent("share/esh/bin")
 
-        // Prefer the scriptable `llama-completion` binary. Recent llama.cpp builds split the tools:
-        // `llama-cli` is interactive-only and now REJECTS `--no-conversation` ("please use
-        // llama-completion instead"), which would leave esh hanging on the interactive `>` prompt.
-        // `llama-completion` is the non-interactive one. We keep `llama-cli` as a fallback for older
-        // installs where it still runs one-shot completions.
-        let explicit = [env["ESH_LLAMA_CPP_CLI"], env["LLAMA_CPP_CLI"]].compactMap { $0 }
+        // Resolve `llama-server`: esh drives GGUF chat through the server's OpenAI endpoint with the
+        // model's own chat template (`--jinja`), so multi-turn chat terminates at the model's native
+        // end-of-turn. Prefer the bundled, self-contained binary; ESH_LLAMA_CPP_SERVER overrides.
+        let explicit = [env["ESH_LLAMA_CPP_SERVER"]].compactMap { $0 }
         for candidate in explicit where FileManager.default.isExecutableFile(atPath: candidate) {
             return URL(fileURLWithPath: candidate)
         }
 
-        for binary in ["llama-completion", "llama-cli"] {
-            let candidates = [
-                bundledDir.appendingPathComponent(binary).path,
-                "/opt/homebrew/bin/\(binary)",
-                "/usr/local/bin/\(binary)"
-            ]
-            for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
-                return URL(fileURLWithPath: candidate)
-            }
-            let output = try? ProcessRunner.run(
-                executableURL: URL(fileURLWithPath: "/usr/bin/which"),
-                arguments: [binary]
-            )
-            if let output, output.exitCode == 0 {
-                let path = String(decoding: output.stdout, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !path.isEmpty {
-                    return URL(fileURLWithPath: path)
-                }
+        let candidates = [
+            bundledDir.appendingPathComponent("llama-server").path,
+            "/opt/homebrew/bin/llama-server",
+            "/usr/local/bin/llama-server"
+        ]
+        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+        let output = try? ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/which"),
+            arguments: ["llama-server"]
+        )
+        if let output, output.exitCode == 0 {
+            let path = String(decoding: output.stdout, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty {
+                return URL(fileURLWithPath: path)
             }
         }
 
@@ -160,203 +161,5 @@ private struct LlamaCppCompatibilityChecker: CompatibilityChecking, Sendable {
 
     func validate(manifest: CacheManifest) throws {
         throw CompatibilityIssue(reason: "GGUF cache import is not supported by the llama.cpp backend yet.")
-    }
-}
-
-public final class LlamaCppRuntime: BackendRuntime, @unchecked Sendable {
-    public let backend: BackendKind = .gguf
-    public let modelID: String
-
-    private let executableURL: URL
-    private let modelURL: URL
-    private let install: ModelInstall
-    private let runtimeVersion: String
-    private var currentMetrics: Metrics
-
-    private final class StreamState: @unchecked Sendable {
-        let lock = NSLock()
-        var stderrData = Data()
-        var sawFirstChunk = false
-    }
-
-    init(
-        executableURL: URL,
-        modelURL: URL,
-        install: ModelInstall,
-        runtimeVersion: String,
-        metrics: Metrics = .init()
-    ) {
-        self.executableURL = executableURL
-        self.modelURL = modelURL
-        self.install = install
-        self.runtimeVersion = runtimeVersion
-        self.modelID = install.id
-        self.currentMetrics = metrics
-    }
-
-    public var metrics: Metrics { currentMetrics }
-
-    public func prepare(session: ChatSession) async throws {}
-
-    public func generate(
-        session: ChatSession,
-        config: GenerationConfig
-    ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    let prompt = promptText(for: session)
-                    let start = ContinuousClock.now
-                    let process = Process()
-                    process.executableURL = executableURL
-                    process.arguments = LlamaCppRuntime.completionArguments(
-                        modelPath: modelURL.path, prompt: prompt, config: config
-                    )
-
-                    let stdoutPipe = Pipe()
-                    let stderrPipe = Pipe()
-                    process.standardOutput = stdoutPipe
-                    process.standardError = stderrPipe
-
-                    let state = StreamState()
-
-                    stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                        let data = handle.availableData
-                        guard !data.isEmpty else { return }
-                        let text = String(decoding: data, as: UTF8.self)
-                        state.lock.lock()
-                        let shouldRecordFirstChunk = !state.sawFirstChunk
-                        if shouldRecordFirstChunk {
-                            state.sawFirstChunk = true
-                        }
-                        state.lock.unlock()
-
-                        if shouldRecordFirstChunk {
-                            let elapsed = start.duration(to: .now)
-                            let milliseconds = Double(elapsed.components.seconds) * 1_000
-                                + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-                            self.currentMetrics = Metrics(ttftMilliseconds: milliseconds)
-                        }
-
-                        // llama.cpp prints an "[end of text]" EOS marker to stdout at completion; it is
-                        // not part of the model's response, so strip it before yielding.
-                        let cleaned = text.replacingOccurrences(of: "[end of text]", with: "")
-                        if !cleaned.isEmpty {
-                            continuation.yield(cleaned)
-                        }
-                    }
-
-                    stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                        let data = handle.availableData
-                        guard !data.isEmpty else { return }
-                        state.lock.lock()
-                        state.stderrData.append(data)
-                        state.lock.unlock()
-                    }
-
-                    process.terminationHandler = { process in
-                        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                        stderrPipe.fileHandleForReading.readabilityHandler = nil
-
-                        state.lock.lock()
-                        let stderr = state.stderrData
-                        let emittedChunk = state.sawFirstChunk
-                        state.lock.unlock()
-
-                        if process.terminationStatus == 0 {
-                            if !emittedChunk {
-                                let elapsed = start.duration(to: .now)
-                                let milliseconds = Double(elapsed.components.seconds) * 1_000
-                                    + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-                                self.currentMetrics = Metrics(ttftMilliseconds: milliseconds)
-                            }
-                            continuation.finish()
-                            return
-                        }
-
-                        let stderrText = String(decoding: stderr, as: UTF8.self)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.finish(throwing: StoreError.invalidManifest(
-                            stderrText.isEmpty ? "llama.cpp generation failed." : stderrText
-                        ))
-                    }
-
-                    continuation.onTermination = { _ in
-                        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                        stderrPipe.fileHandleForReading.readabilityHandler = nil
-                        if process.isRunning {
-                            process.terminate()
-                        }
-                    }
-
-                    try process.run()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-        }
-    }
-
-    public func exportRuntimeCache() async throws -> CacheSnapshot {
-        throw StoreError.invalidManifest("GGUF cache export is not supported by the llama.cpp backend yet.")
-    }
-
-    public func importRuntimeCache(_ snapshot: CacheSnapshot) async throws {
-        throw StoreError.invalidManifest("GGUF cache import is not supported by the llama.cpp backend yet.")
-    }
-
-    public func validateCacheCompatibility(_ manifest: CacheManifest) async throws {
-        throw CompatibilityIssue(reason: "GGUF cache compatibility is not supported by the llama.cpp backend yet.")
-    }
-
-    public func unload() async {}
-
-    /// Build the llama.cpp non-interactive completion arguments. Extracted for testability and to
-    /// keep the one-shot flags in a single place. `--no-conversation` + `--no-display-prompt` +
-    /// `--simple-io` are what make the run non-interactive and keep stdout to just the generated
-    /// tokens (the preferred binary is `llama-completion`; see `defaultResolveExecutable`).
-    static func completionArguments(modelPath: String, prompt: String, config: GenerationConfig) -> [String] {
-        var arguments = [
-            "-m", modelPath,
-            "-c", "8192",
-            "-n", String(config.maxTokens),
-            "--temp", String(config.temperature),
-            "--no-conversation",
-            "--no-display-prompt",
-            "--simple-io",
-            "-p", prompt
-        ]
-        if let topP = config.topP {
-            arguments.append(contentsOf: ["--top-p", String(topP)])
-        }
-        if let topK = config.topK {
-            arguments.append(contentsOf: ["--top-k", String(topK)])
-        }
-        if let minP = config.minP {
-            arguments.append(contentsOf: ["--min-p", String(minP)])
-        }
-        if let repetitionPenalty = config.repetitionPenalty {
-            arguments.append(contentsOf: ["--repeat-penalty", String(repetitionPenalty)])
-        }
-        if let seed = config.seed {
-            arguments.append(contentsOf: ["--seed", String(seed)])
-        }
-        // Native constrained decoding (M8): llama.cpp enforces a JSON schema (converted to a grammar
-        // internally) or a raw GBNF grammar during sampling. JSON schema takes precedence.
-        if let jsonSchema = config.jsonSchema, !jsonSchema.isEmpty {
-            arguments.append(contentsOf: ["--json-schema", jsonSchema])
-        } else if let grammar = config.grammar, !grammar.isEmpty {
-            arguments.append(contentsOf: ["--grammar", grammar])
-        }
-        return arguments
-    }
-
-    private func promptText(for session: ChatSession) -> String {
-        let normalizedSession = PromptSessionNormalizer().normalized(session: session)
-        let transcript = normalizedSession.messages.map { message in
-            let role = message.role == .user ? "User" : "Assistant"
-            return "\(role): \(message.text)"
-        }.joined(separator: "\n")
-        return transcript + "\nAssistant:"
     }
 }

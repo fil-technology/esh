@@ -56,14 +56,9 @@ esh::bridge_script() {
   echo "$(esh::payload_root)/Tools/mlx_vlm_bridge.py"
 }
 
-esh::bundled_llama_cli() {
-  # The package bundles a self-contained `llama-completion` (see scripts/build-llama.sh).
-  local bin_dir; bin_dir="$(esh::app_root)/share/esh/bin"
-  if [[ -x "$bin_dir/llama-completion" ]]; then
-    echo "$bin_dir/llama-completion"
-  else
-    echo "$bin_dir/llama-cli"
-  fi
+esh::bundled_llama_server() {
+  # The package bundles a self-contained `llama-server` (see scripts/build-llama.sh).
+  echo "$(esh::app_root)/share/esh/bin/llama-server"
 }
 
 esh::resolve_llama_cli() {

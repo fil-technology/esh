@@ -9,11 +9,11 @@
 #
 # This build is fully static instead: backends compiled in (no dlopen), Metal
 # shaders embedded, no libcurl/openssl, no external dylibs. The result is a
-# self-contained `llama-completion` (the binary esh's GGUF backend invokes) that
-# runs GGUF with Metal acceleration on any Apple Silicon Mac with zero external
-# dependencies. (In this pinned release `llama-completion` is the sole non-
-# interactive completion binary — upstream dropped the plain `llama-cli` target;
-# esh prefers `llama-completion` anyway, so it is all that needs bundling.)
+# self-contained `llama-server` (the binary esh's GGUF backend drives) that runs
+# GGUF with Metal acceleration on any Apple Silicon Mac with zero external
+# dependencies. esh talks to it over its OpenAI-compatible endpoint with the
+# model's own chat template (--jinja), so multi-turn chat stops at the model's
+# native end-of-turn instead of running away.
 #
 # Pinned to the exact upstream revision esh is validated against so the packaged
 # runtime is reproducible.
@@ -49,27 +49,28 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
   -DGGML_ACCELERATE=ON \
   -DGGML_BLAS=OFF \
   -DLLAMA_OPENSSL=OFF \
-  -DLLAMA_BUILD_SERVER=OFF \
+  -DLLAMA_BUILD_SERVER=ON \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_TOOLS=ON
 
-# Build the non-interactive completion binary esh invokes for GGUF.
-cmake --build "$BUILD_DIR" --config Release --target llama-completion -j"$(sysctl -n hw.ncpu)"
+# Build llama-server: esh drives GGUF chat through its OpenAI endpoint with the model's own chat
+# template (--jinja) and native end-of-turn stop.
+cmake --build "$BUILD_DIR" --config Release --target llama-server -j"$(sysctl -n hw.ncpu)"
 
 # Locate and copy the built binary (path varies by llama.cpp layout).
-found="$(find "$BUILD_DIR" -type f -name llama-completion -perm +111 2>/dev/null | head -1)"
-[[ -n "$found" ]] || { echo "[build-llama] ERROR: built binary 'llama-completion' not found under $BUILD_DIR" >&2; exit 1; }
-cp "$found" "$OUT_DIR/llama-completion"
-chmod +x "$OUT_DIR/llama-completion"
-echo "[build-llama] -> $OUT_DIR/llama-completion"
+found="$(find "$BUILD_DIR" -type f -name llama-server -perm +111 2>/dev/null | head -1)"
+[[ -n "$found" ]] || { echo "[build-llama] ERROR: built binary 'llama-server' not found under $BUILD_DIR" >&2; exit 1; }
+cp "$found" "$OUT_DIR/llama-server"
+chmod +x "$OUT_DIR/llama-server"
+echo "[build-llama] -> $OUT_DIR/llama-server"
 
-# Assert self-containment: no @rpath/Homebrew/ggml dylib dependencies.
-bad="$(otool -L "$OUT_DIR/llama-completion" | tail -n +2 | grep -Ei '@rpath|/opt/homebrew|libggml|libllama|libmtmd' || true)"
+# Assert self-containment: no @rpath/Homebrew/ggml dylib dependencies (a clean machine has no Homebrew).
+bad="$(otool -L "$OUT_DIR/llama-server" | tail -n +2 | grep -Ei '@rpath|/opt/homebrew|/usr/local/(opt|Cellar)|libggml|libllama|libmtmd|openssl' || true)"
 if [[ -n "$bad" ]]; then
-  echo "[build-llama] ERROR: llama-completion has non-relocatable deps:" >&2
+  echo "[build-llama] ERROR: llama-server has non-relocatable deps:" >&2
   echo "$bad" >&2
   exit 1
 fi
 
-echo "[build-llama] OK — self-contained binaries in $OUT_DIR"
+echo "[build-llama] OK — self-contained llama-server in $OUT_DIR"

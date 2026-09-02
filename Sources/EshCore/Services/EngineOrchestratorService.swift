@@ -96,8 +96,8 @@ public final class EngineOrchestratorService {
                 installed: false,
                 ready: false,
                 notes: notes,
-                warnings: ["llama-cli was not found in ESH_LLAMA_CPP_CLI, LLAMA_CPP_CLI, Homebrew paths, or PATH."],
-                suggestedFix: "Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_CLI to your llama-cli path."
+                warnings: ["llama-server was not found in ESH_LLAMA_CPP_SERVER, Homebrew paths, or PATH."],
+                suggestedFix: "Install it with `brew install llama.cpp`, or set ESH_LLAMA_CPP_SERVER to your llama-server path."
             )
         }
         return EngineStatus(
@@ -209,7 +209,9 @@ public final class EngineOrchestratorService {
             return isExecutable(configured) ? configured : nil
         }
 
-        for envKey in ["ESH_LLAMA_CPP_CLI", "LLAMA_CPP_CLI"] {
+        // esh drives GGUF through `llama-server` (native chat template + stop); detect it first, then
+        // fall back to the older CLI env vars for compatibility.
+        for envKey in ["ESH_LLAMA_CPP_SERVER", "ESH_LLAMA_CPP_CLI", "LLAMA_CPP_CLI"] {
             if let value = environment[envKey], !value.isEmpty {
                 let url = expandedURL(value)
                 if isExecutable(url) {
@@ -218,14 +220,18 @@ public final class EngineOrchestratorService {
             }
         }
 
-        for directory in defaultSearchPaths {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("llama-cli")
-            if isExecutable(candidate) {
-                return candidate
+        for binary in ["llama-server", "llama-cli"] {
+            for directory in defaultSearchPaths {
+                let candidate = URL(fileURLWithPath: directory).appendingPathComponent(binary)
+                if isExecutable(candidate) {
+                    return candidate
+                }
+            }
+            if let resolved = resolveExecutable(named: binary) {
+                return resolved
             }
         }
-
-        return resolveExecutable(named: "llama-cli")
+        return nil
     }
 
     private func resolveExecutable(named name: String) -> URL? {

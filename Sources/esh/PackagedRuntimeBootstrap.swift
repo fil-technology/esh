@@ -137,18 +137,14 @@ enum PackagedRuntimeBootstrap {
     }
 
     private static func setLlamaEnvironmentIfAvailable(rootURL: URL) {
-        // The package bundles a self-contained `llama-completion` (static ggml +
-        // Metal, no dlopen, no Homebrew) built by scripts/build-llama.sh. It is the
-        // non-interactive completion binary the GGUF backend drives; point the
-        // runtime at it explicitly. (`llama-cli` kept as a fallback for older
-        // installs that still ship it.)
+        // The package bundles a self-contained `llama-server` (static ggml + Metal,
+        // no dlopen, no Homebrew) built by scripts/build-llama.sh. esh drives GGUF
+        // chat through its OpenAI endpoint with the model's own chat template; point
+        // the runtime at it explicitly.
         let binDir = rootURL.appendingPathComponent("share/esh/bin")
-        for name in ["llama-completion", "llama-cli"] {
-            let candidate = binDir.appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                setenv("ESH_LLAMA_CPP_CLI", candidate.path, 0)
-                return
-            }
+        let server = binDir.appendingPathComponent("llama-server")
+        if FileManager.default.isExecutableFile(atPath: server.path) {
+            setenv("ESH_LLAMA_CPP_SERVER", server.path, 0)
         }
     }
 }
