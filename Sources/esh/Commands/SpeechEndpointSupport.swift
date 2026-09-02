@@ -7,7 +7,10 @@ import EshCore
 /// built-in parakeet default. Local only — no cloud.
 enum SpeechEndpointSupport {
     static func transcribeClosure() -> (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse) {
-        { request in
+        // One shared persistent STT runtime for the server's lifetime (M12): the model stays resident
+        // across requests instead of reloading per call.
+        let speech = SpeechRuntimeManager()
+        return { request in
             guard let data = Data(base64Encoded: sanitizedBase64(request.audio)), data.isEmpty == false else {
                 throw OpenAICompatibleError.invalidRequest("Audio payload was not valid base64-encoded audio.")
             }
@@ -20,11 +23,14 @@ enum SpeechEndpointSupport {
 
             let configuredModel = (try? EshConfigStore().load())?.defaults.sttModel
             let model = request.model ?? configuredModel
-            let text = try SpeechToTextService().transcribe(
-                audioPath: tempURL.path,
-                model: model,
-                language: request.language
-            )
+            let text: String
+            do {
+                text = try await speech.transcribe(audioPath: tempURL.path, model: model, language: request.language)
+            } catch {
+                // Resilience: if the persistent worker can't start/run, fall back to the one-shot path
+                // so STT never regresses vs 2.0.
+                text = try SpeechToTextService().transcribe(audioPath: tempURL.path, model: model, language: request.language)
+            }
             return OpenAIAudioTranscriptionResponse(
                 text: text,
                 model: model ?? SpeechToTextService.defaultModel,

@@ -83,6 +83,19 @@ class MLXVLMBridgeTests(unittest.TestCase):
         # Reasoning tags are NOT stop markers — esh parses <think>…</think>.
         self.assertIsNone(bridge._find_earliest_stop_marker("<think>reasoning</think> answer"))
 
+    def test_speech_serve_persistent_stt_worker_exists(self):
+        # M12: the persistent STT worker must exist so the speech model stays resident across
+        # requests instead of reloading per call.
+        bridge = load_bridge_module()
+        self.assertTrue(hasattr(bridge, "speech_serve"))
+        src = (REPOSITORY_ROOT / "Tools" / "mlx_vlm_bridge.py").read_text(encoding="utf-8")
+        self.assertIn('"speech-serve"', src)               # registered command
+        self.assertIn("speech_serve()", src)               # dispatched
+        # Loads the STT model ONCE, then serves transcribe requests over stdio.
+        self.assertIn("from mlx_audio.stt.utils import load_model", src)
+        self.assertIn('"event": "ready"', src)
+        self.assertIn("transcribe", src)
+
     def test_bridge_declares_mlx_vlm_0_5_dependency_contract(self):
         bridge = load_bridge_module()
         requirements = (REPOSITORY_ROOT / "Tools" / "python-requirements.txt").read_text(encoding="utf-8")

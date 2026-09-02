@@ -1328,6 +1328,110 @@ def turboquant_decompress(bits: float, seed: int) -> None:
     )
 
 
+def speech_serve() -> None:
+    """Persistent STT worker (M12): load the speech-to-text model ONCE, then transcribe many requests
+    over stdio — eliminating the per-call Python+model reload that makes one-shot `mlx-transcribe`
+    cost several seconds every call.
+
+    Protocol (newline-delimited JSON):
+      stdin  : first line `{"op":"init","modelPath":...,"modelID"?}`; then
+               `{"id","op":"transcribe","audioPath":...,"language"?}`, `{"op":"ping"}`, `{"op":"shutdown"}`.
+      stdout : `{"event":"ready","loadMs","memoryBytes","model"}` once loaded;
+               per request `{"id","event":"result","text","ms"}` or `{"id","event":"error","message"}`;
+               `{"event":"pong"}`.
+    Model weights stay resident for the worker's lifetime → true residency. stdin EOF (parent death)
+    ends the loop, so no orphan workers survive esh.
+    """
+    # Emit JSON only to the real stdout; model load/generate may print progress, so we redirect
+    # stdout→stderr around those calls to keep the newline-JSON protocol clean.
+    real_stdout = sys.stdout
+
+    def emit(payload: dict[str, Any]) -> None:
+        line = json.dumps(payload, separators=(",", ":")) + "\n"
+        real_stdout.write(line)
+        real_stdout.flush()
+
+    try:
+        import mlx.core as mx
+    except Exception as exc:  # noqa: BLE001
+        emit({"event": "error", "message": f"mlx not available: {exc}"})
+        raise SystemExit(1)
+    try:
+        from mlx_audio.stt.utils import load_model
+    except Exception as exc:  # noqa: BLE001
+        emit({"event": "error", "message": f"mlx_audio STT is not available: {exc}"})
+        raise SystemExit(1)
+
+    init_line = sys.stdin.readline()
+    if not init_line:
+        return
+    try:
+        init = json.loads(init_line)
+    except Exception as exc:  # noqa: BLE001
+        emit({"event": "error", "message": f"bad init line: {exc}"})
+        raise SystemExit(1)
+
+    load_start = time.time()
+    sys.stdout = sys.stderr
+    try:
+        model = load_model(init["modelPath"])
+    except Exception as exc:  # noqa: BLE001
+        sys.stdout = real_stdout
+        emit({"event": "error", "message": f"STT model load failed: {exc}"})
+        raise SystemExit(1)
+    finally:
+        sys.stdout = real_stdout
+    try:
+        memory_bytes = int(mx.get_peak_memory())
+    except Exception:  # noqa: BLE001
+        memory_bytes = 0
+    emit({"event": "ready", "loadMs": (time.time() - load_start) * 1000.0,
+          "memoryBytes": memory_bytes, "model": init.get("modelID")})
+
+    def _extract_text(result: Any) -> str:
+        # model.generate returns either an STTOutput (has .text) or an iterable of segment results.
+        if hasattr(result, "text"):
+            return (result.text or "").strip()
+        parts = []
+        for segment in result:
+            parts.append(getattr(segment, "text", "") or "")
+        return "".join(parts).strip()
+
+    for raw in sys.stdin:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        op = msg.get("op")
+        if op == "shutdown":
+            break
+        if op == "ping":
+            emit({"event": "pong"})
+            continue
+        if op != "transcribe":
+            continue
+        request_id = msg.get("id")
+        kwargs: dict[str, Any] = {}
+        if msg.get("language"):
+            kwargs["language"] = msg["language"]
+        start = time.time()
+        sys.stdout = sys.stderr
+        try:
+            result = model.generate(msg["audioPath"], verbose=False, **kwargs)
+            text = _extract_text(result)
+            sys.stdout = real_stdout
+            emit({"id": request_id, "event": "result", "text": text,
+                  "ms": (time.time() - start) * 1000.0})
+        except Exception as exc:  # noqa: BLE001
+            sys.stdout = real_stdout
+            emit({"id": request_id, "event": "error", "message": f"transcription failed: {exc}"})
+        finally:
+            sys.stdout = real_stdout
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1340,6 +1444,7 @@ def main() -> None:
             "mlx-generate",
             "mlx-serve",
             "mlx-transcribe",
+            "speech-serve",
             "mlx-validate-model",
             "mlx-validate-config",
             "mlx-export-cache",
@@ -1363,6 +1468,8 @@ def main() -> None:
         mlx_serve()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
+    elif args.command == "speech-serve":
+        speech_serve()
     elif args.command == "mlx-build-cache":
         mlx_build_cache()
     elif args.command == "mlx-validate-model":

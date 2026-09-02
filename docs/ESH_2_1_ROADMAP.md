@@ -17,6 +17,15 @@ fixes on a separate track; additive-only schema changes with migration for anyth
 **Gate:** every 2.1 RC re-runs the packaged/notarized + no-Homebrew validation used for 2.0.
 
 ## M12 — Persistent Speech Runtime  *(first engineering priority)*
+**Status — increment 1 shipped (persistent STT):** new `speech-serve` bridge worker loads the STT model
+ONCE and transcribes over stdio; Swift `SpeechWorkerProcess` + `SpeechRuntimeManager` (lazy start,
+reuse, model-switch, crash-recovery retry, idle eviction, one-shot fallback); wired into the server's
+`/v1/audio/transcriptions`. **Measured:** warm STT **0.14 s** vs the one-shot **4–6 s/call** (~30–40×),
+model resident, correct output. Tests green (357 total). **Remaining M12:** warm TTS (hold a long-lived
+`TTSSpeechSynthesizer` instead of rebuilding per call) and full `RuntimeLifecycleManager` integration
+(shared memory budget + speech reservation so speech evicts under LLM memory pressure), then a unified
+`SpeechBackend` seam (dovetails with M21).
+
 **Objective:** truthful warm STT/TTS under `RuntimeLifecycleManager` via a new `SpeechBackend` protocol.
 **Why (measured):** STT is the real bottleneck — **6.3→5.0→4.0 s/call**, barely warms; TTS already warms
 (1.28 s→~0.5 s), so its win is shared lifecycle + first-audio, not "reload." **Work:** `SpeechBackend`
