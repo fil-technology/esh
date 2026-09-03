@@ -15,13 +15,15 @@ public struct RouteDecision: Codable, Sendable {
     public var reason: String?
     public var alternatives: [String]
     public var provenance: RouterProvenance?
+    /// Human-facing routing explanation for the Execution Inspector (spec §12). Hidden for ordinary users.
+    public var explanation: String?
 
     public init(action: String, capability: String? = nil, request: ExecutionRequest? = nil,
                 installRequirement: InstallRequirement? = nil, pendingId: String? = nil, reason: String? = nil,
-                alternatives: [String] = [], provenance: RouterProvenance? = nil) {
+                alternatives: [String] = [], provenance: RouterProvenance? = nil, explanation: String? = nil) {
         self.action = action; self.capability = capability; self.request = request
         self.installRequirement = installRequirement; self.pendingId = pendingId; self.reason = reason
-        self.alternatives = alternatives; self.provenance = provenance
+        self.alternatives = alternatives; self.provenance = provenance; self.explanation = explanation
     }
 }
 
@@ -135,7 +137,9 @@ public struct CapabilityRouterService: Sendable {
         case .chat:
             return RouteDecision(action: "chat")
         case let .ready(request, intent):
-            return RouteDecision(action: "ready", capability: intent.capability?.rawValue, request: request, provenance: intent.provenance)
+            var d = RouteDecision(action: "ready", capability: intent.capability?.rawValue, request: request, provenance: intent.provenance)
+            d.explanation = "Resolved as \(intent.capability?.rawValue ?? "?") · \(intent.provenance.tier) (\(intent.provenance.router)) · validated by the capability registry"
+            return d
         case let .installRequired(request, intent, requirement):
             let pending = PendingCapabilityInvocation(id: reuseId ?? UUID(), message: message, attachments: attachments,
                                                       intent: intent, requirement: requirement, conversationID: conversationID,

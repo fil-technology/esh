@@ -1045,9 +1045,30 @@ public struct OpenAICompatibleService: Sendable {
             let routerRegistry = registryUCMR   // immutable snapshot after all providers are registered
             // Tier-1 semantic router: a resident LLM proposes a constrained intent when Tier 0 is unsure
             // (ambiguous). Its output is validated against the registry before anything runs (§4/§8).
-            let semanticRouter = ResidentLLMSemanticRouter(infer: { req in try await inference.infer(request: req) })
+            let residentRouter = ResidentLLMSemanticRouter(infer: { req in try await inference.infer(request: req) })
+            // Router Auto: attach a Tier-1 semantic router to the LIVE resolver ONLY when persisted evidence
+            // shows one is safe AND beats the free/instant Tier-0 baseline. With no such evidence (default),
+            // live routing stays Tier-0 + clarification — no wasted LLM-escalation latency. (spec §8/§9)
+            let autoOS = ProcessInfo.processInfo.operatingSystemVersionString
+            let autoDecision = RouterAutoPolicy().choose(
+                from: RouterEvidenceStore(root: root).load().evidence,
+                currentSchemaVersion: CapabilitySchemaVersion.current,
+                currentDatasetVersion: RoutingBenchmark.datasetVersion, currentOS: autoOS)
+            let liveSemantic: SemanticIntentRouter? = {
+                switch autoDecision.chosenRouter {
+                case "resident-llm": return residentRouter
+                case "apple-foundation": return AppleFMSemanticRouter()
+                case "functiongemma":
+                    if let id = (try? modelStore.listInstalls())?.first(where: { $0.id.contains("functiongemma") })?.id {
+                        return ResidentLLMSemanticRouter(name: "functiongemma", modelID: id, infer: { req in try await inference.infer(request: req) })
+                    }
+                    return nil
+                default: return nil
+                }
+            }()
+            let semanticRouter = residentRouter
             let routerService = CapabilityRouterService(
-                resolver: IntentResolver(semantic: semanticRouter),
+                resolver: IntentResolver(semantic: liveSemantic),
                 store: routerStore,
                 registry: { routerRegistry },
                 installs: { (try? modelStore.listInstalls()) ?? [] },
