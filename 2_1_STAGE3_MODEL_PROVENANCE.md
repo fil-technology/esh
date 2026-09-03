@@ -1,58 +1,77 @@
-# esh 2.1 UCMR — Stage 3 model/runtime research & provenance
+# esh 2.1 UCMR — Stage 3 model/runtime research, provenance & LIVE validation
 
-Per Stage 3 item 12. Discovery used to find candidates; not treated as authority. Each selected
-runtime/model records source, license, maintenance, Apple-Silicon support, tested revision, size,
-memory, quality caveats, and known incompatibilities.
+Per Stage 3 items 12 + final validation pass. Discovery used to find candidates; not authority. All
+timings measured on **Apple M1 Pro / 32 GB**, assets on external SSD `/Volumes/Sviat SSD/esh-models`.
 
-## Image generation — SELECTED: mflux (Z-Image Turbo, 4-bit)
-- **Runtime**: [mflux](https://github.com/filipstrand/mflux) `0.19.1` (installed & tested). MLX-native,
-  actively maintained, broad model coverage (FLUX, Z-Image, Qwen-Image, SeedVR2, …), clean CLI + Python.
-- **Model**: `filipstrand/Z-Image-Turbo-mflux-4bit` (pre-quantized 4-bit of Tongyi-MAI/Z-Image-Turbo,
-  6B-param single-stream DiT). ~5.5 GB on disk. **License**: Z-Image is Apache-2.0.
-- **Apple Silicon**: native (MLX/Metal). Offline after download.
-- **Tested**: revision `b3a8f31…`; **LIVE**: text→image via `/v1/execute` → 1024×1024 typed PNG on
-  **Apple M1 Pro / 32 GB**, cold (load+generate) ~457 s. **Caveat**: that time reflects a
-  memory-pressured 32 GB machine (heavy compression/swap during the run); Z-Image Turbo is designed for
-  ~8-step fast generation and is far quicker with free RAM. Warm/seconds-per-image to be measured on an
-  unloaded machine.
-- **Rejected alternatives**: full-precision `Tongyi-MAI/Z-Image-Turbo` (~12 GB, higher peak — worse fit
-  for 32 GB); FLUX.1-schnell (~12 GB bf16, heavier); packaging multiple diffusion models into the release
-  (violates Stage 3 item 11 — kept on-demand instead).
+## Image generation — mflux Z-Image-Turbo 4-bit — LIVE ✅ (but compute-slow)
+- **Runtime**: mflux `0.19.1` (MLX-native, maintained). **Model**: `filipstrand/Z-Image-Turbo-mflux-4bit`
+  (rev `b3a8f31…`, pre-quantized 4-bit of Tongyi-MAI/Z-Image-Turbo, 6B DiT), ~5.5 GB. **License**: Apache-2.0.
+- **LIVE**: text→image via `/v1/execute` → valid 1024×1024 typed PNG. Verified end-to-end.
+- **Benchmarks** (recorded, `~/.esh/benchmarks/image-generation-benchmarks.json`):
+  - 1024×1024, 8 steps: **~215 s warm** (216.3 / 213.3 s; ~25 s/step), cold 457 s (first-run Metal
+    compile + memory pressure). Peak RSS **4.4 GB**.
+  - 512×512, 8 steps: **51 s** (~5.6 s/step). Peak RSS **4.4 GB** (same).
+  - **Root-cause of the 457 s**: not memory — fetch was a cache hit (~0 s), peak 4.4 GB, no swap; it is
+    **GPU-compute-bound** (~25 s/step at 1024²). Resolution is the dominant lever (~4× from 1024²→512²).
+  - **Recommendation note**: 1024² at ~215 s is **not interactive-grade** on M1 Pro; 512² (~51 s) is
+    borderline. Correct + fits comfortably in memory, but a 6B model is slow here. Samples are marked
+    recommendation-grade (measured under normal pressure); Scheduler/Auto should weigh seconds/image, and
+    consider a lighter default (e.g. an SD-Turbo class model) or default to 512² on this machine class.
+- **Rejected**: full-precision Z-Image (~12 GB); FLUX.1-schnell (~12 GB, heavier); baking models into the
+  release (kept on-demand).
 
-## Image upscaling / enhancement — SELECTED: mflux SeedVR2
-- **Runtime**: same mflux `0.19.1` (`mflux-upscale-seedvr2`). No new dependency.
-- **Model**: `seedvr2-3b` (diffusion super-resolution). VAE tiling enabled to bound peak memory.
-- **Capability**: `image.upscale` (a SEPARATE typed capability, not a vague `image.edit`).
-- **Status**: implemented + unit-tested + RAM-guarded; live super-resolution run pending (model download
-  + a memory-heavy run like image-gen). Chosen over Real-ESRGAN (no maintained MLX-native package;
-  onnx/torch paths heavier) because it reuses the already-present mflux runtime.
+## Image upscaling — mflux SeedVR2 — EXPERIMENTAL ⚠️ (upstream backend bug; wiring validated)
+- **Runtime**: mflux SeedVR2 (`numz/SeedVR2_comfyUI`, 6.8 GB). **Capability**: `image.upscale` (separate
+  typed capability, not vague image.edit). VAE tiling for bounded memory.
+- **LIVE result**: model downloaded correctly **to the SSD** (internal disk untouched), RAM guard active,
+  and the provider returned a **clean typed error** — but the actual upscale **fails upstream**: mflux
+  0.19.1 SeedVR2 attention calls `mx.repeat(x, mx.array(counts), axis=…)` (array repeats) at 4+ sites,
+  which **mlx 0.32.2 rejects** (`repeats` must be Int). Not an esh bug; patching a dependency's model
+  code across multiple sites is fragile and violates clean-install reproducibility (item 11).
+- **Classification**: implemented + wired + storage/RAM/error paths validated; **SeedVR2 backend
+  non-functional on this mflux/mlx pairing** → experimental, not recommendation-ready.
+- **Rejected**: Real-ESRGAN (no maintained MLX-native pkg); pyannote-style torch upscalers (torch).
+- **Stage 4 fix**: newer mflux that fixes SeedVR2, or a **Real-ESRGAN ONNX** backend (onnxruntime already
+  present) as a torch-free `image.upscale` provider.
 
-## Video understanding — SELECTED: native AVFoundation pipeline (no new model)
-- **Runtime**: Apple **AVFoundation + ImageIO** for metadata, adaptive keyframe extraction, and audio→
-  16 kHz mono WAV. **No ffmpeg / no external binary** → packaging-clean, offline, clean-machine installable.
-- **Composition**: keyframes → VLM (mlx-vlm, existing) + audio → STT (parakeet, existing) → LLM fusion.
-  Exposed as a canonical N-step `ExecutionPlan`.
-- **Honest scope**: sampled-frame + audio fusion, NOT deep temporal modeling (stated in the result/plan).
-- **Status**: pipeline + plan + all branches unit-verified (short/speech, no-audio, corrupt, cancellation,
-  sampler). Live end-to-end on a real clip pending a bundled test video.
-- **Rejected**: brute-forcing every frame into a VLM (cost); local video *generation* (Stage 3 item 13 —
-  deferred).
+## Video understanding — native AVFoundation pipeline — LIVE ✅
+- **Runtime**: Apple **AVFoundation + ImageIO** (metadata, adaptive keyframes, audio→16 kHz WAV). **No
+  ffmpeg** in esh — packaging-clean, offline. Composition: keyframes → VLM (nanoLLaVA) + audio → STT
+  (parakeet) → LLM fusion (llama-3.2-3b). Canonical N-step `ExecutionPlan`.
+- **LIVE** (synthetic clip: red circle→blue square visuals + "meeting Thursday 3 o'clock" speech,
+  deliberately disjoint so each branch is provable):
+  - visual-only Q → "Red circle (0:00), Blue square (0:02); red, white, blue" ✅ (VLM, with timestamps)
+  - audio-only Q → "Thursday afternoon, 3 o'clock" ✅ (STT)
+  - combined Q → fuses both with timestamps ✅
+  - ~13–25 s/question. Plan verified: metadata→keyframes→image-understand×2→audio-extract→STT→language-fuse.
+- **Honest scope**: sampled-frame + audio fusion, NOT deep temporal modeling (stated in plan rationale).
+- **Known gap**: esh mis-classifies nanoLLaVA as text-only at install, so Auto can't resolve a VLM yet —
+  the request passes `options.visionModel` explicitly. VLM auto-classification is a Stage 4 item.
+- **Rejected**: brute-forcing every frame; local video generation (item 13, deferred).
 
-## Audio intelligence — SELECTED: sherpa-onnx diarization (torch-free)
-- **Runtime**: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) on **onnxruntime** (already present for
-  rembg). **License**: Apache-2.0. Models: pyannote-style segmentation (~6 MB) + speaker embedding (~28 MB).
-- **Capability**: `audio.diarize` → anonymous speaker CLUSTERS + time ranges (+ optional STT transcript).
-- **Honest scope**: clusters, NOT speaker identity; not word-aligned to the transcript.
-- **Status**: implemented + unit-tested; sherpa-onnx + models are an OPTIONAL dependency (clear error when
-  absent); live run pending model download.
-- **Rejected**: **pyannote.audio** — requires PyTorch (heavy; against esh's torch-free MLX/onnx preference).
+## Audio diarization — sherpa-onnx — LIVE ✅
+- **Runtime**: sherpa-onnx (onnxruntime, torch-free). **Models** (on SSD `audio/diarization-models/`):
+  pyannote segmentation `model.int8.onnx` (5.7 MB) + 3D-Speaker ERes2Net embedding (38 MB). Apache-2.0.
+- **LIVE** (2-speaker synthetic audio, two TTS voices concatenated, 9 s): correctly found **2 speakers**,
+  3 segments with timestamps (speaker_1 ≈ 0–4.1 s, speaker_2 ≈ 4.1–9 s), structured JSON typed result,
+  **STT transcript merged** (parakeet), honest "clusters, not identities" note. ~9 s latency.
+- **Capability**: `audio.diarize` (audio→structured). sherpa-onnx + models optional (clear error absent).
+- **Rejected**: pyannote.audio (requires PyTorch — against the torch-free preference).
 
-## Resource / packaging notes (items 10, 11)
-- All large model downloads route to the **assets root** (`/Volumes/Sviat SSD/esh-models`) via
-  `HF_HOME`/`HF_HUB_CACHE`; providers call `ensureAssetsAvailable` so a disconnected SSD fails clearly
-  instead of silently filling internal disk. Verified: the 5.5 GB image model landed on the SSD.
-- Heavy Python deps (mflux, rembg/onnxruntime, sherpa-onnx) are **optional/on-demand**, not baked into the
-  release. `Tools/python-requirements.txt` documents them.
-- Temp frames/audio/video extracts are cleaned via `defer` per execution.
-- RAM guard: image gen/upscale refuse/kill under genuinely low memory (below floor, or critical pressure
-  AND < 2× floor) rather than thrash/crash.
+## Resource / packaging (items 10, 11) — validated
+- Large model downloads route to the **assets root (SSD)** via `HF_HOME`/`HF_HUB_CACHE`; verified: Z-Image
+  (5.5 GB) and SeedVR2 (6.8 GB) landed on the SSD, internal disk stayed ~15–34 GB free. Providers call
+  `ensureAssetsAvailable` → a disconnected SSD fails clearly.
+- Heavy Python deps optional/on-demand: mflux (image), rembg/onnxruntime (segment), sherpa-onnx (diarize).
+  Documented in `Tools/python-requirements.txt`. No developer-machine-only deps in esh's runtime path
+  (ffmpeg is used ONLY to build test fixtures, never by esh).
+- Temp frames/audio/video cleaned per run (`defer`). RAM guard refuses/kills generation only when memory
+  is genuinely low (below floor, or critical pressure AND < 2× floor) — refined after a false-positive kill.
+
+## Model Fit reconciliation (item 6)
+- Predicted image peak (heuristic, weightsGB=disk 6.5) ~9.9 GB vs **observed 4.4 GB** → memory model is
+  **conservative/safe** (no OOM, no swap; "Comfortable" is memory-correct).
+- Gap: Fit expresses MEMORY only; a memory-Comfortable model can still be slow (215 s). Image Fit now
+  carries an explicit caveat ("memory fit only — speed is compute-bound and scales with resolution"). True
+  performance-aware selection (benchmark seconds/image) is a Scheduler v2 / Auto task (Stage 4). Global Fit
+  semantics unchanged.
