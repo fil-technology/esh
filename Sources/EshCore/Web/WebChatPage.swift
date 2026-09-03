@@ -826,8 +826,16 @@ function renderMsg(m){
       : (m.transcript ? `<div class="transcap">${esch(m.transcript)}</div>` : '');
     const body=(a?`<div class="attwrap">${a}</div>`:'')+cap+(m.content?md(m.content):'');
     d.innerHTML=`<div class="userrow"><div class="userbubble">${body}</div></div>`; return d; }
-  if(m.isError){ d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div>
-    <div class="d">${esch(m.detail||'')}</div>
+  if(m.isError){
+    // Long/technical details (e.g. a Python traceback) are collapsed behind "Show details" so the card
+    // stays readable; a short human summary shows by default.
+    const raw=(m.detail||''); const longErr=raw.length>180||raw.indexOf('Traceback')>=0;
+    const summary=longErr?(raw.indexOf('Traceback')>=0?'The local model couldn’t complete this request.':(raw.slice(0,160)+'…')):raw;
+    const detailBlock=longErr
+      ? `<div class="d">${esch(summary)}</div><details class="reason" style="margin-top:6px"><summary>Show details</summary><div class="rc mono" style="font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto">${esch(raw)}</div></details>`
+      : `<div class="d">${esch(raw)}</div>`;
+    d.innerHTML=`<div class="errcard"><div class="t">${esch(m.title||'Something went wrong')}</div>
+    ${detailBlock}
     <div class="d" style="margin-top:6px">Your conversation is safe — nothing was lost.</div>
     <div style="display:flex;gap:10px;margin-top:12px">
       <span class="btn" style="padding:7px 14px;font-size:12px" data-act="retryLast" data-arg="${esch(m.lastUser||'')}">Try again</span>
