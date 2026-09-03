@@ -308,7 +308,7 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
         onbStep:0, voice:null, prefs:{}, installing:{}, effortOpen:false, audioModels:null, voiceDrop:null, chatMenu:null, genChatId:null,
-        folders:{}, renaming:null };
+        capModels:null, capDrop:null, folders:{}, renaming:null };
 
 /* ---------- persistence ---------- */
 function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}}
@@ -334,6 +334,7 @@ async function refreshEngine(){ S.engine=await api('/v1/engine'); render(); }
 async function refreshModels(){ const d=await api('/v1/models'); S.models=(d&&d.data||[]).map(m=>m.id); }
 async function refreshCatalog(){ S.catalog=await api('/v1/catalog'); render(); }
 async function refreshAudioModels(){ const d=await api('/v1/audio/models'); S.audioModels=(d&&d.data)||[]; render(); }
+async function refreshCapModels(){ S.capModels=await api('/v1/capability-models'); render(); }
 async function refreshConfig(){ S.config=await api('/v1/config');
   // Cross-client settings live in esh config (not the browser): reflect the persisted performance mode.
   const pm=S.config&&S.config.defaults&&S.config.defaults.performanceMode;
@@ -516,7 +517,9 @@ const ACT={
   speakMsg:(id)=>{ const c=cur(); const m=c&&c.messages.find(x=>x.id===id); if(!m)return; if(S._speakId===id){ stopSpeak(); render(); } else { speakMessage(m); } },
   speakToggle:()=>{ const a=S._speakAudio; if(!a)return; if(a.paused)a.play().catch(()=>{}); else a.pause(); render(); },
   speakStop:()=>{ stopSpeak(); render(); },
-  pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); render(); },
+  pickPane:(p)=>{ S.settingsPane=p; S.voiceDrop=null; S.capDrop=null; if(p==='Voice'&&!S.audioModels)refreshAudioModels(); if(p==='Models'&&!S.capModels)refreshCapModels(); render(); },
+  toggleCapDrop:(w)=>{ S.capDrop=(S.capDrop===w)?null:w; render(); },
+  pickCapModel:(arg)=>{ const i=arg.indexOf('|'); const key=arg.slice(0,i), id=arg.slice(i+1); S.capDrop=null; const patch={}; patch[key]=id; postConfig({capabilityModels:patch}).then(()=>refreshCapModels()); render(); },
   toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
   pickTtsModel:(id)=>{ S.voiceDrop=null; postConfig({ttsModel:id}).then(()=>render()); render(); },
   pickTtsVoice:(id)=>{ S.prefs.ttsVoice=id; savePrefs(); S.voiceDrop=null; render(); },
@@ -546,6 +549,7 @@ document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); c
   const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
   if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
+  if(S.capDrop && !e.target.closest('.pop') && a!=='toggleCapDrop'){ S.capDrop=null; render(); if(!t)return; }
   if(S.chatMenu && !e.target.closest('.pop')){ S.chatMenu=null; render(); if(!t)return; }
   if(!t)return; const arg=t.getAttribute('data-arg'); if(ACT[a]){ e.stopPropagation(); ACT[a](arg); } });
 // Keyboard: Escape unwinds the most-nested surface; Enter/Space activate focused data-act controls.
@@ -1310,6 +1314,7 @@ function renderPane(){
     const s=e.storage||{};
     return `<div style="display:flex;align-items:center;margin-bottom:18px;max-width:520px"><span style="font-size:15px;font-weight:600">Models</span><span class="sp" style="flex:1"></span><span class="btn ghost" style="padding:7px 14px;font-size:12.5px" data-act="openModels">Browse models…</span></div>
       <div style="max-width:520px"><div class="menuhead" style="padding:0 0 4px">Installed</div>${rows}
+        ${renderTaskModels()}
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;margin-top:18px"><span>Model storage</span><span data-act="goPane" data-arg="Storage" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(volLabel(s.assetsRoot))}${s.freeBytes?(' · '+gb(s.freeBytes)+' free'):''} <span style="font-size:9px">▸</span></span></div></div>`; }
   if(p==='Voice') return renderVoicePane();
   if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Advanced</div><div style="max-width:480px">
@@ -1318,6 +1323,34 @@ function renderPane(){
       <div style="padding:12px 0 0;display:flex;gap:14px;font-size:12px;color:rgba(32,30,27,.65)"><span>✓ Native esh</span><span>✓ OpenAI-compatible</span></div>
       <div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5">Structured output, capability resolution and the Request Inspector are surfaced per response in the Execution panel.</div></div>`; }
   return `<div style="font-size:15px;font-weight:600;margin-bottom:10px">${p}</div><div style="font-size:13px;color:var(--muted)">Designed in the canvas — more controls arrive in a later rc.</div>`;
+}
+// "Task models" — which installed model performs each capability. Driven by /v1/capability-models (the
+// REAL installed models' declared capabilities), so choices are never fabricated. Auto = esh resolves the
+// best local model for that task; fixed rows name the single built-in backend so there's no false choice.
+function renderTaskModels(){
+  const cm=S.capModels; if(!cm) return '<div style="font-size:12px;color:var(--muted);margin-top:18px">Loading task models…</div>';
+  let sel='';
+  (cm.selectable||[]).forEach(a=>{
+    const cur=a.current||'auto';
+    const curName=cur==='auto'?'Auto':((a.options.find(o=>o.id===cur)||{}).name||shortModel(cur));
+    const open=S.capDrop===a.key;
+    let menu='';
+    if(open){ let rr='';
+      (a.options||[]).forEach(o=>{ const on=o.id===cur; rr+=`<div class="pickrow ${on?'sel':''}" data-act="pickCapModel" data-arg="${esch(a.key+'|'+o.id)}"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(o.name)}</span><span class="sp" style="flex:1"></span>${on?'<span class="ck">✓</span>':''}</div>`; });
+      menu=`<div class="pop" style="right:0;top:calc(100% + 4px);width:320px;padding:6px 0;max-height:280px;overflow-y:auto">${rr}</div>`;
+    }
+    const only=(a.options||[]).length<=1;
+    sel+=`<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
+      <span style="display:flex;flex-direction:column;min-width:0;padding-right:12px"><span style="font-size:13.5px">${esch(a.label)}</span>${a.note?`<span style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4">${esch(a.note)}</span>`:''}</span>
+      <button class="cchip" ${only?'disabled style="opacity:.6;cursor:default"':`data-act="toggleCapDrop" data-arg="${esch(a.key)}" style="background:${open?'rgba(32,30,27,.09)':'rgba(32,30,27,.05)'}"`}><span class="lbl">${esch(curName)}</span>${only?'':'<span class="chev">▾</span>'}</button>
+      ${menu}</div>`;
+  });
+  let fx='';
+  (cm.fixed||[]).forEach(a=>{ fx+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;font-size:12.5px;color:var(--muted)"><span>${esch(a.label)}</span><span>${esch(a.current)}</span></div>`; });
+  return `<div class="menuhead" style="padding:18px 0 2px">Task models</div>
+    <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:4px">Choose which model performs each task, or leave it on Auto.</div>
+    ${sel}
+    ${fx?`<div class="menuhead" style="padding:16px 0 2px">Built-in backends</div><div style="font-size:11.5px;color:var(--muted);margin-bottom:2px">Single on-device backend — no choice yet.</div>${fx}`:''}`;
 }
 // A settings dropdown row (label + current-value chip that opens a checkmark menu). Options come from
 // real esh capabilities — never a fabricated list.

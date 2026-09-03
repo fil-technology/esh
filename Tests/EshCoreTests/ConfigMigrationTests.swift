@@ -24,6 +24,27 @@ struct ConfigMigrationTests {
     }
 
     @Test
+    func capabilityModelPinsRoundTripThroughTOML() throws {
+        var config = EshConfig.default
+        config.defaults.capabilityModels["vector.generate"] = "mlx-community/some-chat-model"
+        config.defaults.capabilityModels["image.understand"] = "mlx-community/nanollava"
+        let parsed = try EshConfig(tomlText: config.tomlString)
+        #expect(parsed == config)
+        #expect(parsed.defaults.capabilityModels["vector.generate"] == "mlx-community/some-chat-model")
+        #expect(parsed.defaults.capabilityModels["image.understand"] == "mlx-community/nanollava")
+    }
+
+    @Test
+    func autoAndEmptyCapabilityPinsAreDropped() throws {
+        var config = EshConfig.default
+        config.defaults.capabilityModels["vector.generate"] = "auto"
+        config.defaults.capabilityModels["language.generate"] = ""
+        let parsed = try EshConfig(tomlText: config.tomlString)
+        // "auto"/"" mean Auto — they are not persisted, so a clean config stays clean.
+        #expect(parsed.defaults.capabilityModels.isEmpty)
+    }
+
+    @Test
     func legacyConfigWithoutSchemaVersionDefaultsToOne() throws {
         // A config file written by an older esh release (no [meta] section).
         let legacy = """

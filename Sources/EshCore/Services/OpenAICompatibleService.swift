@@ -951,7 +951,24 @@ public struct OpenAICompatibleService: Sendable {
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
-            registryUCMR.register(TextToSVGProvider(infer: { req in try await inference.infer(request: req) }))
+            // vector.generate (text→SVG): a small resident model often fails to emit clean JSON. Give the
+            // provider a repair pass + escalation to Apple Intelligence (on-device, JSON-reliable) when it's
+            // available. Auto is quality-first (Apple FM first); a user-pinned model takes precedence.
+            let svgConfigRoot = root
+            var svgStrong: TextToSVGProvider.StrongInferFn? = nil
+            if AppleIntelligenceService().status().available {
+                svgStrong = { sys, user, _ in
+                    let text = try await AppleIntelligenceService().generate(prompt: user, instructions: sys)
+                    return (text, "apple-intelligence")
+                }
+            }
+            registryUCMR.register(TextToSVGProvider(
+                infer: { req in try await inference.infer(request: req) },
+                strongInfer: svgStrong,
+                preferStrongFirst: {
+                    let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["vector.generate"] ?? ""
+                    return pick.isEmpty || pick == "auto"   // Auto → quality-first; a pin → the pinned model first
+                }))
             // Embeddings + reranking ride the already-bundled llama-server (--embeddings / --reranking).
             let auxRuntime = LlamaAuxRuntimeManager(resolve: { modelID in
                 guard let id = modelID else { throw CapabilityError.failed("embeddings/rerank require an explicit model id") }
@@ -1014,8 +1031,13 @@ public struct OpenAICompatibleService: Sendable {
                 extractor: AVFoundationVideoExtractor(),
                 describeFrame: { imagePath, prompt, explicitModel in
                     let installs = (try? modelStore.listInstalls()) ?? []
-                    // Prefer an explicitly-requested vision model (option "visionModel"); else capability-resolve.
-                    guard let vm = explicitModel ?? videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
+                    // Prefer an explicitly-requested vision model (option "visionModel"); else the user's
+                    // Vision pin (Settings → Models); else capability-resolve.
+                    let visionPin: String? = {
+                        let p = (try? EshConfigStore(root: root).load())?.defaults.capabilityModels["image.understand"] ?? ""
+                        return (!p.isEmpty && p != "auto" && installs.contains(where: { $0.id == p })) ? p : nil
+                    }()
+                    guard let vm = explicitModel ?? visionPin ?? videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
                         throw CapabilityError.failed("no vision model for video understanding (pass options.visionModel or install a vision-capable model)")
                     }
                     // Use the local install path so mlx-vlm loads weights from disk instead of trying to
@@ -1035,7 +1057,17 @@ public struct OpenAICompatibleService: Sendable {
             // once multiple capable models are installed); the interactive config-preference is active.
             let capabilityScheduler = CapabilityScheduler(index: CapabilityEvidenceIndex(root: root))
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx,
-                modelResolver: { req in capabilityResolver.resolveModelID(capability: req.capability, from: (try? modelStore.listInstalls()) ?? []) },
+                modelResolver: { req in
+                    let installs = (try? modelStore.listInstalls()) ?? []
+                    // Per-capability model override (Settings → Models → Task models). Honored only when the
+                    // pinned model is actually installed; otherwise fall back to capability-aware Auto.
+                    let overrides = (try? EshConfigStore(root: root).load())?.defaults.capabilityModels ?? [:]
+                    if let pick = overrides[req.capability.rawValue], !pick.isEmpty, pick != "auto",
+                       installs.contains(where: { $0.id == pick }) {
+                        return pick
+                    }
+                    return capabilityResolver.resolveModelID(capability: req.capability, from: installs)
+                },
                 scheduler: capabilityScheduler,
                 candidateModels: { _ in [] })
             executeClosure = { req in try await execSvc.executeCollecting(req) }

@@ -7,6 +7,22 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — per-capability model selection + robust vector.generate (development milestone, untagged).**
+  Two user-facing gaps closed. **(1) Task models:** Settings → Models now has a **Task models** section where
+  you pick which installed model performs each capability — **Chat & reasoning**, **Vector & SVG**, and
+  **Vision (images & video)** — or leave it on **Auto**. Options are driven by the real installed models'
+  declared capabilities (`GET /v1/capability-models`), never a fabricated list; built-in single-backend tasks
+  (image generation → Z-Image, upscaling → Real-ESRGAN, diarization → sherpa-onnx, OCR → Apple Vision) are
+  shown as read-only so it's clear why there's no choice yet. Pins persist in `config.toml`
+  (`[defaults.capability_models]`, `EshDefaultsConfig.capabilityModels`) and are honored at execution time by
+  the capability model resolver and the video frame describer (an unavailable pin falls back to Auto).
+  **(2) SVG generation no longer dead-ends:** `vector.generate` asked the resident 3B for strict JSON and
+  failed with "The model did not return a JSON scene" whenever the small model's output wasn't parseable.
+  It now does a **repair pass** (feeds the bad output back) and **escalates to Apple Intelligence** (on-device,
+  JSON-reliable) — Auto is quality-first (Apple FM first, resident as fallback); a user-pinned model is tried
+  first instead. **LIVE-verified**: "red rectangle above yellow circle" → valid SVG via `apple-intelligence`.
+  Full suite 468 green.
+
 - **esh 2.1 UCMR — Router Auto: evidence-driven semantic capability routing (development milestone, untagged).**
   Makes "which capability does this request want?" a measured, explainable, conservative decision — kept
   strictly separate from Scheduler Auto ("how to execute it"). New: a **v2 multilingual routing dataset**

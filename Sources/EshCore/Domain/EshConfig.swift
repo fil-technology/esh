@@ -72,6 +72,12 @@ public struct EshConfig: Codable, Hashable, Sendable {
             case ("defaults", "stt_model"):
                 let m = parseString(value)
                 config.defaults.sttModel = m.isEmpty ? nil : m
+            case ("defaults.capability_models", _):
+                // Arbitrary capability-rawValue keys → installed model id. Empty/"auto" is dropped (= Auto).
+                // Keys may be quoted in TOML (they contain a dot), so strip quotes from the key too.
+                let capKey = parseString(key)
+                let m = parseString(value)
+                if !capKey.isEmpty, !m.isEmpty, m != "auto" { config.defaults.capabilityModels[capKey] = m }
             case ("engines.llama_cpp", "enabled"):
                 config.engines.llamaCpp.enabled = parseBool(value) ?? config.engines.llamaCpp.enabled
             case ("engines.llama_cpp", "binary"):
@@ -112,7 +118,7 @@ public struct EshConfig: Codable, Hashable, Sendable {
         context_size = \(defaults.contextSize)
         tts_model = "\(defaults.ttsModel ?? "")"
         stt_model = "\(defaults.sttModel ?? "")"
-
+        \(capabilityModelsSection)
         [engines.llama_cpp]
         enabled = \(formatBool(engines.llamaCpp.enabled))
         binary = "\(engines.llamaCpp.binary)"
@@ -130,6 +136,17 @@ public struct EshConfig: Codable, Hashable, Sendable {
 
         """
     }
+
+    /// TOML for the per-capability model overrides. Empty when nothing is pinned (all Auto), so a clean
+    /// config stays clean. Keys are capability rawValues (e.g. "vector.generate").
+    private var capabilityModelsSection: String {
+        let pinned = defaults.capabilityModels.filter { !$0.value.isEmpty && $0.value != "auto" }
+        guard !pinned.isEmpty else { return "" }
+        let rows = pinned.sorted { $0.key < $1.key }
+            .map { "\"\($0.key)\" = \"\($0.value)\"" }
+            .joined(separator: "\n")
+        return "\n[defaults.capability_models]\n\(rows)\n"
+    }
 }
 
 public struct EshDefaultsConfig: Codable, Hashable, Sendable {
@@ -141,19 +158,25 @@ public struct EshDefaultsConfig: Codable, Hashable, Sendable {
     /// by default and can be switched. nil = use the built-in working default.
     public var ttsModel: String?
     public var sttModel: String?
+    /// esh 2.1 — per-capability model overrides (capability rawValue → installed model id). An entry that
+    /// is absent or "auto" means Auto (esh resolves the best installed/local model for that capability).
+    /// This is the user-facing "which model performs this action" surface, honored at execution time.
+    public var capabilityModels: [String: String]
 
     public init(engine: String = "auto", modelDir: String = "~/.esh/models", contextSize: Int = 8192,
-                performanceMode: String = "auto", ttsModel: String? = nil, sttModel: String? = nil) {
+                performanceMode: String = "auto", ttsModel: String? = nil, sttModel: String? = nil,
+                capabilityModels: [String: String] = [:]) {
         self.engine = engine
         self.modelDir = modelDir
         self.contextSize = contextSize
         self.performanceMode = performanceMode
         self.ttsModel = ttsModel
         self.sttModel = sttModel
+        self.capabilityModels = capabilityModels
     }
 
     private enum CodingKeys: String, CodingKey {
-        case engine, modelDir, contextSize, performanceMode, ttsModel, sttModel
+        case engine, modelDir, contextSize, performanceMode, ttsModel, sttModel, capabilityModels
     }
 
     public init(from decoder: Decoder) throws {
@@ -164,6 +187,7 @@ public struct EshDefaultsConfig: Codable, Hashable, Sendable {
         self.performanceMode = try c.decodeIfPresent(String.self, forKey: .performanceMode) ?? "auto"
         self.ttsModel = try c.decodeIfPresent(String.self, forKey: .ttsModel)
         self.sttModel = try c.decodeIfPresent(String.self, forKey: .sttModel)
+        self.capabilityModels = try c.decodeIfPresent([String: String].self, forKey: .capabilityModels) ?? [:]
     }
 }
 

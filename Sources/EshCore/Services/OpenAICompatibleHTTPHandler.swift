@@ -84,6 +84,7 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             // 2.0 Web Experience data endpoints — thin JSON over the canonical services.
             case ("GET", "/v1/engine"), ("GET", "/v1/schedule"), ("GET", "/v1/catalog"),
                  ("GET", "/v1/config"), ("GET", "/v1/doctor"), ("GET", "/v1/onboarding"),
+                 ("GET", "/v1/capability-models"),
                  ("POST", "/v1/config"),
                  ("POST", "/v1/models/install"), ("GET", "/v1/models/install"),
                  ("POST", "/v1/models/install/cancel"):
