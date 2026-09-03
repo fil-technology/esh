@@ -7,6 +7,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR Stage 1 — first reference capability providers (development milestone, untagged).**
+  Two substantially-different non-text providers prove the capability abstraction end-to-end, with no
+  model downloads. **Text→SVG** (`vector.generate`): an installed LLM emits a constrained JSON scene-IR
+  that a deterministic Swift renderer compiles to safe, whitelist-only SVG (sanitized values, validated),
+  persisted as a typed `.svg` Artifact with static-sandbox preview — verified live via `/v1/execute` +
+  `/v1/artifacts`. **Embeddings + Reranking** (`language.embed`/`language.rerank`): ride the already-
+  bundled `llama-server` (`--embeddings`/`--reranking`) with zero new dependency (no GPL), producing
+  typed `.embedding`/`.ranked` artifacts — embeddings verified live (dim-3072 vectors via the GGUF model
+  in embedding mode); rerank unit-tested (live needs a reranker model installed).
 - **esh 2.1 UCMR Stage 0 — universal-capability core contract (development milestone, untagged).**
   Additive foundation for the Universal Capability & Modality Runtime, with all 2.0 contracts and
   behavior preserved. New types: `ExecutionRequest`/`ExecutionResult` (typed `inputs[]` + capability +
