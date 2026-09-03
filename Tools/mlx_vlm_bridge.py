@@ -1243,7 +1243,10 @@ def image_generate() -> None:
     if not os.path.exists(cli):
         _fail("mflux is not available (install with: pip install mflux)")
 
-    cmd = [cli, "--prompt", prompt, "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
+    # Default to the pre-quantized 4-bit Z-Image-Turbo (~6.5 GB, lower peak memory) rather than the full
+    # bf16 default (~12 GB); overridable via request "model".
+    model = request.get("model") or "filipstrand/Z-Image-Turbo-mflux-4bit"
+    cmd = [cli, "--model", str(model), "--prompt", prompt, "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
     if quantize is not None:
         cmd += ["--quantize", str(int(quantize))]
     if width is not None:
