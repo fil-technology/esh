@@ -493,6 +493,20 @@ struct WebChatPageTests {
         #expect(html.contains("data-act=\"doInstall\""))
     }
 
+    // UCMR Stage 2: assistant messages render typed capability artifacts (image/SVG inline via
+    // /v1/artifacts, download; other kinds as a file pill) via a /v1/execute client.
+    @Test
+    func rendersTypedCapabilityArtifacts() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function artifactHTML("))
+        #expect(html.contains("/v1/artifacts/"))
+        #expect(html.contains("async function execCapability("))
+        #expect(html.contains("'/v1/execute'"))
+        // Wired into the assistant message renderer.
+        #expect(html.contains("m.artifacts && m.artifacts.length"))
+        #expect(html.contains("class=\"astimg\""))
+    }
+
     // Soak: install progress stays visible from the main chat view (not just the model browser) via a
     // top-bar indicator; polling continues regardless of the active view.
     @Test
