@@ -933,7 +933,11 @@ public struct OpenAICompatibleService: Sendable {
             // Vision understanding (image + text -> text) via mlx-vlm.
             let visionService = VisionUnderstandingService()
             registryUCMR.register(VisionUnderstandProvider(understand: { paths, prompt, model, maxTokens in
-                try visionService.understand(imagePaths: paths, prompt: prompt, model: model, maxTokens: maxTokens)
+                // Prefer the local install path so mlx-vlm loads from disk instead of treating an install id
+                // (e.g. "mlx-community--nanollava-1.5-4bit", which has "--") as a HF repo id and failing.
+                let installs = (try? modelStore.listInstalls()) ?? []
+                let modelPath = installs.first(where: { $0.id == model })?.installPath ?? model
+                return try visionService.understand(imagePaths: paths, prompt: prompt, model: modelPath, maxTokens: maxTokens)
             }))
             // OCR via Apple Vision (zero dependency, on-device, no model).
             registryUCMR.register(AppleVisionOCRProvider())

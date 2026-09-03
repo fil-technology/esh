@@ -119,6 +119,18 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             isAdapter: modelPlan.isAdapter
         )
 
+        // Stage 4.3: the plan defaults MLX installs to text-only; the downloaded config.json is the source
+        // of truth. If it's a vision-language model, upgrade the spec so Auto (CapabilityModelResolver) can
+        // resolve it for image.understand / video.understand without an explicit id.
+        var task = modelPlan.task
+        var inputModalities = modelPlan.inputModalities
+        var capabilities = modelPlan.capabilities
+        if modelPlan.backend == .mlx, VisionModelConfigClassifier.classifyInstall(directory: installDirectory) {
+            task = .vision
+            if !inputModalities.contains(.image) { inputModalities.append(.image) }
+            capabilities.vision = VisionCapabilities(supportsImageUnderstanding: true, supportsOCR: false)
+        }
+
         let install = ModelInstall(
             id: installID,
             spec: ModelSpec(
@@ -130,10 +142,10 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 baseModelID: baseModelID,
                 architectureFingerprint: modelPlan.architectureFingerprint,
                 variant: modelPlan.variant,
-                task: modelPlan.task,
-                inputModalities: modelPlan.inputModalities,
+                task: task,
+                inputModalities: inputModalities,
                 outputModalities: modelPlan.outputModalities,
-                capabilities: modelPlan.capabilities
+                capabilities: capabilities
             ),
             installPath: installDirectory.path,
             sizeBytes: resolvedSize,
