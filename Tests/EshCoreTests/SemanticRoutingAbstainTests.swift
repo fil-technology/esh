@@ -63,4 +63,36 @@ struct SemanticRoutingAbstainTests {
         #expect(intent?.action == .executeCapability)
         #expect(intent?.capability == .imageSegment)
     }
+
+    // MARK: - Tier-0 ambiguous vs unresolved split (escalation gate)
+
+    @Test func genericImproveIsAmbiguousNotUnresolved() {
+        // "make this better" on an image → AMBIGUOUS (multiple registered image transforms plausible) → must
+        // NOT escalate to a semantic router (that's where the eager guesses came from).
+        let intent = DeterministicIntentRouter().route(message: "make this better", inputModalities: [.image])
+        #expect(intent.action == .clarify)
+        #expect(intent.clarifyKind == .ambiguous)
+    }
+
+    @Test func multiStepIsAmbiguous() {
+        let intent = DeterministicIntentRouter().route(message: "Remove the background and upscale it 2×", inputModalities: [.image])
+        #expect(intent.action == .clarify)
+        #expect(intent.clarifyKind == .ambiguous)
+    }
+
+    @Test func nonLatinAttachmentIsUnresolvedSoItCanEscalate() {
+        // Russian "improve this" — Tier-0 can't read it; it's UNRESOLVED so a multilingual router MAY recover
+        // a specific capability (the Safety Validator then decides). Escalation is allowed here.
+        let intent = DeterministicIntentRouter().route(message: "Что здесь написано?", inputModalities: [.image])
+        #expect(intent.action == .clarify)
+        #expect(intent.clarifyKind == .unresolved)
+    }
+
+    @Test func englishNoiseIsAmbiguousNotUnresolved() {
+        // "here you go" with an image — parseable English, no actionable content → AMBIGUOUS (nothing to
+        // recover; escalating only invites a hallucination).
+        let intent = DeterministicIntentRouter().route(message: "here you go", inputModalities: [.image])
+        #expect(intent.action == .clarify)
+        #expect(intent.clarifyKind == .ambiguous)
+    }
 }

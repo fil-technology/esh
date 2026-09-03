@@ -100,11 +100,18 @@ public struct RouterAutoPolicy: Sendable {
     public func choose(from evidence: [RouterEvidence], currentSchemaVersion: Int, currentDatasetVersion: Int,
                        currentOS: String?) -> Decision {
         var reasons: [String] = []
-        // Tier-0 is the free, instant, safe baseline. A Tier-1 router must BEAT it (higher conservative
+        // Tier-0 is the free, instant, safe baseline. A semantic router must BEAT it (higher conservative
         // score) to be worth its latency/memory — otherwise Router Auto stays on Tier-0 + clarification.
         let tier0Score = evidence.first(where: { $0.mode == "tier0" })?.conservativeScore ?? -.greatestFiniteMagnitude
-        // Consider only Tier-1 semantic routers, available + fresh + safe + better than Tier-0.
-        let candidates = evidence.filter { $0.mode == "tier1" && $0.router != "tier0" }
+        // The PRODUCTION path is the ambiguity-gated hybrid (Tier-0 authority + escalate only `unresolved` +
+        // Safety Validator), so evaluate a router's `hybrid-gated` evidence when present; else fall back to its
+        // pure `tier1` measurement. One candidate per router (gated preferred).
+        var byRouter: [String: RouterEvidence] = [:]
+        for e in evidence where e.router != "tier0" && (e.mode == "hybrid-gated" || e.mode == "tier1") {
+            if byRouter[e.router]?.mode == "hybrid-gated" { continue }
+            if e.mode == "hybrid-gated" || byRouter[e.router] == nil { byRouter[e.router] = e }
+        }
+        let candidates = Array(byRouter.values)
         let eligible = candidates.filter { e in
             guard e.available else { reasons.append("\(e.router): unavailable"); return false }
             guard e.isFresh(currentSchemaVersion: currentSchemaVersion, currentDatasetVersion: currentDatasetVersion, currentOS: currentOS) else {

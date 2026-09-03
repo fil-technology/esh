@@ -20,13 +20,16 @@ public struct IntentResolver: Sendable {
         let modalities = attachments.map(Self.modality)
         var intent = router.route(message: message, inputModalities: modalities)
 
-        // Tier 1 escalation: only when Tier 0 couldn't decide (clarify). Keeps LLM calls rare, and the
-        // semantic proposal must name a REGISTERED capability or we keep Tier 0's clarify (no false exec).
-        if intent.action == .clarify, let semantic {
+        // Tier 1 escalation: ONLY on an `unresolved` Tier-0 clarify — never `ambiguous` (where the user must
+        // choose). The proposal must name a REGISTERED capability AND pass the Safety Validator (modality +
+        // specific-vs-vague), or Tier-0's clarify stands (no false execution). Keeps LLM calls rare.
+        if intent.action == .clarify, intent.clarifyKind == .unresolved, let semantic {
             let schema = CapabilitySchemaBuilder.build(from: registry)
             if let proposal = await semantic.propose(message: message, inputModalities: modalities, schema: schema),
                proposal.action == .executeCapability, let cap = proposal.capability,
-               registry.all.contains(where: { $0.descriptor.capabilities.contains(cap) }) {
+               registry.all.contains(where: { $0.descriptor.capabilities.contains(cap) }),
+               await CapabilityRouterService.passesSafetyValidator(proposal, cap: cap, message: message,
+                                                                   mods: modalities, sem: semantic, gated: true) {
                 intent = proposal
             }
         }

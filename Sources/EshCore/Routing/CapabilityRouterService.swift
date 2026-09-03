@@ -101,27 +101,53 @@ public struct CapabilityRouterService: Sendable {
         let schema = CapabilitySchemaBuilder.build(from: reg)
         let sem: SemanticIntentRouter? = semanticOverride ?? (mode.hasPrefix("apple") ? AppleFMSemanticRouter() : semantic)
         let tier1Only = (mode == "tier1" || mode == "apple" || mode == "gemma")
+        // "gated" hybrid (spec: ambiguity-gated Router Auto): escalate to the semantic router ONLY on an
+        // `unresolved` Tier-0 clarify (never on `ambiguous`), and run its proposal through the Safety Validator.
+        let gated = mode.contains("gated")
         let t0 = tier0
         return { message, mods in
             let start = Date()
             if tier1Only {
                 let intent = (await sem?.propose(message: message, inputModalities: mods, schema: schema))
-                    ?? CapabilityIntent(action: .clarify, provenance: .init(tier: "tier1-semantic", router: sem?.name ?? "none"))
+                    ?? CapabilityIntent(action: .abstain, provenance: .init(tier: "tier1-semantic", router: sem?.name ?? "none"))
                 await latencies.add(Date().timeIntervalSince(start) * 1000)
                 return intent
             }
-            // hybrid: Tier-0 first; escalate to Tier-1 only on clarify; validate the proposal is registered.
+            // hybrid: Tier-0 first; escalate to Tier-1 only on clarify (gated: only `unresolved`).
             var intent = t0.route(message: message, inputModalities: mods)
-            if intent.action == .clarify, let sem {
+            let escalate = intent.action == .clarify && (!gated || intent.clarifyKind == .unresolved)
+            if escalate, let sem {
                 if let p = await sem.propose(message: message, inputModalities: mods, schema: schema),
                    p.action == .executeCapability, let cap = p.capability,
-                   reg.all.contains(where: { $0.descriptor.capabilities.contains(cap) }) {
+                   reg.all.contains(where: { $0.descriptor.capabilities.contains(cap) }),
+                   await Self.passesSafetyValidator(p, cap: cap, message: message, mods: mods, sem: sem, gated: gated) {
                     intent = p
                 }
                 await latencies.add(Date().timeIntervalSince(start) * 1000)   // only escalated cases pay LLM cost
             }
             return intent
         }
+    }
+
+    /// Safety Validator (spec §2): a semantic proposal earns EXECUTION authority only if (a) its capability's
+    /// required input modality is actually present, and (b) — in gated mode — a reframed specific-vs-vague
+    /// verification confirms the request singles out this capability. Any "vague"/uncertain answer withholds
+    /// authority (the Tier-0 clarify stands). Non-gated hybrid keeps the prior behavior (modality check only).
+    static func passesSafetyValidator(_ p: CapabilityIntent, cap: CapabilityID, message: String,
+                                      mods: [ModelModality], sem: SemanticIntentRouter, gated: Bool) async -> Bool {
+        // (a) Modality match: an image capability needs an image present, etc. Text-in capabilities (generate)
+        // require no attachment.
+        let prefixOK: Bool = {
+            if cap.rawValue.hasPrefix("image.") { return mods.contains(.image) }
+            if cap.rawValue.hasPrefix("audio.") { return mods.contains(.audio) }
+            if cap.rawValue.hasPrefix("video.") { return mods.contains(.video) }
+            return true
+        }()
+        guard prefixOK else { return false }
+        guard gated else { return true }
+        // (b) Specific-vs-vague verification. Adopt only on an explicit "specific"; "vague" or "unsure"/nil
+        // withholds execution authority so the clarify stands (safe default).
+        return (await sem.verifySpecific(message: message, capability: cap, inputModalities: mods)) == true
     }
 
     /// Choose the Tier-1 router from persisted evidence (Router Auto), explaining why.

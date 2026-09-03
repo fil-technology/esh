@@ -57,6 +57,15 @@ public protocol SemanticIntentRouter: Sendable {
     var name: String { get }
     func propose(message: String, inputModalities: [ModelModality],
                  schema: [CapabilitySchemaEntry]) async -> CapabilityIntent?
+    /// Safety Validator second pass: is `message` a SPECIFIC, unambiguous instruction for `capability`, or a
+    /// VAGUE quality request (e.g. "improve/enhance/make better", multilingually)? Returns true=specific,
+    /// false=vague, nil=no verification available. Used to gate a proposal before it gets execution authority
+    /// — a distinct, reframed question (not self-confirmation), so a router can catch its own over-eager guess.
+    func verifySpecific(message: String, capability: CapabilityID, inputModalities: [ModelModality]) async -> Bool?
+}
+
+public extension SemanticIntentRouter {
+    func verifySpecific(message: String, capability: CapabilityID, inputModalities: [ModelModality]) async -> Bool? { nil }
 }
 
 // Shared constrained prompt + parser so EVERY router (resident LLM, Apple FM, FunctionGemma) targets the
@@ -85,6 +94,21 @@ public enum SemanticRouting {
         - you are not sure. When in doubt, abstain. Never invent a capability id. Never guess to be helpful.
         Available input types on this request: \(modalities.map { $0.rawValue }.joined(separator: ",")).
         Capabilities: \(schemaJSON)
+        """
+    }
+
+    /// The Safety-Validator second-pass prompt: a reframed specific-vs-vague judgment (NOT "did you mean X?",
+    /// which invites self-confirmation). Capability-driven + multilingual — the model judges the user's actual
+    /// wording in any language, so it catches vague quality requests ("improve/enhance" in EN/RU/HE/…) that a
+    /// first pass over-eagerly mapped to a concrete transform.
+    static func verifyInstruction(capability: CapabilityID) -> String {
+        let desc = CapabilitySchemaBuilder.descriptions[capability]?.0 ?? capability.rawValue
+        return """
+        You are a strict verifier. The user's message (in any language) is being considered for the action: \
+        "\(desc)". Decide whether the message is a SPECIFIC, unambiguous instruction for THAT exact action, or \
+        a VAGUE quality request (e.g. "improve", "enhance", "make it better", "fix this", or their equivalents \
+        in other languages) that does not clearly single out this action over other plausible ones. \
+        Reply with ONLY one word: specific OR vague. When unsure, answer vague.
         """
     }
 
@@ -134,6 +158,15 @@ public struct AppleFMSemanticRouter: SemanticIntentRouter {
         let sys = SemanticRouting.systemInstruction(schema: schema, modalities: inputModalities)
         guard let raw = try? await generate(message, sys) else { return nil }
         return SemanticRouting.parse(SanitizeThinking(raw), schema: schema, modalities: inputModalities, routerName: name)
+    }
+
+    public func verifySpecific(message: String, capability: CapabilityID, inputModalities: [ModelModality]) async -> Bool? {
+        let sys = SemanticRouting.verifyInstruction(capability: capability)
+        guard let raw = try? await generate(message, sys) else { return nil }
+        let ans = SanitizeThinking(raw).lowercased()
+        if ans.contains("specific") { return true }
+        if ans.contains("vague") { return false }
+        return nil   // couldn't tell → let the caller apply its safe default
     }
     private func SanitizeThinking(_ s: String) -> String { ThinkingParser.parse(s).answer ?? s }
 }

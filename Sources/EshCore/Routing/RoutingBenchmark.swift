@@ -139,6 +139,8 @@ public enum RoutingBenchmark {
         public var expectedCapability: String?
         public var predictedAction: String
         public var predictedCapability: String?
+        public var predictedClarifyKind: String?   // ambiguous | unresolved (Tier-0 clarify subtype)
+        public var provenanceTier: String?          // tier0-deterministic | tier1-semantic (who decided)
         public var isFalseExecution: Bool
         public var isMissed: Bool
         public var isUnnecessaryClarify: Bool
@@ -157,6 +159,7 @@ public enum RoutingBenchmark {
                 message: c.message, language: c.language, category: c.category,
                 expectedAction: c.expectedAction.rawValue, expectedCapability: c.expectedCapability?.rawValue,
                 predictedAction: intent.action.rawValue, predictedCapability: intent.capability?.rawValue,
+                predictedClarifyKind: intent.clarifyKind?.rawValue, provenanceTier: intent.provenance.tier,
                 isFalseExecution: falseExec,
                 isMissed: expExec && !predExec,
                 isUnnecessaryClarify: intent.action == .clarify && c.expectedAction != .clarify))

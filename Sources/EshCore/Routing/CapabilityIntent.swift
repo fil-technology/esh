@@ -16,6 +16,20 @@ public enum RouterAction: String, Codable, Sendable {
                                      // abstain never executes and never counts as a router "decision".
 }
 
+/// When a router declines to execute (`clarify`), WHY it declined — the distinction that decides whether a
+/// semantic fallback can add value (spec: "ambiguous vs unresolved"). This is part of the canonical routing
+/// architecture, not an Apple-specific detail: it will matter for every future modality.
+public enum ClarifyKind: String, Codable, Sendable {
+    /// Tier-0 has enough evidence to know MULTIPLE registered capabilities plausibly match (or the request
+    /// is multi-step / wrong-modality / has no actionable content). A semantic model cannot safely pick one
+    /// — the USER must choose. Never escalate an `ambiguous` clarify to a router with execution authority.
+    case ambiguous
+    /// Tier-0 cannot confidently interpret the language (e.g. a non-Latin paraphrase), but the request may
+    /// still describe ONE specific capability. Safe to escalate to a semantic router, whose proposal is then
+    /// re-validated before execution.
+    case unresolved
+}
+
 public struct RouterProvenance: Codable, Sendable, Equatable {
     public var tier: String          // "tier0-deterministic", "tier1-semantic", …
     public var router: String        // "rules", "apple-foundation", "functiongemma", resident model id…
@@ -34,6 +48,9 @@ public struct CapabilityIntent: Codable, Sendable, Equatable {
     public var alternatives: [CapabilityID]
     /// Why clarification/unsupported — a concise, user-facing reason.
     public var reason: String?
+    /// For `clarify` only: whether it's `ambiguous` (user must choose) or `unresolved` (a semantic router
+    /// may recover a single intent). Gates escalation — nil for non-clarify actions.
+    public var clarifyKind: ClarifyKind?
     public var provenance: RouterProvenance
     /// UNTRUSTED router metadata only. Never gates execution.
     public var confidence: Double?
@@ -43,6 +60,7 @@ public struct CapabilityIntent: Codable, Sendable, Equatable {
 
     public init(action: RouterAction, capability: CapabilityID? = nil, inputRefs: [String] = [],
                 arguments: [String: JSONValue] = [:], alternatives: [CapabilityID] = [], reason: String? = nil,
+                clarifyKind: ClarifyKind? = nil,
                 provenance: RouterProvenance, confidence: Double? = nil, plan: [CapabilityIntent] = []) {
         self.action = action
         self.capability = capability
@@ -50,6 +68,7 @@ public struct CapabilityIntent: Codable, Sendable, Equatable {
         self.arguments = arguments
         self.alternatives = alternatives
         self.reason = reason
+        self.clarifyKind = clarifyKind
         self.provenance = provenance
         self.confidence = confidence
         self.plan = plan

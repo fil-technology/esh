@@ -63,37 +63,59 @@ struct IntentResolverTests {
         if case .unsupported = out {} else { Issue.record("expected unsupported, got \(out)") }
     }
 
-    // A mock Tier-1 router that always proposes a fixed capability (or an invalid one).
+    // A mock Tier-1 router that always proposes a fixed capability (or an invalid one). It reports every
+    // request as "specific" so the Safety Validator's specific-vs-vague check passes (unless verifyVague).
     struct MockSemantic: SemanticIntentRouter {
-        let name = "mock"; let cap: CapabilityID?
+        let name = "mock"; let cap: CapabilityID?; var verifyVague = false
         func propose(message: String, inputModalities: [ModelModality], schema: [CapabilitySchemaEntry]) async -> CapabilityIntent? {
-            guard let cap else { return CapabilityIntent(action: .clarify, provenance: .init(tier: "tier1-semantic", router: "mock")) }
+            guard let cap else { return CapabilityIntent(action: .abstain, provenance: .init(tier: "tier1-semantic", router: "mock")) }
             return CapabilityIntent(action: .executeCapability, capability: cap, inputRefs: ["attachment_0"],
                                     provenance: .init(tier: "tier1-semantic", router: "mock"))
+        }
+        func verifySpecific(message: String, capability: CapabilityID, inputModalities: [ModelModality]) async -> Bool? { !verifyVague }
+    }
+
+    @Test
+    func tier1ResolvesUnresolvedWhenItNamesARegisteredCapability() async {
+        let r = root()
+        // A non-Latin request is Tier-0 UNRESOLVED (not ambiguous) → escalation is allowed. Tier-1 proposes
+        // image.upscale (registered) and the Safety Validator says "specific" → the resolver adopts it (here
+        // installRequired since the upscale asset isn't present — the point is it became a validated capability).
+        let resolver = IntentResolver(semantic: MockSemantic(cap: .imageUpscale))
+        let out = await resolver.resolve(message: "Что здесь написано?", attachments: [image()], registry: registry(), installs: [], root: r)
+        switch out {
+        case let .installRequired(request, _, _): #expect(request.capability == .imageUpscale)
+        case let .ready(request, _): #expect(request.capability == .imageUpscale)
+        default: Issue.record("expected image.upscale (Tier-1 escalation on unresolved), got \(out)")
         }
     }
 
     @Test
-    func tier1ResolvesAmbiguityWhenItNamesARegisteredCapability() async {
+    func ambiguousClarifyIsNeverEscalated() async {
         let r = root()
-        // "improve this" is Tier-0 ambiguous → clarify; Tier-1 proposes image.upscale (registered) → the
-        // resolver adopts it (here it surfaces as installRequired since the upscale asset isn't present —
-        // the point is the ambiguity became a concrete, validated capability, not a clarify).
+        // "improve this" is Tier-0 AMBIGUOUS → must stay a clarify even with a Tier-1 router present (no
+        // escalation authority for ambiguous — this is what keeps false-execution near zero).
         let resolver = IntentResolver(semantic: MockSemantic(cap: .imageUpscale))
         let out = await resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r)
-        switch out {
-        case let .installRequired(request, _, _): #expect(request.capability == .imageUpscale)
-        case let .ready(request, _): #expect(request.capability == .imageUpscale)
-        default: Issue.record("expected image.upscale (Tier-1 escalation), got \(out)")
-        }
+        if case .clarify = out {} else { Issue.record("expected clarify (ambiguous never escalates), got \(out)") }
+    }
+
+    @Test
+    func safetyValidatorVetoesVagueProposal() async {
+        let r = root()
+        // Unresolved case, router proposes a registered capability, but the Safety Validator judges the
+        // request VAGUE → the proposal is withheld and Tier-0's clarify stands.
+        let resolver = IntentResolver(semantic: MockSemantic(cap: .imageUpscale, verifyVague: true))
+        let out = await resolver.resolve(message: "Что здесь написано?", attachments: [image()], registry: registry(), installs: [], root: r)
+        if case .clarify = out {} else { Issue.record("expected clarify (Safety Validator veto), got \(out)") }
     }
 
     @Test
     func tier1ProposalForAnUnregisteredCapabilityIsRejected() async {
         let r = root()
-        // Tier-1 proposes audio.diarize, which has NO provider in this registry → keep Tier-0 clarify.
+        // Unresolved case; Tier-1 proposes audio.diarize, which has NO provider in this registry → keep clarify.
         let resolver = IntentResolver(semantic: MockSemantic(cap: .audioDiarize))
-        let out = await resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out = await resolver.resolve(message: "Что здесь написано?", attachments: [image()], registry: registry(), installs: [], root: r)
         if case .clarify = out {} else { Issue.record("expected clarify (invalid proposal rejected), got \(out)") }
     }
 

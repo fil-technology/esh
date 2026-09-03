@@ -120,8 +120,13 @@ public struct DeterministicIntentRouter: Sendable {
         // Distinct capabilities matched.
         let distinct = Array(Set(matches.map { $0.route.capability }))
 
-        // Ambiguous "improve/enhance/fix" with an image and no specific op → clarify (never guess).
-        let isAmbiguousImage = present.contains(.image)
+        // A GENERIC-transformation request (improve/enhance/fix) on a modality for which MULTIPLE registered
+        // transform capabilities exist is AMBIGUOUS by capability structure — not because a phrase is on a
+        // list, but because ≥2 registered image transforms plausibly apply and there's no discriminating
+        // argument to choose between them. (A discriminating arg like a scale would have matched a route above.)
+        let imageTransformCount = routes.filter { $0.requiredInputs == [.image] }
+            .map { $0.capability }.reduce(into: Set<CapabilityID>()) { $0.insert($1) }.count
+        let isAmbiguousImage = present.contains(.image) && imageTransformCount >= 2
             && CapabilityRouteCatalog.ambiguousImagePhrases.contains(where: { text.contains($0) })
 
         if distinct.count >= 2 {
@@ -131,9 +136,11 @@ public struct DeterministicIntentRouter: Sendable {
             let steps = ordered.compactMap { cap in matches.first(where: { $0.route.capability == cap }) }
                 .map { m in CapabilityIntent(action: .executeCapability, capability: m.route.capability, inputRefs: m.refs,
                                              arguments: m.route.extractArguments?(text) ?? [:], provenance: prov) }
+            // Multiple registered capabilities plausibly apply → AMBIGUOUS: the user must choose the order/
+            // subset. A semantic model can't safely pick one, so this is never escalated.
             return CapabilityIntent(action: .clarify, alternatives: ordered,
                 reason: "This looks like \(ordered.count) steps (\(ordered.map { $0.rawValue }.joined(separator: " → "))). Run them in this order?",
-                provenance: prov, plan: steps)
+                clarifyKind: .ambiguous, provenance: prov, plan: steps)
         }
 
         if let only = matches.first, distinct.count == 1, !isAmbiguousImage {
@@ -143,9 +150,12 @@ public struct DeterministicIntentRouter: Sendable {
         }
 
         if isAmbiguousImage {
-            return CapabilityIntent(action: .clarify,
-                alternatives: [.imageUpscale, .imageSegment, .imageUnderstand],
-                reason: "Did you want to upscale it, remove the background, or something else?", provenance: prov)
+            // Candidate options come from the registered image capabilities (not hard-coded buttons), so this
+            // clarification stays useful as edit/denoise/relight/… are added later.
+            let candidates = Self.orderedPlan(routes.filter { $0.requiredInputs == [.image] }.map { $0.capability })
+            return CapabilityIntent(action: .clarify, alternatives: candidates,
+                reason: "Did you want to upscale it, remove the background, or something else?",
+                clarifyKind: .ambiguous, provenance: prov)
         }
 
         // Wrong-modality: a capability's phrases match but its required input modality is absent (e.g.
@@ -156,9 +166,11 @@ public struct DeterministicIntentRouter: Sendable {
                 && r.phrases.contains { Self.matches(text, phrase: $0) }
         }
         if wrongModality {
+            // The requested operation contradicts the attached modality → AMBIGUOUS (a semantic model would
+            // only be tempted to force the mismatch). The user must restate.
             return CapabilityIntent(action: .clarify,
                 reason: "This looks like a different kind of request than the attached \(Self.describe(present)). What would you like to do?",
-                provenance: prov)
+                clarifyKind: .ambiguous, provenance: prov)
         }
 
         // Tier-0's rules are English. For predominantly non-Latin text (Cyrillic/Hebrew/…) it must NOT guess
@@ -178,10 +190,15 @@ public struct DeterministicIntentRouter: Sendable {
             return CapabilityIntent(action: .executeCapability, capability: cap,
                                     inputRefs: ["attachment_\(inputModalities.firstIndex(of: .image) ?? 0)"], provenance: prov)
         }
-        // An attachment with no actionable verb and no (parseable) question → clarify.
+        // An attachment with no actionable verb and no (parseable) question → clarify. The KIND depends on
+        // WHY Tier-0 couldn't act: non-Latin text is UNRESOLVED (Tier-0's English rules can't read it, but a
+        // multilingual semantic model may recover one specific capability — safe to escalate). Parseable
+        // English with no actionable content is AMBIGUOUS (nothing to recover; escalation only invites a
+        // guess) — so it clarifies without escalation.
         if present.contains(.image) || present.contains(.audio) || present.contains(.video) {
             return CapabilityIntent(action: .clarify,
-                reason: "What would you like me to do with this \(Self.describe(present))?", provenance: prov)
+                reason: "What would you like me to do with this \(Self.describe(present))?",
+                clarifyKind: nonLatin ? .unresolved : .ambiguous, provenance: prov)
         }
 
         // Otherwise ordinary conversation — the default, so ordinary chat stays ordinary (spec §12).

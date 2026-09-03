@@ -54,6 +54,16 @@ validation → RoutingOutcome → ExecutionPlan → typed result`.
   available, fresh, ≤2% false-exec, AND beats the free/instant Tier-0 baseline; else Tier-0 + clarification.
   The live `/v1/route` honors it (no wasted escalation by default).
 
+> **UPDATE (FINAL — ambiguity-gated safe Apple fallback SHIPPED).** The "Tier-0 wins" verdict below was
+> superseded. Splitting Tier-0's clarify into **`ambiguous`** (≥2 plausible capabilities → clarify, never
+> escalate) vs **`unresolved`** (non-Latin/unfamiliar → escalate), plus a **Safety Validator**
+> (specific-vs-vague second pass) on Apple's proposal, gives the **ambiguity-gated hybrid**: **false-exec
+> 0–1.7%** (≤2% ceiling), **conservative score +0.22** (first config to BEAT Tier-0's −0.14),
+> **safe-automation coverage 38% vs 28%**, EN 0.92 kept, RU 0.55 / HE 0.56 recovered (6 correct RU/HE
+> recoveries). Tier-0 still handles **76%** of traffic; **24%** (unresolved) reach Apple. **Router Auto now
+> selects apple-foundation (gated)** and `/v1/route` runs the gated path. See `2_1_ROUTER_SAFE_APPLE_FALLBACK.md`.
+> The table below is the accepted, frozen baseline set that led to this decision.
+
 ### Measured comparison (Apple M1 Pro / 32 GB, full v2 dataset, 58 cases — LIVE, 2026-09-03, macOS 26.5.1)
 Numbers are from `POST /v1/route/benchmark` with live on-device inference; evidence persisted + versioned in
 `router-evidence.json`. Warm = median steady-state call; Cold = first call (includes model load). Mem = peak
@@ -66,6 +76,7 @@ esh process-tree RSS sampled during the run.
 | resident-llm tier1 | 0.00 | 0% | −1.79 | 0.21 | 0.09 | 0.11 | 10657 ms | 10667 ms | ~1862 MB | 0 | useless as a router |
 | functiongemma-270m tier1 | 0.00 | 0% | −1.79 | 0.21 | 0.09 | 0.11 | 10822 ms | 10514 ms | ~1854 MB | 318 MB | base needs fine-tuning |
 | apple-foundation tier1 | **0.79** | **31%** | −1.48 | 0.55 | **0.64** | **0.78** | **2152 ms** | 12123 ms | ~164 MB* | 0 | accurate + multilingual + fast-warm but **UNSAFE** (rejected) |
+| **apple-foundation hybrid-gated** | 0.70 | **1.7%** | **+0.22** | 0.92 | 0.55 | 0.56 | ~5 s | ~12–18 s | ~164 MB* | 0 | **SHIPPED — safe + beats Tier-0** (added by the final experiment) |
 
 \* Apple FM runs in the OS system-model service, so most of its memory is borne OUTSIDE esh's process tree;
 the ~164 MB is only esh-side overhead. Its real footprint is shared OS state, not esh RAM.

@@ -7,6 +7,25 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — Router Auto: ambiguity-gated safe Apple semantic fallback SHIPPED (untagged).** Turns Apple
+  Foundation Models into an *abstaining* Tier-1 fallback instead of an eager classifier, so multilingual
+  semantic coverage is recovered WITHOUT sacrificing Tier-0's near-zero false-execution. Failure analysis of
+  Apple's ~34% false-exec showed 85% were over-eager executions (chat/unsupported/injection force-mapped to a
+  capability because the schema had no "not a capability request" option). Fixes, layered: (1) a canonical
+  **`abstain`** RouterAction + abstention-first prompt (executeCapability|abstain, "when in doubt, abstain");
+  (2) a canonical **`ClarifyKind`** splitting Tier-0's clarify into **`ambiguous`** (≥2 registered
+  capabilities plausibly match → clarify, never escalate — capability-driven, not a phrase blacklist) vs
+  **`unresolved`** (non-Latin/unfamiliar → may escalate); (3) a **Safety Validator** gating Apple's proposal
+  (modality match + a reframed *specific-vs-vague* second pass that vetoes vague quality requests in any
+  language). Escalation flow: `Tier-0 → execute | ambiguous→clarify | unresolved→Apple→Safety Validator→
+  execute/clarify`; the registry validator still gates every route. **Measured (frozen v2 dataset, 58 cases,
+  macOS 26.5.1, M1 Pro): false-exec 0–1.7%** (≤2% ceiling; ~0% on the detail run), **conservative score +0.22**
+  (first config to BEAT Tier-0's −0.14), **safe-automation coverage 38% vs 28%**, EN 0.92 preserved, RU 0.55 /
+  HE 0.56 recovered (6 correct RU/HE recoveries Tier-0 can't parse), chat 100%. Tier-0 handles 76% of traffic;
+  24% (unresolved) reach Apple. **`RouterAutoPolicy` now selects apple-foundation** from `hybrid-gated`
+  evidence and the live `/v1/route` runs the gated path (verified live). New: `POST /v1/route/benchmark/detail`
+  (per-case failure analysis). All prior evidence preserved (7 versioned rows). Docs:
+  `2_1_ROUTER_SAFE_APPLE_FALLBACK.md`, `2_1_CAPABILITY_ROUTER_STATUS.md`. Full suite 479 green.
 - **esh 2.1 UCMR — Router Auto live re-benchmark: cold latency + memory, sharper verdict (untagged).** Ran the
   full v2 multilingual dataset (58 cases, EN/RU/HE) through every router on-device (macOS 26.5.1, M1 Pro/32 GB)
   and persisted versioned evidence. The benchmark now records **cold latency** (first call, incl. model load)
