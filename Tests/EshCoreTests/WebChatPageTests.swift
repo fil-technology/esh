@@ -481,4 +481,26 @@ struct WebChatPageTests {
         #expect(html.contains(".chatitem{ display:flex; align-items:center;"))
         #expect(html.contains(".chatitem .clabel{"))
     }
+
+    // Soak: the model-detail modal's Install/✕ buttons are dispatched by the delegated click listener on
+    // `document`, so the modal must NOT blanket-stopPropagation (that swallowed the clicks → "Install
+    // does nothing"). The backdrop closes only when the overlay itself is the click target.
+    @Test
+    func modalDoesNotSwallowDataActClicks() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(!html.contains("md_.onclick=e=>e.stopPropagation()"))   // the bug — must be gone
+        #expect(html.contains("on:(e)=>{ if(e.target===ov)"))            // backdrop-only close
+        #expect(html.contains("data-act=\"doInstall\""))
+    }
+
+    // Soak: install progress stays visible from the main chat view (not just the model browser) via a
+    // top-bar indicator; polling continues regardless of the active view.
+    @Test
+    func installProgressShowsInTheChatTopBar() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function installIndicator()"))
+        #expect(html.contains("${installIndicator()}"))
+        #expect(html.contains("class=\"installchip\""))
+        #expect(html.contains("function activeInstalls()"))
+    }
 }

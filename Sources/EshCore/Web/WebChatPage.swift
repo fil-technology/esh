@@ -69,6 +69,10 @@ public enum WebChatPage {
   /* Header */
   .topbar{ display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid rgba(32,30,27,.06); }
   .topbar .brand{ font-weight:600; font-size:15px; letter-spacing:-.01em; }
+  .installchip{ display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border:1px solid var(--line2); border-radius:999px; background:var(--panel2); cursor:pointer; color:var(--ink); }
+  .installchip:hover{ background:rgba(32,30,27,.06); }
+  .installchip .ispin{ width:7px; height:7px; border-radius:50%; background:var(--ink); animation:eshpulse 1s ease-in-out infinite; }
+  .installchip .ilbl{ font-size:11px; color:var(--muted); }
   .topbar .sp{ flex:1; }
   .iconbtn{ color:var(--faint); cursor:pointer; display:flex; padding:4px; border:none; background:none; border-radius:6px; }
   .iconbtn:hover{ color:var(--ink); }
@@ -557,6 +561,7 @@ function renderChat(){
   // composer (progressive disclosure at the point of use), matching the approved design.
   tb.innerHTML=`<button class="iconbtn" data-act="toggleSidebar" title="Sidebar">${ICON.sidebar}</button>
     <span class="brand">esh</span><span class="sp"></span>
+    ${installIndicator()}
     <button class="iconbtn" data-act="openSettings" title="Settings">${ICON.settings}</button>`;
   wrap.appendChild(tb);
   const body=el('div',{cls:'body'});
@@ -1005,6 +1010,18 @@ function kvrow(k,v,mono){ return `<div class="kv"><span class="k">${k}</span><sp
 
 /* ---------- install (start + poll progress, thin over /v1/models/install) ---------- */
 function catModel(id){ return (S.catalog&&S.catalog.models||[]).find(x=>x.id===id); }
+// Installs in flight (not finished/failed/cancelled). Polling continues regardless of view, so this
+// stays live even after the model browser is closed.
+function activeInstalls(){ return Object.entries(S.installing||{}).filter(([,st])=>st&&st.phase!=='failed'&&st.phase!=='installed'&&st.phase!=='cancelled'&&st.phase!=='idle'); }
+// A compact, always-visible install indicator for the chat top bar, so download progress is visible
+// from the main view (not just the model browser). Click to open the model browser.
+function installIndicator(){
+  const act=activeInstalls(); if(!act.length) return '';
+  const [id,st]=act[0]; const m=catModel(id); const name=m?shortModel(m.id):id;
+  const pct=st.percent||0; const lab=st.totalBytes?(pct+'%'):(fmtBytes(st.bytesDownloaded)||'starting…');
+  const extra=act.length>1?(' +'+(act.length-1)):'';
+  return `<button class="installchip" data-act="openModels" title="Installing — open the model browser"><span class="ispin"></span><span class="mono ilbl">${esch(name)}${extra} · ${esch(lab)}</span></button>`;
+}
 function fmtBytes(b){ if(!b)return ''; if(b<1048576)return (b/1024).toFixed(0)+' KB'; if(b<1073741824)return (b/1048576).toFixed(0)+' MB'; return (b/1073741824).toFixed(1)+' GB'; }
 async function startInstall(id){
   S.installing[id]={phase:'resolving',bytesDownloaded:0,percent:0}; render();
@@ -1050,9 +1067,12 @@ function renderModels(){
 }
 function renderDetail(){
   const m=(S.catalog&&S.catalog.models||[]).find(x=>x.id===S.detail); if(!m) return el('div',{cls:'hidden'});
-  const ov=el('div',{cls:'overlay',on:()=>{ S.detail=null; render(); }});
+  // Close only when the backdrop itself is clicked. NOTE: we must NOT stopPropagation on the modal —
+  // data-act clicks (Install, ✕) are dispatched by a delegated listener on document, so a modal-wide
+  // stopPropagation would swallow them and the buttons would do nothing.
+  const ov=el('div',{cls:'overlay',on:(e)=>{ if(e.target===ov){ S.detail=null; render(); } }});
   const tight=m.fitClass==='tight'||m.fitClass==='unlikely';
-  const md_=el('div',{cls:'modal'}); md_.style.width='520px'; md_.onclick=e=>e.stopPropagation();
+  const md_=el('div',{cls:'modal'}); md_.style.width='520px';
   let h=`<div style="padding:22px 26px 0;display:flex;align-items:flex-start"><div><div style="font-size:18px;font-weight:600">${esch(m.name)}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px"><span style="font-size:11px;color:var(--muted)">Fit for this Mac</span><span class="mono" style="font-size:10.5px;letter-spacing:.08em;color:${tight?'var(--amber)':'var(--ink)'};background:${tight?'rgba(176,118,31,.1)':'rgba(32,30,27,.07)'};padding:3px 8px;border-radius:5px">${fitLabel(m.fitClass).toUpperCase()}</span></div></div>
     <span class="sp" style="flex:1"></span><span class="iconbtn" data-act="closeDetail" style="font-size:13px">✕</span></div>
