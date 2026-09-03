@@ -35,9 +35,47 @@ enum AudioSpeechGenerator {
         var sampleRate: Int
     }
 
+    /// Thrown when there isn't enough memory to synthesize speech safely — reported instead of loading
+    /// TTS weights on top of a resident LLM and thrashing/crashing the machine.
+    enum TTSMemoryError: Error, LocalizedError {
+        case insufficientMemory(availableMB: Int, neededMB: Int)
+        var errorDescription: String? {
+            switch self {
+            case let .insufficientMemory(available, needed):
+                return "Not enough memory for speech synthesis: only \(available) MB free (need ~\(needed) MB). "
+                    + "Free memory or unload a model, then retry."
+            }
+        }
+    }
+
+    // TTS weights are loaded per synthesis (not kept resident). To avoid over-committing unified memory
+    // on top of a resident LLM, we leave this much actually-free before loading; below it we ask the warm
+    // pool to evict idle LLMs to make room, and refuse cleanly if we still can't fit.
+    private static let ttsDesiredFreeBytes: Int64 = 2_000 * 1_048_576   // ~2.0 GB
+    private static let ttsCriticalFreeBytes: Int64 = 800 * 1_048_576    // ~0.8 GB
+
+    /// Make room for a transient TTS load: keep the LLM resident when RAM is plentiful; under pressure,
+    /// evict idle LLM residents via the warm pool; refuse cleanly when memory is still critically low.
+    static func prepareMemoryForTTS(pool: RuntimeLifecycleManager?) async throws {
+        guard let avail = SystemMemory.snapshot()?.availableBytes else { return }  // can't read → don't block
+        if avail >= ttsDesiredFreeBytes { return }                                  // plenty free → keep LLM warm
+        if let pool {
+            let usable = await pool.status().usableBudgetGB
+            let targetGB = usable.map { max(0, $0 - Double(ttsDesiredFreeBytes) / 1_073_741_824) } ?? 0
+            _ = await pool.reclaimForPressure(targetGB: targetGB)   // evict idle LLMs (async unload)
+            try? await Task.sleep(nanoseconds: 400_000_000)         // let unloads actually free memory
+        }
+        let after = SystemMemory.snapshot()?.availableBytes ?? avail
+        if after < ttsCriticalFreeBytes {
+            throw TTSMemoryError.insufficientMemory(availableMB: Int(after / 1_048_576),
+                                                    neededMB: Int(ttsCriticalFreeBytes / 1_048_576))
+        }
+    }
+
     static func synthesize(
         _ request: SynthesisRequest,
         currentDirectoryURL: URL,
+        lifecycleManager: RuntimeLifecycleManager? = nil,
         progressHandler: @escaping @Sendable (TTSProgressUpdate) -> Void = { _ in }
     ) async throws -> SynthesisResult {
         let model = try resolveModel(request.model)
@@ -52,6 +90,10 @@ enum AudioSpeechGenerator {
 
         try ensureMLXMetalLibrary(currentDirectoryURL: currentDirectoryURL)
         try ensureMetalDeviceAvailable()
+
+        // RAM safety: keep the LLM resident when memory is ample; make room (or refuse) when it's tight,
+        // so a TTS synthesis never over-commits unified memory on top of a resident LLM.
+        try await prepareMemoryForTTS(pool: lifecycleManager)
 
         // TTS voice weights are large assets: keep them under the configured assets root
         // (default ~/.esh/audio/tts-models), NOT under the current working directory. Gate on
@@ -85,7 +127,8 @@ enum AudioSpeechGenerator {
 
     static func generateResponse(
         _ request: OpenAIAudioSpeechRequest,
-        currentDirectoryURL: URL
+        currentDirectoryURL: URL,
+        lifecycleManager: RuntimeLifecycleManager? = nil
     ) async throws -> OpenAIAudioSpeechResponse {
         let filenameStem = sanitizedFilenameStem(voice: request.voice, model: request.model)
         let temporaryURL = FileManager.default.temporaryDirectory
@@ -106,7 +149,8 @@ enum AudioSpeechGenerator {
                 topP: request.topP.map(Float.init),
                 hfToken: ProcessInfo.processInfo.environment["HF_TOKEN"]
             ),
-            currentDirectoryURL: currentDirectoryURL
+            currentDirectoryURL: currentDirectoryURL,
+            lifecycleManager: lifecycleManager
         )
         let audioData = try Data(contentsOf: result.url)
 

@@ -48,7 +48,8 @@ enum WebCommand {
             toolVersion: toolVersion,
             audioModels: OpenAICompatibleAudioCatalog.ttsModels,
             speech: { request in
-                try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
+                try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL,
+                                                                lifecycleManager: pool)
             },
             transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
             webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
