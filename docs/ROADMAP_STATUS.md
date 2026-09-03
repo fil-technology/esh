@@ -41,10 +41,10 @@ result**, not core surgery. See `UCMR_ARCHITECTURE.md`, `2_1_STAGE3_MODEL_PROVEN
 | **Stage 0–1** Runtime + text/SVG/embed/rerank | ✅ done | ExecutionRequest/Result, CapabilityRegistry, ExecutionPlan, `/v1/execute`; language.* + vector.generate + embed/rerank |
 | **Stage 2** Input modalities | ✅ done | vision understanding (mlx-vlm), OCR (Apple Vision), segmentation (rembg), capability model resolution, web typed-result rendering — all live-verified |
 | **Stage 3** Generation & media | ✅ **complete** (live-validated) | image.generate LIVE (Z-Image-Turbo 4-bit) + Model Fit + benchmarks; **image.upscale LIVE** (Real-ESRGAN ONNX, x2/x4, CoreML — Stage 4.1); video.understand LIVE (AVFoundation pipeline, canonical N-step plan, both branches proven); audio.diarize LIVE (sherpa-onnx, 2 speakers + merged transcript); web image-gen routing + plan inspector. Full suite 431 green; no 2.0 regression. |
-| **Stage 4.1** Working upscale backend | ✅ done | Real-ESRGAN ONNX default (SeedVR2 kept experimental); closes the last Stage 3 item |
-| **Stage 4.2** Performance-aware Auto / Scheduler v2 | 🔜 next | consume capability benchmark evidence (seconds/image, resolution, cold/warm, peak mem, reliability) so Auto picks practical models (memory-fit ≠ useful perf) |
-| **Stage 4.3** VLM auto-classification | ⬜ planned | detect vision models from config.json/architecture/processor so image.understand + video.understand resolve a VLM under Auto without an explicit id |
-| **Stage 4.x** (deferred) | ⬜ not started | image editing/inpainting, local video/music generation, remote runtime — only after 4.2 + 4.3 |
+| **Stage 4.1** Working upscale backend | ✅ done | Real-ESRGAN ONNX default (SeedVR2 kept experimental); closed the last Stage 3 item |
+| **Stage 4.2** Performance-aware Auto / Scheduler v2 | ✅ done (first cut) | `CapabilityPerformanceEvidence` + `CapabilityEvidenceIndex` (adapters over image-gen + LLM benchmark stores) + `CapabilityScheduler` wired into `/v1/execute`: interactive image.generate prefers a within-budget resolution (1024²~215s → 512²~51s), evidence-backed choice folded into the ExecutionPlan. candidateModels enumeration (cross-model ranking) is the remaining follow-up. |
+| **Stage 4.3** VLM auto-classification | ✅ done | Install classifies VLMs from config.json (vision_config/model_type/architecture/image-token keys); nanoLLaVA installs as task=vision; image.understand + video.understand resolve a VLM under Auto with no explicit id (models load from local install path). |
+| **Stage 4.x** (deferred) | ⬜ not started | cross-model candidate enumeration for the scheduler; image editing/inpainting; local video/music generation; remote runtime |
 
 Stage 3 is **complete**: all gate items live-validated, including a working `image.upscale` (Real-ESRGAN
 ONNX). SeedVR2 remains as an experimental, non-default backend for future retest.
