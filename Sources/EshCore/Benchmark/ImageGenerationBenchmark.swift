@@ -34,11 +34,17 @@ public struct ImageGenerationBenchmark: Codable, Hashable, Sendable {
     public var totalRuns: Int
     public var sampleLatenciesMs: [Double]
     public var stable: Bool                          // all runs valid AND latency spread bounded
+    /// True when the sample was taken under elevated memory pressure — NOT recommendation-grade; the
+    /// Scheduler/Auto must not treat such a sample as a normal performance baseline.
+    public var measuredUnderMemoryPressure: Bool
+    /// Free-text honest qualifier (e.g. "GPU-compute-bound; 1024² not interactive-grade on M1 Pro").
+    public var note: String?
 
     public init(modelID: String, provenance: BenchmarkProvenance, requestedWidth: Int, requestedHeight: Int,
                 steps: Int, coldLoadAndGenerateMs: Double?, warmGenerateMsMedian: Double?,
                 secondsPerImageMedian: Double?, peakMemoryMB: Double?, residentMemoryMB: Double?,
-                outputValidCount: Int, totalRuns: Int, sampleLatenciesMs: [Double], stable: Bool) {
+                outputValidCount: Int, totalRuns: Int, sampleLatenciesMs: [Double], stable: Bool,
+                measuredUnderMemoryPressure: Bool = false, note: String? = nil) {
         self.modelID = modelID
         self.provenance = provenance
         self.requestedWidth = requestedWidth
@@ -53,6 +59,8 @@ public struct ImageGenerationBenchmark: Codable, Hashable, Sendable {
         self.totalRuns = totalRuns
         self.sampleLatenciesMs = sampleLatenciesMs
         self.stable = stable
+        self.measuredUnderMemoryPressure = measuredUnderMemoryPressure
+        self.note = note
     }
 }
 
