@@ -31,6 +31,21 @@ implemented, tested, and (for user-facing work) released. Last reconciled: **202
   (hybrid, crashes on current mlx-lm) reclassified `.incompatible`; flagship default = Mistral Small
   24B; broken Marvis TTS gated. GGUF backend fixed for current llama.cpp (Phase D / blocker B3).
 
+## esh 2.1 — Universal Capability & Modality Runtime (UCMR)
+
+Architecture rule held throughout: **new capability = provider + registration + fit/benchmark + typed
+result**, not core surgery. See `UCMR_ARCHITECTURE.md`, `2_1_STAGE3_MODEL_PROVENANCE.md`.
+
+| Stage | Status | Notes |
+|---|---|---|
+| **Stage 0–1** Runtime + text/SVG/embed/rerank | ✅ done | ExecutionRequest/Result, CapabilityRegistry, ExecutionPlan, `/v1/execute`; language.* + vector.generate + embed/rerank |
+| **Stage 2** Input modalities | ✅ done | vision understanding (mlx-vlm), OCR (Apple Vision), segmentation (rembg), capability model resolution, web typed-result rendering — all live-verified |
+| **Stage 3** Generation & media | 🟢 substantially done; 1 item experimental | image.generate LIVE (Z-Image-Turbo 4-bit); image Model Fit + benchmarks; video.understand LIVE (AVFoundation pipeline, canonical N-step plan); audio.diarize LIVE (sherpa-onnx); web image-gen routing + plan inspector. **image.upscale (SeedVR2) EXPERIMENTAL** — wiring/storage/RAM/error validated, backend fails upstream (mflux 0.19.1 + mlx 0.32.2 `mx.repeat`). Full suite 431 green. |
+| **Stage 4** (proposed) | ⬜ not started | perf-aware Auto (benchmark seconds/image), VLM auto-classification at install, working upscale backend (newer mflux / Real-ESRGAN ONNX), then image editing / video-gen |
+
+Stage 3 is **not** marked fully complete: image upscale needs a working backend or formal acceptance as
+experimental. Everything else in the Stage 3 gate is live-validated.
+
 ## Releases
 
 | Version | Contents | State |
