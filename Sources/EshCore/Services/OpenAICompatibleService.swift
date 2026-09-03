@@ -1058,12 +1058,25 @@ public struct OpenAICompatibleService: Sendable {
             resumeRouteClosure = { pendingId, convo in await routerService.resume(pendingId: pendingId, conversationID: convo) }
             let benchRoot = root
             routeBenchmarkClosure = { mode in
-                let (m, warm) = await routerService.benchmark(mode: mode)
+                // Resolve the requested mode to (router name, benchmark logic mode, optional router override).
+                let hybrid = mode.hasSuffix("hybrid")
+                let benchMode = mode == "tier0" ? "tier0" : (hybrid ? "hybrid" : "tier1")
+                var routerName = "resident-llm"
+                var override: SemanticIntentRouter? = nil
+                if mode == "tier0" { routerName = "tier0" }
+                else if mode.hasPrefix("apple") { routerName = "apple-foundation"; override = AppleFMSemanticRouter() }
+                else if mode.hasPrefix("gemma") {
+                    routerName = "functiongemma"
+                    if let id = (try? modelStore.listInstalls())?.first(where: { $0.id.contains("functiongemma") })?.id {
+                        override = ResidentLLMSemanticRouter(name: "functiongemma", modelID: id, infer: { req in try await inference.infer(request: req) })
+                    }
+                }
+                let (m, warm) = await routerService.benchmark(mode: benchMode, semanticOverride: override)
                 let hostP = HostMachineProfileService().currentProfile()
-                let routerName = mode == "tier0" ? "tier0" : "resident-llm"
+                let evMode = benchMode
                 let ev = RouterEvidence(
-                    router: routerName, mode: mode, available: true,
-                    modelOrProvider: mode == "tier0" ? "rules" : "resident-llm", runtime: mode == "tier0" ? "rules" : "mlx",
+                    router: routerName, mode: evMode, available: true,
+                    modelOrProvider: routerName, runtime: mode == "tier0" ? "rules" : (mode.hasPrefix("apple") ? "apple-foundation" : "mlx"),
                     total: m.total, capabilitySelectionAccuracy: m.capabilitySelectionAccuracy, falseExecutionRate: m.falseExecutionRate,
                     conservativeScore: m.conservativeScore, clarifyRecall: m.clarifyRecall, argumentAccuracy: m.argumentAccuracy,
                     enAccuracy: m.languageActionAccuracy("en"), ruAccuracy: m.languageActionAccuracy("ru"), heAccuracy: m.languageActionAccuracy("he"),

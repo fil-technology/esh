@@ -8,6 +8,26 @@ import Foundation
 public enum RoutingDataset {
     public static let all: [RoutingCase] = englishCore + englishHard + russian + hebrew + adversarial
 
+    /// A representative 15-case subset (EN/RU/HE × capability/args/chat/unsupported/clarify/wrong-modality)
+    /// for fast signals when a router is slow per call (cold-load / on-device latency). Labelled as subset.
+    public static let quick: [RoutingCase] = [
+        .init("Upscale this 2×", inputs: [.image], expect: .executeCapability, capability: .imageUpscale, args: ["scale": .int(2)], category: "explicit"),
+        .init("Remove the background", inputs: [.image], expect: .executeCapability, capability: .imageSegment, category: "explicit"),
+        .init("What does this screenshot say?", inputs: [.image], expect: .executeCapability, capability: .imageOCR, category: "explicit"),
+        .init("Generate a watercolor fox", expect: .executeCapability, capability: .imageGenerate, category: "explicit"),
+        .init("make this bigger", inputs: [.image], expect: .executeCapability, capability: .imageUpscale, category: "paraphrase"),
+        .init("Generate a poem about a fox", expect: .chat, category: "chat"),
+        .init("Explain recursion", expect: .chat, category: "chat"),
+        .init("Deploy my Next.js site", expect: .unsupported, category: "agent"),
+        .init("improve this", inputs: [.image], expect: .clarify, category: "ambiguous"),
+        .init("transcribe this", inputs: [.image], expect: .clarify, category: "wrong-modality"),
+        .init("Увеличь это в 2 раза", inputs: [.image], expect: .executeCapability, capability: .imageUpscale, category: "ru", language: "ru"),
+        .init("Что здесь написано?", inputs: [.image], expect: .executeCapability, capability: .imageOCR, category: "ru", language: "ru"),
+        .init("Объясни рекурсию", expect: .chat, category: "ru", language: "ru"),
+        .init("הסר את הרקע", inputs: [.image], expect: .executeCapability, capability: .imageSegment, category: "he", language: "he"),
+        .init("מה כתוב כאן?", inputs: [.image], expect: .executeCapability, capability: .imageOCR, category: "he", language: "he"),
+    ]
+
     // MARK: English — obvious, arguments, chat, unsupported, multi, wrong-modality
     public static let englishCore: [RoutingCase] = [
         .init("Upscale this 2×", inputs: [.image], expect: .executeCapability, capability: .imageUpscale, args: ["scale": .int(2)], refs: ["attachment_0"], category: "explicit"),

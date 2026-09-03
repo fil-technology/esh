@@ -68,18 +68,20 @@ public struct CapabilityRouterService: Sendable {
     /// Run the routing benchmark for one router mode ("tier0" | "tier1" | "hybrid") over the full multilingual
     /// dataset, with live inference for the semantic tiers. Returns metrics + the median warm latency. Used by
     /// POST /v1/route/benchmark to produce versioned Router Auto evidence.
-    public func benchmark(mode: String) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?) {
+    public func benchmark(mode: String, semanticOverride: SemanticIntentRouter? = nil) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?) {
         let cases = RoutingDataset.all
         if mode == "tier0" { return (RoutingBenchmark.run(cases), 0) }
         let reg = registry()
         let schema = CapabilitySchemaBuilder.build(from: reg)
         let latencies = LatencyBox()
-        let sem = semantic
+        // Pick the semantic router by mode: an explicit override (e.g. FunctionGemma) wins; else apple* →
+        // Apple Foundation Models; else the resident LLM.
+        let sem: SemanticIntentRouter? = semanticOverride ?? (mode.hasPrefix("apple") ? AppleFMSemanticRouter() : semantic)
+        let tier1Only = (mode == "tier1" || mode == "apple")
         let t0 = tier0
         let metrics = await RoutingBenchmark.runRouter(cases) { message, mods in
             let start = Date()
-            defer { }
-            if mode == "tier1" {
+            if tier1Only {
                 let intent = (await sem?.propose(message: message, inputModalities: mods, schema: schema))
                     ?? CapabilityIntent(action: .clarify, provenance: .init(tier: "tier1-semantic", router: sem?.name ?? "none"))
                 await latencies.add(Date().timeIntervalSince(start) * 1000)
