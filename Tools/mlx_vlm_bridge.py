@@ -1024,6 +1024,53 @@ def image_segment() -> None:
     _dump_json({"outputPath": out_path, "width": width, "height": height})
 
 
+def image_generate() -> None:
+    """Text -> image generation (UCMR 2.1, Stage 3). Reads {prompt, outputPath, steps?, seed?, width?,
+    height?, quantize?} and writes a PNG via mflux's Z-Image Turbo CLI (Apache-2.0, ~8 steps). Returns
+    {outputPath, width, height}. mflux is an optional dependency; a clear error is returned when the CLI
+    is not installed. The model is downloaded on first use (to the HF cache)."""
+    import os
+    import subprocess
+
+    request = _load_json()
+    prompt = request.get("prompt") or ""
+    out_path = request["outputPath"]
+    steps = int(request.get("steps") or 8)
+    seed = int(request.get("seed") or 0)
+    quantize = request.get("quantize")
+    width = request.get("width")
+    height = request.get("height")
+    if not prompt.strip():
+        _fail("image generation requires a non-empty prompt")
+
+    # The mflux CLI lives next to this interpreter (same venv/bin).
+    cli = os.path.join(os.path.dirname(sys.executable), "mflux-generate-z-image-turbo")
+    if not os.path.exists(cli):
+        _fail("mflux is not available (install with: pip install mflux)")
+
+    cmd = [cli, "--prompt", prompt, "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
+    if quantize is not None:
+        cmd += ["--quantize", str(int(quantize))]
+    if width is not None:
+        cmd += ["--width", str(int(width))]
+    if height is not None:
+        cmd += ["--height", str(int(height))]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"image generation failed to launch: {type(exc).__name__}: {exc}")
+    if proc.returncode != 0:
+        _fail(f"image generation failed (exit {proc.returncode}): {(proc.stderr or '').strip()[-400:]}")
+    try:
+        from PIL import Image
+
+        with Image.open(out_path) as im:
+            out_w, out_h = im.size
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"image generation produced no readable output: {type(exc).__name__}: {exc}")
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1528,6 +1575,7 @@ def main() -> None:
             "mlx-serve",
             "mlx-vlm-generate",
             "image-segment",
+            "image-generate",
             "mlx-transcribe",
             "speech-serve",
             "mlx-validate-model",
@@ -1555,6 +1603,8 @@ def main() -> None:
         mlx_vlm_generate()
     elif args.command == "image-segment":
         image_segment()
+    elif args.command == "image-generate":
+        image_generate()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
     elif args.command == "speech-serve":

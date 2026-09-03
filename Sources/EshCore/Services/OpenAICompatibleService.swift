@@ -942,6 +942,12 @@ public struct OpenAICompatibleService: Sendable {
             registryUCMR.register(SegmentationProvider(removeBackground: { inPath, outPath in
                 try segmentationService.removeBackground(imagePath: inPath, outputPath: outPath)
             }))
+            // Text -> image generation via mflux Z-Image Turbo (optional dependency).
+            let imageGenService = ImageGenerationService()
+            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q in
+                try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
+                                             width: w, height: h, quantize: q)
+            }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities
             // when a request omits it (Auto across modalities).
