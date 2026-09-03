@@ -48,6 +48,7 @@ public struct CapabilityID: RawRepresentable, Codable, Hashable, Sendable, Custo
     public static let imageGenerate: CapabilityID = "image.generate"
     public static let imageEdit: CapabilityID = "image.edit"
     public static let imageSegment: CapabilityID = "image.segment"
+    public static let imageUpscale: CapabilityID = "image.upscale"
     // Audio
     public static let audioTranscribe: CapabilityID = "audio.transcribe"
     public static let audioSynthesizeSpeech: CapabilityID = "audio.synthesizeSpeech"

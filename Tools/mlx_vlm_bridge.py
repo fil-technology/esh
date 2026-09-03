@@ -1057,6 +1057,95 @@ def _mem_pressure_critical() -> bool:
         return False
 
 
+def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str):
+    """Run an mflux CLI as a killable process group while guarding RAM: kill + report on low memory /
+    critical pressure instead of thrashing. Returns the output image (width, height). Shared by
+    image-generate and image-upscale."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"{label} failed to launch: {type(exc).__name__}: {exc}")
+
+    def _kill() -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
+
+    while proc.poll() is None:
+        time.sleep(1.0)
+        avail = _available_mem_mb()
+        if (avail is not None and avail < min_free) or _mem_pressure_critical():
+            _kill()
+            detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
+            _fail(f"{label} stopped to protect the machine: low memory ({detail})")
+
+    stderr = ""
+    try:
+        stderr = (proc.stderr.read() if proc.stderr else "") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    if proc.returncode != 0:
+        _fail(f"{label} failed (exit {proc.returncode}): {stderr.strip()[-400:]}")
+    try:
+        from PIL import Image
+
+        with Image.open(out_path) as im:
+            return im.size
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"{label} produced no readable output: {type(exc).__name__}: {exc}")
+
+
+def image_upscale() -> None:
+    """Image super-resolution / upscale (UCMR 2.1, Stage 3) via mflux's SeedVR2 diffusion upscaler. Reads
+    {imagePath, outputPath, resolution?, model?, quantize?, minFreeMemMB?, vaeTiling?} and writes an
+    upscaled PNG. Returns {outputPath, width, height}. mflux is optional; a clear error otherwise. Uses
+    VAE tiling by default to keep peak memory bounded, and the same RAM guard as image generation."""
+    import os
+
+    request = _load_json()
+    in_path = request["imagePath"]
+    out_path = request["outputPath"]
+    resolution = request.get("resolution")
+    model = request.get("model") or "seedvr2-3b"
+    quantize = request.get("quantize")
+    min_free = float(request.get("minFreeMemMB") or 1500)
+    vae_tiling = request.get("vaeTiling", True)
+    if not os.path.exists(in_path):
+        _fail(f"input image not found: {in_path}")
+
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"image upscale not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    cli = os.path.join(os.path.dirname(sys.executable), "mflux-upscale-seedvr2")
+    if not os.path.exists(cli):
+        _fail("mflux is not available (install with: pip install mflux)")
+
+    cmd = [cli, "--model", str(model), "--image-path", in_path, "--output", out_path]
+    if resolution is not None:
+        cmd += ["--resolution", str(int(resolution))]
+    if quantize is not None:
+        cmd += ["--quantize", str(int(quantize))]
+    if vae_tiling:
+        cmd += ["--vae-tiling"]
+
+    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, "image upscale")
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
+
+
 def image_generate() -> None:
     """Text -> image generation (UCMR 2.1, Stage 3). Reads {prompt, outputPath, steps?, seed?, width?,
     height?, quantize?, minFreeMemMB?} and writes a PNG via mflux's Z-Image Turbo CLI (Apache-2.0, ~8
@@ -1067,9 +1156,6 @@ def image_generate() -> None:
     `minFreeMemMB` (default 1500) or the kernel reports critical memory pressure — reporting that it was
     stopped instead of letting the machine thrash/crash."""
     import os
-    import signal
-    import subprocess
-    import time
 
     request = _load_json()
     prompt = request.get("prompt") or ""
@@ -1101,49 +1187,7 @@ def image_generate() -> None:
     if height is not None:
         cmd += ["--height", str(int(height))]
 
-    try:
-        # Own session/process group so we can kill mflux and any children together.
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                text=True, start_new_session=True)
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"image generation failed to launch: {type(exc).__name__}: {exc}")
-
-    def _kill() -> None:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception:  # noqa: BLE001
-                pass
-
-    # Poll while guarding RAM. Kill cleanly and report if memory gets dangerous.
-    while proc.poll() is None:
-        time.sleep(1.0)
-        avail = _available_mem_mb()
-        if (avail is not None and avail < min_free) or _mem_pressure_critical():
-            _kill()
-            detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
-            _fail(f"image generation stopped to protect the machine: low memory ({detail})")
-
-    stderr = ""
-    try:
-        stderr = (proc.stderr.read() if proc.stderr else "") or ""
-    except Exception:  # noqa: BLE001
-        pass
-    if proc.returncode != 0:
-        _fail(f"image generation failed (exit {proc.returncode}): {stderr.strip()[-400:]}")
-    try:
-        from PIL import Image
-
-        with Image.open(out_path) as im:
-            out_w, out_h = im.size
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"image generation produced no readable output: {type(exc).__name__}: {exc}")
+    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, "image generation")
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
 
 
@@ -1652,6 +1696,7 @@ def main() -> None:
             "mlx-vlm-generate",
             "image-segment",
             "image-generate",
+            "image-upscale",
             "mlx-transcribe",
             "speech-serve",
             "mlx-validate-model",
@@ -1681,6 +1726,8 @@ def main() -> None:
         image_segment()
     elif args.command == "image-generate":
         image_generate()
+    elif args.command == "image-upscale":
+        image_upscale()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
     elif args.command == "speech-serve":

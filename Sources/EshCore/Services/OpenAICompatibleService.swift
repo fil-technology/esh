@@ -948,6 +948,11 @@ public struct OpenAICompatibleService: Sendable {
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree)
             }))
+            // Image super-resolution / upscale via mflux SeedVR2 (optional dependency).
+            let imageUpscaleService = ImageUpscaleService()
+            registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, resolution, minFree in
+                try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, resolution: resolution, minFreeMemMB: minFree)
+            }))
             // Video understanding — a multi-provider pipeline: native keyframe/audio extraction (AVFoundation)
             // → VLM per frame + STT → LLM fusion. Reuses the vision + STT + text providers; no core surgery.
             let videoVisionResolver = CapabilityModelResolver()
