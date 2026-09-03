@@ -9,3 +9,14 @@ mlx-audio>=0.5.1
 # capability returns a clear "rembg is not available" error instead of segmenting. Heavy (onnxruntime).
 # rembg
 # onnxruntime
+# OPTIONAL (UCMR 2.1 Stage 3): text->image + upscale via mflux (image.generate, and the experimental
+# SeedVR2 image.upscale backend). Without it these return a clear "mflux is not available" error.
+# mflux
+# OPTIONAL (UCMR 2.1 Stage 4.1): image.upscale default backend — Real-ESRGAN ONNX on onnxruntime (CoreML
+# EP), torch-free. Needs onnxruntime + pillow + huggingface_hub (model auto-downloaded to the assets root).
+# onnxruntime
+# pillow
+# huggingface_hub
+# OPTIONAL (UCMR 2.1 Stage 3): speaker diarization (audio.diarize) via sherpa-onnx (onnxruntime).
+# sherpa-onnx
+# soundfile

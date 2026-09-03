@@ -948,10 +948,13 @@ public struct OpenAICompatibleService: Sendable {
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree, hfCache: hfCache)
             }))
-            // Image super-resolution / upscale via mflux SeedVR2 (optional dependency).
+            // Image super-resolution / upscale. Default backend: Real-ESRGAN ONNX (onnxruntime, torch-free,
+            // model auto-downloaded to the assets root). SeedVR2 (mflux) remains selectable but experimental.
             let imageUpscaleService = ImageUpscaleService()
-            registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, resolution, minFree, hfCache in
-                try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, resolution: resolution, minFreeMemMB: minFree, hfCache: hfCache)
+            let upscaleModelDir = root.cachesURL.appendingPathComponent("upscale-models", isDirectory: true).path
+            registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, scale, minFree, backend in
+                try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, scale: scale,
+                                                modelDir: upscaleModelDir, minFreeMemMB: minFree, backend: backend)
             }))
             // Speaker diarization (audio -> structured speaker clusters) via sherpa-onnx (optional dep).
             // Models live under the assets root (audio/diarization-models); absent -> a clear error.

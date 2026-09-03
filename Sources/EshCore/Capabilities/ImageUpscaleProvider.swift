@@ -11,27 +11,48 @@ import Foundation
 // (repeats must be Int), so a real upscale run fails upstream. Revisit with a newer mflux, or add a
 // Real-ESRGAN ONNX backend (onnxruntime is already present) — see 2_1_STAGE3_MODEL_PROVENANCE.md.
 
+public enum UpscaleBackend: String, Sendable {
+    case realesrganONNX = "realesrgan-onnx"   // default: Real-ESRGAN ONNX on onnxruntime (CoreML EP), torch-free
+    case seedVR2 = "seedvr2"                   // experimental: mflux SeedVR2 (broken on mflux 0.19.1 + mlx 0.32.2)
+}
+
 public struct ImageUpscaleService: Sendable {
     private let bridge: MLXBridge
     public init(bridge: MLXBridge = .init()) { self.bridge = bridge }
 
+    /// Upscale by an integer `scale` (2 or 4 for the ONNX backend). `modelDir` is where the model lives /
+    /// is downloaded (under the configured assets root). Returns the produced pixel size.
     @discardableResult
-    public func upscale(imagePath: String, outputPath: String, resolution: Int?, minFreeMemMB: Int?, hfCache: String?) throws -> (width: Int, height: Int) {
-        let response: Response = try bridge.run(
-            command: "image-upscale",
-            request: Request(imagePath: imagePath, outputPath: outputPath, resolution: resolution, minFreeMemMB: minFreeMemMB, hfCache: hfCache),
-            as: Response.self)
-        return (response.width, response.height)
+    public func upscale(imagePath: String, outputPath: String, scale: Int, modelDir: String,
+                        minFreeMemMB: Int?, backend: UpscaleBackend = .realesrganONNX) throws -> (width: Int, height: Int) {
+        switch backend {
+        case .realesrganONNX:
+            let response: ONNXResponse = try bridge.run(
+                command: "image-upscale-onnx",
+                request: ONNXRequest(imagePath: imagePath, outputPath: outputPath, scale: scale, modelDir: modelDir, minFreeMemMB: minFreeMemMB),
+                as: ONNXResponse.self)
+            return (response.width, response.height)
+        case .seedVR2:
+            let response: SeedResponse = try bridge.run(
+                command: "image-upscale",
+                request: SeedRequest(imagePath: imagePath, outputPath: outputPath, resolution: nil, minFreeMemMB: minFreeMemMB, hfCache: modelDir),
+                as: SeedResponse.self)
+            return (response.width, response.height)
+        }
     }
 
-    private struct Request: Codable, Sendable {
+    private struct ONNXRequest: Codable, Sendable {
+        let imagePath: String; let outputPath: String; let scale: Int; let modelDir: String; let minFreeMemMB: Int?
+    }
+    private struct ONNXResponse: Codable, Sendable { let outputPath: String; let width: Int; let height: Int; let scale: Int; let provider: String }
+    private struct SeedRequest: Codable, Sendable {
         let imagePath: String; let outputPath: String; let resolution: Int?; let minFreeMemMB: Int?; let hfCache: String?
     }
-    private struct Response: Codable, Sendable { let outputPath: String; let width: Int; let height: Int }
+    private struct SeedResponse: Codable, Sendable { let outputPath: String; let width: Int; let height: Int }
 }
 
 public struct ImageUpscaleProvider: CapabilityProvider {
-    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ resolution: Int?, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> (width: Int, height: Int)
+    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ scale: Int, _ minFreeMemMB: Int?, _ backend: UpscaleBackend) throws -> (width: Int, height: Int)
 
     public let descriptor: CapabilityProviderDescriptor
     private let upscale: UpscaleFn
@@ -68,26 +89,26 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                     try StorageService().ensureAssetsAvailable(root: context.root)   // item 10: no internal-disk fallback
                     let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
-                    let resolution = TextToSVGProvider.intOption(req, "resolution")
+                    let scale = TextToSVGProvider.intOption(req, "scale") ?? 4
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
-                    let hfCache = context.root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
+                    let backend = UpscaleBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .realesrganONNX
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("upscale-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
 
-                    cont.yield(.status("upscaling image"))
-                    let size = try upscale(inPath, outPath, resolution, minFreeMemMB, hfCache)
+                    cont.yield(.status("upscaling image (\(backend.rawValue), \(scale)×)"))
+                    let size = try upscale(inPath, outPath, scale, minFreeMemMB, backend)
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     let artifact = Artifact(
                         kind: .image, mimeType: "image/png", entrypoint: "result.png",
-                        metadata: ["width": .int(size.width), "height": .int(size.height)],
+                        metadata: ["width": .int(size.width), "height": .int(size.height), "scale": .int(scale)],
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: req.model, capability: .imageUpscale),
                         validation: .valid, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["result.png": bytes])
                     cont.yield(.planResolved(ExecutionPlan.single(
                         capability: req.capability, inputModalities: [.image], outputModality: .image,
                         providerID: providerID, modelID: req.model, backend: .python,
-                        rationale: ["Single-provider diffusion super-resolution (mflux SeedVR2)."])))
+                        rationale: ["Single-provider super-resolution (\(backend.rawValue), \(scale)× via onnxruntime CoreML)."])))
                     cont.yield(.artifactProduced(saved))
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()

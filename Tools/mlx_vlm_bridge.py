@@ -1176,6 +1176,67 @@ def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str
         _fail(f"{label} produced no readable output: {type(exc).__name__}: {exc}")
 
 
+def image_upscale_onnx() -> None:
+    """Image super-resolution / upscale (UCMR 2.1, Stage 4.1) via Real-ESRGAN ONNX on onnxruntime — the
+    default, reproducible, torch-free backend. Reads {imagePath, outputPath, scale?(2|4), modelDir?,
+    minFreeMemMB?}. The model (SceneWorks/real-esrgan-onnx, BSD-3, dynamic shape) is downloaded on demand
+    into `modelDir` (under the configured assets root, e.g. external SSD) if absent. Runs on the CoreML
+    execution provider with a CPU fallback. Returns {outputPath, width, height, scale, provider}."""
+    import os
+
+    request = _load_json()
+    in_path = request["imagePath"]
+    out_path = request["outputPath"]
+    scale = int(request.get("scale") or 4)
+    if scale not in (2, 4):
+        _fail(f"unsupported upscale scale {scale} (Real-ESRGAN ONNX supports 2 or 4)")
+    model_dir = request.get("modelDir") or os.path.join(os.path.dirname(sys.executable), "..", "upscale-models")
+    min_free = float(request.get("minFreeMemMB") or 1000)
+    if not os.path.exists(in_path):
+        _fail(f"input image not found: {in_path}")
+
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"image upscale not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    try:
+        import numpy as np
+        from PIL import Image
+        import onnxruntime as ort
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"onnxruntime/Pillow not available (install with: pip install onnxruntime pillow): {exc}")
+
+    repo = "SceneWorks/real-esrgan-onnx"
+    fname = "real_esrgan_x2.onnx" if scale == 2 else "real_esrgan_x4.onnx"
+    model_path = os.path.join(model_dir, fname)
+    if not os.path.exists(model_path):
+        try:
+            os.makedirs(model_dir, exist_ok=True)
+            from huggingface_hub import hf_hub_download
+            got = hf_hub_download(repo_id=repo, filename=fname, local_dir=model_dir)
+            model_path = got
+        except Exception as exc:  # noqa: BLE001
+            _fail(f"could not obtain Real-ESRGAN model {fname} from {repo}: {type(exc).__name__}: {exc}")
+
+    try:
+        img = Image.open(in_path).convert("RGB")
+        arr = np.asarray(img).astype(np.float32) / 255.0
+        x = np.transpose(arr, (2, 0, 1))[None, ...]
+        sess = ort.InferenceSession(model_path, providers=["CoreMLExecutionProvider", "CPUExecutionProvider"])
+        name = sess.get_inputs()[0].name
+        y = sess.run(None, {name: x})[0]
+        y = np.clip(y[0], 0.0, 1.0)
+        y = np.transpose(y, (1, 2, 0))
+        out = (y * 255.0 + 0.5).astype(np.uint8)
+        Image.fromarray(out).save(out_path)
+        with Image.open(out_path) as im:
+            out_w, out_h = im.size
+        provider = sess.get_providers()[0]
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"image upscale failed: {type(exc).__name__}: {exc}")
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "scale": scale, "provider": provider})
+
+
 def image_upscale() -> None:
     """Image super-resolution / upscale (UCMR 2.1, Stage 3) via mflux's SeedVR2 diffusion upscaler. Reads
     {imagePath, outputPath, resolution?, model?, quantize?, minFreeMemMB?, vaeTiling?} and writes an
@@ -1770,6 +1831,7 @@ def main() -> None:
             "image-segment",
             "image-generate",
             "image-upscale",
+            "image-upscale-onnx",
             "audio-diarize",
             "mlx-transcribe",
             "speech-serve",
@@ -1802,6 +1864,8 @@ def main() -> None:
         image_generate()
     elif args.command == "image-upscale":
         image_upscale()
+    elif args.command == "image-upscale-onnx":
+        image_upscale_onnx()
     elif args.command == "audio-diarize":
         audio_diarize()
     elif args.command == "mlx-transcribe":

@@ -12,8 +12,9 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func producesLargerImageArtifactFromImageInput() async throws {
-        let provider = ImageUpscaleProvider(upscale: { _, outPath, resolution, _, _ in
-            #expect(resolution == 2048)
+        let provider = ImageUpscaleProvider(upscale: { _, outPath, scale, _, backend in
+            #expect(scale == 4)
+            #expect(backend == .realesrganONNX)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
             return (2048, 2048)
         })
@@ -23,7 +24,7 @@ struct ImageUpscaleProviderTests {
             capability: .imageUpscale,
             inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1,2]).base64EncodedString()))],
             output: .init(modality: .image),
-            options: ExecutionOptions(["resolution": .int(2048)])))
+            options: ExecutionOptions(["scale": .int(4)])))
         let art = try #require(result.outputs.first)
         #expect(art.kind == .image)
         #expect(art.metadata["width"] == .int(2048))
