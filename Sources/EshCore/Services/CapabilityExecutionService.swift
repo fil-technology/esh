@@ -149,15 +149,45 @@ public struct CapabilityExecutionService: Sendable {
     /// Optional capability-aware model resolver: fills `model` when a request omits it (Auto across
     /// modalities). Returns nil to leave the model unresolved (e.g. capabilities that need no model).
     private let modelResolver: (@Sendable (ExecutionRequest) -> String?)?
+    /// Stage 4.2c: performance-aware Auto. Optional; when present, consulted before the plain model
+    /// resolver to pick an evidence-backed model and (for interactive requests) config.
+    private let scheduler: CapabilityScheduler?
+    private let candidateModels: (@Sendable (CapabilityID) -> [String])?
 
     public init(registry: CapabilityRegistry, context: ExecutionContext,
-                modelResolver: (@Sendable (ExecutionRequest) -> String?)? = nil) {
+                modelResolver: (@Sendable (ExecutionRequest) -> String?)? = nil,
+                scheduler: CapabilityScheduler? = nil,
+                candidateModels: (@Sendable (CapabilityID) -> [String])? = nil) {
         self.registry = registry
         self.context = context
         self.modelResolver = modelResolver
+        self.scheduler = scheduler
+        self.candidateModels = candidateModels
+    }
+
+    /// Apply performance-aware scheduling (evidence-backed model + interactive config) to a request.
+    /// Returns the possibly-modified request and the decision (for plan annotation). Pure w.r.t. providers.
+    private func scheduled(_ request: ExecutionRequest) -> (ExecutionRequest, CapabilityScheduleDecision) {
+        guard let scheduler else { return (request, .none) }
+        var req = request
+        let costKeys = ["width", "height", "steps", "scale"]
+        let cfg = costKeys.reduce(into: [String: JSONValue]()) { acc, k in if let v = req.options.values[k] { acc[k] = v } }
+        let candidates = candidateModels?(req.capability) ?? []
+        let decision = scheduler.decide(capability: req.capability, currentModel: req.model,
+                                        candidateModelIDs: candidates, requestedConfig: cfg,
+                                        latency: req.constraints.latency)
+        if req.model == nil, let m = decision.modelID { req.model = m }
+        for (k, v) in decision.optionOverrides where req.options.values[k] == nil { req.options.values[k] = v }
+        return (req, decision)
     }
 
     public func execute(_ request: ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        let (scheduledRequest, _) = scheduled(request)
+        return runResolved(scheduledRequest)
+    }
+
+    /// Run a request that has already been through `scheduled(_:)` (model resolver fallback + dispatch).
+    private func runResolved(_ request: ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error> {
         var request = request
         if request.model == nil, let resolved = modelResolver?(request) { request.model = resolved }
         let candidates = registry.candidates(for: request)
@@ -174,11 +204,12 @@ public struct CapabilityExecutionService: Sendable {
 
     /// Run to completion, collecting a typed ExecutionResult (text and/or artifacts).
     public func executeCollecting(_ request: ExecutionRequest) async throws -> ExecutionResult {
+        let (scheduledRequest, decision) = scheduled(request)
         var text = ""
         var outputs: [Artifact] = []
         var usage: EshUsage?
         var plan: ExecutionPlan?
-        for try await event in execute(request) {
+        for try await event in runResolved(scheduledRequest) {
             switch event {
             case .textDelta(let s): text += s
             case .artifactProduced(let a): outputs.append(a)
@@ -186,6 +217,19 @@ public struct CapabilityExecutionService: Sendable {
             case .planResolved(let p): plan = p
             case .failed(let m): throw CapabilityError.failed(m)
             case .status, .progress, .reasoningDelta, .previewReady, .done: break
+            }
+        }
+        // Fold the performance-aware decision into the plan ("Why this execution plan?").
+        if !decision.rationale.isEmpty || decision.evidenceBacked {
+            if var p = plan {
+                p.rationale.append(contentsOf: decision.rationale)
+                p.evidenceBacked = p.evidenceBacked || decision.evidenceBacked
+                plan = p
+            } else if !decision.rationale.isEmpty {
+                plan = ExecutionPlan(capability: request.capability,
+                                     inputModalities: request.inputs.map { $0.modality },
+                                     outputModality: request.output.modality,
+                                     steps: [], rationale: decision.rationale, evidenceBacked: decision.evidenceBacked)
             }
         }
         return ExecutionResult(

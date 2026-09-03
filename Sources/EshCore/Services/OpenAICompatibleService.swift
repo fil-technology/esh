@@ -991,8 +991,15 @@ public struct OpenAICompatibleService: Sendable {
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities
             // when a request omits it (Auto across modalities).
             let capabilityResolver = CapabilityModelResolver()
+            // Stage 4.2c: performance-aware Auto — feed recorded capability benchmarks so Auto avoids
+            // "fits in memory but impractically slow" (e.g. prefers a within-budget resolution for
+            // interactive image generation). candidateModels is empty for now (cross-model ranking activates
+            // once multiple capable models are installed); the interactive config-preference is active.
+            let capabilityScheduler = CapabilityScheduler(index: CapabilityEvidenceIndex(root: root))
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx,
-                modelResolver: { req in capabilityResolver.resolveModelID(capability: req.capability, from: (try? modelStore.listInstalls()) ?? []) })
+                modelResolver: { req in capabilityResolver.resolveModelID(capability: req.capability, from: (try? modelStore.listInstalls()) ?? []) },
+                scheduler: capabilityScheduler,
+                candidateModels: { _ in [] })
             executeClosure = { req in try await execSvc.executeCollecting(req) }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
