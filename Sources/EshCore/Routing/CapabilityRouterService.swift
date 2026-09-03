@@ -50,16 +50,65 @@ public struct CapabilityRouterService: Sendable {
     private let root: PersistenceRoot
     private let host: @Sendable () -> HostMachineProfile?
     private let now: @Sendable () -> String
+    /// The Tier-1 semantic router (for benchmarking each router in isolation and the hybrid).
+    private let semantic: SemanticIntentRouter?
+    private let tier0 = DeterministicIntentRouter()
 
     public init(resolver: IntentResolver = .init(), store: PendingInvocationStore,
                 registry: @escaping @Sendable () -> CapabilityRegistry,
                 installs: @escaping @Sendable () -> [ModelInstall],
                 root: PersistenceRoot,
                 host: @escaping @Sendable () -> HostMachineProfile? = { nil },
+                semantic: SemanticIntentRouter? = nil,
                 now: @escaping @Sendable () -> String = { ISO8601DateFormatter().string(from: Date()) }) {
         self.resolver = resolver; self.store = store; self.registry = registry
-        self.installs = installs; self.root = root; self.host = host; self.now = now
+        self.installs = installs; self.root = root; self.host = host; self.semantic = semantic; self.now = now
     }
+
+    /// Run the routing benchmark for one router mode ("tier0" | "tier1" | "hybrid") over the full multilingual
+    /// dataset, with live inference for the semantic tiers. Returns metrics + the median warm latency. Used by
+    /// POST /v1/route/benchmark to produce versioned Router Auto evidence.
+    public func benchmark(mode: String) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?) {
+        let cases = RoutingDataset.all
+        if mode == "tier0" { return (RoutingBenchmark.run(cases), 0) }
+        let reg = registry()
+        let schema = CapabilitySchemaBuilder.build(from: reg)
+        let latencies = LatencyBox()
+        let sem = semantic
+        let t0 = tier0
+        let metrics = await RoutingBenchmark.runRouter(cases) { message, mods in
+            let start = Date()
+            defer { }
+            if mode == "tier1" {
+                let intent = (await sem?.propose(message: message, inputModalities: mods, schema: schema))
+                    ?? CapabilityIntent(action: .clarify, provenance: .init(tier: "tier1-semantic", router: sem?.name ?? "none"))
+                await latencies.add(Date().timeIntervalSince(start) * 1000)
+                return intent
+            }
+            // hybrid: Tier-0 first; escalate to Tier-1 only on clarify; validate the proposal is registered.
+            var intent = t0.route(message: message, inputModalities: mods)
+            if intent.action == .clarify, let sem {
+                if let p = await sem.propose(message: message, inputModalities: mods, schema: schema),
+                   p.action == .executeCapability, let cap = p.capability,
+                   reg.all.contains(where: { $0.descriptor.capabilities.contains(cap) }) {
+                    intent = p
+                }
+                await latencies.add(Date().timeIntervalSince(start) * 1000)   // only escalated cases pay LLM cost
+            }
+            return intent
+        }
+        return (metrics, await latencies.median())
+    }
+
+    /// Choose the Tier-1 router from persisted evidence (Router Auto), explaining why.
+    public func routerAuto(currentOS: String?, eshVersion: String?) -> RouterAutoPolicy.Decision {
+        let ev = RouterEvidenceStore(root: root).load().evidence
+        return RouterAutoPolicy().choose(from: ev, currentSchemaVersion: CapabilitySchemaVersion.current,
+                                         currentDatasetVersion: RoutingBenchmark.datasetVersion, currentOS: currentOS)
+    }
+
+    actor LatencyBox { var xs: [Double] = []; func add(_ x: Double) { xs.append(x) }
+        func median() -> Double? { guard !xs.isEmpty else { return nil }; let s = xs.sorted(); return s[s.count/2] } }
 
     public func route(message: String, attachments: [EshAttachment], conversationID: String?) async -> RouteDecision {
         let outcome = await resolver.resolve(message: message, attachments: attachments,

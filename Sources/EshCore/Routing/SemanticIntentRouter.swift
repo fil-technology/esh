@@ -19,6 +19,9 @@ public struct CapabilitySchemaEntry: Codable, Sendable, Equatable {
     }
 }
 
+/// Bumped when the capability set / arg schemas materially change, so routing evidence can go stale (§13).
+public enum CapabilitySchemaVersion { public static let current = 1 }
+
 public enum CapabilitySchemaBuilder {
     /// Human-readable descriptions + arg schemas per capability (used only for capabilities the registry
     /// actually has a provider for).

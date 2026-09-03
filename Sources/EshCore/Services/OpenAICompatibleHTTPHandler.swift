@@ -134,6 +134,10 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 let decoded = try JSONCoding.decoder.decode(RouteResumeHTTPRequest.self, from: request.body)
                 let decision = try await service.resumeRoute(pendingId: decoded.pendingId, conversationID: decoded.conversationID)
                 return try jsonResponse(statusCode: 200, payload: decision)
+            case ("POST", "/v1/route/benchmark"):
+                let mode = queryItems(from: request.path)["mode"] ?? "hybrid"
+                let data = try await service.routeBenchmark(mode: mode)
+                return jsonDataResponse(data)
             case ("GET", let p) where p.hasPrefix("/v1/artifacts/"):
                 let rest = String(p.dropFirst("/v1/artifacts/".count))
                 let comps = rest.split(separator: "/", maxSplits: 1).map(String.init)

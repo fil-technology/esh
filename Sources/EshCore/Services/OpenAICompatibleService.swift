@@ -816,6 +816,9 @@ public struct OpenAICompatibleService: Sendable {
     /// /v1/route/resume (pendingId → RouteDecision). Additive; nil when the router isn't wired.
     private let routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
     private let resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
+    /// Router Auto benchmark (POST /v1/route/benchmark?mode=tier0|tier1|hybrid): runs the routing dataset,
+    /// persists versioned evidence, returns metrics JSON. Additive; nil when the router isn't wired.
+    private let routeBenchmarkClosure: (@Sendable (String) async -> Data)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -830,7 +833,8 @@ public struct OpenAICompatibleService: Sendable {
         execute: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)? = nil,
         artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil,
         route: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)? = nil,
-        resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil
+        resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
+        routeBenchmark: (@Sendable (String) async -> Data)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -843,6 +847,13 @@ public struct OpenAICompatibleService: Sendable {
         self.artifactClosure = artifact
         self.routeClosure = route
         self.resumeRouteClosure = resumeRoute
+        self.routeBenchmarkClosure = routeBenchmark
+    }
+
+    /// Run the Router Auto benchmark for a mode and return metrics JSON (POST /v1/route/benchmark).
+    public func routeBenchmark(mode: String) async throws -> Data {
+        guard let routeBenchmarkClosure else { throw OpenAICompatibleError.unsupported("Router benchmarking is not available in this process.") }
+        return await routeBenchmarkClosure(mode)
     }
 
     /// Route a chat message + typed attachments to a capability decision (POST /v1/route).
@@ -936,6 +947,7 @@ public struct OpenAICompatibleService: Sendable {
         var artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
         var routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
         var resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
+        var routeBenchmarkClosure: (@Sendable (String) async -> Data)?
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
@@ -1040,9 +1052,32 @@ public struct OpenAICompatibleService: Sendable {
                 registry: { routerRegistry },
                 installs: { (try? modelStore.listInstalls()) ?? [] },
                 root: root,
-                host: { HostMachineProfileService().currentProfile() })
+                host: { HostMachineProfileService().currentProfile() },
+                semantic: semanticRouter)
             routeClosure = { message, attachments, convo in await routerService.route(message: message, attachments: attachments, conversationID: convo) }
             resumeRouteClosure = { pendingId, convo in await routerService.resume(pendingId: pendingId, conversationID: convo) }
+            let benchRoot = root
+            routeBenchmarkClosure = { mode in
+                let (m, warm) = await routerService.benchmark(mode: mode)
+                let hostP = HostMachineProfileService().currentProfile()
+                let routerName = mode == "tier0" ? "tier0" : "resident-llm"
+                let ev = RouterEvidence(
+                    router: routerName, mode: mode, available: true,
+                    modelOrProvider: mode == "tier0" ? "rules" : "resident-llm", runtime: mode == "tier0" ? "rules" : "mlx",
+                    total: m.total, capabilitySelectionAccuracy: m.capabilitySelectionAccuracy, falseExecutionRate: m.falseExecutionRate,
+                    conservativeScore: m.conservativeScore, clarifyRecall: m.clarifyRecall, argumentAccuracy: m.argumentAccuracy,
+                    enAccuracy: m.languageActionAccuracy("en"), ruAccuracy: m.languageActionAccuracy("ru"), heAccuracy: m.languageActionAccuracy("he"),
+                    warmLatencyMsMedian: warm, hardware: hostP.chipDescription ?? "Apple Silicon",
+                    eshVersion: toolVersion, capabilitySchemaVersion: CapabilitySchemaVersion.current,
+                    datasetVersion: RoutingBenchmark.datasetVersion, dateISO8601: ISO8601DateFormatter().string(from: Date()))
+                try? RouterEvidenceStore(root: benchRoot).upsert(ev)
+                let out: [String: JSONValue] = ["mode": .string(mode), "router": .string(routerName), "total": .int(m.total),
+                    "capabilityAccuracy": .double(m.capabilitySelectionAccuracy), "falseExecutionRate": .double(m.falseExecutionRate),
+                    "conservativeScore": .double(m.conservativeScore), "argumentAccuracy": .double(m.argumentAccuracy),
+                    "en": .double(m.languageActionAccuracy("en")), "ru": .double(m.languageActionAccuracy("ru")), "he": .double(m.languageActionAccuracy("he")),
+                    "warmLatencyMs": .double(warm ?? 0), "missed": .int(m.missedCapability), "unnecessaryClarify": .int(m.unnecessaryClarification)]
+                return (try? JSONCoding.encoder.encode(out)) ?? Data("{}".utf8)
+            }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
                 let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
@@ -1069,7 +1104,8 @@ public struct OpenAICompatibleService: Sendable {
             execute: executeClosure,
             artifact: artifactClosure,
             route: routeClosure,
-            resumeRoute: resumeRouteClosure
+            resumeRoute: resumeRouteClosure,
+            routeBenchmark: routeBenchmarkClosure
         )
     }
 
