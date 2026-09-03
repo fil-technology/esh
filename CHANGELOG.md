@@ -7,6 +7,14 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR Stage 2 — vision understanding (development milestone, untagged).** The first real
+  non-text INPUT modality: images now actually reach the model. The MLX bridge gained an
+  `mlx-vlm-generate` op that loads via `mlx_vlm` (previously `mlx_vlm` was imported only for KV-cache and
+  images were dropped); a `VisionUnderstandProvider` (`image.understand`/`image.ocr`, inputs
+  `[text, image]`, text output) resolves image attachments (file path or base64→temp) and runs them
+  through mlx-vlm. Verified live end-to-end via `POST /v1/execute image.understand` (nanoLLaVA correctly
+  read a test image). Note: Qwen2-VL/2.5-VL require a torch-only video processor; torch-free VLMs work
+  as-is.
 - **esh 2.1 UCMR Stage 1 — first reference capability providers (development milestone, untagged).**
   Two substantially-different non-text providers prove the capability abstraction end-to-end, with no
   model downloads. **Text→SVG** (`vector.generate`): an installed LLM emits a constrained JSON scene-IR
