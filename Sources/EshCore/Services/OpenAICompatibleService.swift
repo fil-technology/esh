@@ -944,9 +944,9 @@ public struct OpenAICompatibleService: Sendable {
             }))
             // Text -> image generation via mflux Z-Image Turbo (optional dependency).
             let imageGenService = ImageGenerationService()
-            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q in
+            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q, minFree in
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
-                                             width: w, height: h, quantize: q)
+                                             width: w, height: h, quantize: q, minFreeMemMB: minFree)
             }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities

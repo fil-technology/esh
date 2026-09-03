@@ -11,27 +11,28 @@ public struct ImageGenerationService: Sendable {
     public init(bridge: MLXBridge = .init()) { self.bridge = bridge }
 
     /// Generate an image for `prompt`, writing a PNG to `outputPath`. Returns its pixel size.
+    /// `minFreeMemMB` is the RAM floor below which the run is refused/stopped (nil → bridge default).
     @discardableResult
     public func generate(prompt: String, outputPath: String, steps: Int, seed: Int,
-                         width: Int?, height: Int?, quantize: Int?) throws -> (width: Int, height: Int) {
+                         width: Int?, height: Int?, quantize: Int?, minFreeMemMB: Int?) throws -> (width: Int, height: Int) {
         let response: Response = try bridge.run(
             command: "image-generate",
             request: Request(prompt: prompt, outputPath: outputPath, steps: steps, seed: seed,
-                             width: width, height: height, quantize: quantize),
+                             width: width, height: height, quantize: quantize, minFreeMemMB: minFreeMemMB),
             as: Response.self)
         return (response.width, response.height)
     }
 
     private struct Request: Codable, Sendable {
         let prompt: String; let outputPath: String; let steps: Int; let seed: Int
-        let width: Int?; let height: Int?; let quantize: Int?
+        let width: Int?; let height: Int?; let quantize: Int?; let minFreeMemMB: Int?
     }
     private struct Response: Codable, Sendable { let outputPath: String; let width: Int; let height: Int }
 }
 
 public struct ImageGenerationProvider: CapabilityProvider {
     public typealias GenerateFn = @Sendable (_ prompt: String, _ outputPath: String, _ steps: Int, _ seed: Int,
-                                             _ width: Int?, _ height: Int?, _ quantize: Int?) throws -> (width: Int, height: Int)
+                                             _ width: Int?, _ height: Int?, _ quantize: Int?, _ minFreeMemMB: Int?) throws -> (width: Int, height: Int)
 
     public let descriptor: CapabilityProviderDescriptor
     private let generate: GenerateFn
@@ -71,13 +72,14 @@ public struct ImageGenerationProvider: CapabilityProvider {
                     let width = TextToSVGProvider.intOption(req, "width")
                     let height = TextToSVGProvider.intOption(req, "height")
                     let quantize = TextToSVGProvider.intOption(req, "quantize")
+                    let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
 
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("gen-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
 
                     cont.yield(.status("generating image"))
-                    let size = try generate(prompt, outPath, steps, seed, width, height, quantize)
+                    let size = try generate(prompt, outPath, steps, seed, width, height, quantize, minFreeMemMB)
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     let artifact = Artifact(
                         kind: .image, mimeType: "image/png", entrypoint: "result.png",

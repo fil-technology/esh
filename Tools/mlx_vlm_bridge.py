@@ -1024,13 +1024,52 @@ def image_segment() -> None:
     _dump_json({"outputPath": out_path, "width": width, "height": height})
 
 
+def _available_mem_mb() -> "float | None":
+    """Best-effort available RAM in MB via `vm_stat` (zero-dep). None if it can't be read."""
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    page = 4096
+    m = re.search(r"page size of (\d+) bytes", out)
+    if m:
+        page = int(m.group(1))
+    pages = 0
+    for label in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+        mm = re.search(rf"{label}:\s+(\d+)", out)
+        if mm:
+            pages += int(mm.group(1))
+    return (pages * page) / 1e6 if pages else None
+
+
+def _mem_pressure_critical() -> bool:
+    """True when the kernel reports critical memory pressure (level 4). Best-effort."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return int(out) >= 4
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def image_generate() -> None:
     """Text -> image generation (UCMR 2.1, Stage 3). Reads {prompt, outputPath, steps?, seed?, width?,
-    height?, quantize?} and writes a PNG via mflux's Z-Image Turbo CLI (Apache-2.0, ~8 steps). Returns
-    {outputPath, width, height}. mflux is an optional dependency; a clear error is returned when the CLI
-    is not installed. The model is downloaded on first use (to the HF cache)."""
+    height?, quantize?, minFreeMemMB?} and writes a PNG via mflux's Z-Image Turbo CLI (Apache-2.0, ~8
+    steps). Returns {outputPath, width, height}. mflux is an optional dependency; a clear error is
+    returned when the CLI is not installed. The model is downloaded on first use (to the HF cache).
+
+    RAM safety: refuses to start, and kills the run mid-flight, when available memory drops below
+    `minFreeMemMB` (default 1500) or the kernel reports critical memory pressure — reporting that it was
+    stopped instead of letting the machine thrash/crash."""
     import os
+    import signal
     import subprocess
+    import time
 
     request = _load_json()
     prompt = request.get("prompt") or ""
@@ -1040,8 +1079,14 @@ def image_generate() -> None:
     quantize = request.get("quantize")
     width = request.get("width")
     height = request.get("height")
+    min_free = float(request.get("minFreeMemMB") or 1500)
     if not prompt.strip():
         _fail("image generation requires a non-empty prompt")
+
+    # Pre-flight RAM check: don't even start if we're already low.
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"image generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
 
     # The mflux CLI lives next to this interpreter (same venv/bin).
     cli = os.path.join(os.path.dirname(sys.executable), "mflux-generate-z-image-turbo")
@@ -1055,12 +1100,43 @@ def image_generate() -> None:
         cmd += ["--width", str(int(width))]
     if height is not None:
         cmd += ["--height", str(int(height))]
+
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        # Own session/process group so we can kill mflux and any children together.
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
     except Exception as exc:  # noqa: BLE001
         _fail(f"image generation failed to launch: {type(exc).__name__}: {exc}")
+
+    def _kill() -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Poll while guarding RAM. Kill cleanly and report if memory gets dangerous.
+    while proc.poll() is None:
+        time.sleep(1.0)
+        avail = _available_mem_mb()
+        if (avail is not None and avail < min_free) or _mem_pressure_critical():
+            _kill()
+            detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
+            _fail(f"image generation stopped to protect the machine: low memory ({detail})")
+
+    stderr = ""
+    try:
+        stderr = (proc.stderr.read() if proc.stderr else "") or ""
+    except Exception:  # noqa: BLE001
+        pass
     if proc.returncode != 0:
-        _fail(f"image generation failed (exit {proc.returncode}): {(proc.stderr or '').strip()[-400:]}")
+        _fail(f"image generation failed (exit {proc.returncode}): {stderr.strip()[-400:]}")
     try:
         from PIL import Image
 
