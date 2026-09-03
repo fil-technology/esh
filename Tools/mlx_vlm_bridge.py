@@ -978,14 +978,14 @@ def mlx_vlm_generate() -> None:
         model, processor = vlm_load(model_path)
         config = load_config(model_path)
         formatted = apply_chat_template(processor, config, prompt, num_images=len(images))
-        result = vlm_generate(
-            model, processor, formatted, images,
-            max_tokens=max_tokens, temp=temperature, verbose=False,
-        )
+        gen_kwargs = {"max_tokens": max_tokens, "verbose": False}
+        if temperature > 0:
+            gen_kwargs["temperature"] = temperature
+        result = vlm_generate(model, processor, formatted, images, **gen_kwargs)
         text = _extract_vlm_text(result)
     except Exception as exc:  # noqa: BLE001
         sys.stdout = real_stdout
-        _fail(f"vision generation failed: {exc}")
+        _fail(f"vision generation failed: {type(exc).__name__}: {exc}")
     finally:
         sys.stdout = real_stdout
 
