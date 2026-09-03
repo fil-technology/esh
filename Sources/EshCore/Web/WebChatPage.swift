@@ -259,6 +259,13 @@ public enum WebChatPage {
      re-triggered entrance read as the menu "jumping". */
   .pop{ transform-origin:top; } .pop.opening{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); }
   .asstfoot{ display:flex; align-items:center; gap:6px; align-self:flex-start; }
+  .astarts{ display:flex; flex-direction:column; gap:10px; margin:8px 0 2px; }
+  .astart{ max-width:min(420px,100%); }
+  .astimg{ max-width:100%; border-radius:12px; border:1px solid var(--line2); background:#fff; display:block; }
+  .astartbar{ display:flex; align-items:center; gap:12px; margin-top:5px; font-size:11px; color:var(--muted); }
+  .astart.filepill{ display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:var(--paper); font-size:12px; }
+  .alink{ color:var(--muted); text-decoration:underline; cursor:pointer; }
+  .alink:hover{ color:var(--ink); }
   .sbtn{ display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:none; background:none; color:var(--faint); cursor:pointer; padding:0; transition:color .12s, background .12s; }
   .sbtn svg{ width:14px; height:14px; }
   .sbtn:hover{ color:var(--ink); background:var(--panel2); } .sbtn.on{ color:var(--ink); } .sbtn.load{ animation:eshpulse 1s ease-in-out infinite; }
@@ -687,6 +694,25 @@ function renderLog(){
   setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
   return log;
 }
+// UCMR: render one typed artifact (image/svg inline; other kinds as a download pill). Bytes are fetched
+// by reference from /v1/artifacts/{id} — never inlined as giant base64.
+function artifactHTML(a){
+  const url='/v1/artifacts/'+encodeURIComponent(a.id);
+  if(a.kind==='image'||a.kind==='svg'){
+    return `<div class="astart"><img class="astimg" src="${url}" alt="${esch(a.kind)} result" loading="lazy">`
+      +`<div class="astartbar"><span class="mono">${esch(a.mimeType||a.kind)}</span><a class="alink" href="${url}" download>Download</a></div></div>`;
+  }
+  return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
+}
+// UCMR: thin client for the capability endpoint. inputs use the typed payload encoding; returns
+// {text, outputs:[{id,kind,mimeType}]}. Media is referenced by id, not embedded.
+async function execCapability(capability, inputs, output, model){
+  const body={capability, inputs, output:output||{modality:'text'}, options:{values:{}}};
+  if(model && model!=='Auto' && model!=='Apple Intelligence') body.model=model;
+  const r=await fetch('/v1/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
+  return await r.json();
+}
 function renderMsg(m){
   const fresh=m.id&&!_seen.has(m.id); if(m.id)_seen.add(m.id);
   const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
@@ -716,6 +742,8 @@ function renderMsg(m){
     h+=`<details class="reason"><summary>${label}</summary><div class="rc">${esch(s.reason)}</div></details>`; }
   const ans=s.answer||(s.thinking?'':m.content);
   if(ans) h+=`<div class="asttext">${md(ans)}</div>`;
+  // UCMR: typed capability results (image/svg/file) rendered from /v1/artifacts.
+  if(m.artifacts && m.artifacts.length){ h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
   if(m.truncated) h+=`<div class="reason" style="color:var(--amber)">⚠ Stopped at the token limit — raise Max tokens in Settings.</div>`;
   // Footer: manual "read aloud" control (speech is opt-in, per message — never auto)
   // plus the execution-inspector meta link.
