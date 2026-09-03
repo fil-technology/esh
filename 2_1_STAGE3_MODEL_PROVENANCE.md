@@ -20,19 +20,26 @@ timings measured on **Apple M1 Pro / 32 GB**, assets on external SSD `/Volumes/S
 - **Rejected**: full-precision Z-Image (~12 GB); FLUX.1-schnell (~12 GB, heavier); baking models into the
   release (kept on-demand).
 
-## Image upscaling — mflux SeedVR2 — EXPERIMENTAL ⚠️ (upstream backend bug; wiring validated)
-- **Runtime**: mflux SeedVR2 (`numz/SeedVR2_comfyUI`, 6.8 GB). **Capability**: `image.upscale` (separate
-  typed capability, not vague image.edit). VAE tiling for bounded memory.
-- **LIVE result**: model downloaded correctly **to the SSD** (internal disk untouched), RAM guard active,
-  and the provider returned a **clean typed error** — but the actual upscale **fails upstream**: mflux
-  0.19.1 SeedVR2 attention calls `mx.repeat(x, mx.array(counts), axis=…)` (array repeats) at 4+ sites,
-  which **mlx 0.32.2 rejects** (`repeats` must be Int). Not an esh bug; patching a dependency's model
-  code across multiple sites is fragile and violates clean-install reproducibility (item 11).
-- **Classification**: implemented + wired + storage/RAM/error paths validated; **SeedVR2 backend
-  non-functional on this mflux/mlx pairing** → experimental, not recommendation-ready.
-- **Rejected**: Real-ESRGAN (no maintained MLX-native pkg); pyannote-style torch upscalers (torch).
-- **Stage 4 fix**: newer mflux that fixes SeedVR2, or a **Real-ESRGAN ONNX** backend (onnxruntime already
-  present) as a torch-free `image.upscale` provider.
+## Image upscaling — Real-ESRGAN ONNX — LIVE ✅ (Stage 4.1; SeedVR2 kept experimental)
+- **DEFAULT runtime**: **Real-ESRGAN ONNX on onnxruntime** (CoreML execution provider + CPU fallback),
+  torch-free. **Model**: `SceneWorks/real-esrgan-onnx` — dynamic-shape RRDBNet, **x2 + x4**, 64 MB each.
+  **License**: BSD-3-Clause (Real-ESRGAN). Auto-downloaded on demand to the assets root
+  (`caches/upscale-models/`). **Capability**: `image.upscale` (separate typed capability).
+- **Candidate evaluation**: chose SceneWorks (dynamic shape → no tiling needed) over AXERA-TECH
+  (fixed 64×64 input → needs tiling) and qualcomm (gated repo). MLX-native ports exist
+  (themindstudio / mlx-community) but the ONNX path reuses already-present onnxruntime with a clean
+  provider boundary and CoreML acceleration.
+- **LIVE** via `/v1/execute image.upscale` on M1 Pro / 32 GB:
+  - 2×: 512→1024, cold 7.8 s / warm 7.4 s.
+  - 4×: 512→2048, ~12 s, **peak RSS 10.7 GB** (activation maps scale with output pixels — large inputs
+    would need tiling; a Stage 4 refinement), output 4.7 MB, CoreML EP.
+  - Typed artifact metadata `{width,height,scale}` correct; ExecutionPlan present; model on SSD (internal
+    disk untouched); no leftover processes/temp files; RAM pre-check + graceful errors validated.
+- **Quality**: clean photo-like super-resolution on the test image; no severe artifacts.
+- **EXPERIMENTAL fallback** `seedvr2` (mflux): still fails upstream on mflux 0.19.1 + mlx 0.32.2
+  (`mx.repeat` array repeats). Kept selectable via `options.backend=seedvr2` for future retest, **never
+  the default**. (Storage routing / RAM guard / graceful error were validated on it too.)
+- **Rejected**: pyannote-style torch upscalers (torch); baking upscale models into the release (on-demand).
 
 ## Video understanding — native AVFoundation pipeline — LIVE ✅
 - **Runtime**: Apple **AVFoundation + ImageIO** (metadata, adaptive keyframes, audio→16 kHz WAV). **No

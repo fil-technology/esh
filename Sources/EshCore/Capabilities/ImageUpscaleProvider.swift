@@ -1,15 +1,15 @@
 import Foundation
 
-// esh 2.1 UCMR, Stage 3 — image super-resolution / upscale (image → image) via mflux's SeedVR2 diffusion
-// upscaler through the `image-upscale` bridge op. A SEPARATE typed capability (image.upscale), not folded
-// into a vague image.edit, per the spec. mflux optional; RAM-guarded (VAE tiling + memory floor).
+// esh 2.1 UCMR — image super-resolution / upscale (image → image). A SEPARATE typed capability
+// (image.upscale), not folded into a vague image.edit.
 //
-// STATUS (live-validated 2026-09-03): the provider WIRING is verified end-to-end — model asset download
-// routed to the external SSD, RAM guard active, and a clean typed error on failure. The SeedVR2 BACKEND
-// itself is currently EXPERIMENTAL / non-functional on mflux 0.19.1 + mlx 0.32.2: mflux's SeedVR2
-// attention calls `mx.repeat(x, mx.array(counts), axis=…)` (array repeats) which this mlx rejects
-// (repeats must be Int), so a real upscale run fails upstream. Revisit with a newer mflux, or add a
-// Real-ESRGAN ONNX backend (onnxruntime is already present) — see 2_1_STAGE3_MODEL_PROVENANCE.md.
+// Backends (Stage 4.1):
+//  • DEFAULT `realesrgan-onnx` — Real-ESRGAN ONNX on onnxruntime (CoreML EP, torch-free, BSD-3). Model
+//    (SceneWorks/real-esrgan-onnx, dynamic-shape x2/x4) auto-downloads to the assets root on demand.
+//    LIVE-verified via /v1/execute: 512→1024 (2×, ~7.5s) and 512→2048 (4×, ~12s) on Apple M1 Pro.
+//  • EXPERIMENTAL `seedvr2` — mflux SeedVR2. Broken on mflux 0.19.1 + mlx 0.32.2 (`mx.repeat` array
+//    repeats); selectable via options.backend=seedvr2 for future retest, NEVER the default.
+// RAM-guarded (memory floor pre-check). See 2_1_STAGE3_MODEL_PROVENANCE.md.
 
 public enum UpscaleBackend: String, Sendable {
     case realesrganONNX = "realesrgan-onnx"   // default: Real-ESRGAN ONNX on onnxruntime (CoreML EP), torch-free

@@ -40,11 +40,14 @@ result**, not core surgery. See `UCMR_ARCHITECTURE.md`, `2_1_STAGE3_MODEL_PROVEN
 |---|---|---|
 | **Stage 0–1** Runtime + text/SVG/embed/rerank | ✅ done | ExecutionRequest/Result, CapabilityRegistry, ExecutionPlan, `/v1/execute`; language.* + vector.generate + embed/rerank |
 | **Stage 2** Input modalities | ✅ done | vision understanding (mlx-vlm), OCR (Apple Vision), segmentation (rembg), capability model resolution, web typed-result rendering — all live-verified |
-| **Stage 3** Generation & media | 🟢 substantially done; 1 item experimental | image.generate LIVE (Z-Image-Turbo 4-bit); image Model Fit + benchmarks; video.understand LIVE (AVFoundation pipeline, canonical N-step plan); audio.diarize LIVE (sherpa-onnx); web image-gen routing + plan inspector. **image.upscale (SeedVR2) EXPERIMENTAL** — wiring/storage/RAM/error validated, backend fails upstream (mflux 0.19.1 + mlx 0.32.2 `mx.repeat`). Full suite 431 green. |
-| **Stage 4** (proposed) | ⬜ not started | perf-aware Auto (benchmark seconds/image), VLM auto-classification at install, working upscale backend (newer mflux / Real-ESRGAN ONNX), then image editing / video-gen |
+| **Stage 3** Generation & media | ✅ **complete** (live-validated) | image.generate LIVE (Z-Image-Turbo 4-bit) + Model Fit + benchmarks; **image.upscale LIVE** (Real-ESRGAN ONNX, x2/x4, CoreML — Stage 4.1); video.understand LIVE (AVFoundation pipeline, canonical N-step plan, both branches proven); audio.diarize LIVE (sherpa-onnx, 2 speakers + merged transcript); web image-gen routing + plan inspector. Full suite 431 green; no 2.0 regression. |
+| **Stage 4.1** Working upscale backend | ✅ done | Real-ESRGAN ONNX default (SeedVR2 kept experimental); closes the last Stage 3 item |
+| **Stage 4.2** Performance-aware Auto / Scheduler v2 | 🔜 next | consume capability benchmark evidence (seconds/image, resolution, cold/warm, peak mem, reliability) so Auto picks practical models (memory-fit ≠ useful perf) |
+| **Stage 4.3** VLM auto-classification | ⬜ planned | detect vision models from config.json/architecture/processor so image.understand + video.understand resolve a VLM under Auto without an explicit id |
+| **Stage 4.x** (deferred) | ⬜ not started | image editing/inpainting, local video/music generation, remote runtime — only after 4.2 + 4.3 |
 
-Stage 3 is **not** marked fully complete: image upscale needs a working backend or formal acceptance as
-experimental. Everything else in the Stage 3 gate is live-validated.
+Stage 3 is **complete**: all gate items live-validated, including a working `image.upscale` (Real-ESRGAN
+ONNX). SeedVR2 remains as an experimental, non-default backend for future retest.
 
 ## Releases
 

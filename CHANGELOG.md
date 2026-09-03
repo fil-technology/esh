@@ -7,6 +7,14 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR Stage 4.1 — working image upscale backend (development milestone, untagged).** Replaces the
+  broken SeedVR2 default with **Real-ESRGAN ONNX** on onnxruntime (CoreML execution provider, torch-free,
+  BSD-3) as the default `image.upscale` backend. A new `image-upscale-onnx` bridge op auto-downloads
+  `SceneWorks/real-esrgan-onnx` (dynamic-shape x2/x4, 64 MB) to the assets root on demand. The provider gains
+  `scale` (2|4) and `backend` options; SeedVR2 stays selectable as **experimental** (never the default).
+  **LIVE-verified** via `/v1/execute`: 512→1024 (2×, ~7.5 s) and 512→2048 (4×, ~12 s, peak 10.7 GB) on Apple
+  M1 Pro, CoreML EP, typed metadata `{width,height,scale}` + ExecutionPlan, model on SSD, no proc/temp leaks.
+  This closes the last open Stage 3 item — **Stage 3 is now complete**. Full suite 431 green.
 - **esh 2.1 UCMR Stage 3 — generation & richer media (development milestone, untagged).** New capabilities
   as provider + registration + fit/benchmark + typed result — no core surgery. **Image generation**
   (`image.generate`, text→image) via mflux Z-Image-Turbo 4-bit through an `image-generate` bridge op —
