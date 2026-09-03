@@ -1146,10 +1146,16 @@ def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str
             except Exception:  # noqa: BLE001
                 pass
 
+    # Kill only when memory is genuinely low: below the hard floor, OR under critical kernel pressure
+    # AND still low-ish (< 2x floor). Critical pressure ALONE is normal under heavy load on Apple Silicon
+    # (the kernel compresses), so it must not abort a legitimately memory-hungry generation that still has
+    # comfortable headroom — that was a false-positive kill.
     while proc.poll() is None:
         time.sleep(1.0)
         avail = _available_mem_mb()
-        if (avail is not None and avail < min_free) or _mem_pressure_critical():
+        low = avail is not None and avail < min_free
+        pressure_and_low = _mem_pressure_critical() and (avail is None or avail < min_free * 2)
+        if low or pressure_and_low:
             _kill()
             detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
             _fail(f"{label} stopped to protect the machine: low memory ({detail})")

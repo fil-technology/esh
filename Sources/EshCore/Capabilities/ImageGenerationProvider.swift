@@ -92,6 +92,10 @@ public struct ImageGenerationProvider: CapabilityProvider {
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: req.model, capability: .imageGenerate),
                         validation: .valid, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["result.png": bytes])
+                    cont.yield(.planResolved(ExecutionPlan.single(
+                        capability: req.capability, inputModalities: [.text], outputModality: .image,
+                        providerID: providerID, modelID: req.model, backend: .python,
+                        rationale: ["Single-provider diffusion (mflux Z-Image Turbo, \(steps) steps)."])))
                     cont.yield(.artifactProduced(saved))
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()

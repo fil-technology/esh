@@ -77,6 +77,10 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: req.model, capability: .imageUpscale),
                         validation: .valid, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["result.png": bytes])
+                    cont.yield(.planResolved(ExecutionPlan.single(
+                        capability: req.capability, inputModalities: [.image], outputModality: .image,
+                        providerID: providerID, modelID: req.model, backend: .python,
+                        rationale: ["Single-provider diffusion super-resolution (mflux SeedVR2)."])))
                     cont.yield(.artifactProduced(saved))
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()
