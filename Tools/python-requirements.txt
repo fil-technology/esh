@@ -5,3 +5,7 @@ safetensors>=0.4,<1
 # On-device speech: STT (parakeet) for voice transcription and TTS playback. Without this the voice
 # loop and /v1/audio/* endpoints report "speech runtime not installed" instead of transcribing.
 mlx-audio>=0.5.1
+# OPTIONAL (UCMR 2.1): background removal / segmentation (image.segment / image.edit). Without these the
+# capability returns a clear "rembg is not available" error instead of segmenting. Heavy (onnxruntime).
+# rembg
+# onnxruntime

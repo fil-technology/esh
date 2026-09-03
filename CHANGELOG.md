@@ -21,7 +21,8 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   for image.understand, embedding model for language.embed, …) instead of assuming an LLM. Adds a
   **background removal / segmentation** provider (`image.segment`/`image.edit`, image→image) — the first
   image-OUTPUT provider producing a typed `.image` artifact — via rembg through a new `image-segment`
-  bridge op (rembg/onnxruntime optional; graceful error when absent). And **web typed-result rendering**:
+  bridge op (rembg/onnxruntime optional; graceful error when absent); verified live (background removed
+  → transparent RGBA PNG via `/v1/execute image.segment`). And **web typed-result rendering**:
   assistant messages render typed artifacts (image/SVG inline via `/v1/artifacts`, with download; other
   kinds as a file pill) plus an `execCapability` client — verified live rendering an `/v1/execute`-
   generated SVG in the chat.
