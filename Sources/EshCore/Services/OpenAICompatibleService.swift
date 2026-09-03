@@ -821,6 +821,9 @@ public struct OpenAICompatibleService: Sendable {
     private let routeBenchmarkClosure: (@Sendable (String) async -> Data)?
     /// Per-case routing detail for failure analysis (POST /v1/route/benchmark/detail?mode=…). Additive.
     private let routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
+    /// image.upscale performance benchmark (POST /v1/capability/image-upscale/benchmark) — measures real
+    /// cold/warm/memory on this Mac and persists unified evidence. Additive; nil when not wired.
+    private let upscaleBenchmarkClosure: (@Sendable () async -> Data)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -837,7 +840,8 @@ public struct OpenAICompatibleService: Sendable {
         route: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)? = nil,
         resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
         routeBenchmark: (@Sendable (String) async -> Data)? = nil,
-        routeBenchmarkDetail: (@Sendable (String) async -> Data)? = nil
+        routeBenchmarkDetail: (@Sendable (String) async -> Data)? = nil,
+        upscaleBenchmark: (@Sendable () async -> Data)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -852,6 +856,13 @@ public struct OpenAICompatibleService: Sendable {
         self.resumeRouteClosure = resumeRoute
         self.routeBenchmarkClosure = routeBenchmark
         self.routeBenchmarkDetailClosure = routeBenchmarkDetail
+        self.upscaleBenchmarkClosure = upscaleBenchmark
+    }
+
+    /// Run the image.upscale performance benchmark and return measured evidence JSON.
+    public func runUpscaleBenchmark() async throws -> Data {
+        guard let upscaleBenchmarkClosure else { throw OpenAICompatibleError.unsupported("Upscale benchmarking is not available in this process.") }
+        return await upscaleBenchmarkClosure()
     }
 
     /// Run the Router Auto benchmark for a mode and return metrics JSON (POST /v1/route/benchmark).
@@ -959,6 +970,7 @@ public struct OpenAICompatibleService: Sendable {
         var resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
         var routeBenchmarkClosure: (@Sendable (String) async -> Data)?
         var routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
+        var upscaleBenchmarkClosure: (@Sendable () async -> Data)?
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
@@ -1177,6 +1189,25 @@ public struct OpenAICompatibleService: Sendable {
                 let results = await routerService.benchmarkDetail(mode: benchMode, semanticOverride: override)
                 return (try? JSONCoding.encoder.encode(RouterBenchmarkDetail(mode: mode, cases: results))) ?? Data("{}".utf8)
             }
+            // image.upscale performance benchmark: realistic sizes × scales (avoids absurd combos like 2048@4×).
+            let upscaleBenchRoot = root
+            upscaleBenchmarkClosure = {
+                let dir = upscaleBenchRoot.cachesURL.appendingPathComponent("upscale-models", isDirectory: true).path
+                let runner = ImageUpscaleBenchmarkRunner(service: ImageUpscaleService(), modelDir: dir)
+                let configs: [ImageUpscaleBenchmarkRunner.Config] = [
+                    .init(width: 512, scale: 2), .init(width: 512, scale: 4),
+                    .init(width: 1024, scale: 2), .init(width: 1024, scale: 4),
+                    .init(width: 2048, scale: 2)]
+                let tmp = upscaleBenchRoot.tempURL.appendingPathComponent("upscale-bench", isDirectory: true)
+                let host = HostMachineProfileService().currentProfile()
+                let evidence = await Task.detached { () -> [CapabilityPerformanceEvidence] in
+                    runner.run(configs: configs, tmpDir: tmp, provenanceNote: host.chipDescription)
+                }.value
+                let store = ImageUpscaleBenchmarkStore(root: upscaleBenchRoot)
+                for e in evidence { try? store.upsert(e) }
+                try? FileManager.default.removeItem(at: tmp)
+                return (try? JSONCoding.encoder.encode(UpscaleBenchmarkDataset(evidence: evidence))) ?? Data("{}".utf8)
+            }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
                 let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
@@ -1205,7 +1236,8 @@ public struct OpenAICompatibleService: Sendable {
             route: routeClosure,
             resumeRoute: resumeRouteClosure,
             routeBenchmark: routeBenchmarkClosure,
-            routeBenchmarkDetail: routeBenchmarkDetailClosure
+            routeBenchmarkDetail: routeBenchmarkDetailClosure,
+            upscaleBenchmark: upscaleBenchmarkClosure
         )
     }
 

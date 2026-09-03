@@ -23,9 +23,12 @@ public struct UpscaleResult: Sendable {
     public let nativeScale: Int, effectiveScale: Int
     public let tiled: Bool, alphaPreserved: Bool
     public let runtimeProvider: String   // onnxruntime EP actually used (e.g. CoreMLExecutionProvider)
-    public init(width: Int, height: Int, nativeScale: Int, effectiveScale: Int, tiled: Bool, alphaPreserved: Bool, runtimeProvider: String) {
+    public let peakMemoryMB: Double?      // helper self-reported peak RSS (for benchmark evidence)
+    public init(width: Int, height: Int, nativeScale: Int, effectiveScale: Int, tiled: Bool, alphaPreserved: Bool,
+                runtimeProvider: String, peakMemoryMB: Double? = nil) {
         self.width = width; self.height = height; self.nativeScale = nativeScale; self.effectiveScale = effectiveScale
         self.tiled = tiled; self.alphaPreserved = alphaPreserved; self.runtimeProvider = runtimeProvider
+        self.peakMemoryMB = peakMemoryMB
     }
 }
 
@@ -47,7 +50,8 @@ public struct ImageUpscaleService: Sendable {
                 as: ONNXResponse.self)
             return UpscaleResult(width: r.width, height: r.height, nativeScale: r.nativeScale ?? r.scale,
                                  effectiveScale: r.effectiveScale ?? r.scale, tiled: r.tiled ?? false,
-                                 alphaPreserved: r.alphaPreserved ?? false, runtimeProvider: r.provider)
+                                 alphaPreserved: r.alphaPreserved ?? false, runtimeProvider: r.provider,
+                                 peakMemoryMB: r.peakMemoryMB)
         case .seedVR2:
             let r: SeedResponse = try bridge.run(
                 command: "image-upscale",
@@ -63,7 +67,7 @@ public struct ImageUpscaleService: Sendable {
     }
     private struct ONNXResponse: Codable, Sendable {
         let outputPath: String; let width: Int; let height: Int; let scale: Int; let provider: String
-        let nativeScale: Int?; let effectiveScale: Int?; let tiled: Bool?; let alphaPreserved: Bool?
+        let nativeScale: Int?; let effectiveScale: Int?; let tiled: Bool?; let alphaPreserved: Bool?; let peakMemoryMB: Double?
     }
     private struct SeedRequest: Codable, Sendable {
         let imagePath: String; let outputPath: String; let resolution: Int?; let minFreeMemMB: Int?; let hfCache: String?
@@ -129,10 +133,16 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: req.model, capability: .imageUpscale),
                         validation: .valid, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["result.png": bytes])
+                    // Performance-aware fit for the Execution Inspector: memory fit + expected latency from
+                    // MEASURED evidence (input dims = output / scale). Memory fit ≠ interactive speed.
+                    let inW = r.width / max(r.effectiveScale, 1), inH = r.height / max(r.effectiveScale, 1)
+                    let fit = ImageUpscaleFitService().assess(inputWidth: inW, inputHeight: inH, scale: r.effectiveScale,
+                        host: HostMachineProfileService().currentProfile(), evidence: CapabilityEvidenceIndex(root: context.root))
                     cont.yield(.planResolved(ExecutionPlan.single(
                         capability: req.capability, inputModalities: [.image], outputModality: .image,
                         providerID: providerID, modelID: req.model, backend: .python,
-                        rationale: ["Single-provider super-resolution (\(backend.rawValue), \(scale)× via \(r.runtimeProvider))\(r.tiled ? ", tiled" : "")\(r.alphaPreserved ? ", alpha preserved" : "")."])))
+                        rationale: ["Single-provider super-resolution (\(backend.rawValue), \(scale)× via \(r.runtimeProvider))\(r.tiled ? ", tiled" : "")\(r.alphaPreserved ? ", alpha preserved" : "").",
+                                    fit.note])))
                     cont.yield(.artifactProduced(saved))
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()

@@ -54,6 +54,8 @@ public struct CapabilityEvidenceIndex: Sendable {
         var acc: [CapabilityPerformanceEvidence] = []
         acc.append(contentsOf: ImageGenerationBenchmarkStore(root: root).load().benchmarks.map(Self.adapt))
         acc.append(contentsOf: ModelBenchmarkLabStore(root: root).load().evidence.compactMap(Self.adapt))
+        // image.upscale evidence is already stored in the unified vocabulary (no adapter needed).
+        acc.append(contentsOf: ImageUpscaleBenchmarkStore(root: root).load().evidence)
         self.evidence = acc
     }
 

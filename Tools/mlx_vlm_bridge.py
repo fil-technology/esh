@@ -1284,9 +1284,15 @@ def image_upscale_onnx() -> None:
         provider = sess.get_providers()[0]
     except Exception as exc:  # noqa: BLE001
         _fail(f"image upscale failed: {type(exc).__name__}: {exc}")
+    # Peak process RSS (macOS ru_maxrss is bytes) — accurate self-report for benchmark evidence.
+    try:
+        import resource
+        peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    except Exception:  # noqa: BLE001
+        peak_mb = None
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "scale": scale,
                 "nativeScale": scale, "effectiveScale": scale, "tiled": bool(tiled),
-                "alphaPreserved": alpha is not None, "provider": provider})
+                "alphaPreserved": alpha is not None, "provider": provider, "peakMemoryMB": peak_mb})
 
 
 def image_upscale() -> None:
