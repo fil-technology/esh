@@ -1123,8 +1123,11 @@ public struct OpenAICompatibleService: Sendable {
             let benchRoot = root
             routeBenchmarkClosure = { mode in
                 // Resolve the requested mode to (router name, benchmark logic mode, optional router override).
-                let hybrid = mode.hasSuffix("hybrid")
-                let benchMode = mode == "tier0" ? "tier0" : (hybrid ? "hybrid" : "tier1")
+                // "…-hybrid" = Tier-0 + escalate-on-clarify; "…-hybrid-gated" additionally gates escalation to
+                // `unresolved` clarifies + a Safety Validator (spec: ambiguity-gated Router Auto).
+                let gated = mode.contains("gated")
+                let hybrid = mode.contains("hybrid")
+                let benchMode = mode == "tier0" ? "tier0" : (gated ? mode : (hybrid ? "hybrid" : "tier1"))
                 var routerName = "resident-llm"
                 var override: SemanticIntentRouter? = nil
                 if mode == "tier0" { routerName = "tier0" }
@@ -1137,7 +1140,8 @@ public struct OpenAICompatibleService: Sendable {
                 }
                 let (m, warm, cold) = await routerService.benchmark(mode: benchMode, semanticOverride: override)
                 let hostP = HostMachineProfileService().currentProfile()
-                let evMode = benchMode
+                // Distinct evidence key so gated/ungated hybrids and pure tiers never overwrite each other (§8).
+                let evMode = mode == "tier0" ? "tier0" : (gated ? "hybrid-gated" : (hybrid ? "hybrid" : "tier1"))
                 // downloadMB: extra bytes a router must fetch beyond what's already resident (provenance §13).
                 let downloadMB: Int? = mode.hasPrefix("gemma") ? 318 : (mode.hasPrefix("apple") || mode == "tier0" ? 0 : 0)
                 let ev = RouterEvidence(
@@ -1162,8 +1166,9 @@ public struct OpenAICompatibleService: Sendable {
             }
             // Per-case detail for failure analysis (same mode→router mapping as the benchmark above).
             routeBenchmarkDetailClosure = { mode in
-                let hybrid = mode.hasSuffix("hybrid")
-                let benchMode = mode == "tier0" ? "tier0" : (hybrid ? "hybrid" : "tier1")
+                let gated = mode.contains("gated")
+                let hybrid = mode.contains("hybrid")
+                let benchMode = mode == "tier0" ? "tier0" : (gated ? mode : (hybrid ? "hybrid" : "tier1"))
                 var override: SemanticIntentRouter? = nil
                 if mode.hasPrefix("apple") { override = AppleFMSemanticRouter() }
                 else if mode.hasPrefix("gemma"), let id = (try? modelStore.listInstalls())?.first(where: { $0.id.contains("functiongemma") })?.id {
