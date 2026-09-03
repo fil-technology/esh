@@ -7,6 +7,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — Router Auto live re-benchmark: cold latency + memory, sharper verdict (untagged).** Ran the
+  full v2 multilingual dataset (58 cases, EN/RU/HE) through every router on-device (macOS 26.5.1, M1 Pro/32 GB)
+  and persisted versioned evidence. The benchmark now records **cold latency** (first call, incl. model load)
+  separately from **warm median**, plus **peak process-tree memory**, downloadMB, and OS provenance
+  (`RouterEvidence` gains populated `coldLatencyMs`/`memoryMB`/`downloadMB`/`osVersion`; `LatencyBox` splits
+  cold vs warm). **Measured verdict: Tier-0 still wins** — no Tier-1 is both safe (≤2% false-exec) and beats
+  the instant baseline. Key correction from fresh data: **Apple FM is fast when warm (~2.15 s, not ~13 s — the
+  ~12 s is cold-load only), tiny esh-side footprint, and best multilingual (RU 0.64 / HE 0.78)** — its ONLY
+  blocker is a **31% false-execution rate**. So the top next experiment is **making Apple FM safe**
+  (clarify-biased + abstain gate), NOT fine-tuning FunctionGemma (base capAcc 0, slow, +318 MB). The registry
+  validator gates every route, so a mis-proposing router can't cause a false execution through `/v1/route`.
+  See `2_1_CAPABILITY_ROUTER_STATUS.md` + `2_1_ROUTER_FINETUNE_PROPOSAL.md`. Full suite 468 green.
 - **esh 2.1 UCMR — per-capability model selection + robust vector.generate (development milestone, untagged).**
   Two user-facing gaps closed. **(1) Task models:** Settings → Models now has a **Task models** section where
   you pick which installed model performs each capability — **Chat & reasoning**, **Vector & SVG**, and

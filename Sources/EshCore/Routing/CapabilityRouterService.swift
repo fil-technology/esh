@@ -70,9 +70,9 @@ public struct CapabilityRouterService: Sendable {
     /// Run the routing benchmark for one router mode ("tier0" | "tier1" | "hybrid") over the full multilingual
     /// dataset, with live inference for the semantic tiers. Returns metrics + the median warm latency. Used by
     /// POST /v1/route/benchmark to produce versioned Router Auto evidence.
-    public func benchmark(mode: String, semanticOverride: SemanticIntentRouter? = nil) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?) {
+    public func benchmark(mode: String, semanticOverride: SemanticIntentRouter? = nil) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?, coldLatencyMs: Double?) {
         let cases = RoutingDataset.all
-        if mode == "tier0" { return (RoutingBenchmark.run(cases), 0) }
+        if mode == "tier0" { return (RoutingBenchmark.run(cases), 0, 0) }
         let reg = registry()
         let schema = CapabilitySchemaBuilder.build(from: reg)
         let latencies = LatencyBox()
@@ -101,7 +101,8 @@ public struct CapabilityRouterService: Sendable {
             }
             return intent
         }
-        return (metrics, await latencies.median())
+        // Cold = the first escalated call (pays model load); warm median = the rest (steady state).
+        return (metrics, await latencies.warmMedian(), await latencies.cold())
     }
 
     /// Choose the Tier-1 router from persisted evidence (Router Auto), explaining why.
@@ -111,8 +112,18 @@ public struct CapabilityRouterService: Sendable {
                                          currentDatasetVersion: RoutingBenchmark.datasetVersion, currentOS: currentOS)
     }
 
-    actor LatencyBox { var xs: [Double] = []; func add(_ x: Double) { xs.append(x) }
-        func median() -> Double? { guard !xs.isEmpty else { return nil }; let s = xs.sorted(); return s[s.count/2] } }
+    actor LatencyBox {
+        var xs: [Double] = []
+        func add(_ x: Double) { xs.append(x) }
+        /// The first sample — includes model cold-load, so it's the honest "cold" number.
+        func cold() -> Double? { xs.first }
+        /// Median of the warm (steady-state) samples: drops the first (cold) sample when we have >1.
+        func warmMedian() -> Double? {
+            guard !xs.isEmpty else { return nil }
+            let warm = xs.count > 1 ? Array(xs.dropFirst()) : xs
+            let s = warm.sorted(); return s[s.count/2]
+        }
+    }
 
     public func route(message: String, attachments: [EshAttachment], conversationID: String?) async -> RouteDecision {
         let outcome = await resolver.resolve(message: message, attachments: attachments,

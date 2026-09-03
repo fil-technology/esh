@@ -1124,16 +1124,20 @@ public struct OpenAICompatibleService: Sendable {
                         override = ResidentLLMSemanticRouter(name: "functiongemma", modelID: id, infer: { req in try await inference.infer(request: req) })
                     }
                 }
-                let (m, warm) = await routerService.benchmark(mode: benchMode, semanticOverride: override)
+                let (m, warm, cold) = await routerService.benchmark(mode: benchMode, semanticOverride: override)
                 let hostP = HostMachineProfileService().currentProfile()
                 let evMode = benchMode
+                // downloadMB: extra bytes a router must fetch beyond what's already resident (provenance §13).
+                let downloadMB: Int? = mode.hasPrefix("gemma") ? 318 : (mode.hasPrefix("apple") || mode == "tier0" ? 0 : 0)
                 let ev = RouterEvidence(
                     router: routerName, mode: evMode, available: true,
                     modelOrProvider: routerName, runtime: mode == "tier0" ? "rules" : (mode.hasPrefix("apple") ? "apple-foundation" : "mlx"),
                     total: m.total, capabilitySelectionAccuracy: m.capabilitySelectionAccuracy, falseExecutionRate: m.falseExecutionRate,
                     conservativeScore: m.conservativeScore, clarifyRecall: m.clarifyRecall, argumentAccuracy: m.argumentAccuracy,
                     enAccuracy: m.languageActionAccuracy("en"), ruAccuracy: m.languageActionAccuracy("ru"), heAccuracy: m.languageActionAccuracy("he"),
-                    warmLatencyMsMedian: warm, hardware: hostP.chipDescription ?? "Apple Silicon",
+                    warmLatencyMsMedian: warm, coldLatencyMs: cold, downloadMB: downloadMB,
+                    hardware: hostP.chipDescription ?? "Apple Silicon",
+                    osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                     eshVersion: toolVersion, capabilitySchemaVersion: CapabilitySchemaVersion.current,
                     datasetVersion: RoutingBenchmark.datasetVersion, dateISO8601: ISO8601DateFormatter().string(from: Date()))
                 try? RouterEvidenceStore(root: benchRoot).upsert(ev)
@@ -1141,7 +1145,8 @@ public struct OpenAICompatibleService: Sendable {
                     "capabilityAccuracy": .double(m.capabilitySelectionAccuracy), "falseExecutionRate": .double(m.falseExecutionRate),
                     "conservativeScore": .double(m.conservativeScore), "argumentAccuracy": .double(m.argumentAccuracy),
                     "en": .double(m.languageActionAccuracy("en")), "ru": .double(m.languageActionAccuracy("ru")), "he": .double(m.languageActionAccuracy("he")),
-                    "warmLatencyMs": .double(warm ?? 0), "missed": .int(m.missedCapability), "unnecessaryClarify": .int(m.unnecessaryClarification)]
+                    "warmLatencyMs": .double(warm ?? 0), "coldLatencyMs": .double(cold ?? 0),
+                    "missed": .int(m.missedCapability), "unnecessaryClarify": .int(m.unnecessaryClarification)]
                 return (try? JSONCoding.encoder.encode(out)) ?? Data("{}".utf8)
             }
             artifactClosure = { id, file in

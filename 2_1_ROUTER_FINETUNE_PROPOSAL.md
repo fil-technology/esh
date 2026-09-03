@@ -30,3 +30,20 @@ Apple FM's multilingual recall, at warm-resident latency — the ideal Tier-1. T
 ## Decision
 Do NOT train yet. Prerequisites: warm-router residency class + a larger labeled multilingual dataset. Until
 then Router Auto correctly keeps Tier-0. Revisit once residency lands.
+
+## Update — fresh live evidence (2026-09-03) reprioritizes this
+The full live benchmark (macOS 26.5.1, 58-case v2 dataset) sharpened the picture and **moves a
+FunctionGemma fine-tune DOWN the priority list**:
+- **Apple Foundation Models is the strongest Tier-1 candidate on every axis except safety**: capAcc 0.79,
+  RU 0.64 / HE 0.78 (vs Tier-0's 0.27 / 0.22), **warm latency only ~2.15 s** (cold ~12 s), and a tiny
+  esh-side footprint (~164 MB; the model lives in the OS system service). Its sole disqualifier is a **31%
+  false-execution rate**.
+- FunctionGemma-270m base still scores capAcc 0.00, is **slow (~10.5 s/call, not warm-resident here)**, and
+  costs +318 MB — strictly worse than Apple FM on this Mac today.
+
+**Therefore the highest-value next experiment is "make Apple FM safe"** (clarify-biased instruction + an
+abstain / confidence gate + stricter validation-side rejection of low-signal proposals), NOT training
+FunctionGemma. If Apple FM's false-exec drops ≤2% it becomes the Tier-1 winner and Router Auto promotes it
+automatically from evidence — no training, no download. A FunctionGemma fine-tune remains a *fallback* path
+worth pursuing only if the safety work on Apple FM fails AND a warm-resident tiny router is still wanted.
+Still: **not trained.**
