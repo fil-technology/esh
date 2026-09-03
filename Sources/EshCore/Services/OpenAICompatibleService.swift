@@ -917,6 +917,7 @@ public struct OpenAICompatibleService: Sendable {
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
+            registryUCMR.register(TextToSVGProvider(infer: { req in try await inference.infer(request: req) }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
             executeClosure = { req in try await execSvc.executeCollecting(req) }
