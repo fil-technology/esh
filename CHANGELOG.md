@@ -7,6 +7,28 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR Stage 3 — generation & richer media (development milestone, untagged).** New capabilities
+  as provider + registration + fit/benchmark + typed result — no core surgery. **Image generation**
+  (`image.generate`, text→image) via mflux Z-Image-Turbo 4-bit through an `image-generate` bridge op —
+  **verified LIVE** end-to-end over `/v1/execute` (1024×1024 typed PNG artifact with mime/dimensions/
+  provenance) on Apple M1 Pro/32 GB. **Image upscaling** (`image.upscale`, image→image) via mflux SeedVR2
+  (separate typed capability, VAE-tiled). **Image Model Fit** (`ImageModelFitService`) — resolution-aware
+  diffusion memory model reusing the LLM fit language (Comfortable/Fits/Tight/Unlikely/Unknown/Unsupported).
+  **Image benchmarks** (`ImageGenerationBenchmark` + runner + JSON store): cold/warm/seconds-per-image/
+  peak-memory/resolution/validity/stability with full provenance (model, revision, quantization, runtime,
+  Mac, esh version) — designed to feed Scheduler v2/Auto. **Video understanding** (`video.understand`) — a
+  multi-provider pipeline: native AVFoundation metadata + adaptive keyframe sampling → VLM per frame,
+  native audio→16 kHz WAV → STT, then LLM fusion; exposed as a canonical N-step `ExecutionPlan`
+  (`.planResolved` + `ExecutionResult.plan`) with honest rationale (sampled-frame + audio fusion). Audio/
+  STT skipped when there's no track; AVFoundation/ImageIO only (no ffmpeg). **Speaker diarization**
+  (`audio.diarize`) via sherpa-onnx (onnxruntime, torch-free) — anonymous speaker clusters + time ranges +
+  optional STT transcript; chosen over torch-based pyannote. **Web**: plain image-generation requests route
+  to `image.generate` in Auto (no manual runtime pick) with a progress indicator, inline artifact render +
+  download, and a "Why this execution plan?" inspector. **Resource lifecycle**: large image-model
+  downloads route to the assets root (SSD) via `HF_HOME`/`HF_HUB_CACHE`, gated by `ensureAssetsAvailable`
+  (never silently fill internal disk); RAM guard refuses/kills generation under genuinely low memory; temp
+  frames/audio cleaned per run. Heavy Python deps (mflux, sherpa-onnx) are optional/on-demand — the release
+  stays lean. See `2_1_STAGE3_MODEL_PROVENANCE.md`. Full suite 431 green; no 2.0 text/speech regression.
 - **esh 2.1 UCMR Stage 2 — vision understanding (development milestone, untagged).** The first real
   non-text INPUT modality: images now actually reach the model. The MLX bridge gained an
   `mlx-vlm-generate` op that loads via `mlx_vlm` (previously `mlx_vlm` was imported only for KV-cache and
