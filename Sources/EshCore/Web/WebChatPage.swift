@@ -441,12 +441,23 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ renderView(); popAnimPass(); wireSidebar(); a11yPass(); wireAudioPlayers(); }
+function render(){ renderView(); popAnimPass(); capMenuFlipPass(); wireSidebar(); a11yPass(); wireAudioPlayers(); }
+// The Task-models dropdowns open downward by default; a row near the bottom of a short settings pane would
+// be clipped. Measure the open menu and flip it above its chip when it would overflow the viewport bottom.
+function capMenuFlipPass(){
+  document.querySelectorAll('.pop.capmenu').forEach(p=>{
+    p.style.top='calc(100% + 4px)'; p.style.bottom='auto';   // reset to default before measuring
+    const r=p.getBoundingClientRect();
+    if(r.bottom > (window.innerHeight-8) && r.height < (window.innerHeight-16)){
+      p.style.top='auto'; p.style.bottom='calc(100% + 4px)';
+    }
+  });
+}
 // Play the popover entrance animation only when a popover first opens (the open set
 // changes), not on every full re-render while it stays open — otherwise the menu
 // re-pops on each render (e.g. streaming start/end) and looks like it's jumping.
 function popAnimPass(){
-  const key = S.pickerOpen?'picker':S.effortOpen?'effort':S.attachOpen?'attach':S.engineOpen?'engine':S.voiceDrop?('vdrop:'+S.voiceDrop):S.chatMenu?'menu':'';
+  const key = S.pickerOpen?'picker':S.effortOpen?'effort':S.attachOpen?'attach':S.engineOpen?'engine':S.voiceDrop?('vdrop:'+S.voiceDrop):S.capDrop?('cdrop:'+S.capDrop):S.chatMenu?'menu':'';
   if(key && key!==S._popKey){ document.querySelectorAll('.pop').forEach(p=>p.classList.add('opening')); }
   S._popKey=key;
 }
@@ -1337,7 +1348,7 @@ function renderTaskModels(){
     let menu='';
     if(open){ let rr='';
       (a.options||[]).forEach(o=>{ const on=o.id===cur; rr+=`<div class="pickrow ${on?'sel':''}" data-act="pickCapModel" data-arg="${esch(a.key+'|'+o.id)}"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(o.name)}</span><span class="sp" style="flex:1"></span>${on?'<span class="ck">✓</span>':''}</div>`; });
-      menu=`<div class="pop" style="right:0;top:calc(100% + 4px);width:320px;padding:6px 0;max-height:280px;overflow-y:auto">${rr}</div>`;
+      menu=`<div class="pop capmenu" style="right:0;top:calc(100% + 4px);width:320px;padding:6px 0;max-height:280px;overflow-y:auto">${rr}</div>`;
     }
     const only=(a.options||[]).length<=1;
     sel+=`<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
