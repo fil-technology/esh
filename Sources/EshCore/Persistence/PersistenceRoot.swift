@@ -17,6 +17,9 @@ public struct PersistenceRoot: Sendable {
     public let modelsURL: URL
     public let audioURL: URL
     public let tempURL: URL
+    /// Generated typed artifacts (image/svg/audio/document/project bundles). Relocatable like other
+    /// assets; sibling of `audioURL`. Added for the Universal Capability & Modality Runtime (2.1).
+    public let artifactsURL: URL
 
     /// Alias for `rootURL`, for call sites that want to be explicit about the internal state root.
     public var stateRootURL: URL { rootURL }
@@ -39,6 +42,7 @@ public struct PersistenceRoot: Sendable {
         self.modelsURL = assetsRootURL.appendingPathComponent("models", isDirectory: true)
         self.audioURL = assetsRootURL.appendingPathComponent("audio", isDirectory: true)
         self.tempURL = assetsRootURL.appendingPathComponent("tmp", isDirectory: true)
+        self.artifactsURL = assetsRootURL.appendingPathComponent("artifacts", isDirectory: true)
     }
 
     public static func `default`() -> PersistenceRoot {
