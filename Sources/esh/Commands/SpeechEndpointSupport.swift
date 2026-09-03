@@ -6,10 +6,13 @@ import EshCore
 /// text. The STT model comes from the request, else the user's configured `stt_model`, else the
 /// built-in parakeet default. Local only — no cloud.
 enum SpeechEndpointSupport {
-    static func transcribeClosure() -> (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse) {
+    static func transcribeClosure(
+        lifecycleManager: RuntimeLifecycleManager? = nil
+    ) -> (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse) {
         // One shared persistent STT runtime for the server's lifetime (M12): the model stays resident
-        // across requests instead of reloading per call.
-        let speech = SpeechRuntimeManager()
+        // across requests instead of reloading per call. When a lifecycle manager is passed (M12
+        // follow-up), the STT worker shares the LLM warm pool's memory budget.
+        let speech = SpeechRuntimeManager(lifecycleManager: lifecycleManager)
         return { request in
             guard let data = Data(base64Encoded: sanitizedBase64(request.audio)), data.isEmpty == false else {
                 throw OpenAICompatibleError.invalidRequest("Audio payload was not valid base64-encoded audio.")

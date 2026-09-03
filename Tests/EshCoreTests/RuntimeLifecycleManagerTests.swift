@@ -153,6 +153,62 @@ struct RuntimeLifecycleManagerTests {
         #expect(status.usableBudgetGB == 16)
         #expect(status.estimatedResidentMemoryGB == 4)
     }
+
+    // M12: a live speech reservation is reserved out of the budget — the LLM must not over-allocate on
+    // top of resident speech (the "speech reservation respected" half of the M12 gate).
+    @Test
+    func externalSpeechReservationIsReservedOutOfBudget() async throws {
+        // 5 GB usable; a 4 GB LLM fits alone, but not once speech reserves 2 GB (4 + 2 > 5).
+        let mgr = RuntimeLifecycleManager(config: .init(memorySafetyReserveGB: 0), usableBudgetGB: 5,
+                                          estimator: { Double($0.sizeBytes) / 1_073_741_824 },
+                                          loader: { MockRuntime(modelID: $0.id) })
+        await mgr.setExternalReservation(gigabytes: 2, reclaim: nil)
+        #expect(await mgr.externalReservationGigabytes() == 2)
+        await #expect(throws: RuntimeLifecycleError.self) {
+            _ = try await mgr.acquire(install: install("llm", gib: 4))
+        }
+        // Releasing the reservation lets the same LLM load.
+        await mgr.setExternalReservation(gigabytes: 0, reclaim: nil)
+        let r = try await mgr.acquire(install: install("llm", gib: 4))
+        #expect(r.modelID == "llm")
+        await mgr.release(modelID: "llm")
+    }
+
+    // M12: under LLM memory pressure the pool reclaims the speech runtime (drops it) and retries, so
+    // the LLM loads instead of failing (the "speech evicts under LLM pressure" half of the gate).
+    @Test
+    func llmUnderPressureReclaimsSpeechAndLoads() async throws {
+        let reclaimed = Counter()
+        let mgr = RuntimeLifecycleManager(config: .init(memorySafetyReserveGB: 0), usableBudgetGB: 5,
+                                          estimator: { Double($0.sizeBytes) / 1_073_741_824 },
+                                          loader: { MockRuntime(modelID: $0.id) })
+        // Speech holds 2 GB and offers a reclaim that frees it (mirrors SpeechRuntimeManager dropping
+        // its worker, which pushes the reservation back to 0).
+        await mgr.setExternalReservation(gigabytes: 2, reclaim: {
+            await reclaimed.inc()
+            await mgr.setExternalReservation(gigabytes: 0, reclaim: nil)
+        })
+        // A 4 GB LLM won't fit against a 2 GB reservation until speech is reclaimed.
+        let r = try await mgr.acquire(install: install("llm", gib: 4))
+        #expect(r.modelID == "llm")
+        #expect(await reclaimed.value() == 1)                 // pool reclaimed speech exactly once
+        #expect(await mgr.externalReservationGigabytes() == 0) // reservation freed
+        await mgr.release(modelID: "llm")
+    }
+
+    // If even reclaiming speech can't free enough, the load still fails cleanly (no false success).
+    @Test
+    func stillOverBudgetAfterReclaimThrows() async throws {
+        let mgr = RuntimeLifecycleManager(config: .init(memorySafetyReserveGB: 0), usableBudgetGB: 5,
+                                          estimator: { Double($0.sizeBytes) / 1_073_741_824 },
+                                          loader: { MockRuntime(modelID: $0.id) })
+        await mgr.setExternalReservation(gigabytes: 2, reclaim: {
+            await mgr.setExternalReservation(gigabytes: 0, reclaim: nil)
+        })
+        await #expect(throws: RuntimeLifecycleError.self) {
+            _ = try await mgr.acquire(install: install("huge", gib: 8))   // 8 > 5 even with speech gone
+        }
+    }
 }
 
 /// Simple mutable clock box for injecting time in tests (single-threaded test use).

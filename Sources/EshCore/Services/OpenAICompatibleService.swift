@@ -829,28 +829,16 @@ public struct OpenAICompatibleService: Sendable {
         self.webDataClosure = webData
     }
 
-    public init(
-        modelStore: ModelStore,
-        sessionStore: SessionStore,
-        cacheStore: CacheStore,
-        toolVersion: String? = nil,
-        registry: InferenceBackendRegistry = .init(),
-        workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
-        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
-        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
-            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
-        },
-        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
-        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil
-    ) {
-        // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
-        // request stay warm and are reused by the next, evicted on idle/memory pressure.
+    /// Build the warm-model pool the server uses. Exposed so a caller that also runs a persistent
+    /// speech runtime can construct ONE manager and hand the same instance to both this service and the
+    /// `SpeechRuntimeManager`, so LLMs and speech share a single memory budget (M12 follow-up).
+    public static func makeLifecycleManager(registry: InferenceBackendRegistry = .init()) -> RuntimeLifecycleManager {
         let host = HostMachineProfileService().currentProfile()
         // Persistent MLX residency (opt-in until benchmarks justify making it the default). When on,
         // MLX installs load through a persistent, weights-resident worker owned by this same
         // lifecycle manager; everything else keeps the per-request runtime.
         let persistentMLX = ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1"
-        let lifecycleManager = RuntimeLifecycleManager(
+        return RuntimeLifecycleManager(
             usableBudgetGB: host.totalMemoryGB.map { max(1, $0 - 3) },
             estimator: { install in max(0.2, Double(install.sizeBytes) / 1_073_741_824 * 1.3) },
             loader: { install in
@@ -863,6 +851,28 @@ public struct OpenAICompatibleService: Sendable {
                 (persistentMLX && install.spec.backend == .mlx) ? .weightsResident : .handleCached
             }
         )
+    }
+
+    public init(
+        modelStore: ModelStore,
+        sessionStore: SessionStore,
+        cacheStore: CacheStore,
+        toolVersion: String? = nil,
+        registry: InferenceBackendRegistry = .init(),
+        workspaceRootURL: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+        audioModels: @escaping @Sendable () throws -> [OpenAIAudioModel] = { [] },
+        speech: @escaping @Sendable (OpenAIAudioSpeechRequest) async throws -> OpenAIAudioSpeechResponse = { _ in
+            throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
+        },
+        transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
+        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil,
+        lifecycleManager: RuntimeLifecycleManager? = nil
+    ) {
+        // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
+        // request stay warm and are reused by the next, evicted on idle/memory pressure.
+        // M12 follow-up: callers that also run a persistent speech runtime pass a shared manager (built
+        // via `makeLifecycleManager`) so speech and LLMs share one memory budget; otherwise build one.
+        let lifecycleManager = lifecycleManager ?? Self.makeLifecycleManager(registry: registry)
         let inference = ExternalInferenceService(
             modelStore: modelStore,
             sessionStore: sessionStore,

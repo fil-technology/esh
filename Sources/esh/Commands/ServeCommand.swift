@@ -28,6 +28,10 @@ enum ServeCommand {
             return
         }
 
+        // One warm pool shared by LLM inference and the persistent speech runtime, so both draw on a
+        // single memory budget (M12 follow-up: speech reservation respected; speech evicts under LLM
+        // pressure).
+        let pool = OpenAICompatibleService.makeLifecycleManager()
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),
@@ -37,8 +41,9 @@ enum ServeCommand {
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
             },
-            transcribe: SpeechEndpointSupport.transcribeClosure(),
-            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion)
+            transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
+            lifecycleManager: pool
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)

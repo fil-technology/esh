@@ -103,8 +103,11 @@ public struct RuntimePoolStatus: Codable, Sendable, Equatable {
     public var usableBudgetGB: Double?
     public var maxResidentModels: Int
     public var maxConcurrentRequests: Int
+    /// Memory reserved out of the budget for the persistent speech runtime (its live footprint when a
+    /// worker is resident, else the static planning headroom). 0 when speech isn't loaded. (M12)
+    public var speechReservationGB: Double
 
-    public init(residents: [ResidentModelInfo], activeRequests: Int, estimatedResidentMemoryGB: Double, usableBudgetGB: Double?, maxResidentModels: Int, maxConcurrentRequests: Int) {
+    public init(residents: [ResidentModelInfo], activeRequests: Int, estimatedResidentMemoryGB: Double, usableBudgetGB: Double?, maxResidentModels: Int, maxConcurrentRequests: Int, speechReservationGB: Double = 0) {
         self.residents = residents
         self.residentCount = residents.count
         self.activeRequests = activeRequests
@@ -112,6 +115,7 @@ public struct RuntimePoolStatus: Codable, Sendable, Equatable {
         self.usableBudgetGB = usableBudgetGB
         self.maxResidentModels = maxResidentModels
         self.maxConcurrentRequests = maxConcurrentRequests
+        self.speechReservationGB = speechReservationGB
     }
 }
 

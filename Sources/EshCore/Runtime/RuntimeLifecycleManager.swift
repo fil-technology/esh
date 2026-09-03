@@ -47,6 +47,15 @@ public actor RuntimeLifecycleManager {
     private var activeCount = 0
     private var waiters: [Waiter] = []
 
+    // M12: a non-LLM memory consumer (the persistent speech/STT runtime) shares this pool's memory
+    // budget without being a full BackendRuntime. `externalReservationGB` is the speech runtime's live
+    // resident footprint (0 when it isn't loaded); it's reserved out of the budget so an LLM never
+    // over-allocates on top of resident speech. `externalReclaim` lets the pool drop speech to free
+    // that memory when an LLM otherwise wouldn't fit. Both are pushed in by the speech manager via
+    // `setExternalReservation`.
+    private var externalReservationGB: Double = 0
+    private var externalReclaim: (@Sendable () async -> Void)?
+
     public init(
         config: RuntimeLifecycleConfig = .init(),
         usableBudgetGB: Double? = nil,
@@ -129,7 +138,23 @@ public actor RuntimeLifecycleManager {
         }
 
         let estimatedGB = estimator(install)
-        try makeRoom(forModel: install.id, estimatedGB: estimatedGB)
+        do {
+            try makeRoom(forModel: install.id, estimatedGB: estimatedGB)
+        } catch RuntimeLifecycleError.overBudget {
+            // The LLM won't fit even after evicting idle LLM residents. If a persistent speech runtime
+            // is holding memory, drop it (async, in another actor) and retry once — so an LLM under
+            // memory pressure reclaims speech rather than failing. `reclaim` calls back into
+            // setExternalReservation(0), so the retry sees the freed budget.
+            if externalReservationGB > 0, let reclaim = externalReclaim {
+                await reclaim()
+                try makeRoom(forModel: install.id, estimatedGB: estimatedGB)
+            } else {
+                throw RuntimeLifecycleError.overBudget(
+                    modelID: install.id,
+                    neededGB: (estimatedGB ?? 0) + effectiveExternalReserveGB(),
+                    usableGB: usableBudgetGB ?? 0)
+            }
+        }
 
         let resident = residents[install.id] ?? Resident(install: install, estimatedGB: estimatedGB, now: clock())
         resident.estimatedGB = estimatedGB
@@ -155,6 +180,23 @@ public actor RuntimeLifecycleManager {
         }
     }
 
+    // MARK: - External (speech) memory reservation
+
+    /// Report the live memory a non-LLM runtime (persistent speech/STT) is holding, so the LLM pool
+    /// reserves it out of the budget. Pass `gigabytes: 0` to release. `reclaim`, when provided, is
+    /// invoked by the pool to drop that runtime if an LLM otherwise can't fit; pass nil when there's
+    /// nothing to reclaim (i.e. releasing).
+    public func setExternalReservation(gigabytes gb: Double, reclaim: (@Sendable () async -> Void)?) {
+        externalReservationGB = max(0, gb)
+        externalReclaim = reclaim
+    }
+
+    /// The memory reserved for the external speech runtime: its live footprint when resident, else the
+    /// static planning headroom from config. Exposed for status/tests.
+    public func externalReservationGigabytes() -> Double { effectiveExternalReserveGB() }
+
+    private func effectiveExternalReserveGB() -> Double { max(config.ttsReserveGB, externalReservationGB) }
+
     // MARK: - Budget + eviction
 
     private func makeRoom(forModel modelID: String, estimatedGB: Double?) throws {
@@ -162,7 +204,7 @@ public actor RuntimeLifecycleManager {
             enforceCountLimit(excluding: modelID)
             return
         }
-        let need = (estimatedGB ?? 0) + config.ttsReserveGB
+        let need = (estimatedGB ?? 0) + effectiveExternalReserveGB()
         func currentUsage() -> Double {
             residents.values.filter { $0.install.id != modelID }
                 .reduce(0) { $0 + ($1.estimatedGB ?? 0) }
@@ -321,7 +363,8 @@ public actor RuntimeLifecycleManager {
             estimatedResidentMemoryGB: (estUsage * 10).rounded() / 10,
             usableBudgetGB: usableBudgetGB,
             maxResidentModels: config.maxResidentModels,
-            maxConcurrentRequests: config.maxConcurrentRequests
+            maxConcurrentRequests: config.maxConcurrentRequests,
+            speechReservationGB: (effectiveExternalReserveGB() * 10).rounded() / 10
         )
     }
 

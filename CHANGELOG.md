@@ -7,6 +7,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 M12 follow-up #1 — shared speech/LLM memory budget (development milestone, untagged).** The
+  persistent speech runtime now shares the warm-model pool's memory budget instead of holding memory
+  independently. `RuntimeLifecycleManager` reserves the speech runtime's live footprint out of the LLM
+  budget, and an LLM that otherwise wouldn't fit reclaims speech (drops the worker) and retries;
+  `SpeechRuntimeManager` publishes/clears that reservation on worker load/evict, and the server wires a
+  single pool into both LLM inference and speech. Reported via `RuntimePoolStatus.speechReservationGB`.
+  Proven on-device (M1 Pro): a resident parakeet worker reserved 2.3 GB; a 1.8 GB LLM against a 1.85 GB
+  budget could not fit, reclaimed the worker, and loaded. No web/API/behavior change for existing flows;
+  no TTSMLX changes.
+
 - **esh 2.1 M12 (v1) — persistent speech-to-text runtime (development milestone, untagged).** STT no
   longer reloads Python + the model on every request. A new persistent `speech-serve` bridge worker
   loads the STT model once and serves many transcriptions over stdio; Swift `SpeechWorkerProcess` +

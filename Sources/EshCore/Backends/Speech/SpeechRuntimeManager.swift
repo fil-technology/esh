@@ -13,10 +13,17 @@ public actor SpeechRuntimeManager {
     private var worker: SpeechWorkerProcess?
     private var workerModel: String?
     private var idleTask: Task<Void, Never>?
+    // M12 follow-up: when set, the STT worker shares the LLM warm pool's memory budget. While a worker
+    // is resident we publish its live footprint as the pool's external reservation (so an LLM won't
+    // over-allocate on top of it), and the pool can call our reclaim to drop the worker under pressure.
+    private let lifecycleManager: RuntimeLifecycleManager?
+    private static let fallbackReserveGB = 1.0   // STT models are small; used only if the worker didn't report bytes
 
-    public init(bridge: MLXBridge = .init(), idleTimeout: TimeInterval = 300) {
+    public init(bridge: MLXBridge = .init(), idleTimeout: TimeInterval = 300,
+                lifecycleManager: RuntimeLifecycleManager? = nil) {
         self.bridge = bridge
         self.idleTimeout = idleTimeout
+        self.lifecycleManager = lifecycleManager
     }
 
     /// Transcribe on the resident worker, starting/switching it as needed. Retries once if the worker
@@ -47,6 +54,8 @@ public actor SpeechRuntimeManager {
         idleTask?.cancel(); idleTask = nil
         worker?.shutdown()
         dropWorker()
+        let pool = lifecycleManager
+        Task { await pool?.setExternalReservation(gigabytes: 0, reclaim: nil) }
     }
 
     // MARK: - Internals
@@ -62,6 +71,7 @@ public actor SpeechRuntimeManager {
         try await fresh.start(pythonURL: python, bridgeScriptURL: script, modelID: modelPath)
         worker = fresh
         workerModel = modelPath
+        await publishReservation(bytes: fresh.memoryBytes)
         return fresh
     }
 
@@ -77,8 +87,34 @@ public actor SpeechRuntimeManager {
         }
     }
 
-    private func evictIfIdle() {
+    private func evictIfIdle() async {
         worker?.shutdown()
         dropWorker()
+        await clearReservation()
+    }
+
+    // MARK: - Warm-pool memory reservation (M12 follow-up)
+
+    /// Publish the resident worker's footprint to the shared pool so an LLM reserves it out of the
+    /// budget, and register a reclaim the pool can call to drop us under memory pressure.
+    private func publishReservation(bytes: Int64?) async {
+        guard let pool = lifecycleManager else { return }
+        let gb = bytes.map { max(0.1, Double($0) / 1_073_741_824) } ?? Self.fallbackReserveGB
+        await pool.setExternalReservation(gigabytes: gb, reclaim: { [weak self] in
+            await self?.reclaimForMemoryPressure()
+        })
+    }
+
+    private func clearReservation() async {
+        await lifecycleManager?.setExternalReservation(gigabytes: 0, reclaim: nil)
+    }
+
+    /// Invoked by the warm pool when an LLM otherwise can't fit: drop the STT worker and free the
+    /// reservation. The next transcription lazily starts a fresh worker.
+    private func reclaimForMemoryPressure() async {
+        idleTask?.cancel(); idleTask = nil
+        worker?.shutdown()
+        dropWorker()
+        await clearReservation()
     }
 }

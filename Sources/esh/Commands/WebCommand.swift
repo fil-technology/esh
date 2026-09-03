@@ -38,6 +38,9 @@ enum WebCommand {
             setenv("ESH_MLX_PERSISTENT", "1", 1)
         }
 
+        // One warm pool shared by LLM inference and the persistent speech runtime so both draw on a
+        // single memory budget (M12 follow-up). Built after ESH_MLX_PERSISTENT is set above.
+        let pool = OpenAICompatibleService.makeLifecycleManager()
         let service = OpenAICompatibleService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),
@@ -47,8 +50,9 @@ enum WebCommand {
             speech: { request in
                 try await AudioSpeechGenerator.generateResponse(request, currentDirectoryURL: currentDirectoryURL)
             },
-            transcribe: SpeechEndpointSupport.transcribeClosure(),
-            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion)
+            transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
+            lifecycleManager: pool
         )
         // No bearer token: the browser page needs unauthenticated same-origin access to the API.
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil, toolVersion: toolVersion)
