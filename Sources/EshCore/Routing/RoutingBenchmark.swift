@@ -70,6 +70,13 @@ public struct RoutingMetrics: Sendable {
     }
 }
 
+/// Wrapper for the per-case detail endpoint (POST /v1/route/benchmark/detail).
+public struct RouterBenchmarkDetail: Codable, Sendable {
+    public var mode: String
+    public var cases: [RoutingBenchmark.CaseResult]
+    public init(mode: String, cases: [RoutingBenchmark.CaseResult]) { self.mode = mode; self.cases = cases }
+}
+
 public enum RoutingBenchmark {
     public static let datasetVersion = 2
 
@@ -123,6 +130,38 @@ public enum RoutingBenchmark {
         var m = RoutingMetrics()
         for c in cases { let intent = await route(c.message, c.inputs); score(&m, c, intent) }
         return m
+    }
+
+    /// Per-case outcome for failure analysis (which cases a router mis-routes, and how). Additive — no
+    /// change to scoring; `isFalseExecution` uses the SAME rule as `score`.
+    public struct CaseResult: Codable, Sendable {
+        public var message, language, category, expectedAction: String
+        public var expectedCapability: String?
+        public var predictedAction: String
+        public var predictedCapability: String?
+        public var isFalseExecution: Bool
+        public var isMissed: Bool
+        public var isUnnecessaryClarify: Bool
+    }
+
+    /// Run a router and return per-case detail (for classifying false executions). Async.
+    public static func runRouterDetail(_ cases: [RoutingCase],
+                                       route: @Sendable (_ message: String, _ inputs: [ModelModality]) async -> CapabilityIntent) async -> [CaseResult] {
+        var out: [CaseResult] = []
+        for c in cases {
+            let intent = await route(c.message, c.inputs)
+            let predExec = (intent.action == .executeCapability || intent.action == .installProviderThenExecute)
+            let expExec = (c.expectedAction == .executeCapability || c.expectedAction == .installProviderThenExecute)
+            let falseExec = (!expExec && predExec) || (expExec && predExec && intent.capability != c.expectedCapability)
+            out.append(CaseResult(
+                message: c.message, language: c.language, category: c.category,
+                expectedAction: c.expectedAction.rawValue, expectedCapability: c.expectedCapability?.rawValue,
+                predictedAction: intent.action.rawValue, predictedCapability: intent.capability?.rawValue,
+                isFalseExecution: falseExec,
+                isMissed: expExec && !predExec,
+                isUnnecessaryClarify: intent.action == .clarify && c.expectedAction != .clarify))
+        }
+        return out
     }
 
     /// The original small EN seed (kept for existing tests). The full multilingual dataset is `RoutingDataset.all`.

@@ -819,6 +819,8 @@ public struct OpenAICompatibleService: Sendable {
     /// Router Auto benchmark (POST /v1/route/benchmark?mode=tier0|tier1|hybrid): runs the routing dataset,
     /// persists versioned evidence, returns metrics JSON. Additive; nil when the router isn't wired.
     private let routeBenchmarkClosure: (@Sendable (String) async -> Data)?
+    /// Per-case routing detail for failure analysis (POST /v1/route/benchmark/detail?mode=…). Additive.
+    private let routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -834,7 +836,8 @@ public struct OpenAICompatibleService: Sendable {
         artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil,
         route: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)? = nil,
         resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
-        routeBenchmark: (@Sendable (String) async -> Data)? = nil
+        routeBenchmark: (@Sendable (String) async -> Data)? = nil,
+        routeBenchmarkDetail: (@Sendable (String) async -> Data)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -848,12 +851,19 @@ public struct OpenAICompatibleService: Sendable {
         self.routeClosure = route
         self.resumeRouteClosure = resumeRoute
         self.routeBenchmarkClosure = routeBenchmark
+        self.routeBenchmarkDetailClosure = routeBenchmarkDetail
     }
 
     /// Run the Router Auto benchmark for a mode and return metrics JSON (POST /v1/route/benchmark).
     public func routeBenchmark(mode: String) async throws -> Data {
         guard let routeBenchmarkClosure else { throw OpenAICompatibleError.unsupported("Router benchmarking is not available in this process.") }
         return await routeBenchmarkClosure(mode)
+    }
+
+    /// Per-case routing detail for one mode (POST /v1/route/benchmark/detail) — for failure analysis.
+    public func routeBenchmarkDetail(mode: String) async throws -> Data {
+        guard let routeBenchmarkDetailClosure else { throw OpenAICompatibleError.unsupported("Router benchmarking is not available in this process.") }
+        return await routeBenchmarkDetailClosure(mode)
     }
 
     /// Route a chat message + typed attachments to a capability decision (POST /v1/route).
@@ -948,6 +958,7 @@ public struct OpenAICompatibleService: Sendable {
         var routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
         var resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
         var routeBenchmarkClosure: (@Sendable (String) async -> Data)?
+        var routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
@@ -1149,6 +1160,18 @@ public struct OpenAICompatibleService: Sendable {
                     "missed": .int(m.missedCapability), "unnecessaryClarify": .int(m.unnecessaryClarification)]
                 return (try? JSONCoding.encoder.encode(out)) ?? Data("{}".utf8)
             }
+            // Per-case detail for failure analysis (same mode→router mapping as the benchmark above).
+            routeBenchmarkDetailClosure = { mode in
+                let hybrid = mode.hasSuffix("hybrid")
+                let benchMode = mode == "tier0" ? "tier0" : (hybrid ? "hybrid" : "tier1")
+                var override: SemanticIntentRouter? = nil
+                if mode.hasPrefix("apple") { override = AppleFMSemanticRouter() }
+                else if mode.hasPrefix("gemma"), let id = (try? modelStore.listInstalls())?.first(where: { $0.id.contains("functiongemma") })?.id {
+                    override = ResidentLLMSemanticRouter(name: "functiongemma", modelID: id, infer: { req in try await inference.infer(request: req) })
+                }
+                let results = await routerService.benchmarkDetail(mode: benchMode, semanticOverride: override)
+                return (try? JSONCoding.encoder.encode(RouterBenchmarkDetail(mode: mode, cases: results))) ?? Data("{}".utf8)
+            }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
                 let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
@@ -1176,7 +1199,8 @@ public struct OpenAICompatibleService: Sendable {
             artifact: artifactClosure,
             route: routeClosure,
             resumeRoute: resumeRouteClosure,
-            routeBenchmark: routeBenchmarkClosure
+            routeBenchmark: routeBenchmarkClosure,
+            routeBenchmarkDetail: routeBenchmarkDetailClosure
         )
     }
 

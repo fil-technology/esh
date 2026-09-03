@@ -73,15 +73,36 @@ public struct CapabilityRouterService: Sendable {
     public func benchmark(mode: String, semanticOverride: SemanticIntentRouter? = nil) async -> (metrics: RoutingMetrics, warmLatencyMsMedian: Double?, coldLatencyMs: Double?) {
         let cases = RoutingDataset.all
         if mode == "tier0" { return (RoutingBenchmark.run(cases), 0, 0) }
+        let latencies = LatencyBox()
+        let route = routeClosure(mode: mode, semanticOverride: semanticOverride, latencies: latencies)
+        let metrics = await RoutingBenchmark.runRouter(cases, route: route)
+        // Cold = the first escalated call (pays model load); warm median = the rest (steady state).
+        return (metrics, await latencies.warmMedian(), await latencies.cold())
+    }
+
+    /// Per-case detail for failure analysis (which cases a router mis-routes, and how). Same routing path as
+    /// `benchmark`, so the classification matches the measured metrics.
+    public func benchmarkDetail(mode: String, semanticOverride: SemanticIntentRouter? = nil) async -> [RoutingBenchmark.CaseResult] {
+        let cases = RoutingDataset.all
+        if mode == "tier0" {
+            let t0 = tier0
+            return await RoutingBenchmark.runRouterDetail(cases) { m, mods in t0.route(message: m, inputModalities: mods) }
+        }
+        let route = routeClosure(mode: mode, semanticOverride: semanticOverride, latencies: LatencyBox())
+        return await RoutingBenchmark.runRouterDetail(cases, route: route)
+    }
+
+    /// The routing closure for a benchmark mode, shared by metrics + detail runs so they route identically.
+    /// tier1/apple/gemma = pure semantic; *hybrid = Tier-0 first, escalate to the semantic router ONLY on a
+    /// Tier-0 clarify, and adopt its proposal only when it's a confident, registered capability.
+    private func routeClosure(mode: String, semanticOverride: SemanticIntentRouter?, latencies: LatencyBox)
+        -> @Sendable (_ message: String, _ inputs: [ModelModality]) async -> CapabilityIntent {
         let reg = registry()
         let schema = CapabilitySchemaBuilder.build(from: reg)
-        let latencies = LatencyBox()
-        // Pick the semantic router by mode: an explicit override (e.g. FunctionGemma) wins; else apple* →
-        // Apple Foundation Models; else the resident LLM.
         let sem: SemanticIntentRouter? = semanticOverride ?? (mode.hasPrefix("apple") ? AppleFMSemanticRouter() : semantic)
-        let tier1Only = (mode == "tier1" || mode == "apple")
+        let tier1Only = (mode == "tier1" || mode == "apple" || mode == "gemma")
         let t0 = tier0
-        let metrics = await RoutingBenchmark.runRouter(cases) { message, mods in
+        return { message, mods in
             let start = Date()
             if tier1Only {
                 let intent = (await sem?.propose(message: message, inputModalities: mods, schema: schema))
@@ -101,8 +122,6 @@ public struct CapabilityRouterService: Sendable {
             }
             return intent
         }
-        // Cold = the first escalated call (pays model load); warm median = the rest (steady state).
-        return (metrics, await latencies.warmMedian(), await latencies.cold())
     }
 
     /// Choose the Tier-1 router from persisted evidence (Router Auto), explaining why.

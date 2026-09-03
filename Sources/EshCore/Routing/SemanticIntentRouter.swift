@@ -64,24 +64,42 @@ public protocol SemanticIntentRouter: Sendable {
 public enum SemanticRouting {
     public static func systemInstruction(schema: [CapabilitySchemaEntry], modalities: [ModelModality]) -> String {
         let schemaJSON = (try? String(decoding: JSONCoding.encoder.encode(schema), as: UTF8.self)) ?? "[]"
+        // Abstention-first framing (Router Auto "safe Apple fallback"): the router is a HIGH-PRECISION
+        // proposer, not an eager classifier. It executes ONLY when it is confident the request maps to
+        // exactly one listed capability; for anything else — ordinary conversation, out-of-esh's-scope
+        // (agent/coding/deploy/web tasks), a request whose true operation is NOT in the list, an image/audio/
+        // video op that doesn't match the attached input's type, a multi-capability request, or plain
+        // uncertainty — it must "abstain". Abstaining is SAFE and preferred; a wrong execution is the worst
+        // outcome. This is what keeps false-execution near zero while still recovering the clearly-semantic cases.
         return """
-        You are a strict router. Choose the single best capability for the user's request, ONLY from the \
-        provided list. Reply with ONLY a JSON object: {"action":"executeCapability"|"clarify","capability":<id or null>,\
-        "arguments":{...}}. Use "clarify" (capability null) if unsure. Never invent a capability id.
-        Available inputs: \(modalities.map { $0.rawValue }.joined(separator: ",")).
+        You are a strict, high-precision capability router — NOT an assistant and NOT an eager classifier. \
+        Choose a capability ONLY from the provided list, and ONLY when you are confident the user's request \
+        maps to exactly ONE of them. Reply with ONLY a JSON object: \
+        {"decision":"executeCapability"|"abstain","capability":<id or null>,"arguments":{...},"reason":<short>}.
+        Use "abstain" (capability null) whenever ANY of these is true:
+        - the message is ordinary conversation / a question to answer / a request to write or explain text;
+        - the task is outside esh's on-device media capabilities (e.g. deploying, coding, browsing, running agents);
+        - the real operation the user wants is NOT in the list;
+        - the requested operation does not match the type of the attached input (e.g. "transcribe" on an image);
+        - more than one capability would be needed, or the request is ambiguous;
+        - you are not sure. When in doubt, abstain. Never invent a capability id. Never guess to be helpful.
+        Available input types on this request: \(modalities.map { $0.rawValue }.joined(separator: ",")).
         Capabilities: \(schemaJSON)
         """
     }
 
-    /// Parse a router's raw text into a validated-shape intent (capability must be in `schema`, else clarify).
+    /// Parse a router's raw text into a validated-shape intent. Accepts "decision" or "action" keys and the
+    /// explicit "abstain" outcome. Anything that is not a confident, in-schema executeCapability → abstain
+    /// (the safe deferral) — never a fabricated execution.
     public static func parse(_ raw: String, schema: [CapabilitySchemaEntry], modalities: [ModelModality],
                              routerName: String) -> CapabilityIntent {
         let prov = RouterProvenance(tier: "tier1-semantic", router: routerName)
-        guard let obj = extractJSON(raw) else { return CapabilityIntent(action: .clarify, provenance: prov) }
-        let action = (obj["action"] as? String) ?? "clarify"
+        guard let obj = extractJSON(raw) else { return CapabilityIntent(action: .abstain, reason: "unparseable router output", provenance: prov) }
+        let action = (obj["decision"] as? String) ?? (obj["action"] as? String) ?? "abstain"
+        let reason = obj["reason"] as? String
         guard action == "executeCapability", let capStr = obj["capability"] as? String,
               schema.contains(where: { $0.capability == capStr }) else {
-            return CapabilityIntent(action: .clarify, provenance: prov)
+            return CapabilityIntent(action: .abstain, reason: reason, provenance: prov)
         }
         var args: [String: JSONValue] = [:]
         if let a = obj["arguments"] as? [String: Any] {

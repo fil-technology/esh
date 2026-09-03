@@ -33,7 +33,8 @@ public struct IntentResolver: Sendable {
 
         switch intent.action {
         case .chat: return .chat
-        case .clarify: return .clarify(reason: intent.reason ?? "Could you clarify what you'd like?", alternatives: intent.alternatives)
+        // A semantic router that abstained declined to decide — defer to the safe default (ask, don't guess).
+        case .clarify, .abstain: return .clarify(reason: intent.reason ?? "Could you clarify what you'd like?", alternatives: intent.alternatives)
         case .unsupported: return .unsupported(reason: intent.reason ?? "esh can't perform this here.")
         case .executeCapability, .installProviderThenExecute:
             guard let capability = intent.capability else { return .clarify(reason: "Unclear request.", alternatives: []) }

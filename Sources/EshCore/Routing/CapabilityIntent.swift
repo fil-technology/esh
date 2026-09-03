@@ -11,6 +11,9 @@ public enum RouterAction: String, Codable, Sendable {
     case installProviderThenExecute  // supported, but the provider/model must be installed first
     case clarify                     // ambiguous — ask a concise question rather than guess
     case unsupported                 // esh cannot perform this (or it belongs to the agent layer)
+    case abstain                     // a SEMANTIC router declines to decide — defer to the safe default
+                                     // (Tier-0 keeps its result; a pure Tier-1 falls back to clarify). An
+                                     // abstain never executes and never counts as a router "decision".
 }
 
 public struct RouterProvenance: Codable, Sendable, Equatable {
