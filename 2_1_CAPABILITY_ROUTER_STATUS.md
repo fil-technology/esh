@@ -41,10 +41,37 @@ validation → RoutingOutcome → ExecutionPlan → typed result`.
   proposal must name a registered capability or Tier-0's clarify stands (no false execution). Wired into
   `/v1/route` with the resident LLM; verified live (runs ~2.9 s, conservatively clarifies genuine ambiguity).
 
-## Not yet done (next slices)
-- **Router Auto** benchmarking (§5) — compare Apple Foundation Models / FunctionGemma / resident LLM on the
-  routing benchmark (accuracy/latency/memory/cold-warm) and pick per Mac. The mechanism is pluggable; this is
-  the measurement + selection policy.
+## Router Auto — DONE (evidence-driven, spec §1–§16)
+- **Dataset v2** (`RoutingDataset`): 58 labeled, adversarial, multilingual (EN/RU/HE) cases across every
+  category + a 15-case quick subset. Versioned.
+- **Asymmetric metrics** (`RoutingMetrics`): separated (correct capability/args/refs, false-exec, missed,
+  unnecessary-clarify, chat/unsupported/clarify, per-language) + a documented conservative score
+  (falseExec −6 ≫ missed −2 > unnecessary-clarify −1).
+- **Benchmark harness + endpoint**: `POST /v1/route/benchmark?mode=tier0|tier1|hybrid|apple|apple-hybrid|
+  gemma|gemma-hybrid` runs the dataset with live inference and persists **versioned evidence**
+  (`RouterEvidenceStore`, provenance + freshness §13). All routers share ONE canonical schema (`SemanticRouting`).
+- **Router Auto policy** (`RouterAutoPolicy`): explainable + conservative — a Tier-1 router is chosen only if
+  available, fresh, ≤2% false-exec, AND beats the free/instant Tier-0 baseline; else Tier-0 + clarification.
+  The live `/v1/route` honors it (no wasted escalation by default).
+
+### Measured comparison (Apple M1 Pro / 32 GB, full v2 dataset)
+| Router | Correct cap | False-exec | EN | RU | HE | Warm latency | Download | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| **Tier-0 (rules)** | 0.48 | **0%** | 0.92 | 0.27 | 0.22 | **~0 ms** | 0 | **WINNER (safe, instant)** |
+| resident-llm hybrid | 0.48 | 0% | 0.92 | 0.27 | 0.22 | 2477 ms | 0 | no gain over Tier-0, +latency |
+| resident-llm tier1 | 0.00 | 0% | 0.21 | 0.09 | 0.11 | 2502 ms | 0 | useless as a router |
+| apple-foundation tier1 | **0.70** | **36%** | 0.53 | **0.55** | **0.44** | 13653 ms | 0 | accurate+multilingual but **UNSAFE** (rejected) |
+| functiongemma-270m (base) | 0.00 | 0% | 0.21 | 0.09 | 0.11 | 10514 ms | 318 MB | base needs fine-tuning |
+
+- **Winner: Tier-0.** No Tier-1 router is both safe and better than the instant baseline. Apple FM has the
+  best accuracy + multilingual but a **36% false-execution rate** (confidently wrong, no clarify discipline)
+  → disqualified by the safety ceiling and worst conservative score. FunctionGemma base + the resident 3B
+  can't follow the constrained routing format (capAcc 0). **Router Auto currently keeps Tier-0.**
+- **Residency finding (§11):** non-resident router models pay ~10 s cold-load PER call (bridge reloads them);
+  only a warm-resident router is viable. Apple FM is ~13.6 s/call on-device. So Tier-1 needs both quality AND
+  warm residency to beat Tier-0.
+- **Fallback ladder** (as evidence changes): Tier-0 → (eligible Tier-1 by score) → clarification. Today the
+  middle is empty.
 - **LLM tool-calling front door** (§13) — adapt tool calls into the same validated routing path.
 - **Multilingual** routing cases (§6); larger benchmark dataset (hundreds→thousands).
 - **Durable** pending invocations (survive restart).

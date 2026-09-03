@@ -7,6 +7,23 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — Router Auto: evidence-driven semantic capability routing (development milestone, untagged).**
+  Makes "which capability does this request want?" a measured, explainable, conservative decision — kept
+  strictly separate from Scheduler Auto ("how to execute it"). New: a **v2 multilingual routing dataset**
+  (EN/RU/HE, 58 labeled + adversarial/injection cases, versioned) with **asymmetric metrics** (a false
+  execution is weighted −6, far worse than a missed capability −2 or an unnecessary clarify −1) and a
+  documented conservative score. A **benchmark endpoint** `POST /v1/route/benchmark?mode=tier0|tier1|hybrid|
+  apple|apple-hybrid|gemma|gemma-hybrid` runs the dataset with **live** on-device inference and persists
+  **versioned evidence** (`RouterEvidenceStore`, provenance + freshness). All routers share ONE canonical
+  registry-derived schema (`SemanticRouting`); Tier-1 is pluggable (resident-LLM / Apple Foundation Models /
+  FunctionGemma-270m). **`RouterAutoPolicy`** promotes a Tier-1 router only if it is available, fresh,
+  ≤2% false-exec, AND beats the free/instant Tier-0 baseline — else Tier-0 + clarification; `/v1/route`
+  honors it. **Measured verdict (Apple M1 Pro / 32 GB, full v2 dataset): Tier-0 wins** — no Tier-1 is both
+  safe and better. Apple FM is the most accurate (0.70) and multilingual but **36% false-exec** (rejected by
+  the safety ceiling) and ~13.6 s/call on-device; FunctionGemma base (capAcc 0) and the resident 3B (capAcc 0)
+  can't follow the constrained format; non-resident routers pay ~10 s cold-load per call. A fine-tuned,
+  warm-resident FunctionGemma is the plausible future Tier-1 — **proposed, not trained** (`2_1_ROUTER_
+  FINETUNE_PROPOSAL.md`). See `2_1_CAPABILITY_ROUTER_STATUS.md` for the comparison table. Full suite 466 green.
 - **esh 2.1 UCMR Stage 4.1 — working image upscale backend (development milestone, untagged).** Replaces the
   broken SeedVR2 default with **Real-ESRGAN ONNX** on onnxruntime (CoreML execution provider, torch-free,
   BSD-3) as the default `image.upscale` backend. A new `image-upscale-onnx` bridge op auto-downloads
