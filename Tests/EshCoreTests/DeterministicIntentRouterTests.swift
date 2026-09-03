@@ -87,4 +87,22 @@ struct RoutingBenchmarkTests {
         #expect(m.clarifyRecall >= 0.8)
         #expect(m.total == RoutingBenchmark.seed.count)
     }
+
+    @Test
+    func tier0FullDatasetIsSafeAcrossAllLanguages() {
+        let m = RoutingBenchmark.run(RoutingDataset.all)
+        // SAFETY GATE: Tier-0 must never false-execute on ANY case, in any language.
+        #expect(m.falseExecutions == 0, "false executions: \(m.failures.filter { $0.hasPrefix("FALSE") })")
+        // Print a summary so the comparison table can capture Tier-0's numbers.
+        print("""
+        [ROUTER-BENCH tier0 v\(RoutingBenchmark.datasetVersion)] total=\(m.total) \
+        actionAcc=\(String(format: "%.2f", m.actionAccuracy)) capAcc=\(String(format: "%.2f", m.capabilitySelectionAccuracy)) \
+        falseExec=\(m.falseExecutions) missed=\(m.missedCapability) unneededClarify=\(m.unnecessaryClarification) \
+        clarifyRecall=\(String(format: "%.2f", m.clarifyRecall)) chatAcc=\(String(format: "%.2f", m.chatAccuracy)) \
+        EN=\(String(format: "%.2f", m.languageActionAccuracy("en"))) RU=\(String(format: "%.2f", m.languageActionAccuracy("ru"))) \
+        HE=\(String(format: "%.2f", m.languageActionAccuracy("he"))) score=\(String(format: "%.2f", m.conservativeScore))
+        """)
+        // Tier-0 is English-phrase-based: it is EXPECTED to miss most RU/HE (via clarify/chat), never execute wrong.
+        #expect(m.languageActionAccuracy("en") >= 0.85)
+    }
 }

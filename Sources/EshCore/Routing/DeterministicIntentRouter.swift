@@ -148,16 +148,37 @@ public struct DeterministicIntentRouter: Sendable {
                 reason: "Did you want to upscale it, remove the background, or something else?", provenance: prov)
         }
 
+        // Wrong-modality: a capability's phrases match but its required input modality is absent (e.g.
+        // "who spoke when?" or "transcribe this" with an IMAGE attached). Clarify — never route to a
+        // different capability just because a question mark triggers the understand fallback.
+        let wrongModality = routes.contains { r in
+            !r.requiredInputs.isEmpty && !r.requiredInputs.allSatisfy { present.contains($0) }
+                && r.phrases.contains { Self.matches(text, phrase: $0) }
+        }
+        if wrongModality {
+            return CapabilityIntent(action: .clarify,
+                reason: "This looks like a different kind of request than the attached \(Self.describe(present)). What would you like to do?",
+                provenance: prov)
+        }
+
+        // Tier-0's rules are English. For predominantly non-Latin text (Cyrillic/Hebrew/…) it must NOT guess
+        // a capability from the generic question→understand fallback (that mis-routes e.g. a Russian "what's
+        // written here?" to understand instead of OCR). Defer to Tier-1 by clarifying (attachment) / chatting.
+        let nonLatin = Self.isMostlyNonLatin(text)
+
         // A bare question about an attached image/video → understand (before the no-verb clarify).
-        if present.contains(.video), Self.looksLikeAQuestionAboutInput(text, present: present) {
+        if !nonLatin, present.contains(.video), Self.looksLikeAQuestionAboutInput(text, present: present) {
             return CapabilityIntent(action: .executeCapability, capability: .videoUnderstand,
                                     inputRefs: ["attachment_\(inputModalities.firstIndex(of: .video) ?? 0)"], provenance: prov)
         }
-        if present.contains(.image), Self.looksLikeAQuestionAboutInput(text, present: present) {
-            return CapabilityIntent(action: .executeCapability, capability: .imageUnderstand,
+        if !nonLatin, present.contains(.image), Self.looksLikeAQuestionAboutInput(text, present: present) {
+            // A "what does it say / what's written / read" question is an OCR intent; other questions → understand.
+            let ocrWords = ["say", "says", "written", "read", "text", "label", "caption"]
+            let cap: CapabilityID = ocrWords.contains(where: { Self.matches(text, phrase: $0) }) ? .imageOCR : .imageUnderstand
+            return CapabilityIntent(action: .executeCapability, capability: cap,
                                     inputRefs: ["attachment_\(inputModalities.firstIndex(of: .image) ?? 0)"], provenance: prov)
         }
-        // An attachment with no actionable verb and no question → clarify (what should I do with it?).
+        // An attachment with no actionable verb and no (parseable) question → clarify.
         if present.contains(.image) || present.contains(.audio) || present.contains(.video) {
             return CapabilityIntent(action: .clarify,
                 reason: "What would you like me to do with this \(Self.describe(present))?", provenance: prov)
@@ -197,6 +218,19 @@ public struct DeterministicIntentRouter: Sendable {
         if text.hasSuffix("?") { return true }
         let starters = ["what", "who", "where", "when", "why", "how", "describe", "explain", "summarize", "tell me"]
         return starters.contains { text.hasPrefix($0) }
+    }
+
+    /// True when the message is predominantly non-Latin script (Cyrillic/Hebrew/Arabic/CJK) — Tier-0's
+    /// English rules can't parse it, so it defers to Tier-1 rather than guessing.
+    static func isMostlyNonLatin(_ text: String) -> Bool {
+        var latin = 0, other = 0
+        for s in text.unicodeScalars {
+            let v = s.value
+            if (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v) { latin += 1 }
+            else if (0x0400...0x04FF).contains(v) || (0x0590...0x05FF).contains(v) || (0x0600...0x06FF).contains(v)
+                || (0x3040...0x30FF).contains(v) || (0x4E00...0x9FFF).contains(v) { other += 1 }
+        }
+        return other > latin && other > 0
     }
 
     static func describe(_ present: Set<ModelModality>) -> String {
