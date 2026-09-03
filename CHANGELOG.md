@@ -7,6 +7,18 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR Stage 0 — universal-capability core contract (development milestone, untagged).**
+  Additive foundation for the Universal Capability & Modality Runtime, with all 2.0 contracts and
+  behavior preserved. New types: `ExecutionRequest`/`ExecutionResult` (typed `inputs[]` + capability +
+  desired output + typed `outputs[]`/`Artifact`, not text-only), `CapabilityID` (data, not a closed
+  enum), `CapabilityProvider` + `CapabilityRegistry` (dispatched on capability, not model format;
+  designed to subsume the speech special-cases), `ExecutionPlan` (single- or multi-step pipelines),
+  first-class `Artifact`/`PrivilegeLevel`/`PreviewDescriptor`, and `FileArtifactStore` under a new
+  `PersistenceRoot.artifactsURL` (path-traversal-guarded, sha256). New additive HTTP endpoints
+  `POST /v1/execute` and `GET /v1/artifacts/{id}`; `language.generate` runs as a real provider bridging
+  to the existing text inference path (so text works end-to-end with no change to the 2.0 chat path).
+  No new models. 26 new tests; full suite green.
+
 - **esh 2.1 M12 follow-up #1 — shared speech/LLM memory budget (development milestone, untagged).** The
   persistent speech runtime now shares the warm-model pool's memory budget instead of holding memory
   independently. `RuntimeLifecycleManager` reserves the speech runtime's live footprint out of the LLM
