@@ -52,7 +52,9 @@ enum WebCommand {
             },
             transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
             webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
-            lifecycleManager: pool
+            lifecycleManager: pool,
+            root: root,
+            artifactStore: FileArtifactStore(root: root)
         )
         // No bearer token: the browser page needs unauthenticated same-origin access to the API.
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: nil, toolVersion: toolVersion)

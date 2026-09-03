@@ -15,6 +15,15 @@ public struct CapabilityID: RawRepresentable, Codable, Hashable, Sendable, Custo
     public init(stringLiteral value: String) { self.rawValue = value }
     public init(_ value: String) { self.rawValue = value }
 
+    // Encode/decode as a bare JSON string ("language.generate"), not { "rawValue": ... }.
+    public init(from decoder: Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
     /// The part before the first dot (`language` in `language.generate`); the whole string if there is no dot.
     public var family: String { rawValue.split(separator: ".", maxSplits: 1).first.map(String.init) ?? rawValue }
     /// The part after the first dot (`generate` in `language.generate`); empty if there is no dot.
@@ -149,5 +158,21 @@ public struct ExecutionRequest: Codable, Sendable {
         self.constraints = constraints
         self.options = options
         self.model = model
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, capability, inputs, output, constraints, options, model
+    }
+
+    // Tolerant decode so callers may omit schemaVersion and the optional-with-defaults fields.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ExecutionRequest.currentSchemaVersion
+        self.capability = try c.decode(CapabilityID.self, forKey: .capability)
+        self.inputs = try c.decode([CapabilityInput].self, forKey: .inputs)
+        self.output = try c.decodeIfPresent(OutputSpec.self, forKey: .output) ?? .text
+        self.constraints = try c.decodeIfPresent(ExecutionConstraints.self, forKey: .constraints) ?? .default
+        self.options = try c.decodeIfPresent(ExecutionOptions.self, forKey: .options) ?? .none
+        self.model = try c.decodeIfPresent(String.self, forKey: .model)
     }
 }

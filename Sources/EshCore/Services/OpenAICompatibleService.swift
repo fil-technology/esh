@@ -808,6 +808,10 @@ public struct OpenAICompatibleService: Sendable {
     /// catalog+fit, config). Returns raw JSON so the esh executable composes it from the canonical
     /// services (thin-client rule: no runtime/policy logic in the web layer or the browser).
     private let webDataClosure: (@Sendable (WebDataRequest) async throws -> Data)?
+    /// UCMR (2.1): optional capability execution (POST /v1/execute) and artifact serving
+    /// (GET /v1/artifacts/{id}). Additive; nil in processes that don't wire the capability runtime.
+    private let executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
+    private let artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -818,7 +822,9 @@ public struct OpenAICompatibleService: Sendable {
             throw OpenAICompatibleError.unsupported("Audio speech generation is not available in this process.")
         },
         transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
-        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil
+        webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil,
+        execute: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)? = nil,
+        artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -827,6 +833,24 @@ public struct OpenAICompatibleService: Sendable {
         self.speechClosure = speech
         self.transcribeClosure = transcribe
         self.webDataClosure = webData
+        self.executeClosure = execute
+        self.artifactClosure = artifact
+    }
+
+    /// Run a capability request (POST /v1/execute).
+    public func execute(_ request: ExecutionRequest) async throws -> ExecutionResult {
+        guard let executeClosure else {
+            throw OpenAICompatibleError.unsupported("Capability execution is not available in this process.")
+        }
+        return try await executeClosure(request)
+    }
+
+    /// Fetch a generated artifact's bytes (GET /v1/artifacts/{id}[/{file}]).
+    public func artifactBytes(id: UUID, file: String?) async throws -> ArtifactBytes? {
+        guard let artifactClosure else {
+            throw OpenAICompatibleError.unsupported("Artifact serving is not available in this process.")
+        }
+        return try await artifactClosure(id, file)
     }
 
     /// Build the warm-model pool the server uses. Exposed so a caller that also runs a persistent
@@ -866,7 +890,9 @@ public struct OpenAICompatibleService: Sendable {
         },
         transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
         webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil,
-        lifecycleManager: RuntimeLifecycleManager? = nil
+        lifecycleManager: RuntimeLifecycleManager? = nil,
+        root: PersistenceRoot? = nil,
+        artifactStore: ArtifactStore? = nil
     ) {
         // M7: the server is long-lived, so give it a warm pool. Model runtimes acquired for one
         // request stay warm and are reused by the next, evicted on idle/memory pressure.
@@ -882,6 +908,27 @@ public struct OpenAICompatibleService: Sendable {
             workspaceRootURL: workspaceRootURL
         )
         let capabilities = ExternalCapabilitiesService(modelStore: modelStore)
+
+        // UCMR (2.1): when a root + artifact store are provided, wire the capability runtime so
+        // POST /v1/execute and GET /v1/artifacts work. Stage 0 registers the language.generate provider
+        // (bridging to the existing text stream); non-text providers are added in later stages.
+        var executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
+        var artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
+        if let root, let artifactStore {
+            var registryUCMR = CapabilityRegistry()
+            registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
+            let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
+            let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
+            executeClosure = { req in try await execSvc.executeCollecting(req) }
+            artifactClosure = { id, file in
+                guard let artifact = try artifactStore.load(id: id) else { return nil }
+                let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
+                guard let target, let data = try artifactStore.data(id: id, file: target) else { return nil }
+                let mime = artifact.files.first(where: { $0.relativePath == target }) != nil ? artifact.mimeType : "application/octet-stream"
+                return ArtifactBytes(data: data, mimeType: mime, filename: (target as NSString).lastPathComponent)
+            }
+        }
+
         self.init(
             infer: { request in
                 try await inference.infer(request: request)
@@ -895,7 +942,9 @@ public struct OpenAICompatibleService: Sendable {
             audioModels: audioModels,
             speech: speech,
             transcribe: transcribe,
-            webData: webData
+            webData: webData,
+            execute: executeClosure,
+            artifact: artifactClosure
         )
     }
 

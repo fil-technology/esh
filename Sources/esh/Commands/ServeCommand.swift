@@ -43,7 +43,9 @@ enum ServeCommand {
             },
             transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
             webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
-            lifecycleManager: pool
+            lifecycleManager: pool,
+            root: root,
+            artifactStore: FileArtifactStore(root: root)
         )
         let handler = OpenAICompatibleHTTPHandler(service: service, bearerToken: apiKey, toolVersion: toolVersion)
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)

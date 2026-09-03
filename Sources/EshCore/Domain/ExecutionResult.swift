@@ -44,4 +44,19 @@ public struct ExecutionResult: Codable, Sendable {
         self.usage = usage
         self.executionPlanID = executionPlanID
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, capability, text, outputs, metrics, usage, executionPlanID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ExecutionResult.currentSchemaVersion
+        self.capability = try c.decode(CapabilityID.self, forKey: .capability)
+        self.text = try c.decodeIfPresent(String.self, forKey: .text)
+        self.outputs = try c.decodeIfPresent([Artifact].self, forKey: .outputs) ?? []
+        self.metrics = try c.decodeIfPresent(Metrics.self, forKey: .metrics)
+        self.usage = try c.decodeIfPresent(EshUsage.self, forKey: .usage)
+        self.executionPlanID = try c.decodeIfPresent(UUID.self, forKey: .executionPlanID)
+    }
 }

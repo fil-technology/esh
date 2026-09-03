@@ -121,6 +121,25 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                     let response = try await service.responses(decoded)
                     return try jsonResponse(statusCode: 200, payload: response)
                 }
+            // UCMR (2.1): additive capability endpoints. All v2.0 routes above are unchanged.
+            case ("POST", "/v1/execute"):
+                let decoded = try JSONCoding.decoder.decode(ExecutionRequest.self, from: request.body)
+                let result = try await service.execute(decoded)
+                return try jsonResponse(statusCode: 200, payload: result)
+            case ("GET", let p) where p.hasPrefix("/v1/artifacts/"):
+                let rest = String(p.dropFirst("/v1/artifacts/".count))
+                let comps = rest.split(separator: "/", maxSplits: 1).map(String.init)
+                guard let first = comps.first, let id = UUID(uuidString: first) else {
+                    throw OpenAICompatibleError.invalidRequest("Invalid artifact id in \(p)")
+                }
+                let file = comps.count > 1 ? comps[1] : nil
+                guard let bytes = try await service.artifactBytes(id: id, file: file) else {
+                    throw OpenAICompatibleError.notFound("Artifact not found: \(p)")
+                }
+                // Inline so previewable artifacts (SVG/image) render directly; still fine for download.
+                return binaryResponse(statusCode: 200, contentType: bytes.mimeType, filename: bytes.filename,
+                                      body: bytes.data,
+                                      extraHeaders: ["content-disposition": #"inline; filename="\#(bytes.filename)""#])
             case ("GET", _), ("POST", _):
                 throw OpenAICompatibleError.notFound("No route for \(request.method.uppercased()) \(request.path)")
             default:

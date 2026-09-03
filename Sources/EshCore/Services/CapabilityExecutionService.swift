@@ -115,10 +115,20 @@ public struct LanguageGenerateProvider: CapabilityProvider {
                         context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
         let extReq = CapabilityAdapters.inferenceRequest(from: request.request)
         let stream = streamFn
+        // The inference stream appends an out-of-band execution-telemetry frame ("\u{01}ESHEXEC:{…}");
+        // it is not user text, so strip it here (the SSE chat path emits it as a separate frame).
+        let sentinel = "\u{01}ESHEXEC:"
         return AsyncThrowingStream { cont in
             let task = Task {
                 do {
-                    for try await chunk in stream(extReq) { cont.yield(.textDelta(chunk)) }
+                    for try await chunk in stream(extReq) {
+                        if let range = chunk.range(of: sentinel) {
+                            let prefix = String(chunk[chunk.startIndex..<range.lowerBound])
+                            if !prefix.isEmpty { cont.yield(.textDelta(prefix)) }
+                        } else {
+                            cont.yield(.textDelta(chunk))
+                        }
+                    }
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()
                 } catch {

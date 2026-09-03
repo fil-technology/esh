@@ -126,3 +126,15 @@ public struct Artifact: Codable, Hashable, Sendable, Identifiable {
 
     public var totalByteSize: Int { files.reduce(0) { $0 + $1.byteSize } }
 }
+
+/// A resolved artifact file's bytes for serving over HTTP (GET /v1/artifacts/{id}[/{file}]).
+public struct ArtifactBytes: Sendable {
+    public var data: Data
+    public var mimeType: String
+    public var filename: String
+    public init(data: Data, mimeType: String, filename: String) {
+        self.data = data
+        self.mimeType = mimeType
+        self.filename = filename
+    }
+}
