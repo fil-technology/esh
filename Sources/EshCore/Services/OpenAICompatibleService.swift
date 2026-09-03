@@ -935,6 +935,8 @@ public struct OpenAICompatibleService: Sendable {
             registryUCMR.register(VisionUnderstandProvider(understand: { paths, prompt, model, maxTokens in
                 try visionService.understand(imagePaths: paths, prompt: prompt, model: model, maxTokens: maxTokens)
             }))
+            // OCR via Apple Vision (zero dependency, on-device, no model).
+            registryUCMR.register(AppleVisionOCRProvider())
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
             executeClosure = { req in try await execSvc.executeCollecting(req) }

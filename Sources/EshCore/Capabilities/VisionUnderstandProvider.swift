@@ -36,7 +36,7 @@ public struct VisionUnderstandProvider: CapabilityProvider {
     public init(id: String = "vision-understand", understand: @escaping UnderstandFn) {
         self.descriptor = CapabilityProviderDescriptor(
             id: id,
-            capabilities: [.imageUnderstand, .imageOCR],
+            capabilities: [.imageUnderstand],   // OCR is served by the zero-dep Apple Vision provider
             acceptedInputs: [.text, .image],
             producedOutputs: [.text],
             backend: .python,
