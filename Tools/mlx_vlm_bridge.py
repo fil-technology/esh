@@ -1057,6 +1057,22 @@ def _mem_pressure_critical() -> bool:
         return False
 
 
+def _route_hf_cache(path: "str | None") -> None:
+    """Route Hugging Face downloads to `path` (the configured assets root, e.g. an external SSD) instead
+    of the default internal ~/.cache/huggingface — so large image models never silently fill internal
+    disk (UCMR Stage 3, item 10). No-op when path is falsy."""
+    import os
+
+    if not path:
+        return
+    try:
+        os.makedirs(path, exist_ok=True)
+        os.environ["HF_HOME"] = path
+        os.environ["HF_HUB_CACHE"] = os.path.join(path, "hub")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def audio_diarize() -> None:
     """Speaker diarization (UCMR 2.1, Stage 3) via sherpa-onnx (onnxruntime). Reads {audioPath, segModel,
     embModel, numSpeakers?, clusterThreshold?} and returns {segments:[{start,end,speaker}], speakers:N}.
@@ -1171,6 +1187,7 @@ def image_upscale() -> None:
     vae_tiling = request.get("vaeTiling", True)
     if not os.path.exists(in_path):
         _fail(f"input image not found: {in_path}")
+    _route_hf_cache(request.get("hfCache"))
 
     avail = _available_mem_mb()
     if avail is not None and avail < min_free:
@@ -1214,6 +1231,7 @@ def image_generate() -> None:
     min_free = float(request.get("minFreeMemMB") or 1500)
     if not prompt.strip():
         _fail("image generation requires a non-empty prompt")
+    _route_hf_cache(request.get("hfCache"))
 
     # Pre-flight RAM check: don't even start if we're already low.
     avail = _available_mem_mb()

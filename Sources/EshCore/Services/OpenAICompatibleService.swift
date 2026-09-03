@@ -944,14 +944,14 @@ public struct OpenAICompatibleService: Sendable {
             }))
             // Text -> image generation via mflux Z-Image Turbo (optional dependency).
             let imageGenService = ImageGenerationService()
-            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q, minFree in
+            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q, minFree, hfCache in
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
-                                             width: w, height: h, quantize: q, minFreeMemMB: minFree)
+                                             width: w, height: h, quantize: q, minFreeMemMB: minFree, hfCache: hfCache)
             }))
             // Image super-resolution / upscale via mflux SeedVR2 (optional dependency).
             let imageUpscaleService = ImageUpscaleService()
-            registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, resolution, minFree in
-                try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, resolution: resolution, minFreeMemMB: minFree)
+            registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, resolution, minFree, hfCache in
+                try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, resolution: resolution, minFreeMemMB: minFree, hfCache: hfCache)
             }))
             // Speaker diarization (audio -> structured speaker clusters) via sherpa-onnx (optional dep).
             // Models live under the assets root (audio/diarization-models); absent -> a clear error.

@@ -12,7 +12,7 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func producesLargerImageArtifactFromImageInput() async throws {
-        let provider = ImageUpscaleProvider(upscale: { _, outPath, resolution, _ in
+        let provider = ImageUpscaleProvider(upscale: { _, outPath, resolution, _, _ in
             #expect(resolution == 2048)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
             return (2048, 2048)
@@ -31,7 +31,7 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func requiresAnImage() async {
-        let provider = ImageUpscaleProvider(upscale: { _, _, _, _ in (1, 1) })
+        let provider = ImageUpscaleProvider(upscale: { _, _, _, _, _ in (1, 1) })
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
         await #expect(throws: CapabilityError.self) {
@@ -42,7 +42,7 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func dispatchedForUpscaleImageToImage() {
-        let reg = CapabilityRegistry(providers: [ImageUpscaleProvider(upscale: { _, _, _, _ in (1, 1) })])
+        let reg = CapabilityRegistry(providers: [ImageUpscaleProvider(upscale: { _, _, _, _, _ in (1, 1) })])
         #expect(reg.providers(for: .imageUpscale, inputs: [.image], output: .image).count == 1)
         #expect(reg.providers(for: .imageUpscale, inputs: [.text], output: .image).isEmpty)
     }

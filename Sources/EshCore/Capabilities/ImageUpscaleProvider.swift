@@ -9,22 +9,22 @@ public struct ImageUpscaleService: Sendable {
     public init(bridge: MLXBridge = .init()) { self.bridge = bridge }
 
     @discardableResult
-    public func upscale(imagePath: String, outputPath: String, resolution: Int?, minFreeMemMB: Int?) throws -> (width: Int, height: Int) {
+    public func upscale(imagePath: String, outputPath: String, resolution: Int?, minFreeMemMB: Int?, hfCache: String?) throws -> (width: Int, height: Int) {
         let response: Response = try bridge.run(
             command: "image-upscale",
-            request: Request(imagePath: imagePath, outputPath: outputPath, resolution: resolution, minFreeMemMB: minFreeMemMB),
+            request: Request(imagePath: imagePath, outputPath: outputPath, resolution: resolution, minFreeMemMB: minFreeMemMB, hfCache: hfCache),
             as: Response.self)
         return (response.width, response.height)
     }
 
     private struct Request: Codable, Sendable {
-        let imagePath: String; let outputPath: String; let resolution: Int?; let minFreeMemMB: Int?
+        let imagePath: String; let outputPath: String; let resolution: Int?; let minFreeMemMB: Int?; let hfCache: String?
     }
     private struct Response: Codable, Sendable { let outputPath: String; let width: Int; let height: Int }
 }
 
 public struct ImageUpscaleProvider: CapabilityProvider {
-    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ resolution: Int?, _ minFreeMemMB: Int?) throws -> (width: Int, height: Int)
+    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ resolution: Int?, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> (width: Int, height: Int)
 
     public let descriptor: CapabilityProviderDescriptor
     private let upscale: UpscaleFn
@@ -58,16 +58,18 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                     }).first else {
                         throw CapabilityError.failed("upscaling requires an image input")
                     }
+                    try StorageService().ensureAssetsAvailable(root: context.root)   // item 10: no internal-disk fallback
                     let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
                     let resolution = TextToSVGProvider.intOption(req, "resolution")
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
+                    let hfCache = context.root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("upscale-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
 
                     cont.yield(.status("upscaling image"))
-                    let size = try upscale(inPath, outPath, resolution, minFreeMemMB)
+                    let size = try upscale(inPath, outPath, resolution, minFreeMemMB, hfCache)
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     let artifact = Artifact(
                         kind: .image, mimeType: "image/png", entrypoint: "result.png",
