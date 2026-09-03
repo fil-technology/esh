@@ -412,14 +412,15 @@ function md(t){
 // legitimate reasoning still parses.
 const _DISPLAY_STOP_MARKERS=['<|im_start|>','<|im_end|>','<|endoftext|>','<|eot_id|>','<|eom_id|>','<|start_header_id|>','<|end_header_id|>','<end_of_turn>','<|user|>','<|assistant|>'];
 function sanitizeModelText(t){
-  if(!t||t.indexOf('<|')<0&&t.indexOf('<end_of_turn>')<0) return t; // fast path: nothing to strip
+  if(!t) return ''; // capability results may have no text content (artifacts only) — never return undefined
+  if(t.indexOf('<|')<0&&t.indexOf('<end_of_turn>')<0) return t; // fast path: nothing to strip
   let cut=t.length;
   for(const mk of _DISPLAY_STOP_MARKERS){ const i=t.indexOf(mk); if(i>=0&&i<cut) cut=i; }
   let s=t.slice(0,cut);
   for(const mk of _DISPLAY_STOP_MARKERS){ if(s.indexOf(mk)>=0) s=s.split(mk).join(''); }
   return s.replace(/\n{3,}/g,'\n\n').replace(/[ \t]+\n/g,'\n').trimEnd();
 }
-function splitThink(t,o){ o=o||{}; const c=t.indexOf('</think>');
+function splitThink(t,o){ o=o||{}; t=t||''; const c=t.indexOf('</think>');
   if(c>=0){ let st=t.indexOf('<think>'); st=st<0?0:st+7; return {reason:t.slice(st,c).trim(), answer:t.slice(c+8).trim(), thinking:false}; }
   // Explicit <think> anywhere: everything after it is live reasoning until </think> (content-based, so
   // a model that reasons despite not being flagged still renders correctly).
