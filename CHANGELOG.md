@@ -14,7 +14,11 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   `[text, image]`, text output) resolves image attachments (file path or base64→temp) and runs them
   through mlx-vlm. Verified live end-to-end via `POST /v1/execute image.understand` (nanoLLaVA correctly
   read a test image). Note: Qwen2-VL/2.5-VL require a torch-only video processor; torch-free VLMs work
-  as-is.
+  as-is. Also adds **OCR via Apple Vision** (`image.ocr`, `VNRecognizeTextRequest`) — zero dependency,
+  on-device, verified live (read "HELLO ESH 2.1" from an image); and **capability-aware model
+  resolution** (`CapabilityModelResolver`) that consumes the previously-dormant `ModelSpec.capabilities`
+  so a request without an explicit model picks the right installed model for its capability (vision model
+  for image.understand, embedding model for language.embed, …) instead of assuming an LLM.
 - **esh 2.1 UCMR Stage 1 — first reference capability providers (development milestone, untagged).**
   Two substantially-different non-text providers prove the capability abstraction end-to-end, with no
   model downloads. **Text→SVG** (`vector.generate`): an installed LLM emits a constrained JSON scene-IR
