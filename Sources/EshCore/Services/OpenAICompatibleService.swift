@@ -1049,6 +1049,13 @@ public struct OpenAICompatibleService: Sendable {
                 transcribe: { audioPath in try SpeechToTextService().transcribe(audioPath: audioPath) }))
             // Video understanding — a multi-provider pipeline: native keyframe/audio extraction (AVFoundation)
             // → VLM per frame + STT → LLM fusion. Reuses the vision + STT + text providers; no core surgery.
+            var videoStrongFuse: VideoUnderstandingProvider.StrongFuseFn? = nil
+            if AppleIntelligenceService().status().available {
+                videoStrongFuse = { sys, user, _ in
+                    let text = try await AppleIntelligenceService().generate(prompt: user, instructions: sys)
+                    return (text, "apple-intelligence")
+                }
+            }
             let videoVisionResolver = CapabilityModelResolver()
             registryUCMR.register(VideoUnderstandingProvider(
                 extractor: AVFoundationVideoExtractor(),
@@ -1069,7 +1076,10 @@ public struct OpenAICompatibleService: Sendable {
                     return try visionService.understand(imagePaths: [imagePath], prompt: prompt, model: modelPath, maxTokens: 64)
                 },
                 transcribe: { audioPath in try SpeechToTextService().transcribe(audioPath: audioPath) },
-                fuse: { req in try await inference.infer(request: req) }))
+                fuse: { req in try await inference.infer(request: req) },
+                // Prefer Apple Intelligence for the fusion summary when available — reliable, no control-token
+                // leaks that small resident models produce. Falls back to the resident model otherwise.
+                strongFuse: videoStrongFuse))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities
             // when a request omits it (Auto across modalities).

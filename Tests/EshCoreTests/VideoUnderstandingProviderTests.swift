@@ -77,14 +77,17 @@ struct VideoUnderstandingProviderTests {
             // No audio → this must never be reached; if it is, the transcript would appear and fail below.
             transcribe: { _ in "UNEXPECTED-TRANSCRIPT" },
             fuse: { req in ExternalInferenceResponse(modelID: "m", backend: .mlx, integration: .init(mode: "direct"),
-                                                     outputText: (req.messages.last?.text.contains("UNEXPECTED-TRANSCRIPT") ?? false) ? "LEAK" : "ok",
+                                                     outputText: (req.messages.last?.text.contains("UNEXPECTED-TRANSCRIPT") ?? false)
+                                                        ? "A transcript leaked into the fusion prompt unexpectedly."
+                                                        : "A bird flies across a clear sky; no speech is present.",
                                                      metrics: .init(contextTokens: 1)) })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [p]), context: ctx)
         let result = try await svc.executeCollecting(ExecutionRequest(
             capability: .videoUnderstand,
             inputs: [.attachment(EshAttachment(kind: .video, mimeType: "video/mp4", base64: Data([1]).base64EncodedString()))],
             output: .text))
-        #expect(result.text == "ok")   // transcribe never ran → no leaked transcript
+        #expect(result.text?.contains("no speech") == true)   // transcribe never ran → no leaked transcript
+        #expect(result.text?.contains("leaked") != true)
         let plan = try #require(result.plan)
         #expect(!plan.steps.contains { $0.providerID == "speech-to-text" })
         #expect(plan.rationale.contains { $0.lowercased().contains("no usable audio") })
@@ -110,6 +113,43 @@ struct VideoUnderstandingProviderTests {
                 inputs: [.attachment(EshAttachment(kind: .video, mimeType: "video/mp4", base64: Data([1]).base64EncodedString()))],
                 output: .text))
         }
+    }
+
+    @Test
+    func sanitizeStripsControlTokensAndDetectsDegenerateOutput() {
+        // The exact failure seen live: a resident-3B control-token leak.
+        #expect(VideoUnderstandingProvider.isDegenerate(VideoUnderstandingProvider.sanitizeFusion("<start_function_call>kommen")))
+        #expect(VideoUnderstandingProvider.sanitizeFusion("<|im_end|>ok") == "ok")
+        #expect(VideoUnderstandingProvider.sanitizeFusion("<think>reasoning</think>The video shows a test pattern with tone bars.").contains("test pattern"))
+        // A real sentence survives and is NOT degenerate.
+        let good = VideoUnderstandingProvider.sanitizeFusion("At 0:02 the video shows colour bars while a speaker talks.")
+        #expect(!VideoUnderstandingProvider.isDegenerate(good))
+        // Empty / tiny / punctuation-only are degenerate.
+        #expect(VideoUnderstandingProvider.isDegenerate(""))
+        #expect(VideoUnderstandingProvider.isDegenerate("<eos>"))
+        #expect(VideoUnderstandingProvider.isDegenerate("..."))
+    }
+
+    @Test
+    func fusionEscalatesToStrongBackendWhenResidentIsDegenerate() async throws {
+        // Resident fuse returns a control-token leak; the strong (Apple-FM-like) backend returns a real
+        // summary → the provider must return the strong summary, not the garbage.
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        let provider = VideoUnderstandingProvider(
+            extractor: MockExtractor(duration: 4, hasAudio: true, frameCount: 1),
+            describeFrame: { _, _, _ in "a colour-bar test pattern" },
+            transcribe: { _ in "hello from the speaker" },
+            fuse: { _ in ExternalInferenceResponse(modelID: "llama-3.2-3b", backend: .mlx, integration: .init(mode: "direct"),
+                outputText: "<start_function_call>kommen", metrics: .init(contextTokens: 0)) },
+            strongFuse: { _, _, _ in ("The video shows a colour-bar test pattern while a speaker talks.", "apple-intelligence") })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        let result = try await svc.executeCollecting(ExecutionRequest(
+            capability: .videoUnderstand,
+            inputs: [.attachment(EshAttachment(kind: .video, mimeType: "video/mp4", base64: Data([1,2,3]).base64EncodedString())),
+                     .text("What happens?")],
+            output: .text))
+        #expect(result.text?.contains("colour-bar test pattern") == true)
+        #expect(result.text?.contains("start_function_call") != true)
     }
 
     @Test

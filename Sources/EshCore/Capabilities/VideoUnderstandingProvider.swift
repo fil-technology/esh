@@ -51,18 +51,23 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
     public typealias DescribeFrameFn = @Sendable (_ imagePath: String, _ prompt: String, _ visionModel: String?) async throws -> String
     public typealias TranscribeFn = @Sendable (_ audioPath: String) async throws -> String
     public typealias FuseFn = @Sendable (_ request: ExternalInferenceRequest) async throws -> ExternalInferenceResponse
+    /// A more reliable fusion backend (Apple Intelligence on-device): (system, user, maxTokens) → (text, model).
+    /// nil when unavailable. Preferred for the fusion step because small resident models leak control tokens.
+    public typealias StrongFuseFn = @Sendable (_ system: String, _ user: String, _ maxTokens: Int) async throws -> (text: String, model: String)
 
     public let descriptor: CapabilityProviderDescriptor
     private let extractor: VideoMediaExtractor
     private let describeFrame: DescribeFrameFn
     private let transcribe: TranscribeFn
     private let fuse: FuseFn
+    private let strongFuse: StrongFuseFn?
 
     public init(id: String = "video-understanding",
                 extractor: VideoMediaExtractor,
                 describeFrame: @escaping DescribeFrameFn,
                 transcribe: @escaping TranscribeFn,
-                fuse: @escaping FuseFn) {
+                fuse: @escaping FuseFn,
+                strongFuse: StrongFuseFn? = nil) {
         self.descriptor = CapabilityProviderDescriptor(
             id: id,
             capabilities: [.videoUnderstand],
@@ -77,6 +82,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
         self.describeFrame = describeFrame
         self.transcribe = transcribe
         self.fuse = fuse
+        self.strongFuse = strongFuse
     }
 
     static let framePrompt = "Describe what is visible in this video frame in one concise sentence."
@@ -87,6 +93,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
         let describeFrame = self.describeFrame
         let transcribe = self.transcribe
         let fuse = self.fuse
+        let strongFuse = self.strongFuse
         let providerID = descriptor.id
         return AsyncThrowingStream { cont in
             let task = Task {
@@ -146,24 +153,47 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
                         transcript = (try? await transcribe(audioPath)) ?? ""
                     }
 
-                    // Step 6: reasoning/fusion.
+                    // Step 6: reasoning/fusion. Prefer the reliable backend (Apple Intelligence) when present —
+                    // small resident models leak control tokens / produce degenerate summaries — and sanitize +
+                    // validate the result, falling back to the other backend on a degenerate answer.
                     try Task.checkCancellation()
                     cont.yield(.status("reasoning over frames + audio"))
-                    let fusionPrompt = Self.fusionPrompt(question: question, meta: meta, captions: captions, transcript: transcript)
-                    let fuseReq = ExternalInferenceRequest(
-                        model: req.model,
-                        messages: [
-                            ExternalInferenceMessage(role: .system, text: Self.fusionSystem),
-                            ExternalInferenceMessage(role: .user, text: fusionPrompt)
-                        ],
-                        generation: GenerationConfig(maxTokens: TextToSVGProvider.intOption(req, "maxTokens") ?? 600, temperature: 0.3))
-                    let fused = try await fuse(fuseReq)
-                    let answer = ThinkingParser.parse(fused.outputText).answer ?? fused.outputText
+                    let maxTokens = TextToSVGProvider.intOption(req, "maxTokens") ?? 600
+                    let system = Self.fusionSystem
+                    let userPrompt = Self.fusionPrompt(question: question, meta: meta, captions: captions, transcript: transcript)
+                    let residentAttempt: @Sendable () async throws -> (String, String?) = {
+                        let resp = try await fuse(ExternalInferenceRequest(
+                            model: req.model,
+                            messages: [ExternalInferenceMessage(role: .system, text: system),
+                                       ExternalInferenceMessage(role: .user, text: userPrompt)],
+                            generation: GenerationConfig(maxTokens: maxTokens, temperature: 0.3)))
+                        return (resp.outputText, resp.modelID)
+                    }
+                    var order: [@Sendable () async throws -> (String, String?)] = []
+                    if let strongFuse {
+                        order.append({ let r = try await strongFuse(system, userPrompt, maxTokens); return (r.text, r.model) })
+                        order.append(residentAttempt)
+                    } else {
+                        order.append(residentAttempt)
+                    }
+                    var answer = ""
+                    var fusionModel: String? = req.model
+                    for attempt in order {
+                        if Task.isCancelled { throw CancellationError() }
+                        guard let (raw, model) = try? await attempt() else { continue }
+                        let cleaned = Self.sanitizeFusion(raw)
+                        if !Self.isDegenerate(cleaned) { answer = cleaned; fusionModel = model ?? req.model; break }
+                        if answer.isEmpty { answer = cleaned; fusionModel = model ?? req.model }   // keep best-so-far
+                    }
+                    if Self.isDegenerate(answer) {
+                        // No backend produced a usable summary — fail honestly rather than emit garbage.
+                        throw CapabilityError.failed("the fusion model did not produce a usable summary of this video")
+                    }
 
                     // Canonical composed pipeline.
                     let plan = Self.buildPlan(capability: req.capability, providerID: providerID,
                                               frameCount: frames.count, hasAudio: !transcript.isEmpty,
-                                              fusionModel: fused.modelID ?? req.model, meta: meta)
+                                              fusionModel: fusionModel, meta: meta)
                     cont.yield(.planResolved(plan))
                     cont.yield(.textDelta(answer))
                     cont.yield(.done(finishReason: "stop"))
@@ -238,6 +268,31 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
     static func stringOption(_ req: ExecutionRequest, _ key: String) -> String? {
         if case .string(let s)? = req.options.values[key] { return s }
         return nil
+    }
+
+    /// Strip reasoning tags + special/control tokens that small models leak (e.g. "<start_function_call>",
+    /// "<|im_end|>", "<end_of_turn>", "<eos>"), collapse whitespace. Never lets a control-token artifact reach
+    /// the user as the answer.
+    static func sanitizeFusion(_ raw: String) -> String {
+        var s = ThinkingParser.parse(raw).answer ?? raw
+        // Angle-bracket special tokens: <...>, <|...|>, <0x..>, and function-call markers.
+        s = s.replacingOccurrences(of: #"<\|[^>]*\|>"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"<(start|end)_function_call>"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"<(eos|bos|pad|unk|s|/s|end_of_turn|start_of_turn)>"#, with: "", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: #"<0x[0-9A-Fa-f]{2}>"#, with: "", options: .regularExpression)
+        // Bare "special-ish" leftover tokens (e.g. "start_function_call", "assistantfinal") at the very start.
+        s = s.replacingOccurrences(of: #"^\s*(start_function_call|assistant(final)?|<\|assistant\|>)\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when a fusion answer isn't a usable summary: empty, too short, no letters, or a lone leaked token.
+    static func isDegenerate(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.count < 12 { return true }
+        let letters = t.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        if letters < 8 { return true }                                   // mostly punctuation/tokens
+        let words = t.split { $0 == " " || $0 == "\n" }.count
+        return words < 3                                                  // not a sentence
     }
 
     /// Resolve a video attachment to a local file. `uri` file paths used as-is; inline base64 → temp file.
