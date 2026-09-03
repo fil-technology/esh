@@ -977,7 +977,10 @@ public struct OpenAICompatibleService: Sendable {
                     guard let vm = explicitModel ?? videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
                         throw CapabilityError.failed("no vision model for video understanding (pass options.visionModel or install a vision-capable model)")
                     }
-                    return try visionService.understand(imagePaths: [imagePath], prompt: prompt, model: vm, maxTokens: 64)
+                    // Use the local install path so mlx-vlm loads weights from disk instead of trying to
+                    // download the repo (which fails on id case/format mismatches).
+                    let modelPath = installs.first(where: { $0.id == vm })?.installPath ?? vm
+                    return try visionService.understand(imagePaths: [imagePath], prompt: prompt, model: modelPath, maxTokens: 64)
                 },
                 transcribe: { audioPath in try SpeechToTextService().transcribe(audioPath: audioPath) },
                 fuse: { req in try await inference.infer(request: req) }))
