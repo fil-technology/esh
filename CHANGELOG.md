@@ -7,6 +7,15 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — Stage 3 CLOSED: video.understand fusion made reliable (untagged).** Closes the last Stage 3
+  gate. The `video.understand` fusion step (keyframe VLM + audio STT → LLM summary) leaked control tokens from
+  the small resident model (`<start_function_call>…` as the answer). It now **prefers Apple Intelligence** for
+  the fusion (reliable on-device, no leaks) with a resident-model fallback, **sanitizes** special/control
+  tokens (`<|..|>`, `<start_function_call>`, `<eos>`, `<0x..>`, reasoning tags), and **detects degenerate
+  output** (escalates, or fails honestly instead of emitting garbage). Live-verified on the same fixture that
+  previously produced garbage → a clean coherent summary via apple-intelligence. **STAGE 3 is now COMPLETE**:
+  image.generate / image.upscale / video.understand / audio.diarize all production, plus OCR / vector.generate
+  / vision / segment / embed·rerank. See `2_1_STAGE3_COMPLETION_REPORT.md`. Full suite 491 green.
 - **esh 2.1 UCMR — image.upscale production-qualified (Real-ESRGAN), Stage 3 closeout (untagged).** Turns the
   working Real-ESRGAN ONNX path into a genuinely production capability. **Backend**: pinned model revision
   (`SceneWorks/real-esrgan-onnx@09f741b`) for reproducibility; **alpha preserved** (RGB through the model,

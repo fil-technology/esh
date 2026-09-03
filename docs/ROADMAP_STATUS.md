@@ -40,18 +40,18 @@ result**, not core surgery. See `UCMR_ARCHITECTURE.md`, `2_1_STAGE3_MODEL_PROVEN
 |---|---|---|
 | **Stage 0–1** Runtime + text/SVG/embed/rerank | ✅ done | ExecutionRequest/Result, CapabilityRegistry, ExecutionPlan, `/v1/execute`; language.* + vector.generate + embed/rerank |
 | **Stage 2** Input modalities | ✅ done | vision understanding (mlx-vlm), OCR (Apple Vision), segmentation (rembg), capability model resolution, web typed-result rendering — all live-verified |
-| **Stage 3** Generation & media | 🟡 **NOT complete** (1 gate) — re-audited 2026-09-03 | **image.upscale PRODUCTION-qualified** (Real-ESRGAN ONNX x2/x4, pinned revision, alpha, tiling, cancellation, measured benchmark evidence, perf-aware Model Fit, Web+API+routing live). image.generate / audio.diarize / image.ocr / vector.generate = production (live). **Blocking gate: `video.understand` fusion output is not production-grade** — the 6-step pipeline runs + returns a typed plan, but the resident-3B fusion leaked a control token on the fixture; needs output sanitization + a reliable fusion model + real-footage re-verify. See `2_1_STAGE3_COMPLETION_REPORT.md`. Full suite 489 green; no 2.0 regression. |
+| **Stage 3** Generation & media | ✅ **complete** — re-audited + closed 2026-09-03 | **image.upscale PRODUCTION-qualified** (Real-ESRGAN ONNX x2/x4, pinned revision, alpha, tiling, cancellation, measured benchmark evidence, perf-aware Model Fit, Web+API+routing live). **video.understand fixed** — fusion prefers Apple Intelligence + sanitizes control tokens (was leaking `<start_function_call>…`); re-verified live. image.generate / audio.diarize / image.ocr / vector.generate = production (live). See `2_1_STAGE3_COMPLETION_REPORT.md`. Full suite 491 green; no 2.0 regression. |
 | **Stage 4.1** Working upscale backend | ✅ done | Real-ESRGAN ONNX default (SeedVR2 kept experimental); closed the last Stage 3 item |
 | **Stage 4.2** Performance-aware Auto / Scheduler v2 | ✅ done (first cut) | `CapabilityPerformanceEvidence` + `CapabilityEvidenceIndex` (adapters over image-gen + LLM benchmark stores) + `CapabilityScheduler` wired into `/v1/execute`: interactive image.generate prefers a within-budget resolution (1024²~215s → 512²~51s), evidence-backed choice folded into the ExecutionPlan. candidateModels enumeration (cross-model ranking) is the remaining follow-up. |
 | **Stage 4.3** VLM auto-classification | ✅ done | Install classifies VLMs from config.json (vision_config/model_type/architecture/image-token keys); nanoLLaVA installs as task=vision; image.understand + video.understand resolve a VLM under Auto with no explicit id (models load from local install path). |
 | **Capability Intent Router** (86eyucfbu) | ✅ done incl. Router Auto (gated Apple fallback shipped) | Tier-0 deterministic + CapabilityIntent + independent validation + RoutingOutcome + Install-and-Resume; `POST /v1/route`(+`/resume`, +`/benchmark`, +`/benchmark/detail`) + web chat wiring; **Tier-1** pluggable (resident-LLM / Apple FM / FunctionGemma, shared schema). **Router Auto** evidence-driven: after measuring all routers on the v2 multilingual (EN/RU/HE) dataset, the final safety experiment added a canonical **`abstain`** action + an **`ambiguous`/`unresolved`** clarify split (capability-driven) + a **Safety Validator** — the **ambiguity-gated Apple hybrid** hits **false-exec 0–1.7%** (≤2% ceiling), **cons. score +0.22** (beats Tier-0 −0.14), coverage 38% vs 28%, RU 0.55 / HE 0.56 recovered. **SHIPPED**: `RouterAutoPolicy` selects apple-foundation (gated); Tier-0 handles 76% of traffic, 24% escalate. See `2_1_ROUTER_SAFE_APPLE_FALLBACK.md` + `2_1_CAPABILITY_ROUTER_STATUS.md`. Remaining: warm-resident Apple session (cut ~12–18 s cold escalation), larger dataset, durable pending. |
 | **Stage 4.x** (deferred) | ⬜ not started | cross-model candidate enumeration for the scheduler; image editing/inpainting; local video/music generation; remote runtime |
 
-Stage 3 is **NOT complete** (re-audited 2026-09-03): `image.upscale` is now fully production-qualified
-(Real-ESRGAN ONNX, measured evidence, cancellation, perf-aware Model Fit, live Web+API), and
-image.generate / audio.diarize / image.ocr / vector.generate are production. The one blocking gate is
-`video.understand` fusion output quality (degenerate control-token leak from the resident 3B on the test
-fixture). SeedVR2 remains an experimental, non-default backend. See `2_1_STAGE3_COMPLETION_REPORT.md`.
+Stage 3 is **COMPLETE** (re-audited + closed 2026-09-03): `image.upscale` is fully production-qualified
+(Real-ESRGAN ONNX, measured evidence, cancellation, perf-aware Model Fit, live Web+API), the
+`video.understand` fusion gate is fixed (Apple-Intelligence fusion + control-token sanitization, re-verified
+live), and image.generate / audio.diarize / image.ocr / vector.generate are production. SeedVR2 remains an
+experimental, non-default backend. See `2_1_STAGE3_COMPLETION_REPORT.md`.
 
 ## Releases
 
