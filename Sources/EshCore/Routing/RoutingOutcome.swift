@@ -5,7 +5,7 @@ import Foundation
 // of these distinct outcomes. A missing provider/model is a first-class InstallRequirement, not a generic
 // failure — enabling Install-and-Resume.
 
-public struct InstallRequirement: Sendable, Equatable {
+public struct InstallRequirement: Codable, Sendable, Equatable {
     public var capability: CapabilityID
     public var componentName: String        // user-facing, e.g. "Real-ESRGAN"
     public var recommendedRepo: String      // HF repo id or provider component id

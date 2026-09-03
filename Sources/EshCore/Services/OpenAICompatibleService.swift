@@ -812,6 +812,10 @@ public struct OpenAICompatibleService: Sendable {
     /// (GET /v1/artifacts/{id}). Additive; nil in processes that don't wire the capability runtime.
     private let executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
     private let artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
+    /// UCMR 2.1 Capability Intent Router: POST /v1/route (message+attachments → RouteDecision) and
+    /// /v1/route/resume (pendingId → RouteDecision). Additive; nil when the router isn't wired.
+    private let routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
+    private let resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -824,7 +828,9 @@ public struct OpenAICompatibleService: Sendable {
         transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
         webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil,
         execute: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)? = nil,
-        artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil
+        artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil,
+        route: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)? = nil,
+        resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -835,6 +841,20 @@ public struct OpenAICompatibleService: Sendable {
         self.webDataClosure = webData
         self.executeClosure = execute
         self.artifactClosure = artifact
+        self.routeClosure = route
+        self.resumeRouteClosure = resumeRoute
+    }
+
+    /// Route a chat message + typed attachments to a capability decision (POST /v1/route).
+    public func route(message: String, attachments: [EshAttachment], conversationID: String?) async throws -> RouteDecision {
+        guard let routeClosure else { throw OpenAICompatibleError.unsupported("Capability routing is not available in this process.") }
+        return await routeClosure(message, attachments, conversationID)
+    }
+
+    /// Resume a pending capability invocation after its component was installed (POST /v1/route/resume).
+    public func resumeRoute(pendingId: String, conversationID: String?) async throws -> RouteDecision {
+        guard let resumeRouteClosure else { throw OpenAICompatibleError.unsupported("Capability routing is not available in this process.") }
+        return await resumeRouteClosure(pendingId, conversationID)
     }
 
     /// Run a capability request (POST /v1/execute).
@@ -914,6 +934,8 @@ public struct OpenAICompatibleService: Sendable {
         // (bridging to the existing text stream); non-text providers are added in later stages.
         var executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
         var artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
+        var routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
+        var resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
         if let root, let artifactStore {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
@@ -1005,6 +1027,18 @@ public struct OpenAICompatibleService: Sendable {
                 scheduler: capabilityScheduler,
                 candidateModels: { _ in [] })
             executeClosure = { req in try await execSvc.executeCollecting(req) }
+            // Capability Intent Router (spec 86eyucfbu): message + attachments → RouteDecision, with an
+            // in-memory Install-and-Resume store. Uses the live registry + installs + assets root.
+            let routerStore = PendingInvocationStore()
+            let routerRegistry = registryUCMR   // immutable snapshot after all providers are registered
+            let routerService = CapabilityRouterService(
+                store: routerStore,
+                registry: { routerRegistry },
+                installs: { (try? modelStore.listInstalls()) ?? [] },
+                root: root,
+                host: { HostMachineProfileService().currentProfile() })
+            routeClosure = { message, attachments, convo in await routerService.route(message: message, attachments: attachments, conversationID: convo) }
+            resumeRouteClosure = { pendingId, convo in await routerService.resume(pendingId: pendingId, conversationID: convo) }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
                 let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
@@ -1029,7 +1063,9 @@ public struct OpenAICompatibleService: Sendable {
             transcribe: transcribe,
             webData: webData,
             execute: executeClosure,
-            artifact: artifactClosure
+            artifact: artifactClosure,
+            route: routeClosure,
+            resumeRoute: resumeRouteClosure
         )
     }
 
