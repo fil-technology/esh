@@ -918,6 +918,18 @@ public struct OpenAICompatibleService: Sendable {
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
             registryUCMR.register(TextToSVGProvider(infer: { req in try await inference.infer(request: req) }))
+            // Embeddings + reranking ride the already-bundled llama-server (--embeddings / --reranking).
+            let auxRuntime = LlamaAuxRuntimeManager(resolve: { modelID in
+                guard let id = modelID else { throw CapabilityError.failed("embeddings/rerank require an explicit model id") }
+                let backend = LlamaCppBackend()
+                let exe = try backend.resolveExecutable()
+                guard let install = (try modelStore.listInstalls()).first(where: { $0.id == id }) else {
+                    throw CapabilityError.failed("Model not installed: \(id)")
+                }
+                return (exe, try backend.locateModelFile(for: install).path)
+            })
+            registryUCMR.register(EmbeddingProvider(embed: { modelID, texts in try await auxRuntime.embed(modelID: modelID, texts: texts) }))
+            registryUCMR.register(RerankProvider(rerank: { modelID, query, docs in try await auxRuntime.rerank(modelID: modelID, query: query, documents: docs) }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
             executeClosure = { req in try await execSvc.executeCollecting(req) }
