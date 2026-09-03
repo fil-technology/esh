@@ -1031,7 +1031,11 @@ public struct OpenAICompatibleService: Sendable {
             // in-memory Install-and-Resume store. Uses the live registry + installs + assets root.
             let routerStore = PendingInvocationStore()
             let routerRegistry = registryUCMR   // immutable snapshot after all providers are registered
+            // Tier-1 semantic router: a resident LLM proposes a constrained intent when Tier 0 is unsure
+            // (ambiguous). Its output is validated against the registry before anything runs (§4/§8).
+            let semanticRouter = ResidentLLMSemanticRouter(infer: { req in try await inference.infer(request: req) })
             let routerService = CapabilityRouterService(
+                resolver: IntentResolver(semantic: semanticRouter),
                 store: routerStore,
                 registry: { routerRegistry },
                 installs: { (try? modelStore.listInstalls()) ?? [] },

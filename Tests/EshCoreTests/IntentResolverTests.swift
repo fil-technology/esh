@@ -17,10 +17,10 @@ struct IntentResolverTests {
     private func image() -> EshAttachment { EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1]).base64EncodedString()) }
 
     @Test
-    func upscaleWithMissingModelIsInstallRequiredThenReadyOncePresent() throws {
+    func upscaleWithMissingModelIsInstallRequiredThenReadyOncePresent() async throws {
         let r = root(); let resolver = IntentResolver()
         // No model asset yet → install required (Real-ESRGAN), original request preserved.
-        let out1 = resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out1 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
         guard case let .installRequired(request, intent, requirement) = out1 else {
             Issue.record("expected installRequired, got \(out1)"); return
         }
@@ -35,32 +35,66 @@ struct IntentResolverTests {
         try Data([1]).write(to: asset)
         defer { try? FileManager.default.removeItem(at: r.stateRootURL); try? FileManager.default.removeItem(at: r.assetsRootURL) }
 
-        let out2 = resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out2 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
         #expect(out2.isReady)
     }
 
     @Test
-    func understandNeedsAVisionModelUntilOneIsInstalled() {
+    func understandNeedsAVisionModelUntilOneIsInstalled() async {
         let r = root(); let resolver = IntentResolver()
-        let out = resolver.resolve(message: "what is in this image?", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out = await resolver.resolve(message: "what is in this image?", attachments: [image()], registry: registry(), installs: [], root: r)
         guard case let .installRequired(_, _, req) = out else { Issue.record("expected installRequired, got \(out)"); return }
         #expect(req.capability == .imageUnderstand)
     }
 
     @Test
-    func chatAndClarifyAndUnsupportedPassThrough() {
+    func chatAndClarifyAndUnsupportedPassThrough() async {
         let r = root(); let resolver = IntentResolver()
-        if case .chat = resolver.resolve(message: "Explain recursion", attachments: [], registry: registry(), installs: [], root: r) {} else { Issue.record("expected chat") }
-        if case .clarify = resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r) {} else { Issue.record("expected clarify") }
-        if case .unsupported = resolver.resolve(message: "deploy this", attachments: [], registry: registry(), installs: [], root: r) {} else { Issue.record("expected unsupported") }
+        if case .chat = await resolver.resolve(message: "Explain recursion", attachments: [], registry: registry(), installs: [], root: r) {} else { Issue.record("expected chat") }
+        if case .clarify = await resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r) {} else { Issue.record("expected clarify") }
+        if case .unsupported = await resolver.resolve(message: "deploy this", attachments: [], registry: registry(), installs: [], root: r) {} else { Issue.record("expected unsupported") }
     }
 
     @Test
-    func capabilityWithNoRegisteredProviderIsUnsupported() {
+    func capabilityWithNoRegisteredProviderIsUnsupported() async {
         let r = root(); let resolver = IntentResolver()
         // audio.diarize is NOT in this test registry → unsupported (router proposes, esh validates).
-        let out = resolver.resolve(message: "who spoke when?", attachments: [EshAttachment(kind: .audio, mimeType: "audio/wav", base64: "AA==")], registry: registry(), installs: [], root: r)
+        let out = await resolver.resolve(message: "who spoke when?", attachments: [EshAttachment(kind: .audio, mimeType: "audio/wav", base64: "AA==")], registry: registry(), installs: [], root: r)
         if case .unsupported = out {} else { Issue.record("expected unsupported, got \(out)") }
+    }
+
+    // A mock Tier-1 router that always proposes a fixed capability (or an invalid one).
+    struct MockSemantic: SemanticIntentRouter {
+        let name = "mock"; let cap: CapabilityID?
+        func propose(message: String, inputModalities: [ModelModality], schema: [CapabilitySchemaEntry]) async -> CapabilityIntent? {
+            guard let cap else { return CapabilityIntent(action: .clarify, provenance: .init(tier: "tier1-semantic", router: "mock")) }
+            return CapabilityIntent(action: .executeCapability, capability: cap, inputRefs: ["attachment_0"],
+                                    provenance: .init(tier: "tier1-semantic", router: "mock"))
+        }
+    }
+
+    @Test
+    func tier1ResolvesAmbiguityWhenItNamesARegisteredCapability() async {
+        let r = root()
+        // "improve this" is Tier-0 ambiguous → clarify; Tier-1 proposes image.upscale (registered) → the
+        // resolver adopts it (here it surfaces as installRequired since the upscale asset isn't present —
+        // the point is the ambiguity became a concrete, validated capability, not a clarify).
+        let resolver = IntentResolver(semantic: MockSemantic(cap: .imageUpscale))
+        let out = await resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r)
+        switch out {
+        case let .installRequired(request, _, _): #expect(request.capability == .imageUpscale)
+        case let .ready(request, _): #expect(request.capability == .imageUpscale)
+        default: Issue.record("expected image.upscale (Tier-1 escalation), got \(out)")
+        }
+    }
+
+    @Test
+    func tier1ProposalForAnUnregisteredCapabilityIsRejected() async {
+        let r = root()
+        // Tier-1 proposes audio.diarize, which has NO provider in this registry → keep Tier-0 clarify.
+        let resolver = IntentResolver(semantic: MockSemantic(cap: .audioDiarize))
+        let out = await resolver.resolve(message: "improve this", attachments: [image()], registry: registry(), installs: [], root: r)
+        if case .clarify = out {} else { Issue.record("expected clarify (invalid proposal rejected), got \(out)") }
     }
 
     @Test
@@ -70,7 +104,7 @@ struct IntentResolverTests {
         let svc = InstallAndResumeService(store: store, resolver: resolver)
         let reg = registry()
 
-        let out = resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: reg, installs: [], root: r)
+        let out = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: reg, installs: [], root: r)
         guard case let .installRequired(_, intent, requirement) = out else { Issue.record("expected installRequired"); return }
         let pending = await svc.record(message: "Upscale this 2×", attachments: [image()], intent: intent,
                                        requirement: requirement, conversationID: "c1", nowISO8601: "2026-09-03T00:00:00Z")

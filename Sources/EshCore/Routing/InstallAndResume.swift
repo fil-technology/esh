@@ -64,7 +64,7 @@ public struct InstallAndResumeService: Sendable {
                        host: HostMachineProfile? = nil,
                        execute: @Sendable (ExecutionRequest) async throws -> ExecutionResult) async rethrows -> ResumeResult {
         guard let p = await store.get(id) else { return .notFound }
-        let outcome = resolver.resolve(message: p.message, attachments: p.attachments,
+        let outcome = await resolver.resolve(message: p.message, attachments: p.attachments,
                                        registry: registry, installs: installs, root: root, host: host)
         switch outcome {
         case let .ready(request, _):

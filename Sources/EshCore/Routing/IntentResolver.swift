@@ -7,13 +7,29 @@ import Foundation
 
 public struct IntentResolver: Sendable {
     private let router: DeterministicIntentRouter
-    public init(router: DeterministicIntentRouter = .init()) { self.router = router }
+    /// Optional Tier-1 semantic router, consulted only when Tier 0 is unsure (clarify). Its proposal is
+    /// validated exactly like Tier 0 — the router is never the authority (spec §1/§8).
+    private let semantic: SemanticIntentRouter?
+    public init(router: DeterministicIntentRouter = .init(), semantic: SemanticIntentRouter? = nil) {
+        self.router = router; self.semantic = semantic
+    }
 
     public func resolve(message: String, attachments: [EshAttachment],
                         registry: CapabilityRegistry, installs: [ModelInstall],
-                        root: PersistenceRoot, host: HostMachineProfile? = nil) -> RoutingOutcome {
+                        root: PersistenceRoot, host: HostMachineProfile? = nil) async -> RoutingOutcome {
         let modalities = attachments.map(Self.modality)
-        let intent = router.route(message: message, inputModalities: modalities)
+        var intent = router.route(message: message, inputModalities: modalities)
+
+        // Tier 1 escalation: only when Tier 0 couldn't decide (clarify). Keeps LLM calls rare, and the
+        // semantic proposal must name a REGISTERED capability or we keep Tier 0's clarify (no false exec).
+        if intent.action == .clarify, let semantic {
+            let schema = CapabilitySchemaBuilder.build(from: registry)
+            if let proposal = await semantic.propose(message: message, inputModalities: modalities, schema: schema),
+               proposal.action == .executeCapability, let cap = proposal.capability,
+               registry.all.contains(where: { $0.descriptor.capabilities.contains(cap) }) {
+                intent = proposal
+            }
+        }
 
         switch intent.action {
         case .chat: return .chat

@@ -62,7 +62,7 @@ public struct CapabilityRouterService: Sendable {
     }
 
     public func route(message: String, attachments: [EshAttachment], conversationID: String?) async -> RouteDecision {
-        let outcome = resolver.resolve(message: message, attachments: attachments,
+        let outcome = await resolver.resolve(message: message, attachments: attachments,
                                        registry: registry(), installs: installs(), root: root, host: host())
         return await decision(from: outcome, message: message, attachments: attachments, conversationID: conversationID)
     }
@@ -72,7 +72,7 @@ public struct CapabilityRouterService: Sendable {
         guard let id = UUID(uuidString: pendingId), let p = await store.get(id) else {
             return RouteDecision(action: "unsupported", reason: "This request is no longer pending (it may have expired on a server restart).")
         }
-        let outcome = resolver.resolve(message: p.message, attachments: p.attachments,
+        let outcome = await resolver.resolve(message: p.message, attachments: p.attachments,
                                        registry: registry(), installs: installs(), root: root, host: host())
         if case .ready = outcome { await store.remove(id) }
         return await decision(from: outcome, message: p.message, attachments: p.attachments, conversationID: conversationID, reuseId: id)
