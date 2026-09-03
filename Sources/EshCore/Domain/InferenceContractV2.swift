@@ -57,6 +57,7 @@ public struct EshAttachment: Codable, Hashable, Sendable {
         case image
         case document
         case audio
+        case video
         case other
     }
     public var kind: Kind

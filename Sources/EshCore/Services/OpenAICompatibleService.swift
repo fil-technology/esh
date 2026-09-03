@@ -948,6 +948,20 @@ public struct OpenAICompatibleService: Sendable {
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree)
             }))
+            // Video understanding — a multi-provider pipeline: native keyframe/audio extraction (AVFoundation)
+            // → VLM per frame + STT → LLM fusion. Reuses the vision + STT + text providers; no core surgery.
+            let videoVisionResolver = CapabilityModelResolver()
+            registryUCMR.register(VideoUnderstandingProvider(
+                extractor: AVFoundationVideoExtractor(),
+                describeFrame: { imagePath, prompt in
+                    let installs = (try? modelStore.listInstalls()) ?? []
+                    guard let vm = videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
+                        throw CapabilityError.failed("no vision model installed for video understanding (install one to use video.understand)")
+                    }
+                    return try visionService.understand(imagePaths: [imagePath], prompt: prompt, model: vm, maxTokens: 64)
+                },
+                transcribe: { audioPath in try SpeechToTextService().transcribe(audioPath: audioPath) },
+                fuse: { req in try await inference.infer(request: req) }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities
             // when a request omits it (Auto across modalities).

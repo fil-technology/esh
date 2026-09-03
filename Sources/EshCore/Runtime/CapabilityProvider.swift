@@ -113,6 +113,7 @@ public extension CapabilityInput {
             switch a.kind {
             case .image: return .image
             case .audio: return .audio
+            case .video: return .video
             case .document: return .text   // documents are consumed as text today; refine when doc-VLM lands
             case .other: return .text
             }
