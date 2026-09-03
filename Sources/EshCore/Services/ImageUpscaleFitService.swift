@@ -40,40 +40,47 @@ public struct ImageUpscaleFitService: Sendable {
         let baseMB = 250.0
         let estPeakMB = baseMB + (tiled ? tiledMB : untiledMB)
 
-        // Memory-fit class against this Mac's memory (fall back to a conservative 8 GB when unknown).
-        let totalGB = host?.totalMemoryGB ?? 8
-        let availGB = host?.availableMemoryGB ?? (totalGB * 0.5)
-        let estGB = estPeakMB / 1024
-        let memoryFit: ModelFitClass
-        if estGB < availGB * 0.5 { memoryFit = .comfortable }
-        else if estGB < availGB { memoryFit = .fits }
-        else if estGB < totalGB { memoryFit = .tight }
-        else { memoryFit = .unlikely }
+        _ = estPeakMB   // formula estimate is a fallback; measured peak is preferred below.
 
-        // Expected latency from MEASURED evidence only. Prefer an exact (width,scale) match; else scale a
-        // nearby measured sample by output-pixel ratio (SR cost is ~linear in output pixels).
+        // Expected latency + peak memory from MEASURED evidence only. Prefer an exact (width,scale) match;
+        // else scale a nearby measured sample by output-pixel ratio (SR cost is ~linear in output pixels).
         var expectedSeconds: Double? = nil
         var evidenceBacked = false
+        var measuredPeakMB: Double? = nil
         let pool = evidence.all(capability: .imageUpscale).filter { !($0.reliability == 0) }
         func cfgInt(_ e: CapabilityPerformanceEvidence, _ k: String) -> Int? {
             if case let .int(i)? = e.config[k] { return i }; return nil
         }
         if let exact = pool.first(where: { cfgInt($0, "width") == inputWidth && cfgInt($0, "scale") == scale }),
            let s = exact.secondsPerUnit {
-            expectedSeconds = s; evidenceBacked = true
-        } else if let near = pool.filter({ cfgInt($0, "scale") == scale }).compactMap({ e -> (Double, Double)? in
-            guard let w = cfgInt(e, "width"), let s = e.secondsPerUnit else { return nil }
-            return (Double(w), s)
-        }).min(by: { abs($0.0 - Double(inputWidth)) < abs($1.0 - Double(inputWidth)) }) {
-            let measuredOutPx = near.0 * near.0 * Double(scale * scale)
-            expectedSeconds = near.1 * (outPx / max(measuredOutPx, 1))
+            expectedSeconds = s; evidenceBacked = true; measuredPeakMB = exact.peakMemoryMB
+        } else if let near = pool.filter({ cfgInt($0, "scale") == scale }).min(by: {
+            abs(Double(cfgInt($0, "width") ?? 0) - Double(inputWidth)) < abs(Double(cfgInt($1, "width") ?? 0) - Double(inputWidth))
+        }), let w = cfgInt(near, "width"), let s = near.secondsPerUnit {
+            let measuredOutPx = Double(w * w) * Double(scale * scale)
+            expectedSeconds = s * (outPx / max(measuredOutPx, 1))
+            // Peak memory tracks output pixels; scale the measured peak by the output-pixel ratio.
+            measuredPeakMB = near.peakMemoryMB.map { $0 * (outPx / max(measuredOutPx, 1)) }
             evidenceBacked = true
         }
+        // Prefer the MEASURED peak (evidence) over the rough formula when we have it.
+        let peakMB = measuredPeakMB ?? estPeakMB
 
+        // Memory-fit class against this Mac's memory (fall back to a conservative 8 GB when unknown).
+        let totalGB = host?.totalMemoryGB ?? 8
+        let availGB = host?.availableMemoryGB ?? (totalGB * 0.5)
+        let peakGB = peakMB / 1024
+        let memoryFit: ModelFitClass
+        if peakGB < availGB * 0.5 { memoryFit = .comfortable }
+        else if peakGB < availGB { memoryFit = .fits }
+        else if peakGB < totalGB { memoryFit = .tight }
+        else { memoryFit = .unlikely }
+
+        let peakSource = measuredPeakMB != nil ? "measured" : "est."
         let latencyText = expectedSeconds.map { String(format: "~%.1fs (measured on this Mac)", $0) } ?? "unknown (not yet benchmarked)"
-        let note = "Memory fit: \(memoryFit.rawValue) (est. peak ~\(Int(estPeakMB)) MB\(tiled ? ", tiled" : "")). Expected latency: \(latencyText). Memory fit does not imply interactive speed."
+        let note = "Memory fit: \(memoryFit.rawValue) (\(peakSource) peak ~\(Int(peakMB)) MB\(tiled ? ", tiled" : "")). Expected latency: \(latencyText). Memory fit does not imply interactive speed."
 
-        return ImageUpscaleFit(memoryFit: memoryFit, estimatedPeakMemoryMB: estPeakMB, outputWidth: outW, outputHeight: outH,
+        return ImageUpscaleFit(memoryFit: memoryFit, estimatedPeakMemoryMB: peakMB, outputWidth: outW, outputHeight: outH,
                                expectedSeconds: expectedSeconds, evidenceBacked: evidenceBacked, tiledLikely: tiled, note: note)
     }
 }
