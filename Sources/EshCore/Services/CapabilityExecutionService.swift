@@ -146,13 +146,20 @@ public struct LanguageGenerateProvider: CapabilityProvider {
 public struct CapabilityExecutionService: Sendable {
     private let registry: CapabilityRegistry
     private let context: ExecutionContext
+    /// Optional capability-aware model resolver: fills `model` when a request omits it (Auto across
+    /// modalities). Returns nil to leave the model unresolved (e.g. capabilities that need no model).
+    private let modelResolver: (@Sendable (ExecutionRequest) -> String?)?
 
-    public init(registry: CapabilityRegistry, context: ExecutionContext) {
+    public init(registry: CapabilityRegistry, context: ExecutionContext,
+                modelResolver: (@Sendable (ExecutionRequest) -> String?)? = nil) {
         self.registry = registry
         self.context = context
+        self.modelResolver = modelResolver
     }
 
     public func execute(_ request: ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        var request = request
+        if request.model == nil, let resolved = modelResolver?(request) { request.model = resolved }
         let candidates = registry.candidates(for: request)
         guard let provider = candidates.first else {
             let mods = request.inputs.map { $0.modality.rawValue }.joined(separator: "+")

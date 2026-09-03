@@ -938,7 +938,11 @@ public struct OpenAICompatibleService: Sendable {
             // OCR via Apple Vision (zero dependency, on-device, no model).
             registryUCMR.register(AppleVisionOCRProvider())
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
-            let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
+            // Capability-aware model resolution: fill `model` from installed models' declared capabilities
+            // when a request omits it (Auto across modalities).
+            let capabilityResolver = CapabilityModelResolver()
+            let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx,
+                modelResolver: { req in capabilityResolver.resolveModelID(capability: req.capability, from: (try? modelStore.listInstalls()) ?? []) })
             executeClosure = { req in try await execSvc.executeCollecting(req) }
             artifactClosure = { id, file in
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
