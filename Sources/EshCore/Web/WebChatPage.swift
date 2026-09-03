@@ -713,6 +713,37 @@ async function execCapability(capability, inputs, output, model){
   if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
   return await r.json();
 }
+// UCMR Stage 3: in Auto mode, a plain image-generation request routes to the image.generate capability
+// (no manual runtime picking). Conservative match so normal chat is never hijacked.
+function imageGenIntent(text){
+  const t=(text||'').trim();
+  if(/^\/(image|imagine)\b/i.test(t)) return true;
+  return /^(generate|create|draw|make|paint|render)\b/i.test(t)
+      && /\b(image|picture|illustration|photo|drawing|painting|logo|art|poster|wallpaper|icon|sketch)\b/i.test(t);
+}
+function stripImageIntent(text){ return (text||'').replace(/^\/(image|imagine)\s*/i,'').trim(); }
+// "Why this execution plan?" — renders the composed pipeline (steps + rationale) for a typed result.
+function planInspectorHTML(plan){
+  if(!plan||!plan.steps||!plan.steps.length) return '';
+  const steps=plan.steps.map((s,i)=>`<div class="mono" style="font-size:11px;color:var(--muted)">${i+1}. ${esch(s.providerID)}${s.backend?(' · '+esch(s.backend)):''}${s.modelID?(' · '+esch(s.modelID)):''}</div>`).join('');
+  const why=(plan.rationale||[]).map(r=>`<li>${esch(r)}</li>`).join('');
+  return `<details class="reason" style="margin-top:8px"><summary>Why this execution plan?</summary>`
+    +`<div class="rc"><div style="font-weight:600;margin-bottom:4px">Pipeline (${plan.steps.length} step${plan.steps.length>1?'s':''})</div>${steps}`
+    +(why?`<ul style="margin:8px 0 0 16px;padding:0">${why}</ul>`:'')+`</div></details>`;
+}
+async function generateImage(c, prompt){
+  const clean=stripImageIntent(prompt);
+  const msg={id:uid(),role:'assistant',generating:true,genLabel:'Generating image…'};
+  c.messages.push(msg); S.genChatId=c.id; saveChats(); render();
+  try{
+    const res=await execCapability('image.generate',[{payload:{text:{_0:clean}}}],{modality:'image'}, S.modelSel);
+    msg.generating=false; msg.artifacts=res.outputs||[]; msg.plan=res.plan||null;
+    if(!(msg.artifacts&&msg.artifacts.length)) msg.content=res.text||'No image was produced.';
+  }catch(e){
+    msg.generating=false; msg.isError=true; msg.title='Image generation failed'; msg.detail=(e&&e.message)||String(e); msg.lastUser=prompt;
+  }
+  saveChats(); render();
+}
 function renderMsg(m){
   const fresh=m.id&&!_seen.has(m.id); if(m.id)_seen.add(m.id);
   const d=el('div',{cls:'msg'+(fresh?' msgin':'')});
@@ -742,8 +773,12 @@ function renderMsg(m){
     h+=`<details class="reason"><summary>${label}</summary><div class="rc">${esch(s.reason)}</div></details>`; }
   const ans=s.answer||(s.thinking?'':m.content);
   if(ans) h+=`<div class="asttext">${md(ans)}</div>`;
+  // UCMR Stage 3: generation progress for typed capabilities (e.g. image.generate).
+  if(m.generating){ h+=`<div class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>${esch(m.genLabel||'Working…')}</div>`; }
   // UCMR: typed capability results (image/svg/file) rendered from /v1/artifacts.
   if(m.artifacts && m.artifacts.length){ h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
+  // UCMR Stage 3: "Why this execution plan?" — the composed pipeline for a typed result.
+  if(m.plan){ h+=planInspectorHTML(m.plan); }
   if(m.truncated) h+=`<div class="reason" style="color:var(--amber)">⚠ Stopped at the token limit — raise Max tokens in Settings.</div>`;
   // Footer: manual "read aloud" control (speech is opt-in, per message — never auto)
   // plus the execution-inspector meta link.
@@ -1336,6 +1371,9 @@ async function send(queued){
   // Nothing the model can act on (audio-only + transcription empty/unavailable) → keep the message
   // playable, but don't send an empty conversation to the model.
   if(!((userMsg.content||'')+attText(userMsg)).trim()){ saveChats(); return; }
+  // UCMR Stage 3: a plain image-generation request (no attachments) routes to the image.generate
+  // capability instead of chat — the user never picks a diffusion runtime.
+  if(!atts.length && imageGenIntent(text)){ await generateImage(c, text); return; }
   // Auto routing runs through the real Scheduler: send its chosen model explicitly so the server uses
   // the model the UI shows (and reasoning detection matches the actual model).
   let resolved=S.modelSel;
