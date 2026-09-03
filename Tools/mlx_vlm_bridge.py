@@ -941,6 +941,61 @@ def mlx_transcribe() -> None:
     _dump_json({"text": text})
 
 
+def _extract_vlm_text(result: Any) -> str:
+    """mlx-vlm's generate() returns a str across versions, or a (text, usage) tuple, or an object with
+    a .text attribute. Normalize to a string."""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, tuple) and result:
+        first = result[0]
+        return first if isinstance(first, str) else getattr(first, "text", str(first))
+    text = getattr(result, "text", None)
+    return text if isinstance(text, str) else str(result)
+
+
+def mlx_vlm_generate() -> None:
+    """Vision-language generation (UCMR 2.1). Reads {modelPath, prompt, images:[paths], config?} and
+    returns {text}. Loads via mlx_vlm (NOT mlx_lm) so image inputs actually reach the model. stdout is
+    redirected to stderr around load/generate so model prints never corrupt the JSON protocol."""
+    request = _load_json()
+    model_path = request["modelPath"]
+    prompt = request.get("prompt", "") or ""
+    images = request.get("images", []) or []
+    config_in = request.get("config") or {}
+    max_tokens = int(config_in.get("maxTokens", request.get("maxTokens", 512)))
+    temperature = float(config_in.get("temperature", request.get("temperature", 0.0)))
+
+    try:
+        from mlx_vlm import load as vlm_load, generate as vlm_generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+        from mlx_vlm.utils import load_config
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"mlx-vlm is not available: {exc}")
+
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        model, processor = vlm_load(model_path)
+        config = load_config(model_path)
+        formatted = apply_chat_template(processor, config, prompt, num_images=len(images))
+        result = vlm_generate(
+            model, processor, formatted, images,
+            max_tokens=max_tokens, temp=temperature, verbose=False,
+        )
+        text = _extract_vlm_text(result)
+    except Exception as exc:  # noqa: BLE001
+        sys.stdout = real_stdout
+        _fail(f"vision generation failed: {exc}")
+    finally:
+        sys.stdout = real_stdout
+
+    # Strip any leaked chat/EOS special tokens defensively (same class as the rc.7 MLX fix).
+    cut = _find_earliest_stop_marker(text)
+    if cut is not None:
+        text = text[:cut]
+    _dump_json({"text": text.strip()})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1443,6 +1498,7 @@ def main() -> None:
             "mlx-build-cache",
             "mlx-generate",
             "mlx-serve",
+            "mlx-vlm-generate",
             "mlx-transcribe",
             "speech-serve",
             "mlx-validate-model",
@@ -1466,6 +1522,8 @@ def main() -> None:
         mlx_generate()
     elif args.command == "mlx-serve":
         mlx_serve()
+    elif args.command == "mlx-vlm-generate":
+        mlx_vlm_generate()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
     elif args.command == "speech-serve":

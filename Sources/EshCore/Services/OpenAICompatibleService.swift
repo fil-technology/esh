@@ -930,6 +930,11 @@ public struct OpenAICompatibleService: Sendable {
             })
             registryUCMR.register(EmbeddingProvider(embed: { modelID, texts in try await auxRuntime.embed(modelID: modelID, texts: texts) }))
             registryUCMR.register(RerankProvider(rerank: { modelID, query, docs in try await auxRuntime.rerank(modelID: modelID, query: query, documents: docs) }))
+            // Vision understanding (image + text -> text) via mlx-vlm.
+            let visionService = VisionUnderstandingService()
+            registryUCMR.register(VisionUnderstandProvider(understand: { paths, prompt, model, maxTokens in
+                try visionService.understand(imagePaths: paths, prompt: prompt, model: model, maxTokens: maxTokens)
+            }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             let execSvc = CapabilityExecutionService(registry: registryUCMR, context: execCtx)
             executeClosure = { req in try await execSvc.executeCollecting(req) }

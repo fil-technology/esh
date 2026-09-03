@@ -96,6 +96,22 @@ class MLXVLMBridgeTests(unittest.TestCase):
         self.assertIn('"event": "ready"', src)
         self.assertIn("transcribe", src)
 
+    def test_mlx_vlm_generate_image_path_exists(self):
+        # UCMR Stage 2: images must actually reach the model. The bridge previously imported mlx_vlm ONLY
+        # for KV-cache classes and generated via mlx_lm (text-only). The new op loads via mlx_vlm.
+        bridge = load_bridge_module()
+        self.assertTrue(hasattr(bridge, "mlx_vlm_generate"))
+        self.assertTrue(hasattr(bridge, "_extract_vlm_text"))
+        # _extract_vlm_text normalizes str / tuple / object results.
+        self.assertEqual(bridge._extract_vlm_text("hi"), "hi")
+        self.assertEqual(bridge._extract_vlm_text(("hi", {"usage": 1})), "hi")
+        src = (REPOSITORY_ROOT / "Tools" / "mlx_vlm_bridge.py").read_text(encoding="utf-8")
+        self.assertIn('"mlx-vlm-generate"', src)                                   # registered command
+        self.assertIn("mlx_vlm_generate()", src)                                   # dispatched
+        self.assertIn("from mlx_vlm import load as vlm_load, generate as vlm_generate", src)
+        self.assertIn("apply_chat_template", src)
+        self.assertIn('request.get("images"', src)                                 # consumes image inputs
+
     def test_bridge_declares_mlx_vlm_0_5_dependency_contract(self):
         bridge = load_bridge_module()
         requirements = (REPOSITORY_ROOT / "Tools" / "python-requirements.txt").read_text(encoding="utf-8")
