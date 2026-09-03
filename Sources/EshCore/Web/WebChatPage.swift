@@ -148,7 +148,7 @@ public enum WebChatPage {
   .aplayer .fill{ position:absolute; left:0; top:0; height:100%; background:var(--ink); border-radius:2px; width:0%; }
   .aplayer .knobd{ position:absolute; top:50%; width:9px; height:9px; border-radius:50%; background:var(--ink); transform:translate(-50%,-50%); left:0%; }
   .aplayer .atime{ font:400 10.5px var(--mono); color:var(--muted); flex-shrink:0; min-width:30px; text-align:right; }
-  .metaline{ font:400 11px var(--mono); color:var(--faint); cursor:pointer; align-self:flex-start; }
+  .metaline{ font:400 11px var(--mono); color:var(--faint); cursor:pointer; }
   .metaline:hover{ color:var(--ink); text-decoration:underline; }
   .caret{ display:inline-block; width:8px; height:15px; background:var(--ink); vertical-align:-2px; margin-left:2px; animation:eshblink 1s infinite; }
   /* Streaming cursor sits inline at the END of the last rendered block (paragraph,
@@ -161,7 +161,7 @@ public enum WebChatPage {
   .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(32,30,27,.7); margin-top:5px; }
   /* Composer */
   .composer{ padding:0 24px 10px; flex-shrink:0; position:relative; }
-  .miniplayer{ display:flex; align-items:center; gap:10px; padding:8px 12px; margin-bottom:8px; border:1px solid var(--line2); border-radius:12px; background:var(--paper); box-shadow:0 2px 10px rgba(32,30,27,.05); }
+  .miniplayer{ display:flex; align-items:center; gap:10px; padding:8px 12px; max-width:640px; margin:0 auto 8px; border:1px solid var(--line2); border-radius:12px; background:var(--paper); box-shadow:0 2px 10px rgba(32,30,27,.05); }
   .mpbtn{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex-shrink:0; border:none; border-radius:8px; background:var(--panel2); color:var(--ink); cursor:pointer; padding:0; }
   .mpbtn:hover{ background:rgba(32,30,27,.08); }
   .mpmeta{ flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
@@ -253,7 +253,7 @@ public enum WebChatPage {
      re-renders that happen while a popover stays open (e.g. during streaming) — a
      re-triggered entrance read as the menu "jumping". */
   .pop{ transform-origin:top; } .pop.opening{ animation:eshpop .15s cubic-bezier(.2,.8,.2,1); }
-  .asstfoot{ display:flex; align-items:center; gap:4px; align-self:flex-start; margin-left:-5px; }
+  .asstfoot{ display:flex; align-items:center; gap:6px; align-self:flex-start; }
   .sbtn{ display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:none; background:none; color:var(--faint); cursor:pointer; padding:0; transition:color .12s, background .12s; }
   .sbtn svg{ width:14px; height:14px; }
   .sbtn:hover{ color:var(--ink); background:var(--panel2); } .sbtn.on{ color:var(--ink); } .sbtn.load{ animation:eshpulse 1s ease-in-out infinite; }
@@ -705,7 +705,7 @@ function renderMsg(m){
       ? `<button class="sbtn${speaking?' on':''}${loading?' load':''}" data-act="speakMsg" data-arg="${m.id}" title="${speaking?'Stop':'Read aloud'}" aria-label="${speaking?'Stop reading aloud':'Read aloud'}">${(speaking&&!loading)?ICON.stop:ICON.speaker}</button>`
       : '';
     const ml = m.meta ? `<span class="metaline" data-act="openExec" data-arg="${m.id}">${esch(m.meta)}</span>` : '';
-    h+=`<div class="asstfoot">${sb}${ml}</div>`;
+    h+=`<div class="asstfoot">${ml}${sb}</div>`;
   }
   h+='</div>'; d.innerHTML=h; return d;
 }
