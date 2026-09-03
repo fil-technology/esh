@@ -177,11 +177,13 @@ public struct CapabilityExecutionService: Sendable {
         var text = ""
         var outputs: [Artifact] = []
         var usage: EshUsage?
+        var plan: ExecutionPlan?
         for try await event in execute(request) {
             switch event {
             case .textDelta(let s): text += s
             case .artifactProduced(let a): outputs.append(a)
             case .usage(let u): usage = u
+            case .planResolved(let p): plan = p
             case .failed(let m): throw CapabilityError.failed(m)
             case .status, .progress, .reasoningDelta, .previewReady, .done: break
             }
@@ -190,6 +192,7 @@ public struct CapabilityExecutionService: Sendable {
             capability: request.capability,
             text: text.isEmpty ? nil : text,
             outputs: outputs,
-            usage: usage)
+            usage: usage,
+            plan: plan)
     }
 }

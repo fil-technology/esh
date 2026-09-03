@@ -8,6 +8,7 @@ import Foundation
 public enum CapabilityEvent: Sendable {
     case status(String)                 // human-facing status line ("loading model", "vectorizing")
     case progress(Double)               // 0.0...1.0 where meaningful
+    case planResolved(ExecutionPlan)    // the composed pipeline this execution is running (single or N-step)
     case textDelta(String)
     case reasoningDelta(String)
     case artifactProduced(Artifact)     // a typed output is ready (referenced by id)
@@ -28,6 +29,9 @@ public struct ExecutionResult: Codable, Sendable {
     public var metrics: Metrics?
     public var usage: EshUsage?
     public var executionPlanID: UUID?
+    /// The composed ExecutionPlan (single-provider or multi-provider pipeline) that produced this result,
+    /// for the Execution Inspector and "Why this execution plan?". Additive; nil for legacy paths.
+    public var plan: ExecutionPlan?
 
     public init(capability: CapabilityID,
                 text: String? = nil,
@@ -35,6 +39,7 @@ public struct ExecutionResult: Codable, Sendable {
                 metrics: Metrics? = nil,
                 usage: EshUsage? = nil,
                 executionPlanID: UUID? = nil,
+                plan: ExecutionPlan? = nil,
                 schemaVersion: String = ExecutionResult.currentSchemaVersion) {
         self.schemaVersion = schemaVersion
         self.capability = capability
@@ -42,11 +47,12 @@ public struct ExecutionResult: Codable, Sendable {
         self.outputs = outputs
         self.metrics = metrics
         self.usage = usage
-        self.executionPlanID = executionPlanID
+        self.executionPlanID = executionPlanID ?? plan?.id
+        self.plan = plan
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, capability, text, outputs, metrics, usage, executionPlanID
+        case schemaVersion, capability, text, outputs, metrics, usage, executionPlanID, plan
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +63,7 @@ public struct ExecutionResult: Codable, Sendable {
         self.outputs = try c.decodeIfPresent([Artifact].self, forKey: .outputs) ?? []
         self.metrics = try c.decodeIfPresent(Metrics.self, forKey: .metrics)
         self.usage = try c.decodeIfPresent(EshUsage.self, forKey: .usage)
-        self.executionPlanID = try c.decodeIfPresent(UUID.self, forKey: .executionPlanID)
+        self.plan = try c.decodeIfPresent(ExecutionPlan.self, forKey: .plan)
+        self.executionPlanID = try c.decodeIfPresent(UUID.self, forKey: .executionPlanID) ?? plan?.id
     }
 }
