@@ -53,6 +53,7 @@ public struct CapabilityID: RawRepresentable, Codable, Hashable, Sendable, Custo
     public static let audioTranscribe: CapabilityID = "audio.transcribe"
     public static let audioSynthesizeSpeech: CapabilityID = "audio.synthesizeSpeech"
     public static let audioUnderstand: CapabilityID = "audio.understand"
+    public static let audioDiarize: CapabilityID = "audio.diarize"
     // Video
     public static let videoUnderstand: CapabilityID = "video.understand"
     // Artifact / program generation

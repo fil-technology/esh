@@ -1057,6 +1057,52 @@ def _mem_pressure_critical() -> bool:
         return False
 
 
+def audio_diarize() -> None:
+    """Speaker diarization (UCMR 2.1, Stage 3) via sherpa-onnx (onnxruntime). Reads {audioPath, segModel,
+    embModel, numSpeakers?, clusterThreshold?} and returns {segments:[{start,end,speaker}], speakers:N}.
+    sherpa-onnx is an OPTIONAL dependency; a clear error is returned when it (or the models) are absent.
+    Honest: this labels anonymous speaker CLUSTERS (speaker_0, speaker_1, …), not real identities."""
+    import os
+
+    request = _load_json()
+    audio_path = request["audioPath"]
+    seg_model = request.get("segModel") or ""
+    emb_model = request.get("embModel") or ""
+    num_speakers = int(request.get("numSpeakers") or -1)
+    threshold = float(request.get("clusterThreshold") or 0.5)
+    if not os.path.exists(audio_path):
+        _fail(f"audio not found: {audio_path}")
+    for label, p in (("segmentation", seg_model), ("embedding", emb_model)):
+        if not p or not os.path.exists(p):
+            _fail(f"diarization {label} model not found (download the sherpa-onnx models and pass its path): {p}")
+    try:
+        import sherpa_onnx
+        import soundfile as sf
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"sherpa-onnx is not available (install with: pip install sherpa-onnx soundfile): {exc}")
+
+    try:
+        config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+            segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=seg_model)),
+            embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=emb_model),
+            clustering=sherpa_onnx.FastClusteringConfig(
+                num_clusters=num_speakers if num_speakers > 0 else -1,
+                threshold=threshold),
+        )
+        sd = sherpa_onnx.OfflineSpeakerDiarization(config)
+        samples, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+        mono = samples[:, 0]
+        if sample_rate != sd.sample_rate:
+            _fail(f"audio sample rate {sample_rate} != model rate {sd.sample_rate}; resample to {sd.sample_rate} Hz first")
+        result = sd.process(mono).sort_by_start_time()
+        segments = [{"start": round(s.start, 3), "end": round(s.end, 3), "speaker": f"speaker_{s.speaker}"} for s in result]
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"diarization failed: {type(exc).__name__}: {exc}")
+    speakers = len({s["speaker"] for s in segments})
+    _dump_json({"segments": segments, "speakers": speakers})
+
+
 def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str):
     """Run an mflux CLI as a killable process group while guarding RAM: kill + report on low memory /
     critical pressure instead of thrashing. Returns the output image (width, height). Shared by
@@ -1697,6 +1743,7 @@ def main() -> None:
             "image-segment",
             "image-generate",
             "image-upscale",
+            "audio-diarize",
             "mlx-transcribe",
             "speech-serve",
             "mlx-validate-model",
@@ -1728,6 +1775,8 @@ def main() -> None:
         image_generate()
     elif args.command == "image-upscale":
         image_upscale()
+    elif args.command == "audio-diarize":
+        audio_diarize()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
     elif args.command == "speech-serve":

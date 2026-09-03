@@ -953,6 +953,19 @@ public struct OpenAICompatibleService: Sendable {
             registryUCMR.register(ImageUpscaleProvider(upscale: { inPath, outPath, resolution, minFree in
                 try imageUpscaleService.upscale(imagePath: inPath, outputPath: outPath, resolution: resolution, minFreeMemMB: minFree)
             }))
+            // Speaker diarization (audio -> structured speaker clusters) via sherpa-onnx (optional dep).
+            // Models live under the assets root (audio/diarization-models); absent -> a clear error.
+            let diarizationService = DiarizationService()
+            let diarModelsDir = root.audioURL.appendingPathComponent("diarization-models", isDirectory: true)
+            registryUCMR.register(AudioDiarizationProvider(
+                diarize: { audioPath, numSpeakers in
+                    try diarizationService.diarize(
+                        audioPath: audioPath,
+                        segModel: diarModelsDir.appendingPathComponent("segmentation.onnx").path,
+                        embModel: diarModelsDir.appendingPathComponent("embedding.onnx").path,
+                        numSpeakers: numSpeakers, clusterThreshold: 0.5)
+                },
+                transcribe: { audioPath in try SpeechToTextService().transcribe(audioPath: audioPath) }))
             // Video understanding — a multi-provider pipeline: native keyframe/audio extraction (AVFoundation)
             // → VLM per frame + STT → LLM fusion. Reuses the vision + STT + text providers; no core surgery.
             let videoVisionResolver = CapabilityModelResolver()
