@@ -96,7 +96,12 @@ public struct ImageModelFitService: Sendable {
 
         var reasons: [String] = [
             String(format: "estimated peak ~%.1f GB (weights %.1f GB + working ~%.1f GB at %dx%d) vs ~%.1f GB usable of %.0f GB",
-                   peakGB, weightsGB, workingGB, input.width, input.height, usableGB, total)
+                   peakGB, weightsGB, workingGB, input.width, input.height, usableGB, total),
+            // Honest caveat (Stage 3 item 6): this is a MEMORY fit only. Fitting comfortably in memory does
+            // NOT imply fast generation — diffusion latency is compute-bound and scales strongly with
+            // resolution (e.g. Z-Image-Turbo 6B measured ~215s at 1024² vs ~51s at 512² on M1 Pro, same
+            // ~4.4 GB peak). Scheduler/Auto should weigh benchmark seconds/image, not just memory.
+            "memory fit only — generation speed is compute-bound and scales with resolution (see image benchmarks)"
         ]
         if input.otherResidentGB > 0 { reasons.append(String(format: "reserving %.1f GB for models already resident", input.otherResidentGB)) }
 
