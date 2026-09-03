@@ -12,14 +12,19 @@ public struct InstallRequirement: Codable, Sendable, Equatable {
     public var approxSizeMB: Int?
     public var fit: ModelFitAssessment?     // Model Fit when computable (Comfortable/Fits/Tight/…)
     public var everythingLocal: Bool
+    /// How to install: "model" → esh model install (POST /v1/models/install); "asset" → the provider's
+    /// bridge fetches the component on first execution (explicit via the install card, never silent).
+    public var installKind: String
     public init(capability: CapabilityID, componentName: String, recommendedRepo: String,
-                approxSizeMB: Int? = nil, fit: ModelFitAssessment? = nil, everythingLocal: Bool = true) {
+                approxSizeMB: Int? = nil, fit: ModelFitAssessment? = nil, everythingLocal: Bool = true,
+                installKind: String = "model") {
         self.capability = capability
         self.componentName = componentName
         self.recommendedRepo = recommendedRepo
         self.approxSizeMB = approxSizeMB
         self.fit = fit
         self.everythingLocal = everythingLocal
+        self.installKind = installKind
     }
 }
 

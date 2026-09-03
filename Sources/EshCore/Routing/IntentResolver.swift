@@ -31,9 +31,10 @@ public struct IntentResolver: Sendable {
             // Requirement / install-state check (spec §9B, §10).
             if let req = CapabilityRequirementCatalog.requirements[capability],
                !Self.isSatisfied(req, installs: installs, root: root) {
+                let installKind: String = { if case .visionModel = req.kind { return "model" }; return "asset" }()
                 let requirement = InstallRequirement(
                     capability: capability, componentName: req.componentName, recommendedRepo: req.recommendedRepo,
-                    approxSizeMB: req.approxSizeMB, fit: Self.fit(for: req, host: host, root: root))
+                    approxSizeMB: req.approxSizeMB, fit: Self.fit(for: req, host: host, root: root), installKind: installKind)
                 return .installRequired(request, intent, requirement)
             }
             return .ready(request, intent)

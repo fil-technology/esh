@@ -510,15 +510,17 @@ struct WebChatPageTests {
     // UCMR Stage 3: a plain image-generation request routes to image.generate (no manual runtime pick),
     // shows generation progress, renders the artifact, and exposes "Why this execution plan?".
     @Test
-    func imageGenerationIsWiredIntoTheChatFlow() {
+    func capabilityRouterIsWiredIntoTheChatFlow() {
         let html = WebChatPage.html(toolVersion: nil)
-        #expect(html.contains("function imageGenIntent("))
-        #expect(html.contains("async function generateImage("))
-        #expect(html.contains("image.generate"))
-        #expect(html.contains("imageGenIntent(text)"))          // routed inside send()
+        #expect(html.contains("async function routeCapability("))
+        #expect(html.contains("'/v1/route'"))
+        #expect(html.contains("async function handleRoute("))
+        #expect(html.contains("handleRoute(c, text, atts)"))     // routed inside send()
+        #expect(html.contains("installRequired"))
+        #expect(html.contains("Install & continue"))             // install-and-resume card
+        #expect(html.contains("/v1/route/resume"))
         #expect(html.contains("function planInspectorHTML("))
         #expect(html.contains("Why this execution plan?"))
-        #expect(html.contains("Generating image…"))
     }
 
     // Soak: install progress stays visible from the main chat view (not just the model browser) via a

@@ -467,6 +467,7 @@ function el(tag,attrs,html){ const e=document.createElement(tag); if(attrs) for(
 /* ---------- action delegation (thin client: handlers are named, wired by data-act) ---------- */
 const ACT={
   toggleSidebar:()=>{ S.sidebarOpen=!S.sidebarOpen; S.prefs.sidebarOpen=S.sidebarOpen; savePrefs(); render(); },
+  installResume:(mid)=>{ const c=cur(); const msg=(c&&c.messages||[]).find(x=>x.id===mid); if(msg&&msg.installCard&&!msg.installCard.installing&&!msg.installCard.done) installAndResume(msg.installCard, msg); },
   newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); if(!S.audioModels)refreshAudioModels(); render(); },
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
@@ -713,15 +714,24 @@ async function execCapability(capability, inputs, output, model){
   if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
   return await r.json();
 }
-// UCMR Stage 3: in Auto mode, a plain image-generation request routes to the image.generate capability
-// (no manual runtime picking). Conservative match so normal chat is never hijacked.
-function imageGenIntent(text){
-  const t=(text||'').trim();
-  if(/^\/(image|imagine)\b/i.test(t)) return true;
-  return /^(generate|create|draw|make|paint|render)\b/i.test(t)
-      && /\b(image|picture|illustration|photo|drawing|painting|logo|art|poster|wallpaper|icon|sketch)\b/i.test(t);
+// UCMR 2.1 Capability Intent Router: the server decides (Tier 0 deterministic today). We send the message
+// + typed attachments to /v1/route and act on the RouteDecision — ordinary messages come back as "chat".
+function attToEsh(atts){
+  return (atts||[]).map(a=>{ const b64=(a.dataURL||'').split(',')[1]||'';
+    const kind=a.kind==='image'?'image':a.kind==='audio'?'audio':(a.kind==='video'?'video':'document');
+    return {kind, mimeType:a.mime||'', base64:b64}; });
 }
-function stripImageIntent(text){ return (text||'').replace(/^\/(image|imagine)\s*/i,'').trim(); }
+async function routeCapability(text, atts, convo){
+  const r=await fetch('/v1/route',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message:text||'', attachments:attToEsh(atts), conversationID:convo||null})});
+  if(!r.ok) throw new Error('route failed ('+r.status+')');
+  return await r.json();
+}
+async function execRequest(request){
+  const r=await fetch('/v1/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});
+  if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
+  return await r.json();
+}
 // "Why this execution plan?" — renders the composed pipeline (steps + rationale) for a typed result.
 function planInspectorHTML(plan){
   if(!plan||!plan.steps||!plan.steps.length) return '';
@@ -731,17 +741,60 @@ function planInspectorHTML(plan){
     +`<div class="rc"><div style="font-weight:600;margin-bottom:4px">Pipeline (${plan.steps.length} step${plan.steps.length>1?'s':''})</div>${steps}`
     +(why?`<ul style="margin:8px 0 0 16px;padding:0">${why}</ul>`:'')+`</div></details>`;
 }
-async function generateImage(c, prompt){
-  const clean=stripImageIntent(prompt);
-  const msg={id:uid(),role:'assistant',generating:true,genLabel:'Generating image…'};
+// Run a validated ExecutionRequest and land the typed result in an assistant message.
+async function runCapabilityRequest(c, request, label){
+  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…'};
   c.messages.push(msg); S.genChatId=c.id; saveChats(); render();
   try{
-    const res=await execCapability('image.generate',[{payload:{text:{_0:clean}}}],{modality:'image'}, S.modelSel);
+    const res=await execRequest(request);
     msg.generating=false; msg.artifacts=res.outputs||[]; msg.plan=res.plan||null;
-    if(!(msg.artifacts&&msg.artifacts.length)) msg.content=res.text||'No image was produced.';
+    if(res.text) msg.content=res.text;
+    if(!(msg.artifacts&&msg.artifacts.length) && !res.text) msg.content='Done.';
   }catch(e){
-    msg.generating=false; msg.isError=true; msg.title='Image generation failed'; msg.detail=(e&&e.message)||String(e); msg.lastUser=prompt;
+    msg.generating=false; msg.isError=true; msg.title='That didn’t work'; msg.detail=(e&&e.message)||String(e);
   }
+  saveChats(); render();
+}
+function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
+// Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
+async function handleRoute(c, text, atts){
+  let dec; try{ dec=await routeCapability(text, atts, c.id); }catch(e){ return false; }  // route failure → fall back to chat
+  if(dec.action==='chat') return false;
+  if(dec.action==='ready'){ await runCapabilityRequest(c, dec.request, (friendlyCap(dec.capability)+'…')); return true; }
+  if(dec.action==='clarify'){
+    c.messages.push({id:uid(),role:'assistant',content:(dec.reason||'Could you clarify what you’d like to do?')}); saveChats(); render(); return true;
+  }
+  if(dec.action==='unsupported'){
+    c.messages.push({id:uid(),role:'assistant',content:(dec.reason||'esh can’t do that here.')}); saveChats(); render(); return true;
+  }
+  if(dec.action==='installRequired'){
+    const req=dec.installRequirement||{};
+    c.messages.push({id:uid(),role:'assistant',installCard:{cap:dec.capability, name:req.componentName, repo:req.recommendedRepo,
+      sizeMB:req.approxSizeMB, fit:(req.fit&&req.fit.fitClass)||null, kind:req.installKind||'model', pendingId:dec.pendingId, request:dec.request}});
+    saveChats(); render(); return true;
+  }
+  return false;
+}
+// Install the missing component, then resume the ORIGINAL request (the user never re-types it).
+async function installAndResume(card, msg){
+  msg.installCard.installing=true; saveChats(); render();
+  try{
+    if((card.kind||'model')==='asset'){
+      // The provider's bridge fetches the component on first execution (explicit here, not silent).
+      await runCapabilityRequest(cur(), card.request, (friendlyCap(card.cap)+'…'));
+    } else {
+      await fetch('/v1/models/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:card.repo})});
+      // Poll install to completion.
+      for(let i=0;i<600;i++){ await new Promise(r=>setTimeout(r,2000));
+        let st; try{ st=await (await fetch('/v1/models/install?id='+encodeURIComponent(card.repo))).json(); }catch(_){}
+        if(st&&(st.phase==='installed')) break; if(st&&(st.phase==='failed')) throw new Error(st.error||'install failed');
+      }
+      const dec=await (await fetch('/v1/route/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pendingId:card.pendingId})})).json();
+      if(dec.action==='ready') await runCapabilityRequest(cur(), dec.request, (friendlyCap(card.cap)+'…'));
+      else { cur().messages.push({id:uid(),role:'assistant',content:(dec.reason||'The component is still not ready.')}); }
+    }
+    msg.installCard.done=true;
+  }catch(e){ msg.installCard.installing=false; msg.installCard.error=(e&&e.message)||String(e); }
   saveChats(); render();
 }
 function renderMsg(m){
@@ -779,6 +832,19 @@ function renderMsg(m){
   if(m.artifacts && m.artifacts.length){ h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
   // UCMR Stage 3: "Why this execution plan?" — the composed pipeline for a typed result.
   if(m.plan){ h+=planInspectorHTML(m.plan); }
+  // UCMR 2.1: Install-and-Resume card — a supported capability needs one local component. Installing it
+  // auto-resumes the ORIGINAL request (the user never re-types it). Everything stays local.
+  if(m.installCard){ const ic=m.installCard;
+    const fit=ic.fit?(' · '+esch(ic.fit)):''; const size=ic.sizeMB?(esch(ic.sizeMB)+' MB'):'';
+    const status=ic.done?`<span style="font-size:12px;color:var(--muted)">Installed & resumed ✓</span>`
+      : ic.error?`<span style="font-size:12px;color:var(--amber)">Install failed — ${esch(ic.error)}</span>`
+      : ic.installing?`<span class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>Installing ${esch(ic.name||'component')}…</span>`
+      : `<span class="btn" style="padding:7px 14px;font-size:12px" data-act="installResume" data-arg="${esch(m.id)}">Install & continue</span>`;
+    h+=`<div class="errcard" style="border-color:var(--line2)"><div class="t">${esch(friendlyCap(ic.cap))} needs one local component.</div>
+      <div class="d" style="margin-top:6px"><b>${esch(ic.name||ic.repo||'component')}</b>${size?(' · '+size):''}${fit}</div>
+      <div class="d" style="font-size:12px;color:var(--muted)">Everything stays local.</div>
+      <div style="margin-top:12px">${status}</div></div>`;
+  }
   if(m.truncated) h+=`<div class="reason" style="color:var(--amber)">⚠ Stopped at the token limit — raise Max tokens in Settings.</div>`;
   // Footer: manual "read aloud" control (speech is opt-in, per message — never auto)
   // plus the execution-inspector meta link.
@@ -1371,9 +1437,12 @@ async function send(queued){
   // Nothing the model can act on (audio-only + transcription empty/unavailable) → keep the message
   // playable, but don't send an empty conversation to the model.
   if(!((userMsg.content||'')+attText(userMsg)).trim()){ saveChats(); return; }
-  // UCMR Stage 3: a plain image-generation request (no attachments) routes to the image.generate
-  // capability instead of chat — the user never picks a diffusion runtime.
-  if(!atts.length && imageGenIntent(text)){ await generateImage(c, text); return; }
+  // UCMR 2.1 Capability Intent Router: send message + typed attachments to /v1/route. A capability outcome
+  // (ready/installRequired/clarify/unsupported) is handled here; ordinary messages come back as "chat" and
+  // fall through to normal conversation. Audio-only messages keep the existing transcribe→chat flow
+  // (audio.transcribe has no capability provider yet).
+  const audioOnly = atts.length>0 && atts.every(a=>a.kind==='audio');
+  if(!audioOnly){ S.genChatId=c.id; if(await handleRoute(c, text, atts)){ saveChats(); return; } }
   // Auto routing runs through the real Scheduler: send its chosen model explicitly so the server uses
   // the model the UI shows (and reasoning detection matches the actual model).
   let resolved=S.modelSel;
