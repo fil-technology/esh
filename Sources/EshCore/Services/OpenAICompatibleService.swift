@@ -937,6 +937,11 @@ public struct OpenAICompatibleService: Sendable {
             }))
             // OCR via Apple Vision (zero dependency, on-device, no model).
             registryUCMR.register(AppleVisionOCRProvider())
+            // Background removal / segmentation via rembg (optional dependency).
+            let segmentationService = SegmentationService()
+            registryUCMR.register(SegmentationProvider(removeBackground: { inPath, outPath in
+                try segmentationService.removeBackground(imagePath: inPath, outputPath: outPath)
+            }))
             let execCtx = ExecutionContext(root: root, artifactStore: artifactStore, lifecycle: lifecycleManager)
             // Capability-aware model resolution: fill `model` from installed models' declared capabilities
             // when a request omits it (Auto across modalities).

@@ -996,6 +996,34 @@ def mlx_vlm_generate() -> None:
     _dump_json({"text": text.strip()})
 
 
+def image_segment() -> None:
+    """Background removal / segmentation (UCMR 2.1). Reads {imagePath, outputPath} and writes an RGBA
+    PNG with the background removed via rembg (U2Net/ISNet). Returns {outputPath, width, height}. rembg +
+    onnxruntime are an optional dependency; a clear error is returned when they are not installed."""
+    request = _load_json()
+    in_path = request["imagePath"]
+    out_path = request["outputPath"]
+    try:
+        from rembg import remove
+        from PIL import Image
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"rembg is not available (install with: pip install rembg onnxruntime): {exc}")
+
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        image = Image.open(in_path).convert("RGBA")
+        output = remove(image)
+        output.save(out_path)
+        width, height = output.size
+    except Exception as exc:  # noqa: BLE001
+        sys.stdout = real_stdout
+        _fail(f"segmentation failed: {type(exc).__name__}: {exc}")
+    finally:
+        sys.stdout = real_stdout
+    _dump_json({"outputPath": out_path, "width": width, "height": height})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1499,6 +1527,7 @@ def main() -> None:
             "mlx-generate",
             "mlx-serve",
             "mlx-vlm-generate",
+            "image-segment",
             "mlx-transcribe",
             "speech-serve",
             "mlx-validate-model",
@@ -1524,6 +1553,8 @@ def main() -> None:
         mlx_serve()
     elif args.command == "mlx-vlm-generate":
         mlx_vlm_generate()
+    elif args.command == "image-segment":
+        image_segment()
     elif args.command == "mlx-transcribe":
         mlx_transcribe()
     elif args.command == "speech-serve":
