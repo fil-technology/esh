@@ -18,7 +18,13 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   on-device, verified live (read "HELLO ESH 2.1" from an image); and **capability-aware model
   resolution** (`CapabilityModelResolver`) that consumes the previously-dormant `ModelSpec.capabilities`
   so a request without an explicit model picks the right installed model for its capability (vision model
-  for image.understand, embedding model for language.embed, …) instead of assuming an LLM.
+  for image.understand, embedding model for language.embed, …) instead of assuming an LLM. Adds a
+  **background removal / segmentation** provider (`image.segment`/`image.edit`, image→image) — the first
+  image-OUTPUT provider producing a typed `.image` artifact — via rembg through a new `image-segment`
+  bridge op (rembg/onnxruntime optional; graceful error when absent). And **web typed-result rendering**:
+  assistant messages render typed artifacts (image/SVG inline via `/v1/artifacts`, with download; other
+  kinds as a file pill) plus an `execCapability` client — verified live rendering an `/v1/execute`-
+  generated SVG in the chat.
 - **esh 2.1 UCMR Stage 1 — first reference capability providers (development milestone, untagged).**
   Two substantially-different non-text providers prove the capability abstraction end-to-end, with no
   model downloads. **Text→SVG** (`vector.generate`): an installed LLM emits a constrained JSON scene-IR
