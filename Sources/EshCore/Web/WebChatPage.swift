@@ -80,7 +80,8 @@ public enum WebChatPage {
   .newchat{ display:flex; align-items:center; justify-content:center; gap:8px; padding:7px 12px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; border:1px solid var(--line2); margin-bottom:10px; background:none; }
   .newchat:hover{ background:rgba(32,30,27,.03); }
   .sgroup{ padding:4px 12px; margin-top:8px; font:500 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
-  .chatitem{ padding:7px 12px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.75); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chatitem{ display:flex; align-items:center; min-height:30px; padding:2px 12px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.75); cursor:pointer; }
+  .chatitem .clabel{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .chatitem:hover{ background:rgba(32,30,27,.04); }
   .chatitem.active{ background:rgba(32,30,27,.05); color:var(--ink); }
   .chatitem[draggable="true"]{ cursor:pointer; }
@@ -392,6 +393,21 @@ function md(t){
   if(tail.t==='x'){ const op=tail.v.indexOf('```'); if(op>=0){ const after=tail.v.slice(op+3); const nl=after.indexOf('\n'); const lang=nl>=0?after.slice(0,nl).trim():''; const code=nl>=0?after.slice(nl+1):''; tail.v=tail.v.slice(0,op); segs.push({t:'c',lang,v:code}); } }
   return segs.map(s=> s.t==='c' ? ('<pre><code>'+highlight(s.v, s.lang)+'</code></pre>') : mdBlocks(s.v) ).join('');
 }
+// Defensive DISPLAY sanitizer. New replies already terminate correctly server-side (the model's
+// native EOS for GGUF; stop-marker detection for MLX), but chats stored before that fix — or from a
+// gated/mismatched model — can hold leaked chat/EOS special tokens and hallucinated extra turns
+// (e.g. "…answer<|im_start|>user…"). Cut at the first such marker and strip any residual tokens so
+// history renders clean. NOT a generation stop list — <think>/</think> are intentionally excluded so
+// legitimate reasoning still parses.
+const _DISPLAY_STOP_MARKERS=['<|im_start|>','<|im_end|>','<|endoftext|>','<|eot_id|>','<|eom_id|>','<|start_header_id|>','<|end_header_id|>','<end_of_turn>','<|user|>','<|assistant|>'];
+function sanitizeModelText(t){
+  if(!t||t.indexOf('<|')<0&&t.indexOf('<end_of_turn>')<0) return t; // fast path: nothing to strip
+  let cut=t.length;
+  for(const mk of _DISPLAY_STOP_MARKERS){ const i=t.indexOf(mk); if(i>=0&&i<cut) cut=i; }
+  let s=t.slice(0,cut);
+  for(const mk of _DISPLAY_STOP_MARKERS){ if(s.indexOf(mk)>=0) s=s.split(mk).join(''); }
+  return s.replace(/\n{3,}/g,'\n\n').replace(/[ \t]+\n/g,'\n').trimEnd();
+}
 function splitThink(t,o){ o=o||{}; const c=t.indexOf('</think>');
   if(c>=0){ let st=t.indexOf('<think>'); st=st<0?0:st+7; return {reason:t.slice(st,c).trim(), answer:t.slice(c+8).trim(), thinking:false}; }
   // Explicit <think> anywhere: everything after it is live reasoning until </think> (content-based, so
@@ -578,7 +594,7 @@ function chatRow(ch){
   if(S.renaming && S.renaming.type==='chat' && S.renaming.id===ch.id){
     return `<div class="chatitem active"><input class="renameinput" id="renameinput" data-rename="chat" data-arg="${ch.id}" value="${escAttr(ch.title||'')}" maxlength="80"></div>`;
   }
-  return `<div class="chatitem ${ch.id===S.current?'active':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}">${esch(ch.title||'New chat')}</div>`;
+  return `<div class="chatitem ${ch.id===S.current?'active':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}"><span class="clabel">${esch(ch.title||'New chat')}</span></div>`;
 }
 function folderRow(f, chats){
   const collapsed=!!f.collapsed;
@@ -689,7 +705,7 @@ function renderMsg(m){
       <span class="btn" style="padding:7px 14px;font-size:12px" data-act="retryLast" data-arg="${esch(m.lastUser||'')}">Try again</span>
       <span class="btn ghost" style="padding:7px 14px;font-size:12px" data-act="continueAuto" data-arg="${esch(m.lastUser||'')}">Continue with Auto</span>
     </div></div>`; return d; }
-  const s=splitThink(m.content,{streaming:false,expectReasoning:m.reasoning});
+  const s=splitThink(sanitizeModelText(m.content),{streaming:false,expectReasoning:m.reasoning});
   let h='<div class="asst">';
   if(s.reason){ const label=m.thinkMs?('Reasoning · '+Math.round(m.thinkMs)+'s'):'Reasoning';
     h+=`<details class="reason"><summary>${label}</summary><div class="rc">${esch(s.reason)}</div></details>`; }
@@ -1398,7 +1414,7 @@ function updateMiniProgress(a){ if(!a)return; const fill=document.getElementById
   const d=a.duration||0, c=a.currentTime||0; if(fill)fill.style.width=(d?Math.min(100,c/d*100):0)+'%'; if(t)t.textContent=fmtT(c); }
 async function speakMessage(m){
   stopSpeak();
-  const text=(splitThink(m.content).answer||m.content||'').trim(); if(!text)return;
+  const clean=sanitizeModelText(m.content); const text=(splitThink(clean).answer||clean||'').trim(); if(!text)return;
   S._speakId=m.id; S._speakChatId=S.current; S._speakLoading=true; render();
   let b=null; try{ b=await speakBlob(text); }catch(e){}
   if(S._speakId!==m.id) return;                 // superseded or stopped mid-synthesis

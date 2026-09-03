@@ -454,4 +454,31 @@ struct WebChatPageTests {
         // It's rendered as part of the composer.
         #expect(html.contains("${renderMiniPlayer()}<div class=\"cbox\">"))
     }
+
+    // Soak: assistant replies stored before the runaway fix (or from a gated/mismatched model) can
+    // hold leaked chat/EOS special tokens and hallucinated extra turns. The display sanitizer must be
+    // wired into both the render path and the read-aloud path so history never shows/speaks them, while
+    // legitimate <think> reasoning is left for splitThink to parse.
+    @Test
+    func storedRepliesAreSanitizedForDisplayAndSpeech() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function sanitizeModelText("))
+        #expect(html.contains("_DISPLAY_STOP_MARKERS"))
+        // Renders through the sanitizer.
+        #expect(html.contains("splitThink(sanitizeModelText(m.content)"))
+        // Read-aloud speaks the sanitized text.
+        #expect(html.contains("const clean=sanitizeModelText(m.content);"))
+        // <think>/</think> are NOT stripped (reasoning must still parse).
+        #expect(!html.contains("_DISPLAY_STOP_MARKERS=['<think>"))
+    }
+
+    // Soak: recent-chat rows must have symmetric top/bottom padding — the row is flex-centered and the
+    // title lives in a .clabel span (so ellipsis works while the text stays vertically centered).
+    @Test
+    func sidebarChatRowsAreVerticallyCentered() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("class=\"clabel\">${esch(ch.title||'New chat')}</span>"))
+        #expect(html.contains(".chatitem{ display:flex; align-items:center;"))
+        #expect(html.contains(".chatitem .clabel{"))
+    }
 }
