@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- **esh 2.1 M12 (v1) — persistent speech-to-text runtime (development milestone, untagged).** STT no
+  longer reloads Python + the model on every request. A new persistent `speech-serve` bridge worker
+  loads the STT model once and serves many transcriptions over stdio; Swift `SpeechWorkerProcess` +
+  `SpeechRuntimeManager` (lazy start, reuse, model switching, crash-recovery retry, idle eviction) drive
+  it, and the server's `/v1/audio/transcriptions` uses it with a one-shot fallback so STT never
+  regresses vs 2.0. Measured on M1 Pro: warm STT ~0.14 s vs the one-shot ~4–6 s/call (~30–40×), model
+  resident, correct transcription. 2.0 API/behavior contract unchanged. Remaining M12
+  (pool memory-reservation integration; warm-TTS folded in) is tracked as a follow-up.
+
 ## [2.0.0] - 2026-09-02
 
 **esh 2.0 — local AI runtime.** Promotion of the `2.0.0-rc.7` tree (behaviorally identical; only this

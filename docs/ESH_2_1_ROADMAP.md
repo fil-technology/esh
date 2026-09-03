@@ -17,14 +17,25 @@ fixes on a separate track; additive-only schema changes with migration for anyth
 **Gate:** every 2.1 RC re-runs the packaged/notarized + no-Homebrew validation used for 2.0.
 
 ## M12 — Persistent Speech Runtime  *(first engineering priority)*
-**Status — increment 1 shipped (persistent STT):** new `speech-serve` bridge worker loads the STT model
-ONCE and transcribes over stdio; Swift `SpeechWorkerProcess` + `SpeechRuntimeManager` (lazy start,
-reuse, model-switch, crash-recovery retry, idle eviction, one-shot fallback); wired into the server's
-`/v1/audio/transcriptions`. **Measured:** warm STT **0.14 s** vs the one-shot **4–6 s/call** (~30–40×),
-model resident, correct output. Tests green (357 total). **Remaining M12:** warm TTS (hold a long-lived
-`TTSSpeechSynthesizer` instead of rebuilding per call) and full `RuntimeLifecycleManager` integration
-(shared memory budget + speech reservation so speech evicts under LLM memory pressure), then a unified
-`SpeechBackend` seam (dovetails with M21).
+**Status — M12 v1 SHIPPED (persistent STT); rest is a tracked follow-up (paused for direction).**
+v1: new `speech-serve` bridge worker loads the STT model ONCE and transcribes over stdio; Swift
+`SpeechWorkerProcess` + `SpeechRuntimeManager` (lazy start, reuse, model-switch, crash-recovery retry,
+idle eviction, one-shot fallback); wired into the server's `/v1/audio/transcriptions`. **Measured (M1
+Pro):** warm STT **0.14 s** vs the one-shot **4–6 s/call** (~30–40×), model resident, correct output.
+Tests green (357 Swift + 10 Python).
+
+**M12 follow-up (tracked, not yet started):**
+1. `RuntimeLifecycleManager` integration — shared memory budget + speech reservation so speech evicts
+   under LLM memory pressure. This is the real M12 gate ("memory bounded with a 7B+ LLM co-resident")
+   and makes BOTH speech runtimes' residency truthful/bounded.
+2. Warm TTS — **deliberately deferred.** Measured: TTS reloads the model per `synthesize`
+   (`TTS.loadModel` → `fromPretrained(cache: HubCache)`, a download cache not a weights cache), but the
+   saving on the default `pocket-tts` is only **~0.3–0.6 s/call** (vs STT's 30–40×), and eliminating it
+   needs reaching into TTSMLX/mlx-audio-swift internal `SpeechGenerationModel.generate` and
+   re-implementing the synth glue outside the 2.0-proven `TTSSpeechSynthesizer` path. Per the "reject
+   complexity without measured net win" rule, fold this into (1) or into M13 streaming first-audio
+   rather than shipping a bespoke loader.
+3. Unified `SpeechBackend` seam (dovetails with M21).
 
 **Objective:** truthful warm STT/TTS under `RuntimeLifecycleManager` via a new `SpeechBackend` protocol.
 **Why (measured):** STT is the real bottleneck — **6.3→5.0→4.0 s/call**, barely warms; TTS already warms
