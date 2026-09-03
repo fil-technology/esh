@@ -29,6 +29,17 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
   (never silently fill internal disk); RAM guard refuses/kills generation under genuinely low memory; temp
   frames/audio cleaned per run. Heavy Python deps (mflux, sherpa-onnx) are optional/on-demand — the release
   stays lean. See `2_1_STAGE3_MODEL_PROVENANCE.md`. Full suite 431 green; no 2.0 text/speech regression.
+  **Live validation pass** (Apple M1 Pro / 32 GB): image generation LIVE via `/v1/execute` (1024×1024 PNG;
+  benchmarked ~215 s warm at 1024², ~51 s at 512², peak RSS 4.4 GB — GPU-compute-bound, memory is not the
+  constraint; recorded with recommendation-grade qualifiers). Video understanding LIVE end-to-end on a
+  synthetic clip — VLM (nanoLLaVA) reported "red circle (0:00), blue square (0:02)" while STT (parakeet)
+  reported "Thursday 3 o'clock", and fusion answered visual-only, audio-only, and combined questions
+  correctly with timestamps. Diarization LIVE on 2-speaker audio (2 clusters + time ranges + merged STT
+  transcript, sherpa-onnx). Image **upscale (SeedVR2) classified EXPERIMENTAL** — provider wiring, SSD
+  storage routing, RAM guard, and graceful error handling validated, but the SeedVR2 backend fails upstream
+  on mflux 0.19.1 + mlx 0.32.2 (`mx.repeat` array-repeats API); revisit via newer mflux or a Real-ESRGAN
+  ONNX backend. Fixes from the pass: audio materialize extension (WAV was named `.png` → STT failed),
+  video VLM loads from the local install path, RAM-guard false-positive on transient pressure removed.
 - **esh 2.1 UCMR Stage 2 — vision understanding (development milestone, untagged).** The first real
   non-text INPUT modality: images now actually reach the model. The MLX bridge gained an
   `mlx-vlm-generate` op that loads via `mlx_vlm` (previously `mlx_vlm` was imported only for KV-cache and
