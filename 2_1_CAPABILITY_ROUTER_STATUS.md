@@ -24,12 +24,27 @@ validation → RoutingOutcome → ExecutionPlan → typed result`.
   & unsupported accuracy). Seed dataset covers explicit/paraphrase/ambiguity/multi/unsupported/chat.
   Seed result: **zero false executions**.
 
+## Done — product wiring (§9/§10)
+- **`POST /v1/route`** and **`POST /v1/route/resume`** — `CapabilityRouterService` turns message+attachments
+  into a serializable `RouteDecision` (action + built ExecutionRequest for ready/installRequired +
+  InstallRequirement + pendingId). Verified live under `esh serve` and `esh web`.
+- **Web chat** routes-first: `handleRoute` calls `/v1/route`; `ready` → runs via `/v1/execute` + renders the
+  typed artifact + "Why this execution plan?"; `installRequired` → an **Install-and-Resume card**
+  ("<capability> needs one local component … [Install & continue]") that installs (esh model install for
+  VLMs, or bridge auto-fetch for asset backends) then resumes via `/v1/route/resume`; `clarify`/`unsupported`
+  → concise assistant message; `chat` → ordinary conversation. Audio-only keeps the existing transcribe flow.
+
+## Done — Tier 1 constrained semantic router (§4/§5, first cut)
+- **`CapabilitySchemaBuilder`** generates the router schema from the REAL registry (only capabilities with a
+  provider, with arg schemas). **`SemanticIntentRouter`** protocol (pluggable) + **`ResidentLLMSemanticRouter`**
+  (constrained JSON, zero extra download). `IntentResolver` escalates to Tier 1 ONLY on Tier-0 `clarify`; the
+  proposal must name a registered capability or Tier-0's clarify stands (no false execution). Wired into
+  `/v1/route` with the resident LLM; verified live (runs ~2.9 s, conservatively clarifies genuine ambiguity).
+
 ## Not yet done (next slices)
-- **Tier 1 constrained semantic router** (§4/§5) — dynamic capability schema from the registry, sent to a
-  router model (Apple Foundation Models / FunctionGemma / resident LLM), result validated independently.
-  Includes **Router Auto** benchmarking (accuracy/latency/memory/cold-warm) to pick the router per Mac.
-- **Product wiring** — a `/v1/route` endpoint and/or chat integration (install card UI + resume button),
-  so the router drives real conversations.
+- **Router Auto** benchmarking (§5) — compare Apple Foundation Models / FunctionGemma / resident LLM on the
+  routing benchmark (accuracy/latency/memory/cold-warm) and pick per Mac. The mechanism is pluggable; this is
+  the measurement + selection policy.
 - **LLM tool-calling front door** (§13) — adapt tool calls into the same validated routing path.
 - **Multilingual** routing cases (§6); larger benchmark dataset (hundreds→thousands).
 - **Durable** pending invocations (survive restart).
