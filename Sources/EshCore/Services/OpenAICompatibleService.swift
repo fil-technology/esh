@@ -971,10 +971,11 @@ public struct OpenAICompatibleService: Sendable {
             let videoVisionResolver = CapabilityModelResolver()
             registryUCMR.register(VideoUnderstandingProvider(
                 extractor: AVFoundationVideoExtractor(),
-                describeFrame: { imagePath, prompt in
+                describeFrame: { imagePath, prompt, explicitModel in
                     let installs = (try? modelStore.listInstalls()) ?? []
-                    guard let vm = videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
-                        throw CapabilityError.failed("no vision model installed for video understanding (install one to use video.understand)")
+                    // Prefer an explicitly-requested vision model (option "visionModel"); else capability-resolve.
+                    guard let vm = explicitModel ?? videoVisionResolver.resolveModelID(capability: .imageUnderstand, from: installs) else {
+                        throw CapabilityError.failed("no vision model for video understanding (pass options.visionModel or install a vision-capable model)")
                     }
                     return try visionService.understand(imagePaths: [imagePath], prompt: prompt, model: vm, maxTokens: 64)
                 },

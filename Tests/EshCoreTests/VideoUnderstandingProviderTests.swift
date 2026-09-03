@@ -35,7 +35,7 @@ struct VideoUnderstandingProviderTests {
     private func provider(_ ex: MockExtractor, sawTranscribe: @escaping @Sendable () -> Void = {}) -> VideoUnderstandingProvider {
         VideoUnderstandingProvider(
             extractor: ex,
-            describeFrame: { _, _ in "a person waves at the camera" },
+            describeFrame: { _, _, _ in "a person waves at the camera" },
             transcribe: { _ in sawTranscribe(); return "hello everyone welcome" },
             fuse: { req in
                 // Echo evidence so we can assert fusion consumed captions + transcript.
@@ -73,7 +73,7 @@ struct VideoUnderstandingProviderTests {
         let ex = MockExtractor(duration: 3, hasAudio: false, frameCount: 2)
         let p = VideoUnderstandingProvider(
             extractor: ex,
-            describeFrame: { _, _ in "a bird flies across the sky" },
+            describeFrame: { _, _, _ in "a bird flies across the sky" },
             // No audio → this must never be reached; if it is, the transcript would appear and fail below.
             transcribe: { _ in "UNEXPECTED-TRANSCRIPT" },
             fuse: { req in ExternalInferenceResponse(modelID: "m", backend: .mlx, integration: .init(mode: "direct"),

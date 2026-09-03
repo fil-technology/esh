@@ -116,7 +116,16 @@ public struct VisionUnderstandProvider: CapabilityProvider {
         case "image/jpeg", "image/jpg": return "jpg"
         case "image/webp": return "webp"
         case "image/gif": return "gif"
-        default: return "png"
+        // Audio (diarization/STT materialize through here too): a correct extension matters — soundfile/
+        // librosa infer the container from it, so a WAV named ".png" fails to decode.
+        case "audio/wav", "audio/x-wav", "audio/wave": return "wav"
+        case "audio/mpeg", "audio/mp3": return "mp3"
+        case "audio/mp4", "audio/m4a", "audio/x-m4a": return "m4a"
+        case "audio/flac": return "flac"
+        case "audio/ogg": return "ogg"
+        default:
+            if let mime, mime.hasPrefix("audio/") { return "wav" }
+            return "png"
         }
     }
 

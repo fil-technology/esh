@@ -48,7 +48,7 @@ public enum VideoFrameSampler {
 }
 
 public struct VideoUnderstandingProvider: CapabilityProvider {
-    public typealias DescribeFrameFn = @Sendable (_ imagePath: String, _ prompt: String) async throws -> String
+    public typealias DescribeFrameFn = @Sendable (_ imagePath: String, _ prompt: String, _ visionModel: String?) async throws -> String
     public typealias TranscribeFn = @Sendable (_ audioPath: String) async throws -> String
     public typealias FuseFn = @Sendable (_ request: ExternalInferenceRequest) async throws -> ExternalInferenceResponse
 
@@ -119,6 +119,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
                     try Task.checkCancellation()
 
                     // Step 2: adaptive keyframe extraction.
+                    let visionModel = Self.stringOption(req, "visionModel")
                     let maxFrames = TextToSVGProvider.intOption(req, "maxFrames") ?? 8
                     let timestamps = VideoFrameSampler.sampleTimestamps(durationSeconds: meta.durationSeconds, maxFrames: maxFrames)
                     cont.yield(.status("extracting \(timestamps.count) keyframes"))
@@ -132,7 +133,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
                         try Task.checkCancellation()
                         cont.yield(.progress(Double(i) / Double(frames.count)))
                         let t = i < timestamps.count ? timestamps[i] : 0
-                        let caption = (try? await describeFrame(frame, Self.framePrompt)) ?? ""
+                        let caption = (try? await describeFrame(frame, Self.framePrompt, visionModel)) ?? ""
                         if !caption.isEmpty { captions.append((t, caption)) }
                     }
 
@@ -232,6 +233,11 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
             steps: steps,
             rationale: rationale,
             evidenceBacked: false)
+    }
+
+    static func stringOption(_ req: ExecutionRequest, _ key: String) -> String? {
+        if case .string(let s)? = req.options.values[key] { return s }
+        return nil
     }
 
     /// Resolve a video attachment to a local file. `uri` file paths used as-is; inline base64 → temp file.
