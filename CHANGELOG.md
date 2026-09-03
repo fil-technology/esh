@@ -7,6 +7,22 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — image.upscale production-qualified (Real-ESRGAN), Stage 3 closeout (untagged).** Turns the
+  working Real-ESRGAN ONNX path into a genuinely production capability. **Backend**: pinned model revision
+  (`SceneWorks/real-esrgan-onnx@09f741b`) for reproducibility; **alpha preserved** (RGB through the model,
+  LANCZOS alpha, recompose — transparent PNGs stay transparent); **tiling with overlap + size-aware memory
+  guard** for large inputs (bounds peak memory instead of OOMing); honest metadata (native/effective scale,
+  tiled, runtime EP). **Cancellation** (product invariant): `ProcessRunner.runCancellable` /
+  `MLXBridge.runCancellable` terminate the helper subprocess on Task cancel (SIGTERM→SIGKILL) — no orphan
+  worker; unit-tested. **Benchmark evidence**: `ImageUpscaleBenchmarkRunner` + store persist unified
+  `CapabilityPerformanceEvidence`; `POST /v1/capability/image-upscale/benchmark`; wired into
+  `CapabilityEvidenceIndex`. **Measured (M1 Pro/32 GB, CoreML EP):** 512@2× ~7 s/3.1 GB, 512@4× ~12 s/10 GB,
+  1024@2× ~11 s/3.6 GB, 1024@4× ~24 s/12 GB, 2048@2× ~27 s/8.4 GB; cold≈warm (no warm reuse today).
+  **Performance-aware Model Fit** (`ImageUpscaleFitService`): separates memory-fit from expected latency
+  (both from measured evidence) — "memory fit does not imply interactive speed" — surfaced in the Execution
+  Inspector. **Live-verified** via `/v1/execute` AND the real Web UI: 2×/4×, 800 px tiling, RGBA alpha,
+  corrupt-image→typed error, and "Make this better"→clarify (Router Auto safety preserved, no auto-upscale).
+  SeedVR2 stays experimental, never auto-selected. Full suite 489 green.
 - **esh 2.1 UCMR — Router Auto: ambiguity-gated safe Apple semantic fallback SHIPPED (untagged).** Turns Apple
   Foundation Models into an *abstaining* Tier-1 fallback instead of an eager classifier, so multilingual
   semantic coverage is recovered WITHOUT sacrificing Tier-0's near-zero false-execution. Failure analysis of
