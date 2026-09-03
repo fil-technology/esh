@@ -31,12 +31,31 @@ public struct MLXBridge: Sendable {
         request: Request,
         as responseType: Response.Type
     ) throws -> Response {
+        try run(command: command, request: request, as: responseType, cancellable: false)
+    }
+
+    /// Cancellable bridge call: if the surrounding Task is cancelled, the helper subprocess is terminated and
+    /// `CancellationError` is thrown (no orphan worker). Use for long-running capability ops (e.g. upscale).
+    public func runCancellable<Request: Encodable, Response: Decodable>(
+        command: String,
+        request: Request,
+        as responseType: Response.Type
+    ) throws -> Response {
+        try run(command: command, request: request, as: responseType, cancellable: true)
+    }
+
+    private func run<Request: Encodable, Response: Decodable>(
+        command: String,
+        request: Request,
+        as responseType: Response.Type,
+        cancellable: Bool
+    ) throws -> Response {
         let input = try JSONCoding.encoder.encode(request)
-        let output = try ProcessRunner.run(
-            executableURL: try resolvedPythonExecutable(),
-            arguments: [try resolvedHelperScript().path, command],
-            stdin: input
-        )
+        let exe = try resolvedPythonExecutable()
+        let args = [try resolvedHelperScript().path, command]
+        let output = try cancellable
+            ? ProcessRunner.runCancellable(executableURL: exe, arguments: args, stdin: input)
+            : ProcessRunner.run(executableURL: exe, arguments: args, stdin: input)
         guard output.exitCode == 0 else {
             throw StoreError.invalidManifest(String(decoding: output.stderr, as: UTF8.self))
         }

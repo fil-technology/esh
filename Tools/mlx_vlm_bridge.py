@@ -1176,6 +1176,11 @@ def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str
         _fail(f"{label} produced no readable output: {type(exc).__name__}: {exc}")
 
 
+# Pinned Real-ESRGAN ONNX revision (SceneWorks/real-esrgan-onnx) for reproducible production upscaling.
+# Bump deliberately after re-benchmarking; overridable per request via "revision".
+REAL_ESRGAN_ONNX_REVISION = "09f741bac80a246b407da3ee902bf5f3291b602f"
+
+
 def image_upscale_onnx() -> None:
     """Image super-resolution / upscale (UCMR 2.1, Stage 4.1) via Real-ESRGAN ONNX on onnxruntime — the
     default, reproducible, torch-free backend. Reads {imagePath, outputPath, scale?(2|4), modelDir?,
@@ -1207,34 +1212,81 @@ def image_upscale_onnx() -> None:
         _fail(f"onnxruntime/Pillow not available (install with: pip install onnxruntime pillow): {exc}")
 
     repo = "SceneWorks/real-esrgan-onnx"
+    # Pin the revision for reproducibility (production): the model must be identical across machines/time.
+    revision = request.get("revision") or REAL_ESRGAN_ONNX_REVISION
     fname = "real_esrgan_x2.onnx" if scale == 2 else "real_esrgan_x4.onnx"
     model_path = os.path.join(model_dir, fname)
     if not os.path.exists(model_path):
         try:
             os.makedirs(model_dir, exist_ok=True)
             from huggingface_hub import hf_hub_download
-            got = hf_hub_download(repo_id=repo, filename=fname, local_dir=model_dir)
+            got = hf_hub_download(repo_id=repo, filename=fname, revision=revision, local_dir=model_dir)
             model_path = got
         except Exception as exc:  # noqa: BLE001
-            _fail(f"could not obtain Real-ESRGAN model {fname} from {repo}: {type(exc).__name__}: {exc}")
+            _fail(f"could not obtain Real-ESRGAN model {fname} from {repo}@{revision}: {type(exc).__name__}: {exc}")
 
+    # Large-image safety: Real-ESRGAN is fully convolutional, so tile inputs above a threshold with a small
+    # overlap and stitch — bounds peak memory instead of running one giant tensor (which OOMs on big inputs).
+    # `tile` is the input-space tile size; 0 disables tiling (used for small images). Size-aware memory check
+    # uses the ACTUAL output pixels, not just a static floor.
+    tile = int(request.get("tile") or 512)
+    overlap = int(request.get("overlap") or 16)
     try:
-        img = Image.open(in_path).convert("RGB")
-        arr = np.asarray(img).astype(np.float32) / 255.0
-        x = np.transpose(arr, (2, 0, 1))[None, ...]
+        pil = Image.open(in_path)
+        has_alpha = pil.mode in ("RGBA", "LA") or (pil.mode == "P" and "transparency" in pil.info)
+        alpha = pil.convert("RGBA").split()[3] if has_alpha else None
+        img = pil.convert("RGB")
+        in_w, in_h = img.size
+        # Size-aware guard: ~4 bytes/px float in + out tensors, ×3 channels, ×~3 working copies. Refuse if the
+        # UNTILED path would exceed free memory AND tiling is disabled; with tiling, peak is per-tile so it's safe.
+        out_px = in_w * in_h * scale * scale
+        if avail is not None and tile <= 0:
+            need_mb = (in_w * in_h + out_px) * 3 * 4 * 3 / (1024 * 1024)
+            if need_mb > avail:
+                _fail(f"image too large for untiled upscale: needs ~{need_mb:.0f} MB, only {avail:.0f} MB free (enable tiling)")
+
         sess = ort.InferenceSession(model_path, providers=["CoreMLExecutionProvider", "CPUExecutionProvider"])
         name = sess.get_inputs()[0].name
-        y = sess.run(None, {name: x})[0]
-        y = np.clip(y[0], 0.0, 1.0)
-        y = np.transpose(y, (1, 2, 0))
-        out = (y * 255.0 + 0.5).astype(np.uint8)
-        Image.fromarray(out).save(out_path)
-        with Image.open(out_path) as im:
-            out_w, out_h = im.size
+
+        def run_rgb(rgb_arr):
+            x = np.transpose(rgb_arr, (2, 0, 1))[None, ...]
+            y = sess.run(None, {name: x})[0]
+            y = np.clip(y[0], 0.0, 1.0)
+            return np.transpose(y, (1, 2, 0))
+
+        arr = np.asarray(img).astype(np.float32) / 255.0
+        tiled = tile > 0 and (in_w > tile or in_h > tile)
+        if not tiled:
+            out = run_rgb(arr)
+        else:
+            out = np.zeros((in_h * scale, in_w * scale, 3), dtype=np.float32)
+            for ty in range(0, in_h, tile):
+                for tx in range(0, in_w, tile):
+                    x0, y0 = max(tx - overlap, 0), max(ty - overlap, 0)
+                    x1, y1 = min(tx + tile + overlap, in_w), min(ty + tile + overlap, in_h)
+                    up = run_rgb(arr[y0:y1, x0:x1, :])
+                    # Crop the overlap margin (in output space) and place the core tile region.
+                    cx0, cy0 = (tx - x0) * scale, (ty - y0) * scale
+                    cw, ch = min(tile, in_w - tx) * scale, min(tile, in_h - ty) * scale
+                    out[ty * scale:ty * scale + ch, tx * scale:tx * scale + cw, :] = up[cy0:cy0 + ch, cx0:cx0 + cw, :]
+        rgb8 = (out * 255.0 + 0.5).astype(np.uint8)
+        result = Image.fromarray(rgb8)
+
+        if alpha is not None:
+            # Preserve transparency: upscale the alpha channel with high-quality resampling (the SR model is
+            # RGB-only) and re-attach, so PNGs with transparency don't come back opaque.
+            up_alpha = alpha.resize((in_w * scale, in_h * scale), Image.LANCZOS)
+            result = result.convert("RGBA")
+            result.putalpha(up_alpha)
+
+        result.save(out_path)
+        out_w, out_h = result.size
         provider = sess.get_providers()[0]
     except Exception as exc:  # noqa: BLE001
         _fail(f"image upscale failed: {type(exc).__name__}: {exc}")
-    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "scale": scale, "provider": provider})
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "scale": scale,
+                "nativeScale": scale, "effectiveScale": scale, "tiled": bool(tiled),
+                "alphaPreserved": alpha is not None, "provider": provider})
 
 
 def image_upscale() -> None:

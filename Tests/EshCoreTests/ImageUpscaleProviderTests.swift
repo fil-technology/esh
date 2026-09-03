@@ -16,7 +16,7 @@ struct ImageUpscaleProviderTests {
             #expect(scale == 4)
             #expect(backend == .realesrganONNX)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
-            return (2048, 2048)
+            return UpscaleResult(width: 2048, height: 2048, nativeScale: 4, effectiveScale: 4, tiled: false, alphaPreserved: false, runtimeProvider: "CoreMLExecutionProvider")
         })
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
@@ -32,7 +32,7 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func requiresAnImage() async {
-        let provider = ImageUpscaleProvider(upscale: { _, _, _, _, _ in (1, 1) })
+        let provider = ImageUpscaleProvider(upscale: { _, _, _, _, _ in UpscaleResult(width: 1, height: 1, nativeScale: 4, effectiveScale: 4, tiled: false, alphaPreserved: false, runtimeProvider: "cpu") })
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
         await #expect(throws: CapabilityError.self) {
@@ -43,7 +43,7 @@ struct ImageUpscaleProviderTests {
 
     @Test
     func dispatchedForUpscaleImageToImage() {
-        let reg = CapabilityRegistry(providers: [ImageUpscaleProvider(upscale: { _, _, _, _, _ in (1, 1) })])
+        let reg = CapabilityRegistry(providers: [ImageUpscaleProvider(upscale: { _, _, _, _, _ in UpscaleResult(width: 1, height: 1, nativeScale: 4, effectiveScale: 4, tiled: false, alphaPreserved: false, runtimeProvider: "cpu") })])
         #expect(reg.providers(for: .imageUpscale, inputs: [.image], output: .image).count == 1)
         #expect(reg.providers(for: .imageUpscale, inputs: [.text], output: .image).isEmpty)
     }

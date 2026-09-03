@@ -7,7 +7,7 @@ struct IntentResolverTests {
     // A registry with real provider descriptors so capability registration is validated honestly.
     private func registry() -> CapabilityRegistry {
         CapabilityRegistry(providers: [
-            ImageUpscaleProvider(upscale: { _, _, _, _, _ in (1, 1) }),
+            ImageUpscaleProvider(upscale: { _, _, _, _, _ in UpscaleResult(width: 1, height: 1, nativeScale: 4, effectiveScale: 4, tiled: false, alphaPreserved: false, runtimeProvider: "cpu") }),
             VisionUnderstandProvider(understand: { _, _, _, _ in "" }),
         ])
     }

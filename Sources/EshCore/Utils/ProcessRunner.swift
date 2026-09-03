@@ -20,6 +20,33 @@ public enum ProcessRunner {
         stdin: Data? = nil,
         currentDirectoryURL: URL? = nil
     ) throws -> ProcessOutput {
+        try run(executableURL: executableURL, arguments: arguments, environment: environment,
+                stdin: stdin, currentDirectoryURL: currentDirectoryURL, cancellable: false)
+    }
+
+    /// Cooperatively-cancellable variant: while the subprocess runs, polls `Task.isCancelled` and, if the
+    /// surrounding Task is cancelled, terminates the process (SIGTERM, then SIGKILL after a short grace) and
+    /// throws `CancellationError`. Used by long-running capability providers (e.g. image.upscale) so a
+    /// user cancel actually stops the work and reclaims memory — no orphan subprocess.
+    public static func runCancellable(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String] = [:],
+        stdin: Data? = nil,
+        currentDirectoryURL: URL? = nil
+    ) throws -> ProcessOutput {
+        try run(executableURL: executableURL, arguments: arguments, environment: environment,
+                stdin: stdin, currentDirectoryURL: currentDirectoryURL, cancellable: true)
+    }
+
+    private static func run(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String],
+        stdin: Data?,
+        currentDirectoryURL: URL?,
+        cancellable: Bool
+    ) throws -> ProcessOutput {
         final class DataSink: @unchecked Sendable {
             private let lock = NSLock()
             private var value = Data()
@@ -76,7 +103,21 @@ public enum ProcessRunner {
             try process.run()
         }
 
-        process.waitUntilExit()
+        if cancellable {
+            while process.isRunning {
+                if Task.isCancelled {
+                    process.terminate()   // SIGTERM
+                    let deadline = Date().addingTimeInterval(2.0)
+                    while process.isRunning && Date() < deadline { usleep(50_000) }
+                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                    group.wait()          // let reader threads drain to EOF (no leaked FDs)
+                    throw CancellationError()
+                }
+                usleep(50_000)            // 50 ms poll
+            }
+        } else {
+            process.waitUntilExit()
+        }
         group.wait()
         return ProcessOutput(
             stdout: stdoutData.load(),

@@ -16,35 +16,55 @@ public enum UpscaleBackend: String, Sendable {
     case seedVR2 = "seedvr2"                   // experimental: mflux SeedVR2 (broken on mflux 0.19.1 + mlx 0.32.2)
 }
 
+/// Typed result of an upscale run — carries the honest metadata (effective vs native scale, whether the
+/// image was tiled for memory, whether transparency was preserved, and the onnxruntime execution provider).
+public struct UpscaleResult: Sendable {
+    public let width: Int, height: Int
+    public let nativeScale: Int, effectiveScale: Int
+    public let tiled: Bool, alphaPreserved: Bool
+    public let runtimeProvider: String   // onnxruntime EP actually used (e.g. CoreMLExecutionProvider)
+    public init(width: Int, height: Int, nativeScale: Int, effectiveScale: Int, tiled: Bool, alphaPreserved: Bool, runtimeProvider: String) {
+        self.width = width; self.height = height; self.nativeScale = nativeScale; self.effectiveScale = effectiveScale
+        self.tiled = tiled; self.alphaPreserved = alphaPreserved; self.runtimeProvider = runtimeProvider
+    }
+}
+
 public struct ImageUpscaleService: Sendable {
     private let bridge: MLXBridge
     public init(bridge: MLXBridge = .init()) { self.bridge = bridge }
 
     /// Upscale by an integer `scale` (2 or 4 for the ONNX backend). `modelDir` is where the model lives /
-    /// is downloaded (under the configured assets root). Returns the produced pixel size.
+    /// is downloaded (under the configured assets root). Returns the produced size + honest run metadata.
     @discardableResult
     public func upscale(imagePath: String, outputPath: String, scale: Int, modelDir: String,
-                        minFreeMemMB: Int?, backend: UpscaleBackend = .realesrganONNX) throws -> (width: Int, height: Int) {
+                        minFreeMemMB: Int?, backend: UpscaleBackend = .realesrganONNX) throws -> UpscaleResult {
         switch backend {
         case .realesrganONNX:
-            let response: ONNXResponse = try bridge.run(
+            // Cancellable: a user cancel terminates the onnxruntime helper and reclaims memory (no orphan).
+            let r: ONNXResponse = try bridge.runCancellable(
                 command: "image-upscale-onnx",
                 request: ONNXRequest(imagePath: imagePath, outputPath: outputPath, scale: scale, modelDir: modelDir, minFreeMemMB: minFreeMemMB),
                 as: ONNXResponse.self)
-            return (response.width, response.height)
+            return UpscaleResult(width: r.width, height: r.height, nativeScale: r.nativeScale ?? r.scale,
+                                 effectiveScale: r.effectiveScale ?? r.scale, tiled: r.tiled ?? false,
+                                 alphaPreserved: r.alphaPreserved ?? false, runtimeProvider: r.provider)
         case .seedVR2:
-            let response: SeedResponse = try bridge.run(
+            let r: SeedResponse = try bridge.run(
                 command: "image-upscale",
                 request: SeedRequest(imagePath: imagePath, outputPath: outputPath, resolution: nil, minFreeMemMB: minFreeMemMB, hfCache: modelDir),
                 as: SeedResponse.self)
-            return (response.width, response.height)
+            return UpscaleResult(width: r.width, height: r.height, nativeScale: scale, effectiveScale: scale,
+                                 tiled: false, alphaPreserved: false, runtimeProvider: "mflux-seedvr2")
         }
     }
 
     private struct ONNXRequest: Codable, Sendable {
         let imagePath: String; let outputPath: String; let scale: Int; let modelDir: String; let minFreeMemMB: Int?
     }
-    private struct ONNXResponse: Codable, Sendable { let outputPath: String; let width: Int; let height: Int; let scale: Int; let provider: String }
+    private struct ONNXResponse: Codable, Sendable {
+        let outputPath: String; let width: Int; let height: Int; let scale: Int; let provider: String
+        let nativeScale: Int?; let effectiveScale: Int?; let tiled: Bool?; let alphaPreserved: Bool?
+    }
     private struct SeedRequest: Codable, Sendable {
         let imagePath: String; let outputPath: String; let resolution: Int?; let minFreeMemMB: Int?; let hfCache: String?
     }
@@ -52,7 +72,7 @@ public struct ImageUpscaleService: Sendable {
 }
 
 public struct ImageUpscaleProvider: CapabilityProvider {
-    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ scale: Int, _ minFreeMemMB: Int?, _ backend: UpscaleBackend) throws -> (width: Int, height: Int)
+    public typealias UpscaleFn = @Sendable (_ inputPath: String, _ outputPath: String, _ scale: Int, _ minFreeMemMB: Int?, _ backend: UpscaleBackend) throws -> UpscaleResult
 
     public let descriptor: CapabilityProviderDescriptor
     private let upscale: UpscaleFn
@@ -97,18 +117,22 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                     tempPaths.append(outPath)
 
                     cont.yield(.status("upscaling image (\(backend.rawValue), \(scale)×)"))
-                    let size = try upscale(inPath, outPath, scale, minFreeMemMB, backend)
+                    let r = try upscale(inPath, outPath, scale, minFreeMemMB, backend)
+                    if Task.isCancelled { throw CancellationError() }
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     let artifact = Artifact(
                         kind: .image, mimeType: "image/png", entrypoint: "result.png",
-                        metadata: ["width": .int(size.width), "height": .int(size.height), "scale": .int(scale)],
+                        metadata: ["width": .int(r.width), "height": .int(r.height), "scale": .int(r.effectiveScale),
+                                   "nativeScale": .int(r.nativeScale), "tiled": .bool(r.tiled),
+                                   "alphaPreserved": .bool(r.alphaPreserved), "runtime": .string(r.runtimeProvider),
+                                   "backend": .string(backend.rawValue)],
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: req.model, capability: .imageUpscale),
                         validation: .valid, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["result.png": bytes])
                     cont.yield(.planResolved(ExecutionPlan.single(
                         capability: req.capability, inputModalities: [.image], outputModality: .image,
                         providerID: providerID, modelID: req.model, backend: .python,
-                        rationale: ["Single-provider super-resolution (\(backend.rawValue), \(scale)× via onnxruntime CoreML)."])))
+                        rationale: ["Single-provider super-resolution (\(backend.rawValue), \(scale)× via \(r.runtimeProvider))\(r.tiled ? ", tiled" : "")\(r.alphaPreserved ? ", alpha preserved" : "")."])))
                     cont.yield(.artifactProduced(saved))
                     cont.yield(.done(finishReason: "stop"))
                     cont.finish()
