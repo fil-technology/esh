@@ -127,8 +127,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         var capabilities = modelPlan.capabilities
         if modelPlan.backend == .mlx, VisionModelConfigClassifier.classifyInstall(directory: installDirectory) {
             task = .vision
-            if !inputModalities.contains(.image) { inputModalities.append(.image) }
-            capabilities.vision = VisionCapabilities(supportsImageUnderstanding: true, supportsOCR: false)
+            inputModalities = [.text, .image]
+            // VISION-ONLY capabilities: esh's text runtime (mlx_lm) cannot load a VLM architecture
+            // (e.g. llava-qwen2), so a VLM must NOT advertise chat/text — otherwise the capability resolver
+            // could pick it for language.* / vector.generate and crash. It is reachable only via image.understand.
+            capabilities = ModelCapabilities(vision: VisionCapabilities(supportsImageUnderstanding: true, supportsOCR: false))
         }
 
         let install = ModelInstall(

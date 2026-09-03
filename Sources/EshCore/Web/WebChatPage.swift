@@ -311,7 +311,14 @@ let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, s
         folders:{}, renaming:null };
 
 /* ---------- persistence ---------- */
-function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}} }
+function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}catch(e){S.chats={}}
+  // A capability generation runs as a live promise that does NOT survive a page reload. Any message still
+  // marked "generating" from a previous session is a zombie — mark it interrupted so it doesn't spin forever.
+  try{ for(const id in S.chats){ for(const m of (S.chats[id].messages||[])){
+    if(m.generating){ m.generating=false; if(!(m.artifacts&&m.artifacts.length)){ m.isError=true; m.title='Generation interrupted'; m.detail='This was still running when the page reloaded. Send the request again to retry.'; } }
+    if(m.installCard&&m.installCard.installing){ m.installCard.installing=false; }
+  } } }catch(e){}
+}
 function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
 function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
@@ -482,7 +489,7 @@ const ACT={
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
-  send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); },
+  send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); if(S.capController)S.capController.abort(); },
   removeQueued:(i)=>{ const c=cur(); if(c&&c.queue)c.queue.splice(+i,1); S.focusInput=true; render(); },
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
@@ -597,7 +604,10 @@ function escAttr(s){ return esch(s).replace(/"/g,'&quot;'); }
 // A cheap fingerprint of the thread: changes only when the messages actually change (not on popover
 // toggles). During streaming the bubble is patched in place by throttleRender, so the sig stays stable.
 function logSig(){ const c=cur(); if(!c)return ''; const last=c.messages[c.messages.length-1];
-  const lastPart=last?(last.id+':'+((last.content||'').length)):'';
+  // Capability messages carry no text (content stays ''), so also fingerprint generating/artifact/error/
+  // install-card state — otherwise render() skips the update when a generation finishes (stale spinner).
+  const capPart=last?((last.generating?'g':'')+((last.artifacts||[]).length)+(last.isError?'e':'')+(last.installCard?(last.installCard.installing?'ci':last.installCard.done?'cd':'c'):'')):'';
+  const lastPart=last?(last.id+':'+((last.content||'').length)+':'+capPart):'';
   // Include read-aloud state so the per-message speak button repaints (loading →
   // playing → idle) even though the message list itself is unchanged.
   const speakPart=(S._speakId||'')+(S._speakLoading?'L':'');
@@ -728,8 +738,8 @@ async function routeCapability(text, atts, convo){
   if(!r.ok) throw new Error('route failed ('+r.status+')');
   return await r.json();
 }
-async function execRequest(request){
-  const r=await fetch('/v1/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});
+async function execRequest(request, signal){
+  const r=await fetch('/v1/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request),signal});
   if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
   return await r.json();
 }
@@ -745,16 +755,18 @@ function planInspectorHTML(plan){
 // Run a validated ExecutionRequest and land the typed result in an assistant message.
 async function runCapabilityRequest(c, request, label){
   const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…'};
-  c.messages.push(msg); S.genChatId=c.id; saveChats(); render();
+  c.messages.push(msg); S.genChatId=c.id; S.capBusy=true; S.capController=new AbortController(); saveChats(); render();
   try{
-    const res=await execRequest(request);
+    const res=await execRequest(request, S.capController.signal);
     msg.generating=false; msg.artifacts=res.outputs||[]; msg.plan=res.plan||null;
     if(res.text) msg.content=res.text;
     if(!(msg.artifacts&&msg.artifacts.length) && !res.text) msg.content='Done.';
   }catch(e){
-    msg.generating=false; msg.isError=true; msg.title='That didn’t work'; msg.detail=(e&&e.message)||String(e);
+    msg.generating=false;
+    if(e&&e.name==='AbortError'){ msg.content='⏹ Stopped. (The local model may still be finishing on the server.)'; }
+    else { msg.isError=true; msg.title='That didn’t work'; msg.detail=(e&&e.message)||String(e); }
   }
-  saveChats(); render();
+  S.capBusy=false; S.capController=null; saveChats(); render();
 }
 function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
 // Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
@@ -873,7 +885,7 @@ function statusInfo(){
                                  : (S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   if(!e) return {label:'Local · …',amber:false};
   if(engDown) return {label:'Local · Degraded',amber:true};
-  if(S.streaming) return {label:'Local · '+name+' · generating',amber:false};
+  if(S.streaming||S.capBusy) return {label:'Local · '+name+' · generating',amber:false};
   if(S.modelSel==='Apple Intelligence') return {label:'Local · Apple Intelligence',amber:false};
   const c=cur(); if(c&&c.messages.length) return {label:'Local · '+name+' warm',amber:false};
   return {label:'Local · Private · Ready',amber:false};
@@ -905,7 +917,7 @@ function renderComposer(){
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
        <span class="cdiv"></span>
        <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
-       ${(S.streaming&&S.genChatId===S.current)?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+       ${(((S.streaming||S.capBusy)&&S.genChatId===S.current))?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
      ${S.pickerOpen?renderPicker():''}
@@ -1418,8 +1430,8 @@ async function transcribeAtts(atts){ const out=[];
 async function send(queued){
   stopSpeak();
   let text, atts, c, ta=null;
-  if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
-  else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
+  if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller||S.capBusy)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
+  else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller||S.capBusy) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
   const userMsg=c.messages[c.messages.length-1];
   if(c.title==='New chat'&&text) c.title=text.slice(0,40);
@@ -1525,7 +1537,7 @@ function enqueueDraft(){ const ta=document.querySelector('#input'); const t=((ta
   const c=cur()||(newChat(),cur()); c.queue=c.queue||[]; c.queue.push({text:t, atts:S.pendingAtts.slice()});
   S.pendingAtts=[]; S.draft=''; if(ta){ ta.value=''; ta.style.height='auto'; }
   S.focusInput=true; render(); maybeSendQueue(c.id); }
-function maybeSendQueue(chatId){ if(S.streaming||S.controller)return; const c=S.chats[chatId]; if(!c||!c.queue||!c.queue.length)return; const item=c.queue.shift(); render(); send({chatId:chatId, text:item.text, atts:item.atts}); }
+function maybeSendQueue(chatId){ if(S.streaming||S.controller||S.capBusy)return; const c=S.chats[chatId]; if(!c||!c.queue||!c.queue.length)return; const item=c.queue.shift(); render(); send({chatId:chatId, text:item.text, atts:item.atts}); }
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');
