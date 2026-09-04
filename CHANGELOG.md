@@ -7,6 +7,27 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — project.generate reliability pass -> PRODUCTION-READY (untagged).** Closed the "valid files
+  but broken project" gap. `ProjectConsistency` (layer 2) adds cheap, conservative, deterministic CROSS-FILE
+  checks: JS -> HTML targets (`getElementById('x')` / `querySelector('#x')` must exist — the exact
+  `#back-to-top` bug), HTML/CSS -> local assets exist and stay in-bundle (no absolute/dev-machine or `..`
+  paths), `.css`/`.js` files must be PURE (not wrapped in `<style>`/`<script>`) and must actually be referenced
+  by the HTML (no orphaned/dead stylesheet or script), structure (missing `<body>`, unclosed tags, duplicate
+  ids), and unresolved `{{templates}}`. A BOUNDED repair pass (initial generation + at most 2 repairs) feeds
+  the structured issue list back to the model and re-validates — accepting a repair only if it strictly reduces
+  the problem set, never an unbounded self-fixing loop; a project is saved only as valid when consistency
+  passes, otherwise saved and honestly marked invalid. Structured stage-by-stage provenance
+  (`metadata.validation`: pathSafety / mimeTypes / entrypoint / contentQuality / crossFileReferences /
+  repairAttempts) is exposed for the Execution Inspector. **Evidence-based model policy** (benchmarked on M1
+  Pro / 32 GB): Apple FM is the only reliable local option (llama-3.2-3b produced cross-file-broken output,
+  deepseek-r1-7b ~8 min + reasoning overflow, qwen3.5-9b crashes in mlx_lm — incompatible, NOT promoted);
+  `ProjectComplexity.estimate` sizes the request and Auto selects Apple FM for small projects, and for a large
+  one with no compatible larger local model explains/clarifies instead of overflowing (context-window errors
+  now return an actionable message, not a raw 400). The decision is exposed in `ExecutionPlan` +
+  `metadata.selection`. Warm residency: not applicable to the chosen primary (Apple FM is a system service with
+  no esh-side model load; cold ~= warm ~24 s), so left on-demand. Live: 3 projects (landing / dashboard /
+  catalog) generated locally, all valid with genuinely resolving cross-file references + correct per-file MIME
+  types + working previews. Full suite 519 green.
 - **esh 2.1 UCMR — project.generate: text -> multi-file static web project (untagged).** Second slice of the
   ProjectArtifact/web-generation milestone. Text -> a validated, self-contained MULTI-FILE static project
   (index.html + style.css + script.js, referenced by RELATIVE path), a typed `.webProject` artifact previewed
