@@ -59,7 +59,7 @@ public enum BrowserModuleComposer {
                                          globals: [(specifier: String, global: String)],
                                          hasStyle: Bool, appEntry: String) -> String {
         let mapJSON = (try? String(data: JSONSerialization.data(withJSONObject: ["imports": importMap],
-                                                                options: [.sortedKeys]), encoding: .utf8)) ?? #"{"imports":{}}"#
+                                                                options: [.sortedKeys]), encoding: .utf8))?.replacingOccurrences(of: "\\/", with: "/") ?? #"{"imports":{}}"#
         let styleLink = hasStyle ? "\n  <link rel=\"stylesheet\" href=\"style.css\">" : ""
         let safeTitle = title.replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
         // esh-owned bootstrap: import each resolved lib and expose its conventional global BEFORE app.js runs
@@ -99,7 +99,7 @@ public enum BrowserModuleComposer {
     public static func scaffoldThreeJSIndexHTML(title: String, importMap: [String: String],
                                                 hasStyle: Bool, appEntry: String) -> String {
         let mapJSON = (try? String(data: JSONSerialization.data(withJSONObject: ["imports": importMap],
-                                                                options: [.sortedKeys]), encoding: .utf8)) ?? #"{"imports":{}}"#
+                                                                options: [.sortedKeys]), encoding: .utf8))?.replacingOccurrences(of: "\\/", with: "/") ?? #"{"imports":{}}"#
         let styleLink = hasStyle ? "\n  <link rel=\"stylesheet\" href=\"style.css\">" : ""
         let safeTitle = title.replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
         let bootstrap = """

@@ -98,6 +98,20 @@ public enum CapabilityRouteCatalog {
         "html page", "html file", "web app", "webapp", "web application", "single-page app", "web form",
         "web dashboard", "html document"]
 
+    /// Tier-B browser-native cues (interactive ES-module projects, e.g. Three.js/WebGL). Checked BEFORE the
+    /// generic "3d model"→image path so "interactive 3D …" becomes a runnable project, not a static image.
+    static let browserNativeCues = ["three.js", "threejs", "webgl", "3d scene", "interactive 3d",
+        "3d visualization", "rotating 3d", "3d earth", "3d globe", "solar system", "particle system",
+        "canvas animation", "interactive visualization", "interactive simulation"]
+
+    /// The browser-module project type for a browser-native request (used to set ExecutionOptions.projectType).
+    static func browserNativeProjectType(_ text: String) -> ProjectType? {
+        guard browserNativeCues.contains(where: { text.contains($0) }) else { return nil }
+        let threeCues = ["three.js", "threejs", "webgl", "3d scene", "interactive 3d", "3d visualization",
+                         "rotating 3d", "3d earth", "3d globe", "solar system", "particle system"]
+        return threeCues.contains(where: { text.contains($0) }) ? .threejs : .browserModule
+    }
+
     /// Detect a generation request from a verb + a target noun. vector.generate for SVG/vector, webArtifact
     /// for a web page, else image.generate — or nil when it's not a visual/web generation ask ("generate a poem").
     static func generationCapability(_ text: String) -> CapabilityID? {
@@ -108,6 +122,8 @@ public enum CapabilityRouteCatalog {
         // Explicit multi-file/project language → project.generate (multi-file); else a single web page.
         let projectCues = ["multi-file", "multiple files", "separate files", "web project", "static site", "project with separate"]
         if projectCues.contains(where: { text.contains($0) }) { return .projectGenerate }
+        // Tier-B browser-native (interactive 3D / Three.js) → a runnable project (before generic web/image).
+        if browserNativeProjectType(text) != nil { return .projectGenerate }
         // A web page is a self-contained HTML artifact (checked before generic "image").
         if webNouns.contains(where: { text.contains($0) }) { return .webArtifactGenerate }
         if visualNouns.contains(where: { text.contains($0) }) { return .imageGenerate }
@@ -142,9 +158,15 @@ public struct DeterministicIntentRouter: Sendable {
             guard route.phrases.contains(where: { Self.matches(text, phrase: $0) }) else { continue }
             matches.append((route, Self.inputRefs(for: route, inputModalities: inputModalities)))
         }
-        // Generation (text → image/svg) is verb+visual-noun detected, not phrase-listed.
+        // Generation (text → image/svg/web/project) is verb+noun detected, not phrase-listed.
         if let genCap = CapabilityRouteCatalog.generationCapability(text) {
-            matches.append((CapabilityRoute(genCap, requires: [], phrases: []), []))
+            // Tier-B: carry the browser-native project type as an argument → ExecutionOptions.projectType.
+            var extract: (@Sendable (String) -> [String: JSONValue])? = nil
+            if genCap == .projectGenerate, let pt = CapabilityRouteCatalog.browserNativeProjectType(text) {
+                let raw = pt.rawValue
+                extract = { _ in ["projectType": .string(raw)] }
+            }
+            matches.append((CapabilityRoute(genCap, requires: [], phrases: [], extractArguments: extract), []))
         }
         // Instruction-based image editing (image + concrete transformation instruction).
         if let editCap = CapabilityRouteCatalog.editCapability(text, present: present) {
