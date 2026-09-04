@@ -1388,9 +1388,9 @@ def image_generate() -> None:
 # FLUX.1 Kontext is available but NON-COMMERCIAL (BFL license) so it's opt-in/experimental, never default.
 IMAGE_EDIT_BACKENDS = {
     "qwen-edit": {"cli": "mflux-generate-qwen-edit", "model": "qwen-image-edit", "license": "apache-2.0",
-                  "steps": 8, "commercial": True},
+                  "steps": 8, "commercial": True, "image_arg": "--image-paths"},
     "kontext":   {"cli": "mflux-generate-kontext", "model": "dev-kontext", "license": "flux-1-dev-non-commercial",
-                  "steps": 28, "commercial": False},
+                  "steps": 28, "commercial": False, "image_arg": "--image-path"},
 }
 
 
@@ -1417,7 +1417,9 @@ def image_edit() -> None:
         _fail(f"input image not found: {in_path}")
     _route_hf_cache(request.get("hfCache"))
 
-    min_free = float(request.get("minFreeMemMB") or 2000)
+    # Editing loads a ~12B+ diffusion model; on constrained Macs this is near the memory ceiling. Default to a
+    # high floor + low-RAM mode so we never thrash the machine (a raw run once contributed to a watchdog panic).
+    min_free = float(request.get("minFreeMemMB") or 4000)
     avail = _available_mem_mb()
     if avail is not None and avail < min_free:
         _fail(f"image editing not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
@@ -1429,7 +1431,7 @@ def image_edit() -> None:
     model = request.get("model") or spec["model"]
     steps = int(request.get("steps") or spec["steps"])
     seed = int(request.get("seed") or 0)
-    cmd = [cli, "--model", str(model), "--image-path", in_path, "--prompt", instruction,
+    cmd = [cli, "--model", str(model), spec["image_arg"], in_path, "--prompt", instruction,
            "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
     if request.get("quantize") is not None:
         cmd += ["--quantize", str(int(request["quantize"]))]
@@ -1439,8 +1441,13 @@ def image_edit() -> None:
         cmd += ["--width", str(int(request["width"]))]
     if request.get("height") is not None:
         cmd += ["--height", str(int(request["height"]))]
-    if request.get("vaeTiling", True):
+    # Low-RAM mode ON by default for editing (implies VAE tiling); an mlx cache cap bounds peak further.
+    if request.get("lowRam", True):
+        cmd += ["--low-ram"]
+    elif request.get("vaeTiling", True):
         cmd += ["--vae-tiling"]
+    if request.get("mlxCacheLimitGB") is not None:
+        cmd += ["--mlx-cache-limit-gb", str(int(request["mlxCacheLimitGB"]))]
 
     # mflux runs as a separate child process group, so peak memory is sampled externally by the benchmark
     # (bridge RSS here would not reflect the child's footprint).

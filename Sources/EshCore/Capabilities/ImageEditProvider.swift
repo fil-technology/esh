@@ -30,13 +30,15 @@ public struct ImageEditService: Sendable {
     public init(bridge: MLXBridge = .init()) { self.bridge = bridge }
 
     /// Edit `imagePath` per `instruction`, writing to `outputPath`. Cancellable + RAM-guarded via the bridge.
+    /// `model` optionally overrides the backend's default weights (e.g. a lighter pre-quantized repo).
     @discardableResult
     public func edit(imagePath: String, outputPath: String, instruction: String, backend: ImageEditBackend,
-                     quantize: Int?, minFreeMemMB: Int?, hfCache: String?) throws -> ImageEditResult {
+                     model: String? = nil, quantize: Int? = nil, minFreeMemMB: Int?, hfCache: String?) throws -> ImageEditResult {
         let r: Response = try bridge.runCancellable(
             command: "image-edit",
             request: Request(imagePath: imagePath, outputPath: outputPath, instruction: instruction,
-                             backend: backend.rawValue, quantize: quantize, minFreeMemMB: minFreeMemMB, hfCache: hfCache),
+                             backend: backend.rawValue, model: model, quantize: quantize,
+                             minFreeMemMB: minFreeMemMB, hfCache: hfCache),
             as: Response.self)
         return ImageEditResult(width: r.width, height: r.height, backend: r.backend, model: r.model,
                                license: r.license, commercial: r.commercial)
@@ -44,7 +46,7 @@ public struct ImageEditService: Sendable {
 
     private struct Request: Codable, Sendable {
         let imagePath: String; let outputPath: String; let instruction: String; let backend: String
-        let quantize: Int?; let minFreeMemMB: Int?; let hfCache: String?
+        let model: String?; let quantize: Int?; let minFreeMemMB: Int?; let hfCache: String?
     }
     private struct Response: Codable, Sendable {
         let outputPath: String; let width: Int; let height: Int
@@ -54,7 +56,7 @@ public struct ImageEditService: Sendable {
 
 public struct ImageEditProvider: CapabilityProvider {
     public typealias EditFn = @Sendable (_ inputPath: String, _ outputPath: String, _ instruction: String,
-                                         _ backend: ImageEditBackend, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> ImageEditResult
+                                         _ backend: ImageEditBackend, _ model: String?, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> ImageEditResult
 
     public let descriptor: CapabilityProviderDescriptor
     private let edit: EditFn
@@ -101,6 +103,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
                     let backend = ImageEditBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .qwenEdit
+                    let modelOverride = VideoUnderstandingProvider.stringOption(req, "model")
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("edit-\(UUID().uuidString).png").path
@@ -109,7 +112,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     // Route the model download to the assets root (SSD), never internal disk.
                     let hfCache = context.root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
                     cont.yield(.status("editing image (\(backend.rawValue))"))
-                    let r = try edit(inPath, outPath, instruction, backend, minFreeMemMB, hfCache)
+                    let r = try edit(inPath, outPath, instruction, backend, modelOverride, minFreeMemMB, hfCache)
                     if Task.isCancelled { throw CancellationError() }
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     // Provenance chain (Phase 11): record the SOURCE artifact this result was edited from (set

@@ -731,6 +731,16 @@ function artifactHTML(a){
   }
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }
+// image.edit before/after: source (left) and edited result (right), each labelled, with download on the result.
+function beforeAfterHTML(sourceDataURL, art){
+  const url='/v1/artifacts/'+encodeURIComponent(art.id);
+  const cell=(label,src,dl)=>`<figure style="margin:0;flex:1;min-width:0">`
+    +`<img class="astimg" src="${src}" alt="${esch(label)}" loading="lazy" style="width:100%">`
+    +`<figcaption class="mono" style="font-size:11px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;margin-top:4px">`
+    +`<span>${esch(label)}</span>${dl?`<a class="alink" href="${dl}" download>Download</a>`:''}</figcaption></figure>`;
+  return `<div class="astart" style="padding:0;background:none;border:none"><div style="display:flex;gap:10px;align-items:flex-start">`
+    +cell('Before', sourceDataURL, null)+cell('After', url, url)+`</div></div>`;
+}
 // UCMR: thin client for the capability endpoint. inputs use the typed payload encoding; returns
 // {text, outputs:[{id,kind,mimeType}]}. Media is referenced by id, not embedded.
 async function execCapability(capability, inputs, output, model){
@@ -770,6 +780,11 @@ function planInspectorHTML(plan){
 // Run a validated ExecutionRequest and land the typed result in an assistant message.
 async function runCapabilityRequest(c, request, label){
   const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…'};
+  // For image.edit, keep the SOURCE image so the result can be shown as a before/after compare.
+  if(request&&request.capability==='image.edit'){
+    try{ const img=(request.inputs||[]).map(i=>i&&i.payload&&i.payload.attachment&&i.payload.attachment._0).find(a=>a&&a.kind==='image');
+      if(img&&img.base64) msg.sourceImage='data:'+(img.mimeType||'image/png')+';base64,'+img.base64; }catch(e){}
+  }
   c.messages.push(msg); S.genChatId=c.id; S.capBusy=true; S.capController=new AbortController(); saveChats(); render();
   try{
     const res=await execRequest(request, S.capController.signal);
@@ -783,7 +798,7 @@ async function runCapabilityRequest(c, request, label){
   }
   S.capBusy=false; S.capController=null; saveChats(); render();
 }
-function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
+function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.edit':'Edit image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
 // Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
 async function handleRoute(c, text, atts){
   let dec; try{ dec=await routeCapability(text, atts, c.id); }catch(e){ return false; }  // route failure → fall back to chat
@@ -865,7 +880,12 @@ function renderMsg(m){
   // UCMR Stage 3: generation progress for typed capabilities (e.g. image.generate).
   if(m.generating){ h+=`<div class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>${esch(m.genLabel||'Working…')}</div>`; }
   // UCMR: typed capability results (image/svg/file) rendered from /v1/artifacts.
-  if(m.artifacts && m.artifacts.length){ h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
+  // image.edit shows a before/after compare when the source image is known; otherwise the plain result.
+  if(m.artifacts && m.artifacts.length){
+    const editArt=m.sourceImage ? m.artifacts.find(a=>a&&a.kind==='image'&&a.generatedBy&&a.generatedBy.capability==='image.edit') : null;
+    if(editArt){ h+=beforeAfterHTML(m.sourceImage, editArt)+m.artifacts.filter(a=>a!==editArt).map(artifactHTML).join(''); }
+    else { h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
+  }
   // UCMR Stage 3: "Why this execution plan?" — the composed pipeline for a typed result.
   if(m.plan){ h+=planInspectorHTML(m.plan); }
   // UCMR 2.1: Install-and-Resume card — a supported capability needs one local component. Installing it

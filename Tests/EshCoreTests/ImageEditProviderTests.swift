@@ -13,7 +13,7 @@ struct ImageEditProviderTests {
     @Test
     func producesEditedImageArtifactWithLicenseProvenance() async throws {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
-        let provider = ImageEditProvider(edit: { _, outPath, instruction, backend, _, _ in
+        let provider = ImageEditProvider(edit: { _, outPath, instruction, backend, _, _, _ in
             #expect(instruction == "change the sky to sunset")
             #expect(backend == .qwenEdit)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
@@ -36,7 +36,7 @@ struct ImageEditProviderTests {
     @Test
     func requiresAnImageAndAnInstruction() async {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
-        let provider = ImageEditProvider(edit: { _, _, _, _, _, _ in
+        let provider = ImageEditProvider(edit: { _, _, _, _, _, _, _ in
             ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
         // No image → error.
@@ -53,7 +53,7 @@ struct ImageEditProviderTests {
 
     @Test
     func dispatchedForEditImageToImage() {
-        let reg = CapabilityRegistry(providers: [ImageEditProvider(edit: { _, _, _, _, _, _ in
+        let reg = CapabilityRegistry(providers: [ImageEditProvider(edit: { _, _, _, _, _, _, _ in
             ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })])
         #expect(reg.providers(for: .imageEdit, inputs: [.image, .text], output: .image).count == 1)
     }
