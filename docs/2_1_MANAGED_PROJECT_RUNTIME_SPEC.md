@@ -1,6 +1,6 @@
 # esh 2.1 UCMR — Managed Project Runtime / ProjectArtifact v2 (Design Spec — DESIGN ONLY)
 
-**Status:** proposal / architecture only. **No implementation** until approved.
+**Status:** ✅ **ARCHITECTURE APPROVED (2026-09-04).** Implementation may proceed per the phased plan (§9); first managed tier = Tier B (Three.js / browser-module). Tier C (Node) remains a separate future milestone gated on a proven macOS OS-sandbox; Tier D stays Ashex.
 **Author context:** follows `project.generate` (static ProjectArtifact) reaching PRODUCTION-READY.
 **Scope boundary:** esh generates + validates + previews artifacts locally & privately. Autonomous repo/editing/deploy stays in **Ashex**.
 
