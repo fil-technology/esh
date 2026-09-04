@@ -93,14 +93,20 @@ public enum CapabilityRouteCatalog {
         "portrait", "landscape", "wallpaper", "poster", "artwork", "watercolor", "photorealistic", "sketch",
         "cartoon", "anime", "render of", "3d model"]
     static let svgNouns = ["logo", "icon", "vector", "svg", "diagram", "vector graphic"]
+    /// Web-page nouns (text → self-contained HTML). "build a landing page", "make a web page", "html page".
+    static let webNouns = ["web page", "webpage", "web-page", "website", "web site", "landing page",
+        "html page", "html file", "web app", "webapp", "web application", "single-page app", "web form",
+        "web dashboard", "html document"]
 
-    /// Detect a generation request from a verb + visual-noun. Returns vector.generate when SVG/vector is
-    /// explicit, else image.generate — or nil when it's not a visual generation ask ("generate a poem").
+    /// Detect a generation request from a verb + a target noun. vector.generate for SVG/vector, webArtifact
+    /// for a web page, else image.generate — or nil when it's not a visual/web generation ask ("generate a poem").
     static func generationCapability(_ text: String) -> CapabilityID? {
-        let hasGenVerb = genVerbs.contains { text.contains($0) }
+        let hasGenVerb = genVerbs.contains { text.contains($0) } || text.contains("build ") || text.contains("code ") || text.contains("make ")
         guard hasGenVerb else { return nil }
         let wantsSVG = text.contains("svg") || text.contains("vector")
         if wantsSVG, svgNouns.contains(where: { text.contains($0) }) { return .vectorGenerate }
+        // A web page is a self-contained HTML artifact (checked before generic "image").
+        if webNouns.contains(where: { text.contains($0) }) { return .webArtifactGenerate }
         if visualNouns.contains(where: { text.contains($0) }) { return .imageGenerate }
         // "logo/icon" without svg/vector is still typically a vector ask.
         if text.contains("logo") || text.contains("icon") { return .vectorGenerate }

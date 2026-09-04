@@ -729,6 +729,15 @@ function artifactHTML(a){
     return `<div class="astart"><img class="astimg" src="${url}" alt="${esch(a.kind)} result" loading="lazy">`
       +`<div class="astartbar"><span class="mono">${esch(a.mimeType||a.kind)}</span><a class="alink" href="${url}" download>Download</a></div></div>`;
   }
+  if(a.kind==='webProject'){
+    // Isolated preview: sandbox WITHOUT allow-same-origin → the page's JS runs but can't touch the parent,
+    // cookies, storage, or navigate the top window. Served same-origin but the sandbox gives it an opaque origin.
+    const entry=url+'/'+encodeURIComponent(a.entrypoint||'index.html');
+    return `<div class="astart"><iframe class="astweb" src="${entry}" sandbox="allow-scripts allow-pointer-lock"`
+      +` title="web artifact preview" loading="lazy" style="width:100%;height:360px;border:0;border-radius:10px;background:#fff"></iframe>`
+      +`<div class="astartbar"><span class="mono">web page · sandboxed</span>`
+      +`<span><a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
+  }
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }
 // image.edit before/after: source (left) and edited result (right), each labelled, with download on the result.
@@ -798,7 +807,7 @@ async function runCapabilityRequest(c, request, label){
   }
   S.capBusy=false; S.capController=null; saveChats(); render();
 }
-function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.edit':'Edit image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
+function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.edit':'Edit image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','webArtifact.generate':'Generate web page','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
 // Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
 async function handleRoute(c, text, atts){
   let dec; try{ dec=await routeCapability(text, atts, c.id); }catch(e){ return false; }  // route failure → fall back to chat

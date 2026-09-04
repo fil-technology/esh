@@ -108,12 +108,14 @@ public struct IntentResolver: Sendable {
             options: ExecutionOptions(intent.arguments))
     }
 
-    static let textConsuming: Set<CapabilityID> = [.imageGenerate, .vectorGenerate, .imageUnderstand, .videoUnderstand, .imageEdit]
+    static let textConsuming: Set<CapabilityID> = [.imageGenerate, .vectorGenerate, .imageUnderstand, .videoUnderstand, .imageEdit, .webArtifactGenerate, .projectGenerate]
 
     static func outputSpec(for capability: CapabilityID) -> OutputSpec {
         switch capability {
         case .imageGenerate, .imageUpscale, .imageSegment, .imageEdit: return OutputSpec(modality: .image)
         case .vectorGenerate: return .svg
+        case .webArtifactGenerate: return .webArtifact
+        case .projectGenerate: return .project
         case .audioDiarize: return .json
         default: return .text   // understand / ocr / video.understand / transcribe
         }

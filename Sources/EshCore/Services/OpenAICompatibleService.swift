@@ -992,6 +992,15 @@ public struct OpenAICompatibleService: Sendable {
                     let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["vector.generate"] ?? ""
                     return pick.isEmpty || pick == "auto"   // Auto → quality-first; a pin → the pinned model first
                 }))
+            // webArtifact.generate (text → self-contained HTML): same quality-first + repair + Apple-FM
+            // escalation as SVG, previewed in an isolated sandbox. LLM codegen — no heavy models.
+            registryUCMR.register(WebArtifactProvider(
+                infer: { req in try await inference.infer(request: req) },
+                strongInfer: svgStrong,
+                preferStrongFirst: {
+                    let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["webArtifact.generate"] ?? ""
+                    return pick.isEmpty || pick == "auto"
+                }))
             // Embeddings + reranking ride the already-bundled llama-server (--embeddings / --reranking).
             let auxRuntime = LlamaAuxRuntimeManager(resolve: { modelID in
                 guard let id = modelID else { throw CapabilityError.failed("embeddings/rerank require an explicit model id") }

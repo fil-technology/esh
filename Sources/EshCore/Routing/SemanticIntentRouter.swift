@@ -33,6 +33,7 @@ public enum CapabilitySchemaBuilder {
         .imageGenerate: ("Generate a new image from a text prompt", [:]),
         .imageEdit: ("Edit an existing image per a natural-language instruction (remove/replace/change/restyle/relight)", [:]),
         .vectorGenerate: ("Generate an SVG/vector graphic from a text prompt", [:]),
+        .webArtifactGenerate: ("Generate a self-contained HTML web page from a text description", [:]),
         .videoUnderstand: ("Answer a question about / summarize a video", [:]),
         .audioDiarize: ("Label who spoke when in audio (speaker clusters)", [:]),
     ]

@@ -101,6 +101,9 @@ public struct OutputSpec: Codable, Hashable, Sendable {
     public static let json = OutputSpec(modality: .json)
     public static let embedding = OutputSpec(modality: .embedding)
     public static let svg = OutputSpec(modality: .image, format: "image/svg+xml")
+    /// A single self-contained HTML page (webArtifact.generate) or a multi-file project (project.generate).
+    public static let webArtifact = OutputSpec(modality: .text, format: "text/html")
+    public static let project = OutputSpec(modality: .text, format: "application/vnd.esh.project")
 }
 
 /// Execution constraints. Reuses the existing quality/latency vocabulary from `CapabilityRequest`.
