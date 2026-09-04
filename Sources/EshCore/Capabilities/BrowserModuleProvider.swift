@@ -117,7 +117,7 @@ public enum BrowserModuleComposer {
           globalThis.scene = scene; globalThis.camera = camera; globalThis.renderer = renderer;
           function _resize() {
             const w = app.clientWidth || window.innerWidth, h = app.clientHeight || window.innerHeight;
-            renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+            renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
           }
           _resize(); window.addEventListener('resize', _resize);
           let _last = performance.now();
@@ -135,7 +135,7 @@ public enum BrowserModuleComposer {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>\(safeTitle)</title>
-          <style>html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#eee;font-family:system-ui,sans-serif}#app{position:fixed;inset:0}#app canvas{display:block}.ui{position:fixed;top:10px;left:10px;z-index:10;display:flex;gap:8px}.ui button{padding:6px 10px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font:inherit}</style>\(styleLink)
+          <style>html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#eee;font-family:system-ui,sans-serif}#app{position:fixed;inset:0}#app canvas{display:block;width:100%;height:100%}.ui{position:fixed;top:10px;left:10px;z-index:10;display:flex;gap:8px}.ui button{padding:6px 10px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font:inherit}</style>\(styleLink)
           <script type="importmap">
         \(mapJSON)
           </script>

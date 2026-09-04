@@ -94,4 +94,42 @@ struct BrowserModuleTests {
         #expect(CapabilityRouteCatalog.browserNativeProjectType("a canvas animation of falling snow") == .browserModule)
         #expect(CapabilityRouteCatalog.browserNativeProjectType("a static landing page") == nil)
     }
+
+    // MARK: - Tier-B coding-model selection (Phase 7) — metadata-driven, no hard-coded id
+
+    private func inst(_ id: String, size: Int64, vision: Bool = false) -> ModelInstall {
+        ModelInstall(id: id,
+                     spec: ModelSpec(id: id, displayName: id, backend: .mlx,
+                                     source: ModelSource(kind: .huggingFace, reference: id),
+                                     inputModalities: vision ? [.text, .image] : [.text],
+                                     capabilities: .textGeneration),
+                     installPath: "/x/\(id)", sizeBytes: size, backendFormat: "mlx")
+    }
+
+    @Test func bestCodingModelPicksLargestCoderTextModel() {
+        let installs = [
+            inst("mlx-community--qwen2.5-0.5b-instruct-4bit", size: 400_000_000),          // tiny, non-coder
+            inst("mlx-community--qwen2.5-coder-7b-instruct-4bit", size: 4_300_000_000),    // coder 7B
+            inst("mlx-community--qwen2.5-coder-14b-instruct-4bit", size: 8_300_000_000),   // coder 14B (largest)
+            inst("mlx-community--nanollava-1.5-4bit", size: 3_000_000_000, vision: true),  // vision → excluded
+            inst("mlx-community--llama-3.2-3b-instruct-4bit", size: 1_800_000_000),        // chat, non-coder
+        ]
+        #expect(ProjectGenProvider.bestCodingModelID(installs) == "mlx-community--qwen2.5-coder-14b-instruct-4bit")
+        // No coder installed → nil so the provider falls back to Apple FM / default.
+        #expect(ProjectGenProvider.bestCodingModelID([inst("x--llama-3.2-3b", size: 1_800_000_000)]) == nil)
+        // A coder-named VISION model is still excluded (Tier-B needs a text model).
+        #expect(ProjectGenProvider.bestCodingModelID([inst("x--some-coder-vl", size: 9_000_000_000, vision: true)]) == nil)
+    }
+
+    @Test func decodeManifestRecoversBacktickTemplateLiterals() {
+        // Common LLM deviation: content delimited by JS backticks + wrapped in a ```json fence → invalid JSON.
+        let raw = "```json\n{\"files\":[{\"path\":\"app.js\",\"content\":`const x = 1;\nconsole.log(\"hi\");`}]}\n```"
+        let m = ProjectGenProvider.decodeManifest(from: raw)
+        #expect(m?.files.first?.path == "app.js")
+        #expect(m?.files.first?.content.contains("console.log") == true)
+        #expect(m?.files.first?.content.contains("\n") == true)          // newline preserved, not literal \n
+        // Strict, already-valid JSON still decodes unchanged.
+        let strict = "{\"files\":[{\"path\":\"a.js\",\"content\":\"let y=2;\"}]}"
+        #expect(ProjectGenProvider.decodeManifest(from: strict)?.files.first?.content == "let y=2;")
+    }
 }

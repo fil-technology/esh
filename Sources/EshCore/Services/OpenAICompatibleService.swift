@@ -1037,7 +1037,10 @@ public struct OpenAICompatibleService: Sendable {
                 preferStrongFirst: {
                     let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["project.generate"] ?? ""
                     return pick.isEmpty || pick == "auto"
-                }))
+                },
+                // Tier-B (browser-native) prefers the best installed local coding model over Apple FM; resolved
+                // from the live catalog by metadata (no hard-coded id). nil → fall back to Apple FM/default.
+                codingModel: { ProjectGenProvider.bestCodingModelID((try? modelStore.listInstalls()) ?? []) }))
             // Embeddings + reranking ride the already-bundled llama-server (--embeddings / --reranking).
             let auxRuntime = LlamaAuxRuntimeManager(resolve: { modelID in
                 guard let id = modelID else { throw CapabilityError.failed("embeddings/rerank require an explicit model id") }

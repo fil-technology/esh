@@ -249,18 +249,76 @@ public struct ProjectGenProvider: CapabilityProvider {
         error.localizedDescription.lowercased().contains("context window")
     }
 
+    /// Pick the best installed LOCAL coding model for Tier-B generation, by metadata (NOT a hard-coded id):
+    /// a text-only chat model whose name/id marks it as code-focused (coder/code/codestral/starcoder),
+    /// preferring the largest (a proxy for capability). Returns nil when none is installed, so the caller
+    /// falls back to its default behavior. Kept pure + static for unit testing.
+    public static func bestCodingModelID(_ installs: [ModelInstall]) -> String? {
+        let coders = installs.filter { inst in
+            let s = inst.spec
+            guard s.inputModalities == [.text] else { return false }        // text-only (exclude vision/VLM)
+            guard s.capabilities.text?.supportsChat ?? false else { return false }
+            let hay = (s.id + " " + s.displayName).lowercased()
+            return hay.contains("coder") || hay.contains("codestral") || hay.contains("starcoder")
+                || hay.contains("code-") || hay.contains("-code")
+        }
+        return coders.max(by: { $0.sizeBytes < $1.sizeBytes })?.id
+    }
+
+    /// Decode the model's file manifest, tolerating a common LLM serialization deviation: emitting the
+    /// {"files":[…]} object with the string values delimited by BACKTICKS (JS template literals) instead of
+    /// JSON double-quoted strings. This is a parsing-robustness step ONLY — every generated file still goes
+    /// through the full security validation afterwards (deps/imports/CommonJS/addons); nothing is trusted here.
+    static func decodeManifest(from raw: String) -> ProjectManifest? {
+        if let json = TextToSVGProvider.extractJSONObject(raw),
+           let m = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) {
+            return m
+        }
+        // Fallback: rewrite `…` template-literal values into valid JSON strings, then retry.
+        let repaired = repairTemplateLiteralJSON(raw)
+        guard repaired != raw, let json = TextToSVGProvider.extractJSONObject(repaired),
+              let m = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) else { return nil }
+        return m
+    }
+
+    /// Convert JSON-value positions delimited by backticks (`: \`…\``) into properly escaped JSON strings.
+    /// Scene/app code rarely contains a literal backtick, so a lazy match to the next backtick recovers the
+    /// value; if it doesn't parse afterwards the caller still fails safely into bounded repair.
+    static func repairTemplateLiteralJSON(_ s: String) -> String {
+        guard s.contains("`") else { return s }
+        guard let re = try? NSRegularExpression(pattern: ":\\s*`([\\s\\S]*?)`(?=\\s*[,}\\]])") else { return s }
+        let ns = s as NSString
+        let matches = re.matches(in: s, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return s }
+        let mut = NSMutableString(string: s)
+        for m in matches.reversed() {
+            let inner = ns.substring(with: m.range(at: 1))
+            let encoded = (try? String(data: JSONSerialization.data(withJSONObject: inner, options: [.fragmentsAllowed]),
+                                       encoding: .utf8)) ?? "\"\""
+            mut.replaceCharacters(in: m.range, with: ": " + encoded)
+        }
+        return mut as String
+    }
+
     public let descriptor: CapabilityProviderDescriptor
     private let infer: InferFn
     private let strongInfer: StrongInferFn?
     private let preferStrongFirst: @Sendable () -> Bool
+    /// Resolves the id of the best installed local CODING model for Tier-B (browser-native) generation, or nil
+    /// when none is installed. Kept as a closure (resolved from the live catalog) so no model id is hard-coded
+    /// in this provider — the interactive/browser-module tier prefers this model over Apple FM (whose ~4K
+    /// window overflows on rich scenes); small static projects still prefer Apple FM.
+    private let codingModel: @Sendable () -> String?
 
     public init(id: String = "project-generate", infer: @escaping InferFn,
-                strongInfer: StrongInferFn? = nil, preferStrongFirst: @escaping @Sendable () -> Bool = { false }) {
+                strongInfer: StrongInferFn? = nil, preferStrongFirst: @escaping @Sendable () -> Bool = { false },
+                codingModel: @escaping @Sendable () -> String? = { nil }) {
         self.descriptor = CapabilityProviderDescriptor(
             id: id, capabilities: [.projectGenerate], acceptedInputs: [.text], producedOutputs: [.text],
             backend: .native, modelFamily: nil, streaming: false, structuredOutput: true,
             requiredPrivilege: .previewSandboxed, previewMode: .staticSandbox)
         self.infer = infer; self.strongInfer = strongInfer; self.preferStrongFirst = preferStrongFirst
+        self.codingModel = codingModel
     }
 
     static let systemInstruction = """
@@ -334,7 +392,10 @@ public struct ProjectGenProvider: CapabilityProvider {
     want the camera or object to move, rotate your object inside eshTick instead. Use ONLY procedural \
     geometry/colors/math — NO network, NO external textures/images/fonts, NO fetch, NO require()/module.exports, \
     NO URL/CDN imports. THREE is a global so no import is needed. app.js is PURE JavaScript, style.css PURE CSS \
-    (no <script>/<style> tags, no markdown). Return ONLY the JSON object.
+    (no <script>/<style> tags, no markdown). CRITICAL JSON FORMAT: each "content" value MUST be a standard \
+    JSON string in DOUBLE QUOTES with newlines escaped as \\n and inner double-quotes as \\" — NEVER use \
+    backticks or template literals to delimit the content, and NEVER wrap the reply in markdown code fences. \
+    Return ONLY the JSON object.
     """
 
     /// Tier-B (browser-native) generation: model writes app logic → esh resolves approved vendored deps →
@@ -358,9 +419,13 @@ public struct ProjectGenProvider: CapabilityProvider {
                     let cacheRoot = context.root.cachesURL.appendingPathComponent("web-libs", isDirectory: true)
                     let resolver = DependencyResolver(cacheRoot: cacheRoot)
 
+                    // Tier B prefers a real local CODING model (large context, competent JS) over Apple FM,
+                    // whose ~4K window overflows on rich interactive scenes. Use the explicitly-pinned model if
+                    // any, else the best installed coding model resolved from the live catalog.
+                    let tierBModel = req.model ?? self.codingModel()
                     let localAttempt: Attempt = { sys, user, maxT in
                         let r = try await infer(ExternalInferenceRequest(
-                            model: req.model,
+                            model: tierBModel,
                             messages: [ExternalInferenceMessage(role: .system, text: sys),
                                        ExternalInferenceMessage(role: .user, text: user)],
                             generation: GenerationConfig(maxTokens: maxT, temperature: 0.4), responseFormat: .json))
@@ -368,8 +433,11 @@ public struct ProjectGenProvider: CapabilityProvider {
                     }
                     var strongAttempt: Attempt? = nil
                     if let s = strongInfer { strongAttempt = { sys, user, maxT in try await s(sys, user, min(maxT, 3000)) } }
+                    // A capable coding model is available (pinned or resolved) → try it FIRST for Tier B, with
+                    // Apple FM only as a fallback. Fall back to the previous ordering when none is installed.
                     var attempts: [Attempt] = []
-                    if preferStrongFirst(), let st = strongAttempt { attempts = [st, localAttempt] }
+                    if tierBModel != nil { attempts = [localAttempt]; if let st = strongAttempt { attempts.append(st) } }
+                    else if preferStrongFirst(), let st = strongAttempt { attempts = [st, localAttempt] }
                     else { attempts = [localAttempt]; if let st = strongAttempt { attempts.append(st) } }
 
                     let sysInstruction = (projectType == .threejs)
@@ -435,8 +503,7 @@ public struct ProjectGenProvider: CapabilityProvider {
                             if Task.isCancelled { throw CancellationError() }
                             do {
                                 let (raw, model) = try await attempt(sysInstruction, user, maxTokens)
-                                if let json = TextToSVGProvider.extractJSONObject(raw),
-                                   let manifest = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) {
+                                if let manifest = Self.decodeManifest(from: raw) {
                                     let files = manifest.files.map { (path: $0.path, content: $0.content) }
                                     let (issues, res) = validate(files)
                                     if issues.isEmpty { appFiles = files; resolution = res; usedModel = model; break outer }
@@ -614,8 +681,7 @@ public struct ProjectGenProvider: CapabilityProvider {
                             if Task.isCancelled { throw CancellationError() }
                             do {
                                 let (raw, model) = try await attempt(Self.systemInstruction, user, maxTokens)
-                                if let json = TextToSVGProvider.extractJSONObject(raw),
-                                   let manifest = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) {
+                                if let manifest = Self.decodeManifest(from: raw) {
                                     let (safe, v) = ProjectValidator.validate(manifest.files.map { ($0.path, $0.content) })
                                     if v.isValid { files = safe; validation = v; usedModel = model; winner = attempt; break outer }
                                 }
@@ -650,8 +716,7 @@ public struct ProjectGenProvider: CapabilityProvider {
                         do {
                             let (sys, user) = Self.repairPrompt(files: files, issues: issues)
                             let (raw, model) = try await winner(sys, user, maxTokens)
-                            guard let json = TextToSVGProvider.extractJSONObject(raw),
-                                  let manifest = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) else { break }
+                            guard let manifest = Self.decodeManifest(from: raw) else { break }
                             let (safe, v) = ProjectValidator.validate(manifest.files.map { ($0.path, $0.content) })
                             guard v.isValid else { break }
                             let newIssues = ProjectConsistency.check(safe)
