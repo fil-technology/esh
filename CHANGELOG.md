@@ -7,6 +7,19 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — webArtifact.generate: text -> self-contained HTML page (ProjectArtifact primitive) (untagged).**
+  First slice of the ProjectArtifact/web-generation milestone. Text -> a validated, self-contained HTML page
+  (inline CSS/JS, no network), a typed `.webProject` artifact previewed in an ISOLATED sandboxed iframe
+  (allow-scripts, no same-origin/network). Pure LLM codegen (quality-first Apple Intelligence + repair, same
+  pattern as vector.generate) -- **no heavy models, fits 32 GB comfortably** (the opposite of the diffusion
+  memory ceiling). Proves the architectural rule again: provider + metadata + routing + fit + rendering, no
+  core surgery (webArtifact.generate + ArtifactKind.webProject already existed in the contract). Tier-0 routes
+  'build a landing page/website/html page' -> webArtifact.generate without stealing SVG/image/chat (Tier-0
+  false-exec still 0); Web renders it inline + Open/Download + Execution Inspector. Live-verified: a coffee-shop
+  landing page generated in ~35 s (valid 2.8 KB self-contained page, renders correctly: hero + menu + hours).
+  Next: project.generate (multi-file Three.js/Next.js -> ProjectArtifact). Full suite 504 green.
+
+### Added
 - **esh 2.1 UCMR — image.edit (instruction-based image editing) — EXPERIMENTAL (untagged).** New first-class
   `image.edit` capability (image + instruction -> image) proving the architectural rule: a new capability =
   provider + metadata + routing + fit + rendering, **no core surgery** (image.edit already existed in the
