@@ -7,6 +7,22 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — image.edit (instruction-based image editing) — EXPERIMENTAL (untagged).** New first-class
+  `image.edit` capability (image + instruction -> image) proving the architectural rule: a new capability =
+  provider + metadata + routing + fit + rendering, **no core surgery** (image.edit already existed in the
+  contract). ImageEditProvider -> ImageEditService -> mflux edit CLIs; backends qwen-edit (Qwen-Image-Edit,
+  Apache-2.0, default) + kontext (FLUX.1 Kontext, non-commercial, opt-in); typed ImageArtifact with
+  license/model provenance + source-artifact lineage; Tier-0 routing (edit vs segment vs clarify, Tier-0
+  false-exec still 0); Install-and-Resume detection; Web before/after compare. **Guarded execution validated
+  live**: runs only via /v1/execute (never the raw CLI), killable, --low-ram + memory floor -- the RAM guard
+  killed a 768-square run at 4.3 GB free to protect the machine (the safety that, bypassed by a raw CLI run,
+  had caused a kernel panic). **Marked EXPERIMENTAL, not production**: no working + memory-feasible +
+  accessible model on this 32 GB Mac -- the open commercial-safe Qwen (~40 GB) is too heavy, the official
+  Kontext is gated (needs the user's HF license acceptance + token), and the feasible 9 GB community 4-bit
+  Kontext produces garbage (silent format incompatibility, verified on real + synthetic images). See
+  2_1_IMAGE_EDIT_MILESTONE_STATUS.md. Full suite 498 green.
+
+### Added
 - **esh 2.1 UCMR — Stage 3 CLOSED: video.understand fusion made reliable (untagged).** Closes the last Stage 3
   gate. The `video.understand` fusion step (keyframe VLM + audio STT → LLM summary) leaked control tokens from
   the small resident model (`<start_function_call>…` as the answer). It now **prefers Apple Intelligence** for

@@ -56,7 +56,7 @@ public struct ImageEditService: Sendable {
 
 public struct ImageEditProvider: CapabilityProvider {
     public typealias EditFn = @Sendable (_ inputPath: String, _ outputPath: String, _ instruction: String,
-                                         _ backend: ImageEditBackend, _ model: String?, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> ImageEditResult
+                                         _ backend: ImageEditBackend, _ model: String?, _ quantize: Int?, _ minFreeMemMB: Int?, _ hfCache: String?) throws -> ImageEditResult
 
     public let descriptor: CapabilityProviderDescriptor
     private let edit: EditFn
@@ -104,6 +104,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     if isTemp { tempPaths.append(inPath) }
                     let backend = ImageEditBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .qwenEdit
                     let modelOverride = VideoUnderstandingProvider.stringOption(req, "model")
+                    let quantize = TextToSVGProvider.intOption(req, "quantize")
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("edit-\(UUID().uuidString).png").path
@@ -112,7 +113,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     // Route the model download to the assets root (SSD), never internal disk.
                     let hfCache = context.root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
                     cont.yield(.status("editing image (\(backend.rawValue))"))
-                    let r = try edit(inPath, outPath, instruction, backend, modelOverride, minFreeMemMB, hfCache)
+                    let r = try edit(inPath, outPath, instruction, backend, modelOverride, quantize, minFreeMemMB, hfCache)
                     if Task.isCancelled { throw CancellationError() }
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     // Provenance chain (Phase 11): record the SOURCE artifact this result was edited from (set
