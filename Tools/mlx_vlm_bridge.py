@@ -1383,6 +1383,72 @@ def image_generate() -> None:
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
 
 
+# Backends for instruction-based image editing (image + instruction -> image), via mflux CLIs already
+# installed alongside this interpreter. Default is the Apache-2.0 Qwen-Image-Edit (commercial-safe);
+# FLUX.1 Kontext is available but NON-COMMERCIAL (BFL license) so it's opt-in/experimental, never default.
+IMAGE_EDIT_BACKENDS = {
+    "qwen-edit": {"cli": "mflux-generate-qwen-edit", "model": "qwen-image-edit", "license": "apache-2.0",
+                  "steps": 8, "commercial": True},
+    "kontext":   {"cli": "mflux-generate-kontext", "model": "dev-kontext", "license": "flux-1-dev-non-commercial",
+                  "steps": 28, "commercial": False},
+}
+
+
+def image_edit() -> None:
+    """Instruction-based image editing (UCMR 2.1) — image + natural-language instruction -> edited image.
+    Reads {imagePath, outputPath, instruction, backend?(qwen-edit|kontext), model?, steps?, seed?, quantize?,
+    guidance?, width?, height?, minFreeMemMB?, hfCache?, vaeTiling?}. Runs the mflux edit CLI as a killable,
+    RAM-guarded process (VAE tiling on by default to bound peak memory). The model downloads on first use to
+    the configured HF cache (assets root / SSD). Returns {outputPath, width, height, backend, model, license,
+    commercial, peakMemoryMB}."""
+    import os
+
+    request = _load_json()
+    in_path = request["imagePath"]
+    out_path = request["outputPath"]
+    instruction = (request.get("instruction") or request.get("prompt") or "").strip()
+    backend = request.get("backend") or "qwen-edit"
+    if backend not in IMAGE_EDIT_BACKENDS:
+        _fail(f"unknown image-edit backend '{backend}' (supported: {', '.join(IMAGE_EDIT_BACKENDS)})")
+    spec = IMAGE_EDIT_BACKENDS[backend]
+    if not instruction:
+        _fail("image editing requires a non-empty instruction")
+    if not os.path.exists(in_path):
+        _fail(f"input image not found: {in_path}")
+    _route_hf_cache(request.get("hfCache"))
+
+    min_free = float(request.get("minFreeMemMB") or 2000)
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"image editing not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    cli = os.path.join(os.path.dirname(sys.executable), spec["cli"])
+    if not os.path.exists(cli):
+        _fail(f"mflux edit backend '{backend}' not available ({spec['cli']} missing; install with: pip install mflux)")
+
+    model = request.get("model") or spec["model"]
+    steps = int(request.get("steps") or spec["steps"])
+    seed = int(request.get("seed") or 0)
+    cmd = [cli, "--model", str(model), "--image-path", in_path, "--prompt", instruction,
+           "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
+    if request.get("quantize") is not None:
+        cmd += ["--quantize", str(int(request["quantize"]))]
+    if request.get("guidance") is not None:
+        cmd += ["--guidance", str(float(request["guidance"]))]
+    if request.get("width") is not None:
+        cmd += ["--width", str(int(request["width"]))]
+    if request.get("height") is not None:
+        cmd += ["--height", str(int(request["height"]))]
+    if request.get("vaeTiling", True):
+        cmd += ["--vae-tiling"]
+
+    # mflux runs as a separate child process group, so peak memory is sampled externally by the benchmark
+    # (bridge RSS here would not reflect the child's footprint).
+    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "backend": backend,
+                "model": model, "license": spec["license"], "commercial": spec["commercial"]})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1888,6 +1954,7 @@ def main() -> None:
             "mlx-vlm-generate",
             "image-segment",
             "image-generate",
+            "image-edit",
             "image-upscale",
             "image-upscale-onnx",
             "audio-diarize",
@@ -1920,6 +1987,8 @@ def main() -> None:
         image_segment()
     elif args.command == "image-generate":
         image_generate()
+    elif args.command == "image-edit":
+        image_edit()
     elif args.command == "image-upscale":
         image_upscale()
     elif args.command == "image-upscale-onnx":

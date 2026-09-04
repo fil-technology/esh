@@ -68,6 +68,26 @@ public enum CapabilityRouteCatalog {
         "enhance", "fix this", "fix the image", "make clearer", "make it clearer", "clean up", "touch up",
         "better quality", "make nicer"]
 
+    /// Instruction-based EDIT cues (image + concrete transformation instruction → image.edit). Deliberately
+    /// SPECIFIC multi-word cues, not bare verbs, so "make this better" stays ambiguous and "remove the
+    /// background" stays segmentation. The operation rides in the instruction; this only detects edit INTENT.
+    static let editCues = ["remove the", "remove this", "remove that", "erase the", "erase this",
+        "change the", "change this", "change only", "replace the", "replace this", "add a ", "add an ",
+        "make it look", "make this look", "make the ", "turn it into", "turn this into", "turn the ",
+        "extend the image", "extend it", "extend this", "recolor", "restyle", "relight", "swap the",
+        "put a ", "put an ", "without changing"]
+        // NB: "get rid of …" / "backdrop" are intentionally NOT edit cues — they read as background removal
+        // (segmentation), so they're left to image.segment / Tier-1 rather than claimed as generic edits.
+
+    /// Detect an image-editing instruction. nil unless an image is present with a specific edit cue that
+    /// isn't background removal (→ segment) or a vague-improve (→ clarify).
+    static func editCapability(_ text: String, present: Set<ModelModality>) -> CapabilityID? {
+        guard present.contains(.image) else { return nil }
+        if text.contains("background") || text.contains("backdrop") || text.contains("transparent") { return nil }   // segmentation owns this
+        if ambiguousImagePhrases.contains(where: { text.contains($0) }) { return nil }   // vague → clarify
+        return editCues.contains(where: { text.contains($0) }) ? .imageEdit : nil
+    }
+
     static let genVerbs = ["generate", "create", "draw", "paint", "render", "design", "make me", "give me"]
     static let visualNouns = ["image", "picture", "illustration", "photo", "photograph", "drawing", "painting",
         "portrait", "landscape", "wallpaper", "poster", "artwork", "watercolor", "photorealistic", "sketch",
@@ -116,6 +136,11 @@ public struct DeterministicIntentRouter: Sendable {
         // Generation (text → image/svg) is verb+visual-noun detected, not phrase-listed.
         if let genCap = CapabilityRouteCatalog.generationCapability(text) {
             matches.append((CapabilityRoute(genCap, requires: [], phrases: []), []))
+        }
+        // Instruction-based image editing (image + concrete transformation instruction).
+        if let editCap = CapabilityRouteCatalog.editCapability(text, present: present) {
+            let refs = present.contains(.image) ? ["attachment_\(inputModalities.firstIndex(of: .image) ?? 0)"] : []
+            matches.append((CapabilityRoute(editCap, requires: [.image], phrases: []), refs))
         }
         // Distinct capabilities matched.
         let distinct = Array(Set(matches.map { $0.route.capability }))

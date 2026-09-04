@@ -36,11 +36,16 @@ public struct ArtifactProvenance: Codable, Hashable, Sendable {
     public var modelID: String?
     public var capability: CapabilityID?
     public var executionPlanID: UUID?
-    public init(providerID: String? = nil, modelID: String? = nil, capability: CapabilityID? = nil, executionPlanID: UUID? = nil) {
+    /// The artifact this one was derived FROM (image.edit result → its source image, edit→upscale chains,
+    /// iterative "Edit again"). Enables lineage for iterative transforms + Ashex. nil for first-generation.
+    public var sourceArtifactID: UUID?
+    public init(providerID: String? = nil, modelID: String? = nil, capability: CapabilityID? = nil,
+                executionPlanID: UUID? = nil, sourceArtifactID: UUID? = nil) {
         self.providerID = providerID
         self.modelID = modelID
         self.capability = capability
         self.executionPlanID = executionPlanID
+        self.sourceArtifactID = sourceArtifactID
     }
 }
 

@@ -1026,6 +1026,13 @@ public struct OpenAICompatibleService: Sendable {
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree, hfCache: hfCache)
             }))
+            // Instruction-based image editing (image + instruction → image). Default backend: Qwen-Image-Edit
+            // (Apache-2.0, commercial-safe); FLUX.1 Kontext selectable but experimental/non-commercial.
+            let imageEditService = ImageEditService()
+            registryUCMR.register(ImageEditProvider(edit: { inPath, outPath, instruction, backend, minFree, hfCache in
+                try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction,
+                                          backend: backend, quantize: nil, minFreeMemMB: minFree, hfCache: hfCache)
+            }))
             // Image super-resolution / upscale. Default backend: Real-ESRGAN ONNX (onnxruntime, torch-free,
             // model auto-downloaded to the assets root). SeedVR2 (mflux) remains selectable but experimental.
             let imageUpscaleService = ImageUpscaleService()

@@ -108,7 +108,7 @@ public struct IntentResolver: Sendable {
             options: ExecutionOptions(intent.arguments))
     }
 
-    static let textConsuming: Set<CapabilityID> = [.imageGenerate, .vectorGenerate, .imageUnderstand, .videoUnderstand]
+    static let textConsuming: Set<CapabilityID> = [.imageGenerate, .vectorGenerate, .imageUnderstand, .videoUnderstand, .imageEdit]
 
     static func outputSpec(for capability: CapabilityID) -> OutputSpec {
         switch capability {
