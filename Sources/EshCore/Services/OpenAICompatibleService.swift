@@ -908,6 +908,15 @@ public struct OpenAICompatibleService: Sendable {
     /// Build the warm-model pool the server uses. Exposed so a caller that also runs a persistent
     /// speech runtime can construct ONE manager and hand the same instance to both this service and the
     /// `SpeechRuntimeManager`, so LLMs and speech share a single memory budget (M12 follow-up).
+    /// Safe default Content-Security-Policy for previewable web artifacts. Deliberately does NOT constrain
+    /// script-src/style-src/img-src — the preview iframe already runs at an OPAQUE origin (sandbox without
+    /// allow-same-origin), so a `'self'` source would fail to match and break loading the bundle's own
+    /// relative CSS/JS, and single-file webArtifacts legitimately rely on inline <script>/<style>. Instead we
+    /// block the genuinely dangerous vectors with zero regression risk: no network egress (connect-src),
+    /// no plugins (object-src), no <base> hijack (base-uri), and only same-origin framing (frame-ancestors).
+    /// A Tier-B managed project that needs a data feed overrides this via its PreviewConfig.csp allowlist.
+    static let defaultArtifactCSP = "connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+
     /// Content type for a project file, derived from its extension. Falls back to the artifact's own
     /// mime for html/unknown so a single-file webArtifact keeps behaving exactly as before.
     static func contentType(for path: String, default fallback: String) -> String {
@@ -1271,7 +1280,16 @@ public struct OpenAICompatibleService: Sendable {
                 // webProject's style.css / script.js must NOT inherit the artifact's text/html, or a strict
                 // (nosniff) browser refuses to apply the stylesheet and to execute the script.
                 let mime = isKnownFile ? Self.contentType(for: target, default: artifact.mimeType) : "application/octet-stream"
-                return ArtifactBytes(data: data, mimeType: mime, filename: (target as NSString).lastPathComponent)
+                // Defense-in-depth CSP for previewable web artifacts: a v2 project may pin its own policy
+                // (PreviewConfig.csp, e.g. a network allowlist); otherwise apply the safe default. Non-web
+                // artifacts (image/svg/audio/…) get no CSP.
+                var csp: String? = nil
+                if artifact.kind == .webProject {
+                    csp = ProjectManifestV2.from(metadata: artifact.metadata)?.previewConfiguration.csp
+                        ?? Self.defaultArtifactCSP
+                }
+                return ArtifactBytes(data: data, mimeType: mime, filename: (target as NSString).lastPathComponent,
+                                     contentSecurityPolicy: csp)
             }
         }
 

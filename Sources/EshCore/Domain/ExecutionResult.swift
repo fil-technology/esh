@@ -32,6 +32,9 @@ public struct ExecutionResult: Codable, Sendable {
     /// The composed ExecutionPlan (single-provider or multi-provider pipeline) that produced this result,
     /// for the Execution Inspector and "Why this execution plan?". Additive; nil for legacy paths.
     public var plan: ExecutionPlan?
+    /// A preview surface URL a provider signalled via `.previewReady` (e.g. a managed project's entry URL
+    /// or a Tier-C loopback dev server). Additive; nil when there is no distinct preview surface.
+    public var previewURL: String?
 
     public init(capability: CapabilityID,
                 text: String? = nil,
@@ -40,6 +43,7 @@ public struct ExecutionResult: Codable, Sendable {
                 usage: EshUsage? = nil,
                 executionPlanID: UUID? = nil,
                 plan: ExecutionPlan? = nil,
+                previewURL: String? = nil,
                 schemaVersion: String = ExecutionResult.currentSchemaVersion) {
         self.schemaVersion = schemaVersion
         self.capability = capability
@@ -49,10 +53,11 @@ public struct ExecutionResult: Codable, Sendable {
         self.usage = usage
         self.executionPlanID = executionPlanID ?? plan?.id
         self.plan = plan
+        self.previewURL = previewURL
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, capability, text, outputs, metrics, usage, executionPlanID, plan
+        case schemaVersion, capability, text, outputs, metrics, usage, executionPlanID, plan, previewURL
     }
 
     public init(from decoder: Decoder) throws {
@@ -65,5 +70,6 @@ public struct ExecutionResult: Codable, Sendable {
         self.usage = try c.decodeIfPresent(EshUsage.self, forKey: .usage)
         self.plan = try c.decodeIfPresent(ExecutionPlan.self, forKey: .plan)
         self.executionPlanID = try c.decodeIfPresent(UUID.self, forKey: .executionPlanID) ?? plan?.id
+        self.previewURL = try c.decodeIfPresent(String.self, forKey: .previewURL)
     }
 }
