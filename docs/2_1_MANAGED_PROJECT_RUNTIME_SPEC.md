@@ -243,3 +243,17 @@ esh produces a **disposable-preview, durable-artifact** result from a single req
 4. Harden the server (CSP/nosniff/frame-ancestors) and activate the dormant `.previewReady`/`.managed`/`.explicitFull` extension points.
 5. Progressive validation + **bounded** repair; no autonomous debugging agent.
 6. **Tier C (Node) is a separate future milestone** gated on a proven macOS OS-sandbox; **Tier D is Ashex.**
+
+---
+
+## Tier-B Implementation Status (2026-09-04) — NOT READY (runtime proven; blocked on local model quality)
+
+Phases 0–5 implemented on branch `managed-project-runtime` (schema, server hardening, curated+vendored deps, browser-module runtime + Three.js scaffold, routing + tests). Full suite 540 green.
+
+**Proven live (architecture):** vendored Three.js **r160** loads via the esh-owned import map inside the **opaque-origin sandboxed iframe** (ACAO:* permits the cross-opaque-origin module fetch); `globalThis.THREE` set by the esh bootstrap; **WebGL context acquired**; the esh Three.js scaffold owns a correctly-sized renderer + scene + camera + lights + render loop (canvas 2560×1440); **CSP `connect-src 'none'` blocks network egress** (verified: a test `fetch()` was refused); dependency resolution/rejection/integrity and Tier-0 routing (`interactive 3D Earth` → project.generate + projectType=threejs) all work.
+
+**Blocker (local model code quality):** no locally-available model reliably produces correct/complete Three.js scene code. Apple FM (**only reliable local option**, ~4K context) **context-overflows on rich scenes** (the Earth: sphere + procedural continents + markers + controls) even with the model writing only scene content; on small scenes it emits recurring bugs (`require()` instead of ESM, non-bundled `THREE.OrbitControls`, `eshTick` defined locally instead of on `globalThis`, meshes not parented). `llama-3.2-3b` is unreliable; `qwen3.5-9b` crashes in `mlx_lm` (incompatible); `deepseek-r1-7b` is ~8 min + overflow. Same class of outcome as `image.edit` (architecture + safety proven, blocked on model).
+
+**Verdict:** TIER B BROWSER-NATIVE MANAGED RUNTIME **NOT READY** — the acceptance Earth proof does not pass on this machine's local models.
+
+**Next recommendation:** either (a) qualify a compatible larger local code model (evaluate current MLX-community code models that load in the installed `mlx_lm`, or a newer `mlx_lm` that supports Qwen2.5-Coder-7B/14B), then re-run the Earth proof; or (b) reduce model burden further with a small library of esh-owned, verified scene *templates* the model parameterizes (risks the "hard-coded demo" concern §18, so prefer (a)). Keep Tier C (Node) deferred.
