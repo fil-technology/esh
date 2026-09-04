@@ -7,6 +7,47 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — project.generate reliability pass -> PRODUCTION-READY (untagged).** Closed the "valid files
+  but broken project" gap. `ProjectConsistency` (layer 2) adds cheap, conservative, deterministic CROSS-FILE
+  checks: JS -> HTML targets (`getElementById('x')` / `querySelector('#x')` must exist — the exact
+  `#back-to-top` bug), HTML/CSS -> local assets exist and stay in-bundle (no absolute/dev-machine or `..`
+  paths), `.css`/`.js` files must be PURE (not wrapped in `<style>`/`<script>`) and must actually be referenced
+  by the HTML (no orphaned/dead stylesheet or script), structure (missing `<body>`, unclosed tags, duplicate
+  ids), and unresolved `{{templates}}`. A BOUNDED repair pass (initial generation + at most 2 repairs) feeds
+  the structured issue list back to the model and re-validates — accepting a repair only if it strictly reduces
+  the problem set, never an unbounded self-fixing loop; a project is saved only as valid when consistency
+  passes, otherwise saved and honestly marked invalid. Structured stage-by-stage provenance
+  (`metadata.validation`: pathSafety / mimeTypes / entrypoint / contentQuality / crossFileReferences /
+  repairAttempts) is exposed for the Execution Inspector. **Evidence-based model policy** (benchmarked on M1
+  Pro / 32 GB): Apple FM is the only reliable local option (llama-3.2-3b produced cross-file-broken output,
+  deepseek-r1-7b ~8 min + reasoning overflow, qwen3.5-9b crashes in mlx_lm — incompatible, NOT promoted);
+  `ProjectComplexity.estimate` sizes the request and Auto selects Apple FM for small projects, and for a large
+  one with no compatible larger local model explains/clarifies instead of overflowing (context-window errors
+  now return an actionable message, not a raw 400). The decision is exposed in `ExecutionPlan` +
+  `metadata.selection`. Warm residency: not applicable to the chosen primary (Apple FM is a system service with
+  no esh-side model load; cold ~= warm ~24 s), so left on-demand. Live: 3 projects (landing / dashboard /
+  catalog) generated locally, all valid with genuinely resolving cross-file references + correct per-file MIME
+  types + working previews. Full suite 519 green.
+- **esh 2.1 UCMR — project.generate: text -> multi-file static web project (untagged).** Second slice of the
+  ProjectArtifact/web-generation milestone. Text -> a validated, self-contained MULTI-FILE static project
+  (index.html + style.css + script.js, referenced by RELATIVE path), a typed `.webProject` artifact previewed
+  in the SAME isolated sandboxed iframe as single-file webArtifacts. Pure LLM codegen (quality-first Apple
+  Intelligence + JSON-manifest repair, same pattern as vector.generate/webArtifact.generate) -- **no heavy
+  models**. Proves the architectural rule again: provider + registration + routing + validation, **no core
+  surgery** (project.generate + ArtifactKind.webProject + OutputSpec.project already existed in the contract).
+  `ProjectValidator` enforces safety AND quality: drops traversal/absolute/`..`/`~` paths, flags external
+  resources, requires a real index.html, and **rejects placeholder/ellipsis content** (some models emit `...`
+  instead of writing files) so a degenerate reply fails -> retries -> escalates, and garbage is NEVER saved.
+  Artifact files are now served with **per-file content types** (style.css -> text/css, script.js ->
+  text/javascript) so a strict (nosniff) browser applies the stylesheet and executes the script. Tier-0 routes
+  'multi-file website / web project / static site' -> project.generate without stealing single-file
+  webArtifact/SVG/chat (Tier-0 false-exec still 0). **Fit finding:** Apple FM's small (~4 K) context window
+  fits a small 2-3 file project but overflows on larger multi-file output ("Exceeded model context window
+  size") -- pin a larger local code model (e.g. qwen3.5-9b) for bigger projects; the tier stays honest, failing
+  rather than truncating. Live-verified: a 3-file bookshop site generated locally in ~25 s (valid, self-
+  contained, relative-linked, correct content types). **The framework/managed-runtime tier (Next.js/Three.js
+  with npm + dev-server) remains explicitly DEFERRED** -- running untrusted generated Node code is a separate,
+  heavier, security-sensitive tier, not this static bundle. Full suite 510 green.
 - **esh 2.1 UCMR — webArtifact.generate: text -> self-contained HTML page (ProjectArtifact primitive) (untagged).**
   First slice of the ProjectArtifact/web-generation milestone. Text -> a validated, self-contained HTML page
   (inline CSS/JS, no network), a typed `.webProject` artifact previewed in an ISOLATED sandboxed iframe

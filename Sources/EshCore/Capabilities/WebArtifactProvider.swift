@@ -73,6 +73,12 @@ public struct WebArtifactProvider: CapabilityProvider {
     offline in a sandboxed iframe. Reply with ONLY the HTML — no markdown fences, no prose, no explanation.
     """
 
+    static let reviseInstruction = """
+    You revise an existing HTML page. Apply ONLY the requested change while preserving everything else (layout, \
+    content, styles) as much as possible. Keep it a single self-contained HTML5 document — all CSS/JS inline, \
+    NO external resources or network. Reply with ONLY the complete updated HTML — no markdown fences, no prose.
+    """
+
     public func execute(_ request: ResolvedExecutionRequest, context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
         let req = request.request
         let infer = self.infer
@@ -87,8 +93,26 @@ public struct WebArtifactProvider: CapabilityProvider {
                         if case .text(let t) = input.payload { return t }
                         return nil
                     }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let userPrompt = prompt.isEmpty ? "a simple hello-world page" : prompt
                     let maxTokens = TextToSVGProvider.intOption(req, "maxTokens") ?? 4000
+
+                    // Iterative editing: if a prior web artifact is referenced (sourceArtifactID), load its HTML
+                    // and REVISE it per the instruction — the operation rides in the instruction, with lineage.
+                    let sourceID = VideoUnderstandingProvider.stringOption(req, "sourceArtifactID").flatMap(UUID.init)
+                    var currentHTML: String? = nil
+                    if let sourceID, let a = try? context.artifactStore.load(id: sourceID),
+                       let data = try? context.artifactStore.data(id: sourceID, file: a.entrypoint ?? "index.html") {
+                        currentHTML = String(decoding: data, as: UTF8.self)
+                        cont.yield(.status("revising web page"))
+                    }
+                    let system: String
+                    let userPrompt: String
+                    if let cur = currentHTML {
+                        system = Self.reviseInstruction
+                        userPrompt = "Apply this change: \(prompt.isEmpty ? "improve the page" : prompt)\n\nCurrent HTML:\n\(cur)"
+                    } else {
+                        system = Self.systemInstruction
+                        userPrompt = prompt.isEmpty ? "a simple hello-world page" : prompt
+                    }
 
                     let localAttempt: Attempt = { sys, user, maxT in
                         let response = try await infer(ExternalInferenceRequest(
@@ -116,7 +140,7 @@ public struct WebArtifactProvider: CapabilityProvider {
                         for pass in 0..<2 {
                             if Task.isCancelled { throw CancellationError() }
                             do {
-                                let (raw, model) = try await attempt(Self.systemInstruction, user, maxTokens)
+                                let (raw, model) = try await attempt(system, user, maxTokens)
                                 let extracted = Self.extractHTML(raw)
                                 if WebArtifactValidator.validate(extracted).isValid {
                                     html = extracted; usedModel = model; break outer
@@ -137,8 +161,10 @@ public struct WebArtifactProvider: CapabilityProvider {
                     let validation = WebArtifactValidator.validate(html)
                     let artifact = Artifact(
                         kind: .webProject, mimeType: "text/html", entrypoint: "index.html",
-                        metadata: ["byteSize": .int(html.utf8.count), "selfContained": .bool(validation.findings.isEmpty)],
-                        generatedBy: ArtifactProvenance(providerID: providerID, modelID: usedModel, capability: .webArtifactGenerate),
+                        metadata: ["byteSize": .int(html.utf8.count), "selfContained": .bool(validation.findings.isEmpty),
+                                   "revised": .bool(currentHTML != nil)],
+                        generatedBy: ArtifactProvenance(providerID: providerID, modelID: usedModel,
+                                                        capability: .webArtifactGenerate, sourceArtifactID: sourceID),
                         validation: validation, preview: .staticSandbox)
                     let saved = try context.artifactStore.save(artifact, files: ["index.html": Data(html.utf8)])
                     cont.yield(.planResolved(ExecutionPlan.single(
