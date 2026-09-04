@@ -105,6 +105,9 @@ public enum CapabilityRouteCatalog {
         guard hasGenVerb else { return nil }
         let wantsSVG = text.contains("svg") || text.contains("vector")
         if wantsSVG, svgNouns.contains(where: { text.contains($0) }) { return .vectorGenerate }
+        // Explicit multi-file/project language → project.generate (multi-file); else a single web page.
+        let projectCues = ["multi-file", "multiple files", "separate files", "web project", "static site", "project with separate"]
+        if projectCues.contains(where: { text.contains($0) }) { return .projectGenerate }
         // A web page is a self-contained HTML artifact (checked before generic "image").
         if webNouns.contains(where: { text.contains($0) }) { return .webArtifactGenerate }
         if visualNouns.contains(where: { text.contains($0) }) { return .imageGenerate }

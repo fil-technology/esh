@@ -7,6 +7,26 @@ The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- **esh 2.1 UCMR — project.generate: text -> multi-file static web project (untagged).** Second slice of the
+  ProjectArtifact/web-generation milestone. Text -> a validated, self-contained MULTI-FILE static project
+  (index.html + style.css + script.js, referenced by RELATIVE path), a typed `.webProject` artifact previewed
+  in the SAME isolated sandboxed iframe as single-file webArtifacts. Pure LLM codegen (quality-first Apple
+  Intelligence + JSON-manifest repair, same pattern as vector.generate/webArtifact.generate) -- **no heavy
+  models**. Proves the architectural rule again: provider + registration + routing + validation, **no core
+  surgery** (project.generate + ArtifactKind.webProject + OutputSpec.project already existed in the contract).
+  `ProjectValidator` enforces safety AND quality: drops traversal/absolute/`..`/`~` paths, flags external
+  resources, requires a real index.html, and **rejects placeholder/ellipsis content** (some models emit `...`
+  instead of writing files) so a degenerate reply fails -> retries -> escalates, and garbage is NEVER saved.
+  Artifact files are now served with **per-file content types** (style.css -> text/css, script.js ->
+  text/javascript) so a strict (nosniff) browser applies the stylesheet and executes the script. Tier-0 routes
+  'multi-file website / web project / static site' -> project.generate without stealing single-file
+  webArtifact/SVG/chat (Tier-0 false-exec still 0). **Fit finding:** Apple FM's small (~4 K) context window
+  fits a small 2-3 file project but overflows on larger multi-file output ("Exceeded model context window
+  size") -- pin a larger local code model (e.g. qwen3.5-9b) for bigger projects; the tier stays honest, failing
+  rather than truncating. Live-verified: a 3-file bookshop site generated locally in ~25 s (valid, self-
+  contained, relative-linked, correct content types). **The framework/managed-runtime tier (Next.js/Three.js
+  with npm + dev-server) remains explicitly DEFERRED** -- running untrusted generated Node code is a separate,
+  heavier, security-sensitive tier, not this static bundle. Full suite 510 green.
 - **esh 2.1 UCMR — webArtifact.generate: text -> self-contained HTML page (ProjectArtifact primitive) (untagged).**
   First slice of the ProjectArtifact/web-generation milestone. Text -> a validated, self-contained HTML page
   (inline CSS/JS, no network), a typed `.webProject` artifact previewed in an ISOLATED sandboxed iframe

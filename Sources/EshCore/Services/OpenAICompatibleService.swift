@@ -908,6 +908,25 @@ public struct OpenAICompatibleService: Sendable {
     /// Build the warm-model pool the server uses. Exposed so a caller that also runs a persistent
     /// speech runtime can construct ONE manager and hand the same instance to both this service and the
     /// `SpeechRuntimeManager`, so LLMs and speech share a single memory budget (M12 follow-up).
+    /// Content type for a project file, derived from its extension. Falls back to the artifact's own
+    /// mime for html/unknown so a single-file webArtifact keeps behaving exactly as before.
+    static func contentType(for path: String, default fallback: String) -> String {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "html", "htm": return "text/html; charset=utf-8"
+        case "css": return "text/css; charset=utf-8"
+        case "js", "mjs": return "text/javascript; charset=utf-8"
+        case "json": return "application/json"
+        case "svg": return "image/svg+xml"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "ico": return "image/x-icon"
+        case "txt", "md": return "text/plain; charset=utf-8"
+        default: return fallback
+        }
+    }
+
     public static func makeLifecycleManager(registry: InferenceBackendRegistry = .init()) -> RuntimeLifecycleManager {
         let host = HostMachineProfileService().currentProfile()
         // Persistent MLX residency (opt-in until benchmarks justify making it the default). When on,
@@ -999,6 +1018,15 @@ public struct OpenAICompatibleService: Sendable {
                 strongInfer: svgStrong,
                 preferStrongFirst: {
                     let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["webArtifact.generate"] ?? ""
+                    return pick.isEmpty || pick == "auto"
+                }))
+            // project.generate (text → multi-file static web project). Same LLM-codegen pattern; static
+            // preview (no npm/build/dev-server — the managed runtime tier is deferred).
+            registryUCMR.register(ProjectGenProvider(
+                infer: { req in try await inference.infer(request: req) },
+                strongInfer: svgStrong,
+                preferStrongFirst: {
+                    let pick = (try? EshConfigStore(root: svgConfigRoot).load())?.defaults.capabilityModels["project.generate"] ?? ""
                     return pick.isEmpty || pick == "auto"
                 }))
             // Embeddings + reranking ride the already-bundled llama-server (--embeddings / --reranking).
@@ -1238,7 +1266,11 @@ public struct OpenAICompatibleService: Sendable {
                 guard let artifact = try artifactStore.load(id: id) else { return nil }
                 let target = file ?? artifact.entrypoint ?? artifact.files.first?.relativePath
                 guard let target, let data = try artifactStore.data(id: id, file: target) else { return nil }
-                let mime = artifact.files.first(where: { $0.relativePath == target }) != nil ? artifact.mimeType : "application/octet-stream"
+                let isKnownFile = artifact.files.first(where: { $0.relativePath == target }) != nil
+                // Serve each project file with the content type its extension implies — a multi-file
+                // webProject's style.css / script.js must NOT inherit the artifact's text/html, or a strict
+                // (nosniff) browser refuses to apply the stylesheet and to execute the script.
+                let mime = isKnownFile ? Self.contentType(for: target, default: artifact.mimeType) : "application/octet-stream"
                 return ArtifactBytes(data: data, mimeType: mime, filename: (target as NSString).lastPathComponent)
             }
         }
