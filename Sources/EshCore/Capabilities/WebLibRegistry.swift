@@ -25,8 +25,12 @@ public struct WebLib: Sendable, Hashable {
     public let license: String   // "MIT"
     public let files: [File]
     public let sourceURL: String // provenance: where esh vendored it from (maintainer step, not runtime)
-    public init(id: String, version: String, license: String, files: [File], sourceURL: String) {
-        self.id = id; self.version = version; self.license = license; self.files = files; self.sourceURL = sourceURL
+    /// The library's conventional browser global (e.g. Three.js → "THREE"). When set, esh's bootstrap exposes
+    /// the imported module under this global so natural `THREE.*` code works without a correct ESM import.
+    public let globalName: String?
+    public init(id: String, version: String, license: String, files: [File], sourceURL: String, globalName: String? = nil) {
+        self.id = id; self.version = version; self.license = license; self.files = files
+        self.sourceURL = sourceURL; self.globalName = globalName
     }
     /// In-bundle subdirectory the files are copied into.
     public var bundleDir: String { "vendor/\(id)" }
@@ -39,7 +43,8 @@ public enum WebLibRegistry {
                files: [.init(filename: "three.module.min.js",
                              sha256: "3e690ac7d180b0aadf0891bea39eec643e29e2d3e75c99b18689518665f69ba6",
                              importSpecifier: "three")],
-               sourceURL: "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js")
+               sourceURL: "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js",
+               globalName: "THREE")
     ]
     public static func entry(for id: String) -> WebLib? {
         all.first { $0.id.lowercased() == id.lowercased() }
@@ -74,6 +79,27 @@ public struct DependencyResolver: Sendable {
 
     public func cacheDir(for lib: WebLib) -> URL {
         cacheRoot.appendingPathComponent("\(lib.id)/\(lib.version)", isDirectory: true)
+    }
+
+    /// Which approved libraries the JS sources actually USE — detected from a bare ES import of the library id
+    /// OR from a reference to its conventional global (e.g. `THREE.`). This lets esh resolve + vendor + expose
+    /// a library even when the model writes global-style code without a correct ESM import.
+    public func usedLibIDs(in jsSources: [String]) -> [String] {
+        var ids: [String] = []
+        for lib in registry {
+            let importedByName = jsSources.contains { src in
+                BrowserModuleComposer.imports(inJS: src).contains {
+                    $0.kind == .bare && $0.specifier.lowercased() == lib.id.lowercased()
+                }
+            }
+            let usedAsGlobal: Bool = {
+                guard let g = lib.globalName else { return false }
+                let pattern = "\\b\(NSRegularExpression.escapedPattern(for: g))\\b"
+                return jsSources.contains { $0.range(of: pattern, options: .regularExpression) != nil }
+            }()
+            if importedByName || usedAsGlobal { ids.append(lib.id) }
+        }
+        return ids
     }
 
     /// Resolve the requested bare specifiers. Unknown names → `rejected`. Known names that are not present

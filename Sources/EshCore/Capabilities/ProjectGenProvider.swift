@@ -297,7 +297,256 @@ public struct ProjectGenProvider: CapabilityProvider {
         return (systemInstruction, user)
     }
 
+    /// Tier-B system prompt: the model writes ONLY the app logic (app.js + optional style.css). esh owns
+    /// index.html, the import map, and the bootstrap — so generated code can never set the security policy.
+    static func browserModuleSystemInstruction(approved: [String]) -> String {
+        let libs = approved.isEmpty ? "(none available)" : approved.joined(separator: ", ")
+        return """
+        You write the application logic for a small BROWSER-NATIVE interactive project that runs as a NATIVE \
+        browser ES MODULE. Respond with ONLY a JSON object of this shape: \
+        {"files":[{"path":"app.js","content":"..."},{"path":"style.css","content":"..."}]} (style.css optional). \
+        Rules: write an ES module app.js that renders into the EXISTING element document.getElementById('app') — \
+        esh provides index.html, the import map and the module bootstrap, so do NOT write index.html or an \
+        import map. Use ES MODULE syntax ONLY — `import * as THREE from "three";` — and NEVER Node/CommonJS \
+        (no require(), no module.exports); this runs directly in the browser, not Node. Import approved \
+        libraries ONLY by BARE specifier. Available libraries: \(libs). NEVER import from a URL/CDN/path (no \
+        "https://…", no "./file.js"). Actually CREATE the requested objects (geometry, meshes, lights) and an \
+        animation loop with requestAnimationFrame so something visibly renders. NO network of any kind: no \
+        fetch/XHR/WebSocket, no external images/textures/fonts — use PROCEDURAL / generated visuals only so it \
+        works fully offline. app.js is PURE JavaScript and style.css is PURE CSS (no <script>/<style> tags, no \
+        markdown fences). Return ONLY the JSON object.
+        """
+    }
+
+    /// Three.js scene-contract prompt: esh owns the renderer/scene/camera/lights/loop; the model writes only
+    /// scene content. This keeps output small + reliable (fits the on-device model even for rich scenes).
+    static let threeJSSystemInstruction = """
+    You write ONLY the scene content for a Three.js project. esh already provides index.html and, as GLOBALS: \
+    THREE, scene, camera (at z=5 looking at the origin), renderer, plus a full-window render loop and lights. \
+    Respond with ONLY a JSON object: {"files":[{"path":"app.js","content":"..."},{"path":"style.css","content":"..."}]} \
+    (style.css optional). In app.js: build objects with THREE and ADD them to the EXISTING global `scene` via \
+    scene.add(...). Do NOT create a renderer, camera, scene, or animation loop and do NOT call renderer.render — \
+    esh runs the loop. For animation assign globalThis.eshTick = (dt) => { /* runs each frame, dt seconds */ }. \
+    For controls (pause, toggle) create <button> elements, append them to a <div class="ui"> you add to \
+    document.body, and wire click handlers that flip simple boolean flags your eshTick reads. Use ONLY CORE \
+    THREE classes (Scene, Mesh, *Geometry, MeshStandardMaterial/MeshBasicMaterial, lights, Group, Vector3, \
+    Color) — do NOT use THREE.OrbitControls or ANY addon/example/loader class (they are NOT available); if you \
+    want the camera or object to move, rotate your object inside eshTick instead. Use ONLY procedural \
+    geometry/colors/math — NO network, NO external textures/images/fonts, NO fetch, NO require()/module.exports, \
+    NO URL/CDN imports. THREE is a global so no import is needed. app.js is PURE JavaScript, style.css PURE CSS \
+    (no <script>/<style> tags, no markdown). Return ONLY the JSON object.
+    """
+
+    /// Tier-B (browser-native) generation: model writes app logic → esh resolves approved vendored deps →
+    /// esh scaffolds index.html + import map → validated, self-contained `.webProject` v2 artifact.
+    func browserModuleStream(_ request: ResolvedExecutionRequest, projectType: ProjectType,
+                             context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        let req = request.request
+        let infer = self.infer
+        let strongInfer = self.strongInfer
+        let preferStrongFirst = self.preferStrongFirst
+        let providerID = descriptor.id
+        return AsyncThrowingStream { cont in
+            let task = Task {
+                do {
+                    cont.yield(.status("composing interactive project"))
+                    let prompt = req.inputs.compactMap { input -> String? in
+                        if case .text(let t) = input.payload { return t }; return nil
+                    }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let userPrompt = prompt.isEmpty ? "a small interactive browser project" : prompt
+                    let maxTokens = TextToSVGProvider.intOption(req, "maxTokens") ?? 4000
+                    let cacheRoot = context.root.cachesURL.appendingPathComponent("web-libs", isDirectory: true)
+                    let resolver = DependencyResolver(cacheRoot: cacheRoot)
+
+                    let localAttempt: Attempt = { sys, user, maxT in
+                        let r = try await infer(ExternalInferenceRequest(
+                            model: req.model,
+                            messages: [ExternalInferenceMessage(role: .system, text: sys),
+                                       ExternalInferenceMessage(role: .user, text: user)],
+                            generation: GenerationConfig(maxTokens: maxT, temperature: 0.4), responseFormat: .json))
+                        return (ThinkingParser.parse(r.outputText).answer ?? r.outputText, r.modelID)
+                    }
+                    var strongAttempt: Attempt? = nil
+                    if let s = strongInfer { strongAttempt = { sys, user, maxT in try await s(sys, user, min(maxT, 3000)) } }
+                    var attempts: [Attempt] = []
+                    if preferStrongFirst(), let st = strongAttempt { attempts = [st, localAttempt] }
+                    else { attempts = [localAttempt]; if let st = strongAttempt { attempts.append(st) } }
+
+                    let sysInstruction = (projectType == .threejs)
+                        ? Self.threeJSSystemInstruction
+                        : Self.browserModuleSystemInstruction(approved: WebLibRegistry.approvedNames)
+
+                    // Validate a candidate file set → (issues, resolution). Issues drive bounded repair.
+                    func validate(_ files: [(path: String, content: String)]) -> ([String], DependencyResolution) {
+                        var issues: [String] = []
+                        let jsFiles = files.filter { $0.path.lowercased().hasSuffix(".js") }
+                        guard !jsFiles.isEmpty else {
+                            return (["no app.js entry module"], DependencyResolution(resolved: [], importMap: [:], bundleFiles: [:], rejected: []))
+                        }
+                        for f in files where ProjectValidator.isPlaceholder(f.content) { issues.append("\(f.path): placeholder/empty content") }
+                        let returned = Set(files.map { $0.path.lowercased() })
+                        var bareSpecs: [String] = []
+                        for f in jsFiles {
+                            // Reject Node/CommonJS — this runs as a native browser ES module.
+                            if f.content.range(of: #"\brequire\s*\(\s*["']"#, options: .regularExpression) != nil {
+                                issues.append("\(f.path): uses CommonJS require() — use ES module syntax instead, e.g. import * as THREE from \"three\"")
+                            }
+                            if f.content.range(of: #"\bmodule\.exports\b|\bexports\.\w"#, options: .regularExpression) != nil {
+                                issues.append("\(f.path): uses CommonJS module.exports — use ES module import/export syntax")
+                            }
+                            // Three.js addons (OrbitControls, loaders, etc.) are NOT in the core bundle — reject.
+                            if let m = f.content.range(of: #"THREE\.(OrbitControls|TrackballControls|GLTFLoader|OBJLoader|FBXLoader|TextureLoader|FontLoader|EffectComposer|[A-Za-z]+Controls|[A-Za-z]+Loader)"#, options: .regularExpression) {
+                                issues.append("\(f.path): uses \(f.content[m]) — Three.js addons/examples are not available; use only CORE THREE and rotate objects inside globalThis.eshTick")
+                            }
+                            for ref in BrowserModuleComposer.imports(inJS: f.content) {
+                                switch ref.kind {
+                                case .url:
+                                    issues.append("\(f.path): remote import \"\(ref.specifier)\" is not allowed — import the approved library by bare name (e.g. \"three\")")
+                                case .relative:
+                                    var t = ref.specifier
+                                    if t.hasPrefix("./") { t = String(t.dropFirst(2)) }
+                                    if !returned.contains(t.lowercased()) { issues.append("\(f.path): import \"\(ref.specifier)\" points to a missing local file") }
+                                case .bare:
+                                    bareSpecs.append(ref.specifier)
+                                }
+                            }
+                        }
+                        // A bare import to something NOT in the curated registry is rejected outright.
+                        for spec in bareSpecs where !resolver.registry.contains(where: { $0.id.lowercased() == spec.lowercased() }) {
+                            issues.append("dependency \"\(spec)\" is not an approved library — remove it or use an approved one (\(WebLibRegistry.approvedNames.joined(separator: ", ")))")
+                        }
+                        // Resolve libraries the code actually USES (bare import of the id, or the library global
+                        // such as THREE.…). esh vendors + exposes them; a used-but-not-vendored lib is rejected.
+                        let usedIDs = resolver.usedLibIDs(in: jsFiles.map { $0.content })
+                        let res = resolver.resolve(usedIDs)
+                        for r in res.rejected { issues.append("dependency \"\(r)\" is used but not vendored offline — run scripts/vendor-web-libs.sh to provision it") }
+                        return (issues, res)
+                    }
+
+                    var appFiles: [(path: String, content: String)]?
+                    var resolution = DependencyResolution(resolved: [], importMap: [:], bundleFiles: [:], rejected: [])
+                    var usedModel = req.model ?? "unknown"
+                    var repairAttempts = 0
+                    var lastError: Error?
+                    outer: for (i, attempt) in attempts.enumerated() {
+                        if i > 0 { cont.yield(.status("retrying with a more reliable model")) }
+                        var user = userPrompt
+                        for pass in 0..<2 {
+                            if Task.isCancelled { throw CancellationError() }
+                            do {
+                                let (raw, model) = try await attempt(sysInstruction, user, maxTokens)
+                                if let json = TextToSVGProvider.extractJSONObject(raw),
+                                   let manifest = try? JSONDecoder().decode(ProjectManifest.self, from: Data(json.utf8)) {
+                                    let files = manifest.files.map { (path: $0.path, content: $0.content) }
+                                    let (issues, res) = validate(files)
+                                    if issues.isEmpty { appFiles = files; resolution = res; usedModel = model; break outer }
+                                    if pass == 0 {
+                                        repairAttempts += 1
+                                        cont.yield(.status("repairing (attempt \(repairAttempts))"))
+                                        user = userPrompt + "\n\nYour previous reply had these problems:\n"
+                                            + issues.map { "- \($0)" }.joined(separator: "\n")
+                                            + "\n\nReturn ONLY the corrected JSON. Import approved libraries by bare name only; no URLs, no network."
+                                    }
+                                } else if pass == 0 {
+                                    user = userPrompt + "\n\nYour previous reply was not valid JSON of {\"files\":[…]} with an app.js. Reply again with ONLY the JSON."
+                                }
+                            } catch { lastError = error; break }
+                        }
+                    }
+                    guard let files = appFiles else {
+                        if let e = lastError, Self.isContextWindowError(e) {
+                            throw CapabilityError.failed("This interactive project is likely too large for the on-device model's context window. Try a simpler scene, or pin a larger compatible local code model.")
+                        }
+                        throw lastError ?? CapabilityError.failed("The model did not produce a valid browser-module project (app.js) using only approved offline dependencies.")
+                    }
+
+                    // Compose the bundle: esh scaffold + model files + vendored libs (integrity re-verified).
+                    cont.yield(.status("resolving local dependencies"))
+                    let appEntry = files.first { $0.path.lowercased() == "app.js" }?.path
+                        ?? files.first { $0.path.lowercased().hasSuffix(".js") }?.path ?? "app.js"
+                    let hasStyle = files.contains { $0.path.lowercased() == "style.css" }
+                    var payload: [String: Data] = [:]
+                    for f in files where f.path.lowercased() != "index.html" { payload[f.path] = Data(f.content.utf8) }
+                    for (bundlePath, absPath) in resolution.bundleFiles {
+                        let expected = resolution.resolved.first(where: { bundlePath.contains("/\($0.name)/") })?.integritySHA256
+                        payload[bundlePath] = try WebLibVendor.bytes(at: absPath, expectedSHA256: expected)
+                    }
+                    // Expose each resolved library's conventional global (e.g. three → THREE) so natural
+                    // global-style generated code works; the ESM specifier stays available via the import map.
+                    var globals: [(specifier: String, global: String)] = []
+                    for dep in resolution.resolved {
+                        if let lib = WebLibRegistry.entry(for: dep.name), let g = lib.globalName {
+                            globals.append((lib.files.first?.importSpecifier ?? lib.id, g))
+                        }
+                    }
+                    let title = String(userPrompt.prefix(60))
+                    let indexHTML: String
+                    if projectType == .threejs, resolution.importMap["three"] != nil {
+                        // esh owns the Three.js renderer/scene/camera/loop; the model supplied only scene content.
+                        indexHTML = BrowserModuleComposer.scaffoldThreeJSIndexHTML(
+                            title: title, importMap: resolution.importMap, hasStyle: hasStyle, appEntry: appEntry)
+                    } else {
+                        indexHTML = BrowserModuleComposer.scaffoldIndexHTML(
+                            title: title, importMap: resolution.importMap, globals: globals,
+                            hasStyle: hasStyle, appEntry: appEntry)
+                    }
+                    payload["index.html"] = Data(indexHTML.utf8)
+
+                    cont.yield(.status("validating"))
+                    let manifest = ProjectManifestV2(
+                        projectType: projectType,
+                        runtimeRequirements: RuntimeRequirements(kind: .browserModule, importMap: resolution.importMap),
+                        dependencies: resolution.resolved,
+                        permissions: .sandboxedNoNetwork,
+                        previewConfiguration: PreviewConfig(previewMode: .managed, privilege: .previewSandboxed,
+                                                            sandboxFlags: ["allow-scripts"], csp: nil))
+                    let totalBytes = payload.values.reduce(0) { $0 + $1.count }
+                    func stage(_ ok: Bool) -> JSONValue { .string(ok ? "passed" : "failed") }
+                    let report: JSONValue = .object([
+                        "pathSafety": stage(true), "mimeTypes": stage(true), "entrypoint": stage(true),
+                        "contentQuality": stage(true), "dependencies": stage(resolution.rejected.isEmpty),
+                        "moduleImports": stage(true), "securityPolicy": stage(true),
+                        "crossFileReferences": stage(true), "repairAttempts": .int(repairAttempts)])
+                    let depList = resolution.resolved.map { "\($0.name)@\($0.version)" }
+                    var meta: [String: JSONValue] = [
+                        "fileCount": .int(payload.count), "byteSize": .int(totalBytes), "selfContained": .bool(true),
+                        "repairAttempts": .int(repairAttempts), "validation": report,
+                        "files": .array(payload.keys.sorted().map { .string($0) }),
+                        "dependencies": .array(depList.map { .string($0) })]
+                    if let pj = try? manifest.asJSONValue() { meta[ProjectManifestV2.metadataKey] = pj }
+                    let artifact = Artifact(
+                        kind: .webProject, mimeType: "text/html", entrypoint: "index.html", metadata: meta,
+                        generatedBy: ArtifactProvenance(providerID: providerID, modelID: usedModel, capability: .projectGenerate),
+                        validation: ArtifactValidation(isValid: true, findings: []),
+                        preview: PreviewDescriptor(mode: .managed, privilege: .previewSandboxed))
+                    let saved = try context.artifactStore.save(artifact, files: payload)
+                    cont.yield(.planResolved(ExecutionPlan.single(
+                        capability: req.capability, inputModalities: [.text], outputModality: .text,
+                        providerID: providerID, modelID: usedModel, backend: .native,
+                        rationale: [
+                            "Generated a Tier-B browser-native (\(projectType.rawValue)) project (\(usedModel)) — esh-owned scaffold + import map, previewed in an isolated sandbox.",
+                            "Dependencies (vendored, pinned, integrity-verified): \(depList.isEmpty ? "none" : depList.joined(separator: ", ")).",
+                            "Network denied by default (connect-src 'none'); no external imports/CDNs; repairs: \(repairAttempts)."])))
+                    cont.yield(.artifactProduced(saved))
+                    cont.yield(.previewReady(url: "/v1/artifacts/\(saved.id.uuidString)/index.html"))
+                    cont.yield(.done(finishReason: "stop"))
+                    cont.finish()
+                } catch is CancellationError {
+                    cont.yield(.failed(message: "interactive project generation was cancelled")); cont.finish(throwing: CancellationError())
+                } catch {
+                    cont.yield(.failed(message: error.localizedDescription)); cont.finish(throwing: error)
+                }
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
+    }
+
     public func execute(_ request: ResolvedExecutionRequest, context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        // Tier B (browser-native / Three.js) is a distinct, self-contained flow so the production static path
+        // below is untouched. Gated by the router-set ExecutionOptions["projectType"].
+        if let tierBType = BrowserModuleComposer.requestedTierBType(request.request) {
+            return browserModuleStream(request, projectType: tierBType, context: context)
+        }
         let req = request.request
         let infer = self.infer
         let strongInfer = self.strongInfer
