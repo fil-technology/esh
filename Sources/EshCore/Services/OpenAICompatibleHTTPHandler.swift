@@ -157,9 +157,14 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                     throw OpenAICompatibleError.notFound("Artifact not found: \(p)")
                 }
                 // Inline so previewable artifacts (SVG/image) render directly; still fine for download.
+                // Security hardening (defense-in-depth beyond the iframe sandbox): nosniff always (we serve
+                // correct per-file MIME types), plus a CSP for web artifacts (network-egress/plugin/base/frame
+                // lockdown, or a v2 project's pinned policy).
+                var artifactHeaders = ["content-disposition": #"inline; filename="\#(bytes.filename)""#,
+                                       "x-content-type-options": "nosniff"]
+                if let csp = bytes.contentSecurityPolicy { artifactHeaders["content-security-policy"] = csp }
                 return binaryResponse(statusCode: 200, contentType: bytes.mimeType, filename: bytes.filename,
-                                      body: bytes.data,
-                                      extraHeaders: ["content-disposition": #"inline; filename="\#(bytes.filename)""#])
+                                      body: bytes.data, extraHeaders: artifactHeaders)
             case ("GET", _), ("POST", _):
                 throw OpenAICompatibleError.notFound("No route for \(request.method.uppercased()) \(request.path)")
             default:

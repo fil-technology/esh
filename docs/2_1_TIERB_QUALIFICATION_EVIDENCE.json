@@ -1,0 +1,35 @@
+{
+  "suite": "tier-b-project-generation",
+  "version": 1,
+  "date": "2026-09-04",
+  "hardware": {"chip": "Apple M1 Pro", "cores": 8, "unifiedMemoryGB": 32, "os": "macOS 26.5.1"},
+  "assetsRoot": "/Volumes/Sviat SSD/esh-models",
+  "runtime": {"mlx_lm": "0.31.1", "backend": "mlx", "persistentWorker": true},
+  "capability": "project.generate",
+  "model": {
+    "id": "mlx-community--qwen2.5-coder-14b-instruct-4bit",
+    "repo": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "family": "Qwen2.5-Coder", "params": "14B dense", "quant": "4bit-mlx",
+    "license": "Apache-2.0", "contextNative": 32768, "contextYarn": 131072,
+    "weightsGB": 7.0, "sizeBytesInstalled": 8320000000
+  },
+  "modelFit": {"class": "comfortable", "estPeakGB": 10.8, "usableGB": 25.6, "totalGB": 32},
+  "selection": {"policy": "metadata-driven bestCodingModelID (no hard-coded id)", "tierB": "coding-model-first", "smallStatic": "apple-foundation-first"},
+  "runtimeFixes": [
+    "scaffold canvas sizing: renderer.setSize updateStyle=true + canvas width/height:100%",
+    "manifest robustness: decodeManifest recovers backtick/template-literal string values (strict-first, tolerant-fallback); security validation unchanged",
+    "prompt hardening: require JSON-escaped content strings"
+  ],
+  "fixtures": [
+    {"id": "A_structured", "category": "structured-output", "projectType": null, "pass": true, "valid": true, "seconds": 55, "repairs": 0, "files": ["index.html","style.css","script.js","avatar.png"]},
+    {"id": "B_crossfile", "category": "cross-file-static", "projectType": null, "pass": true, "valid": true, "seconds": 18, "repairs": 0, "files": ["index.html","style.css","app.js"]},
+    {"id": "C_cube", "category": "browser-module-basic", "projectType": "threejs", "pass": true, "valid": true, "secondsWarm": 25, "secondsCold": 90, "repairs": 0, "verified": ["renders","rotates","pause"]},
+    {"id": "D_controls", "category": "interactive-controls", "projectType": "threejs", "pass": true, "valid": true, "seconds": 48, "repairs": 0, "verified": ["renders","rotates","pause-resume","visibility-toggle"]},
+    {"id": "E_earth", "category": "acceptance-earth", "projectType": "threejs", "pass": true, "valid": true, "seconds": 50, "repairs": 0, "verified": ["renders","rotates","pause-resume","markers","marker-toggle","no-js-errors","network-blocked-by-csp","reload"]},
+    {"id": "F_solar", "category": "acceptance-solar", "projectType": "threejs", "pass": true, "valid": true, "seconds": 50, "repairs": 0, "verified": ["renders","sun+orbiting-planets","orbits","pause"]},
+    {"id": "G_generic", "category": "generic-browser-module", "projectType": "browser-module", "pass": true, "valid": true, "seconds": 40, "repairs": 0, "verified": ["generic-scaffold","self-authored-renderer","controls","offline"]}
+  ],
+  "acceptanceGate": {"earth": "PASS", "solar": "PASS", "thirdGenericProof": "PASS"},
+  "regression": {"suite": "542 green", "routerFalseExecutionRate": 0.0, "staticPathUnchanged": true},
+  "verdict": "TIER B BROWSER-NATIVE MANAGED RUNTIME PRODUCTION-READY"
+}

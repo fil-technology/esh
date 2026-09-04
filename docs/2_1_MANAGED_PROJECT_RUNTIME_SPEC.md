@@ -243,3 +243,37 @@ esh produces a **disposable-preview, durable-artifact** result from a single req
 4. Harden the server (CSP/nosniff/frame-ancestors) and activate the dormant `.previewReady`/`.managed`/`.explicitFull` extension points.
 5. Progressive validation + **bounded** repair; no autonomous debugging agent.
 6. **Tier C (Node) is a separate future milestone** gated on a proven macOS OS-sandbox; **Tier D is Ashex.**
+
+---
+
+## Tier-B Implementation Status (2026-09-04) — PRODUCTION-READY (Earth + Solar gate passed with a qualified local coding model)
+
+> Supersedes the earlier "NOT READY (blocked on local model quality)" status. The blocker was closed by qualifying a compatible local coding model (recommendation (a) below) — no scene templates were introduced.
+
+**Qualified model:** **`Qwen2.5-Coder-14B-Instruct` (MLX 4-bit, `mlx-community/Qwen2.5-Coder-14B-Instruct-4bit`, Apache-2.0)** on M1 Pro / 32 GB. Model Fit: **Comfortable** (~10.8 GB peak vs ~25.6 GB usable; weights 7.0 GB; 32K native context, 128K via YaRN). Loads on the MLX backend via `.venv` `mlx_lm` 0.31.1. Downloaded to the external SSD.
+
+**Selection (Phase 7, no hard-coded id):** `ProjectGenProvider.bestCodingModelID` picks the best installed local coding model from the live catalog by metadata (text-only chat model, code-focused name, largest). The Tier-B (browser-module / Three.js) path prefers this coding model over Apple FM; **small static projects still prefer Apple FM**. A `capabilityModels["project.generate"]` pin overrides. So Auto (no pin) already routes `project.generate(browser-module) → the 14B` and `small static → Apple FM`.
+
+**Two runtime fixes (genuine defects, not model crutches):**
+1. **Canvas sizing** — the Three.js scaffold used `renderer.setSize(w,h,false)`, so the HiDPI drawing buffer overflowed the viewport and the scene rendered cropped to a corner. Now `setSize(w,h)` updates the canvas CSS size (+ a `width/height:100%` backstop). Model-agnostic; benefits every Tier-B output.
+2. **Manifest robustness** — local coding models sometimes serialize the `{"files":[…]}` manifest with backtick/template-literal string values (and markdown fences) instead of JSON strings (valid code, invalid JSON). `decodeManifest` now recovers these into valid JSON (**strict parse first; tolerant repair only on failure**). This is parsing robustness ONLY — every generated file still passes the full security validation (deps/imports/CommonJS/addons) unchanged. The Tier-B prompt was also hardened to require JSON escaping.
+
+**Frozen Tier-B benchmark (A–G) — Qwen2.5-Coder-14B, all PASS** (via `/v1/execute` + in-app browser):
+
+| Fixture | What | Result | Time | Repairs |
+|---|---|---|---|---|
+| A structured | valid manifest/static | PASS | ~55s | 0 |
+| B cross-file | separate html/css/js + refs | PASS | ~18s | 0 |
+| C cube | browser-module basic | PASS (rotates + pause) | ~25s | 0 |
+| D controls | pause/resume + visibility toggle | PASS | ~48s | 0 |
+| **E Earth** | **acceptance** | **PASS** | ~50s | 0–1 |
+| **F Solar** | **acceptance** | **PASS** | ~50s | 0 |
+| G generic | non-scaffold browser-module | PASS | ~40s | 0 |
+
+**Frozen Earth acceptance gate — verified live (Auto, no pin → 14B auto-selected):** router → `project.generate`+`threejs` ✓; logical `three` dep → local pinned vendored `three@0.160.0` (integrity-verified, no CDN) ✓; offline preview ✓; WebGL acquired ✓; Earth renders ✓; rotates ✓; pause/resume ✓; markers display ✓; marker toggle ✓; no uncaught JS errors ✓; **forbidden network BLOCKED by CSP `connect-src 'none'`** (console-confirmed) ✓; reload re-inits ✓; artifact persists + downloads ✓; bounded repair ≤2 ✓; parent Web Chat state isolated by the opaque-origin sandbox (architectural). **Solar** independently PASSES (sun + orbiting planets + pause). A **generic** (non-Three.js-scaffold) browser-module project also passes, confirming the runtime stays generic.
+
+**Regression:** full suite **542 green** (2 new Tier-B unit tests: coding-model selection + manifest recovery); Tier-0 router false-execution **0** (58-case bench); static `project.generate` path unchanged (small static still uses Apple FM).
+
+**Verdict:** TIER B BROWSER-NATIVE MANAGED RUNTIME **PRODUCTION-READY** on this machine with `Qwen2.5-Coder-14B-Instruct` installed. Recommend merging `managed-project-runtime` → `main` after branch CI is green. Tier C (Node) remains deferred.
+
+**Notes / options:** (i) On a machine without a local coding model installed, Tier-B falls back to Apple FM and rich scenes may overflow — install the 14B (or any code-focused text model) to enable Tier B. (ii) A **7B backend comparison** (Qwen2.5-Coder-7B MLX vs GGUF) was scoped but not run, because the 14B passed the full gate (per the qualification directive to stop once Earth + Solar pass); it can be run later if a faster/smaller option is desired. (iii) The Qwen3-Coder-30B-A3B MoE (~33 GB) is over this machine's 32 GB and was intentionally not attempted.

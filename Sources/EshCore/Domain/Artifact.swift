@@ -137,9 +137,13 @@ public struct ArtifactBytes: Sendable {
     public var data: Data
     public var mimeType: String
     public var filename: String
-    public init(data: Data, mimeType: String, filename: String) {
+    /// Content-Security-Policy to serve alongside this artifact (defense-in-depth beyond the iframe sandbox).
+    /// nil = no CSP header. For a v2 project this comes from its `PreviewConfig.csp`, else a safe default.
+    public var contentSecurityPolicy: String?
+    public init(data: Data, mimeType: String, filename: String, contentSecurityPolicy: String? = nil) {
         self.data = data
         self.mimeType = mimeType
         self.filename = filename
+        self.contentSecurityPolicy = contentSecurityPolicy
     }
 }

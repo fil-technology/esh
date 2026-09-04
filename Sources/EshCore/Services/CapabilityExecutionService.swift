@@ -209,14 +209,16 @@ public struct CapabilityExecutionService: Sendable {
         var outputs: [Artifact] = []
         var usage: EshUsage?
         var plan: ExecutionPlan?
+        var previewURL: String?
         for try await event in runResolved(scheduledRequest) {
             switch event {
             case .textDelta(let s): text += s
             case .artifactProduced(let a): outputs.append(a)
             case .usage(let u): usage = u
             case .planResolved(let p): plan = p
+            case .previewReady(let url): previewURL = url
             case .failed(let m): throw CapabilityError.failed(m)
-            case .status, .progress, .reasoningDelta, .previewReady, .done: break
+            case .status, .progress, .reasoningDelta, .done: break
             }
         }
         // Fold the performance-aware decision into the plan ("Why this execution plan?").
@@ -237,6 +239,7 @@ public struct CapabilityExecutionService: Sendable {
             text: text.isEmpty ? nil : text,
             outputs: outputs,
             usage: usage,
-            plan: plan)
+            plan: plan,
+            previewURL: previewURL)
     }
 }
