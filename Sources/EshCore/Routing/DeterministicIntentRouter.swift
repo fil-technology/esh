@@ -100,15 +100,15 @@ public enum CapabilityRouteCatalog {
 
     /// Tier-B browser-native cues (interactive ES-module projects, e.g. Three.js/WebGL). Checked BEFORE the
     /// generic "3d model"→image path so "interactive 3D …" becomes a runnable project, not a static image.
-    static let browserNativeCues = ["three.js", "threejs", "webgl", "3d scene", "interactive 3d",
-        "3d visualization", "rotating 3d", "3d earth", "3d globe", "solar system", "particle system",
-        "canvas animation", "interactive visualization", "interactive simulation"]
+    static let browserNativeCues = ["three.js", "threejs", "three js", "three-js", "webgl", "3d scene",
+        "interactive 3d", "3d visualization", "rotating 3d", "3d earth", "3d globe", "solar system",
+        "particle system", "canvas animation", "interactive visualization", "interactive simulation"]
 
     /// The browser-module project type for a browser-native request (used to set ExecutionOptions.projectType).
     static func browserNativeProjectType(_ text: String) -> ProjectType? {
         guard browserNativeCues.contains(where: { text.contains($0) }) else { return nil }
-        let threeCues = ["three.js", "threejs", "webgl", "3d scene", "interactive 3d", "3d visualization",
-                         "rotating 3d", "3d earth", "3d globe", "solar system", "particle system"]
+        let threeCues = ["three.js", "threejs", "three js", "three-js", "webgl", "3d scene", "interactive 3d",
+                         "3d visualization", "rotating 3d", "3d earth", "3d globe", "solar system", "particle system"]
         return threeCues.contains(where: { text.contains($0) }) ? .threejs : .browserModule
     }
 

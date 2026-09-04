@@ -95,6 +95,17 @@ struct BrowserModuleTests {
         #expect(CapabilityRouteCatalog.browserNativeProjectType("a static landing page") == nil)
     }
 
+    @Test func routesSpacedThreeJsPhrasingToTierB() {
+        // "three js" (space) / "three-js" are as common as "three.js" — all must reach the Tier-B runtime,
+        // not fall through to plain chat.
+        let r = DeterministicIntentRouter()
+        for msg in ["create minimal 3d car in three js", "make a spinning cube using three-js"] {
+            let d = r.route(message: msg, inputModalities: [])
+            #expect(d.capability == .projectGenerate)
+            #expect(d.arguments["projectType"] == .string("threejs"))
+        }
+    }
+
     // MARK: - Tier-B coding-model selection (Phase 7) — metadata-driven, no hard-coded id
 
     private func inst(_ id: String, size: Int64, vision: Bool = false) -> ModelInstall {
