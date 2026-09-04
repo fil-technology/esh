@@ -551,6 +551,15 @@ const ACT={
   toggleRouting:()=>{ S.prefs.autoRouting=!(S.prefs.autoRouting!==false); savePrefs(); render(); },
   pickReasoning:(v)=>{ S.prefs.reasoning=v; savePrefs(); render(); },
   goPane:(p)=>{ S.settingsPane=p; render(); },
+  // Iterative web editing: revise a prior webProject artifact by id (lineage via sourceArtifactID).
+  editWebArtifact:(id)=>{ const c=cur(); if(!c||S.capBusy)return; const instr=prompt('How should I change this page?'); if(!instr||!instr.trim())return;
+    const request={schemaVersion:'esh.execute.request.v1',capability:'webArtifact.generate',
+      inputs:[{payload:{text:{_0:instr.trim(),_1:'instruction'}}}],
+      output:{modality:'text',format:'text/html'},
+      constraints:{latency:'interactive',localOnly:true},
+      options:{values:{sourceArtifactID:id}}};
+    c.messages.push({id:uid(),role:'user',content:'Edit: '+instr.trim()}); saveChats();
+    runCapabilityRequest(c, request, 'Editing web page…'); },
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
 function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; if(open)S[open]=true; }
@@ -736,7 +745,7 @@ function artifactHTML(a){
     return `<div class="astart"><iframe class="astweb" src="${entry}" sandbox="allow-scripts allow-pointer-lock"`
       +` title="web artifact preview" loading="lazy" style="width:100%;height:360px;border:0;border-radius:10px;background:#fff"></iframe>`
       +`<div class="astartbar"><span class="mono">web page · sandboxed</span>`
-      +`<span><a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
+      +`<span><a class="alink" data-act="editWebArtifact" data-arg="${esch(a.id)}">Edit</a> · <a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
   }
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }

@@ -31,6 +31,31 @@ struct WebArtifactProviderTests {
         #expect(String(decoding: bytes, as: UTF8.self).contains("<h1>Hi</h1>"))
     }
 
+    @Test func revisesPriorArtifactWithLineage() async throws {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        // v1
+        let r1 = try await CapabilityExecutionService(registry: CapabilityRegistry(providers: [
+            WebArtifactProvider(infer: mockInfer("<!DOCTYPE html><html><body><h1>v1 page</h1></body></html>"))]), context: ctx)
+            .executeCollecting(ExecutionRequest(capability: .webArtifactGenerate, inputs: [.text("a v1 page")], output: .webArtifact))
+        let a1 = try #require(r1.outputs.first)
+        // Revise: the infer proves it received the prior HTML (returns v2 only then), and lineage is recorded.
+        let reviser = WebArtifactProvider(infer: { req in
+            let sawPrior = (req.messages.last?.text ?? "").contains("<h1>v1 page</h1>")
+            let out = sawPrior ? "<!DOCTYPE html><html><body><h1>v2 page</h1></body></html>"
+                               : "<!DOCTYPE html><html><body>no prior seen</body></html>"
+            return ExternalInferenceResponse(modelID: "m", backend: .mlx, integration: .init(mode: "direct"),
+                                             outputText: out, metrics: .init(contextTokens: 1))
+        })
+        let r2 = try await CapabilityExecutionService(registry: CapabilityRegistry(providers: [reviser]), context: ctx)
+            .executeCollecting(ExecutionRequest(capability: .webArtifactGenerate, inputs: [.text("rename heading to v2")],
+                output: .webArtifact, options: ExecutionOptions(["sourceArtifactID": .string(a1.id.uuidString)])))
+        let a2 = try #require(r2.outputs.first)
+        #expect(a2.generatedBy.sourceArtifactID == a1.id)     // lineage
+        #expect(a2.metadata["revised"] == .bool(true))
+        let html2 = try #require(try ctx.artifactStore.data(id: a2.id, file: "index.html"))
+        #expect(String(decoding: html2, as: UTF8.self).contains("<h1>v2 page</h1>"))   // proves prior HTML was loaded
+    }
+
     @Test func extractsHTMLFromMarkdownFencesAndProse() {
         let raw = "Sure! Here is your page:\n```html\n<!DOCTYPE html><html><body>ok</body></html>\n```\nHope it helps!"
         let html = WebArtifactProvider.extractHTML(raw)
