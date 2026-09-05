@@ -73,5 +73,15 @@ public enum CapabilityRequirementCatalog {
                           componentName: "FLUX.2 Klein 4B (Apache-2.0)", recommendedRepo: "black-forest-labs/FLUX.2-klein-4B", approxSizeMB: 24000),
         .audioDiarize: .init(capability: .audioDiarize, kind: .assetFile(relativePath: "diarization-models/segmentation.onnx"),
                              componentName: "sherpa-onnx diarization", recommendedRepo: "sherpa-onnx speaker models", approxSizeMB: 45),
+        // audio.generate NEURAL SFX (deterministic noise/tones are gated out in IntentResolver): AudioGen via
+        // the isolated audio runtime. music.generate: MusicGen. Both download to the SSD audio-models cache.
+        // approxSizeMB is WEIGHTS/STORAGE footprint (measured on-disk), distinct from peak RUNTIME memory (the
+        // bridge's free-RAM floors: SFX 6000 MB, music 2500 MB) and PERFORMANCE (SFX gen RTF ~5.6–6.3×, music
+        // ~1.4–1.9×). AudioGen 3.6 GB matches measured; MusicGen's on-disk cache is ~2.2 GB (weights + T5 text
+        // encoder + EnCodec, fp32), not the ~1.2 GB the raw model card implies — corrected to measured evidence.
+        .audioGenerate: .init(capability: .audioGenerate, kind: .assetFile(relativePath: "audio-models/hub/models--facebook--audiogen-medium"),
+                              componentName: "AudioGen (SFX, isolated runtime)", recommendedRepo: "facebook/audiogen-medium", approxSizeMB: 3600),
+        .musicGenerate: .init(capability: .musicGenerate, kind: .assetFile(relativePath: "audio-models/hub/models--facebook--musicgen-small"),
+                              componentName: "MusicGen (CC-BY-NC)", recommendedRepo: "facebook/musicgen-small", approxSizeMB: 2200),
     ]
 }

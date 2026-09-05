@@ -12,6 +12,7 @@ public struct DoctorReport: Codable, Sendable {
     public var engines: [EngineStatus]
     public var models: DoctorModelsReport
     public var appleIntelligence: AppleIntelligenceStatus
+    public var audio: AudioRuntimeStatus
     public var stateRoot: String
     public var configPath: String
 
@@ -24,6 +25,7 @@ public struct DoctorReport: Codable, Sendable {
         engines: [EngineStatus],
         models: DoctorModelsReport,
         appleIntelligence: AppleIntelligenceStatus,
+        audio: AudioRuntimeStatus,
         stateRoot: String,
         configPath: String
     ) {
@@ -35,8 +37,25 @@ public struct DoctorReport: Codable, Sendable {
         self.engines = engines
         self.models = models
         self.appleIntelligence = appleIntelligence
+        self.audio = audio
         self.stateRoot = stateRoot
         self.configPath = configPath
+    }
+}
+
+/// State of the generative-audio backends. SFX (AudioGen) runs in an ISOLATED Python runtime kept off the
+/// main venv; music (MusicGen) runs in the bridge. Both cache weights under the assets root (SSD), never the
+/// internal HF cache. Reported so the neural audio provider is observable and installable as first-class.
+public struct AudioRuntimeStatus: Codable, Sendable {
+    /// Path to the isolated AudioGen venv python, if discoverable (env override or a known managed path).
+    public var isolatedRuntimePath: String?
+    public var sfxModelInstalled: Bool     // facebook/audiogen-medium present under the assets cache
+    public var musicModelInstalled: Bool   // facebook/musicgen-small present under the assets cache
+
+    public init(isolatedRuntimePath: String?, sfxModelInstalled: Bool, musicModelInstalled: Bool) {
+        self.isolatedRuntimePath = isolatedRuntimePath
+        self.sfxModelInstalled = sfxModelInstalled
+        self.musicModelInstalled = musicModelInstalled
     }
 }
 
@@ -76,6 +95,7 @@ public struct DoctorService: Sendable {
             engines: engines,
             models: models,
             appleIntelligence: AppleIntelligenceService().status(),
+            audio: audioRuntimeStatus(root: root),
             stateRoot: root.stateRootURL.path,
             configPath: root.stateRootURL.appendingPathComponent("config.toml").path
         )
@@ -103,6 +123,25 @@ public struct DoctorService: Sendable {
             incomplete: incomplete,
             defaultModel: defaultModel
         )
+    }
+
+    /// Probe the generative-audio backends: is the isolated SFX runtime discoverable, and are the model
+    /// weights cached under the assets root? Pure on-disk / env checks — no downloads, no subprocess.
+    private func audioRuntimeStatus(root: PersistenceRoot) -> AudioRuntimeStatus {
+        let fm = FileManager.default
+        var isolated: String?
+        var candidates: [String] = []
+        if let env = ProcessInfo.processInfo.environment["ESH_AUDIOGEN_PYTHON"], !env.isEmpty {
+            candidates.append(env)
+        }
+        candidates.append("/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv/bin/python")
+        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".esh/runtime/audio/audiogen-mlx/venv/bin/python"))
+        for c in candidates where fm.fileExists(atPath: c) { isolated = c; break }
+
+        let audioCache = root.cachesURL.appendingPathComponent("audio-models/hub", isDirectory: true)
+        let sfx = fm.fileExists(atPath: audioCache.appendingPathComponent("models--facebook--audiogen-medium").path)
+        let music = fm.fileExists(atPath: audioCache.appendingPathComponent("models--facebook--musicgen-small").path)
+        return AudioRuntimeStatus(isolatedRuntimePath: isolated, sfxModelInstalled: sfx, musicModelInstalled: music)
     }
 
     public static func macOSVersionString() -> String {

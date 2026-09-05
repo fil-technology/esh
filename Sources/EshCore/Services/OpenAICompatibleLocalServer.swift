@@ -1,6 +1,22 @@
 import Foundation
 import Network
 
+/// Thread-safe holder that ties a client connection's lifetime to its producer Task: cancellation can arrive
+/// (on the connection queue) before the Task is even created, so a cancel before `set` still cancels on set.
+private final class CancelBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    func set(_ t: Task<Void, Never>) {
+        lock.lock(); defer { lock.unlock() }
+        if cancelled { t.cancel() } else { task = t }
+    }
+    func cancel() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true; task?.cancel(); task = nil
+    }
+}
+
 public final class OpenAICompatibleLocalServer: @unchecked Sendable {
     private enum HostMode {
         case loopback
@@ -124,15 +140,47 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
     /// Send headers, then stream body chunks from the response's provider as they arrive, then close.
     private func sendStreaming(response: OpenAICompatibleHTTPResponse, on connection: NWConnection) {
         guard let provider = response.bodyStream else { send(response: response, on: connection); return }
+        // Cancel the producer when the client goes away. Otherwise the generation (and any worker subprocess)
+        // runs to completion writing into a dead socket. Cancelling the Task makes the CapabilityEvent stream's
+        // onTermination fire → the provider cancels its work → ProcessRunner SIGTERMs the bridge → the bridge's
+        // reaper kills the isolated worker group. No orphan, memory reclaimed on client disconnect.
+        let cancelBox = CancelBox()
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .failed, .cancelled: cancelBox.cancel()
+            default: break
+            }
+        }
+        // A long generation produces no output for many seconds, so nothing reads or writes the socket and
+        // NWConnection never notices a client that hung up. Post a receive that stays pending until the client
+        // closes (FIN → isComplete) or errors — that is our disconnect signal, and it cancels the producer.
+        watchForDisconnect(connection: connection, cancelBox: cancelBox)
         connection.send(content: serializeHeadersOnly(response: response), completion: .contentProcessed { _ in })
-        Task {
+        let task = Task {
             await provider { chunk in
-                connection.send(content: chunk, completion: .contentProcessed { _ in })
+                connection.send(content: chunk, completion: .contentProcessed { error in
+                    if error != nil { cancelBox.cancel() }   // client vanished mid-stream
+                })
             }
             // Finalize once the last chunk has been handed to the connection.
             connection.send(content: Data(), completion: .contentProcessed { _ in
                 connection.cancel()
             })
+        }
+        cancelBox.set(task)
+    }
+
+    /// Keep a receive pending on a streaming connection purely to detect the client hanging up. HTTP clients
+    /// send nothing more after the request, so this completes only when the peer closes (isComplete) or the
+    /// connection errors — at which point we cancel the in-flight producer (stopping generation + its worker).
+    private func watchForDisconnect(connection: NWConnection, cancelBox: CancelBox) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                cancelBox.cancel()
+                return
+            }
+            // Client sent unexpected extra bytes but is still connected — keep watching.
+            self?.watchForDisconnect(connection: connection, cancelBox: cancelBox)
         }
     }
 

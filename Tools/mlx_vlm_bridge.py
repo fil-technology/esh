@@ -1132,6 +1132,7 @@ def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, start_new_session=True)
     except Exception as exc:  # noqa: BLE001
         _fail(f"{label} failed to launch: {type(exc).__name__}: {exc}")
+    _register_child_pgid(proc.pid)   # bridge cancellation reaps this group too (no orphan CLI)
 
     def _kill() -> None:
         try:
@@ -1160,6 +1161,7 @@ def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str
             detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
             _fail(f"{label} stopped to protect the machine: low memory ({detail})")
 
+    _unregister_child_pgid(proc.pid)
     stderr = ""
     try:
         stderr = (proc.stderr.read() if proc.stderr else "") or ""
@@ -1960,6 +1962,7 @@ def speech_serve() -> None:
 
 
 def main() -> None:
+    _install_child_reaper()   # bridge cancellation must reclaim any long-running worker groups (no orphans)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
@@ -2047,6 +2050,129 @@ _MUSICGEN_MODELS = {
 }
 
 
+# --- Orphan-free cancellation: track child process GROUPS so a parent (bridge) death reclaims them. ---
+# Long-running workers are spawned with start_new_session=True (own process group) so THIS process can kill
+# the whole tree in one syscall. But a NEW session also means the OS will NOT auto-signal them when the bridge
+# dies — so if the bridge is itself terminated (Swift ProcessRunner cancels → SIGTERM, then SIGKILL), those
+# groups must be reaped explicitly or they orphan mid-compute. We register each group and install a SIGTERM
+# handler that SIGKILLs them before exiting. (SIGKILL to the bridge can't be handled — hence ProcessRunner's
+# 2s SIGTERM grace, which this handler uses to tear the workers down first.)
+_CHILD_PGIDS: "set[int]" = set()
+
+
+def _register_child_pgid(pid: int) -> None:
+    import os
+    try:
+        _CHILD_PGIDS.add(os.getpgid(pid))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _unregister_child_pgid(pid: int) -> None:
+    import os
+    try:
+        _CHILD_PGIDS.discard(os.getpgid(pid))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _install_child_reaper() -> None:
+    """On SIGTERM (bridge cancellation), SIGKILL every registered worker group, then exit — no orphans."""
+    import os
+    import signal
+
+    def _on_term(signum, _frame):  # noqa: ANN001
+        for pgid in list(_CHILD_PGIDS):
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
+        os._exit(143)  # 128 + SIGTERM
+
+    try:
+        signal.signal(signal.SIGTERM, _on_term)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _isolated_audiogen_python() -> "str | None":
+    """Locate the ISOLATED audio-runtime venv (mlx-audiocraft / AudioGen) — env override, then known paths.
+    Kept separate from the main esh venv so its deps never destabilize the MLX LLM/VLM runtime."""
+    import os
+    cand = [os.environ.get("ESH_AUDIOGEN_PYTHON")]
+    cand += [
+        "/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv/bin/python",
+        os.path.expanduser("~/.esh/runtime/audio/audiogen-mlx/venv/bin/python"),
+    ]
+    for c in cand:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _generate_sfx_isolated(request: dict) -> None:
+    """audio.generate SFX → run AudioGen inside the isolated venv (Tools/esh_audiogen.py), RAM-floor guarded."""
+    import os, subprocess, json as _json
+    py = _isolated_audiogen_python()
+    if not py:
+        _fail("the AudioGen SFX runtime is not installed — run scripts/setup-audio-runtime.sh "
+              "(installs mlx-audiocraft into an isolated venv on managed storage)")
+    min_free = float(request.get("minFreeMemMB") or 6000)   # AudioGen-medium + T5 is memory-heavy
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"sound generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_audiogen.py")
+    env = dict(os.environ)
+    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1"})
+    hf = request.get("hfCache")
+    if hf:
+        env["HF_HOME"] = hf; env["HF_HUB_CACHE"] = os.path.join(hf, "hub")
+    import signal
+    # Own process group (start_new_session) so we can kill the whole worker tree at once. Registered with the
+    # SIGTERM reaper so a bridge cancellation tears the worker down instead of orphaning it (see _install_child_reaper).
+    try:
+        proc = subprocess.Popen([py, script], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"sound generation failed to launch: {type(exc).__name__}: {exc}")
+    _register_child_pgid(proc.pid)
+    try:
+        out, err = proc.communicate(input=_json.dumps(request), timeout=1200)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # kill the group, not just the leader
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except Exception:  # noqa: BLE001
+            pass
+        _fail("sound generation timed out")
+    finally:
+        _unregister_child_pgid(proc.pid)
+    if proc.returncode != 0:
+        _fail(f"sound generation failed: {(err or out or '')[-300:]}")
+    line = [l for l in (out or "").strip().splitlines() if l.strip().startswith("{")]
+    if not line:
+        _fail(f"sound generation produced no result: {(out or err or '')[-200:]}")
+    res = _json.loads(line[-1])
+    if res.get("error"):
+        _fail(res["error"])
+    _dump_json(res)
+
+
+def _peak_normalize(arr, ceiling: float = 0.99):
+    """Deterministic true-peak limiter: if the signal would clip (peak > ceiling), scale it down by a single
+    constant so the loudest sample sits at `ceiling`. Linear gain preserves relative dynamics exactly; safe
+    outputs (peak <= ceiling) are returned untouched. Returns (arr, original_peak, normalized?).
+    Mirrored in Tools/esh_audiogen.py (the isolated SFX worker) — keep the two in sync."""
+    import numpy as np
+    peak = float(np.max(np.abs(arr))) if getattr(arr, "size", 0) else 0.0
+    if peak > ceiling:
+        return arr * (ceiling / peak), peak, True
+    return arr, peak, False
+
+
 def audio_or_music_generate(kind: str) -> None:
     import os
     request = _load_json()
@@ -2054,12 +2180,22 @@ def audio_or_music_generate(kind: str) -> None:
     out_path = request["outputPath"]
     if not prompt:
         _fail("audio generation requires a text prompt")
+    # SFX/ambience → the qualified AudioGen model in the isolated runtime (not MusicGen).
+    if kind == "sound":
+        _route_hf_cache(request.get("hfCache"))
+        _generate_sfx_isolated(request)
+        return
     seconds = float(request.get("seconds") or 10.0)
     seconds = max(1.0, min(30.0, seconds))            # MusicGen practical single-shot range
     seed = int(request.get("seed") or 0)
     spec = _MUSICGEN_MODELS.get(kind, _MUSICGEN_MODELS["music"])
     model_repo = request.get("model") or spec["repo"]
     _route_hf_cache(request.get("hfCache"))
+    # huggingface_hub freezes its cache dir at import time (pulled in transitively before _route_hf_cache
+    # runs), so setting HF_HUB_CACHE alone leaks a duplicate copy onto the internal disk. Pass cache_dir
+    # explicitly so MusicGen's weights land ONLY in the routed (SSD) cache. No-op when hfCache is unset.
+    hf_cache = request.get("hfCache")
+    hub_cache = os.path.join(hf_cache, "hub") if hf_cache else None
 
     min_free = float(request.get("minFreeMemMB") or 2500)
     avail = _available_mem_mb()
@@ -2078,8 +2214,9 @@ def audio_or_music_generate(kind: str) -> None:
     # For SFX/ambience, steer the music model away from melody toward field-recording textures.
     text = prompt if kind == "music" else f"{prompt}. ambient field recording, environmental sound, no melody, no drums"
     try:
-        proc = AutoProcessor.from_pretrained(model_repo)
-        model = MusicgenForConditionalGeneration.from_pretrained(model_repo).to(dev)
+        proc = AutoProcessor.from_pretrained(model_repo, cache_dir=hub_cache)
+        model = MusicgenForConditionalGeneration.from_pretrained(model_repo, cache_dir=hub_cache).to(dev)
+        revision = getattr(model.config, "_commit_hash", None)   # resolved HF revision (provenance)
         sr = int(model.config.audio_encoder.sampling_rate)
         inp = proc(text=[text], padding=True, return_tensors="pt").to(dev)
         max_new = int(seconds * 50)                    # ~50 audio frames / second
@@ -2090,10 +2227,12 @@ def audio_or_music_generate(kind: str) -> None:
         _fail(f"audio generation failed: {e}")
 
     import soundfile as sf
+    wav, peak, normalized = _peak_normalize(wav)   # prevent clipping (MusicGen can exceed full scale)
     sf.write(out_path, wav, sr)
     actual = len(wav) / sr
     _dump_json({"outputPath": out_path, "seconds": round(actual, 3), "sampleRate": sr, "channels": 1,
-                "provider": spec["provider"], "model": model_repo, "license": spec["license"]})
+                "provider": spec["provider"], "model": model_repo, "revision": revision, "license": spec["license"],
+                "peak": round(peak, 4), "normalized": normalized})
 
 
 if __name__ == "__main__":
