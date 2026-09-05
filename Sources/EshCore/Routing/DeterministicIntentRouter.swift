@@ -124,11 +124,41 @@ public enum CapabilityRouteCatalog {
         if projectCues.contains(where: { text.contains($0) }) { return .projectGenerate }
         // Tier-B browser-native (interactive 3D / Three.js) → a runnable project (before generic web/image).
         if browserNativeProjectType(text) != nil { return .projectGenerate }
+        // Generative audio: non-speech sound/ambience → audio.generate, music → music.generate.
+        if let audioCap = audioMusicCapability(text) { return audioCap }
         // A web page is a self-contained HTML artifact (checked before generic "image").
         if webNouns.contains(where: { text.contains($0) }) { return .webArtifactGenerate }
         if visualNouns.contains(where: { text.contains($0) }) { return .imageGenerate }
         // "logo/icon" without svg/vector is still typically a vector ask.
         if text.contains("logo") || text.contains("icon") { return .vectorGenerate }
+        return nil
+    }
+
+    /// Generative-audio routing (verb already present). Music (synth/soundtrack/…) → music.generate; non-speech
+    /// sound/ambience/SFX → audio.generate. Visual asks (photo/picture/landscape) are excluded so "a photo of
+    /// rain" stays image.generate. "no music" negates the music cue (so "rain … no music" → audio.generate).
+    static func audioMusicCapability(_ text: String) -> CapabilityID? {
+        // Visual or web generation owns the request — never treat "forest"/"cafe" there as audio.
+        if text.contains("photo") || text.contains("picture") || text.contains("image")
+            || visualNouns.contains(where: { text.contains($0) })
+            || webNouns.contains(where: { text.contains($0) })
+            || text.contains(" page") || text.contains("website") { return nil }
+        // Unambiguous sound words route without extra framing.
+        let strongAudio = ["noise", "sound of", "sound effect", "sfx", "foley", "ambience", "ambient sound",
+                           "white noise", "pink noise", "brown noise", " tone", "sine wave", "sweep", "chirp",
+                           "footsteps", "thunder", "crackl", "whoosh", "rumble", "heartbeat", "raindrop"]
+        if strongAudio.contains(where: { text.contains($0) }) { return .audioGenerate }
+        let musicNouns = ["music", "song", "melody", "soundtrack", "synth", "lo-fi", "lofi", "orchestral",
+                          "piano", "instrumental", "chiptune", "8-bit", "8bit", " score", "jingle", "cinematic cue", " beat"]
+        let musicNegated = text.contains("no music") || text.contains("without music")
+        if !musicNegated, musicNouns.contains(where: { text.contains($0) }) { return .musicGenerate }
+        // Ambiguous environmental cues need audio framing ("N seconds of …", "sound"/"audio"/"ambient", or an
+        // explicit "no music"), so "a landing page for a cafe" or "a forest logo" don't misroute.
+        let framed = text.range(of: #"seconds?\s+of"#, options: .regularExpression) != nil
+            || text.contains("sound") || text.contains("audio") || text.contains("ambient") || musicNegated
+        let weakAudio = ["rain", "wave", "fireplace", " wind", "birds", "forest", "ocean", "storm"]
+        if framed, weakAudio.contains(where: { text.contains($0) }) { return .audioGenerate }
+        if text.range(of: #"seconds?\s+of"#, options: .regularExpression) != nil { return .audioGenerate }
         return nil
     }
 }

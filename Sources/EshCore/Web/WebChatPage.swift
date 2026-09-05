@@ -763,6 +763,14 @@ function artifactHTML(a){
     return `<div class="astart"><img class="astimg" src="${url}" alt="${esch(a.kind)} result" loading="lazy">`
       +`<div class="astartbar"><span class="mono">${esch(a.mimeType||a.kind)}</span><a class="alink" href="${url}" download>Download</a></div></div>`;
   }
+  if(a.kind==='audio'){
+    const m=a.metadata||{}; const dur=m.durationSeconds?(Math.round(m.durationSeconds*10)/10+'s'):'';
+    const label=(m.provider==='deterministic-dsp')?(m.model||'audio').replace('esh.dsp.','')+' · DSP':(m.provider||'audio');
+    const sr=m.sampleRate?(' · '+Math.round(m.sampleRate/1000)+'kHz'):'';
+    return `<div class="astart"><audio controls preload="metadata" src="${url}/result.wav" style="width:100%;margin:2px 0"></audio>`
+      +`<div class="astartbar"><span class="mono">${esch(label)}${esch(dur?' · '+dur:'')}${esch(sr)}</span>`
+      +`<a class="alink" href="${url}/result.wav" download>Download</a></div></div>`;
+  }
   if(a.kind==='webProject'){
     // Isolated preview: sandbox WITHOUT allow-same-origin → the page's JS runs but can't touch the parent,
     // cookies, storage, or navigate the top window. Served same-origin but the sandbox gives it an opaque origin.

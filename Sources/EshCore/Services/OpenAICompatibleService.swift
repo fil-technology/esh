@@ -1092,6 +1092,19 @@ public struct OpenAICompatibleService: Sendable {
                 try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction,
                                           backend: backend, model: model, quantize: quantize, minFreeMemMB: minFree, hfCache: hfCache)
             }))
+            // audio.generate (SFX/ambience) + music.generate. Deterministic DSP (noise/tones/sweeps) needs no
+            // model; neural requests (rain, footsteps, music) go through the RAM-guarded bridge (AudioGen /
+            // MusicGen). The neural closure is nil until those models are installed (Install-and-Resume).
+            let audioGenService = AudioGenService()
+            let audioModelDir = root.cachesURL.appendingPathComponent("audio-models", isDirectory: true).path
+            registryUCMR.register(AudioGenProvider(neural: { prompt, outPath, seconds, seed, sr, minFree, hfCache in
+                try audioGenService.generate(kind: .sound, prompt: prompt, outputPath: outPath, seconds: seconds,
+                                             seed: seed, sampleRate: sr, minFreeMemMB: minFree, hfCache: hfCache ?? audioModelDir)
+            }))
+            registryUCMR.register(MusicGenProvider(neural: { prompt, outPath, seconds, seed, sr, minFree, hfCache in
+                try audioGenService.generate(kind: .music, prompt: prompt, outputPath: outPath, seconds: seconds,
+                                             seed: seed, sampleRate: sr, minFreeMemMB: minFree, hfCache: hfCache ?? audioModelDir)
+            }))
             // Image super-resolution / upscale. Default backend: Real-ESRGAN ONNX (onnxruntime, torch-free,
             // model auto-downloaded to the assets root). SeedVR2 (mflux) remains selectable but experimental.
             let imageUpscaleService = ImageUpscaleService()
