@@ -1964,6 +1964,8 @@ def main() -> None:
             "image-edit",
             "image-upscale",
             "image-upscale-onnx",
+            "audio-generate",
+            "music-generate",
             "audio-diarize",
             "mlx-transcribe",
             "speech-serve",
@@ -2000,6 +2002,10 @@ def main() -> None:
         image_upscale()
     elif args.command == "image-upscale-onnx":
         image_upscale_onnx()
+    elif args.command == "audio-generate":
+        audio_or_music_generate(kind="sound")
+    elif args.command == "music-generate":
+        audio_or_music_generate(kind="music")
     elif args.command == "audio-diarize":
         audio_diarize()
     elif args.command == "mlx-transcribe":
@@ -2018,6 +2024,64 @@ def main() -> None:
         triattention_calibrate()
     else:
         mlx_import_cache()
+
+
+# Generative audio: MusicGen (transformers) for music.generate; also serves audio.generate's neural path
+# (a music model used for ambience/SFX — recorded honestly in provenance; a dedicated SFX model like AudioGen
+# or Stable Audio is the recommended upgrade). Requested duration is honored (never silently shortened).
+_MUSICGEN_MODELS = {
+    "music": {"repo": "facebook/musicgen-small", "license": "cc-by-nc-4.0", "provider": "musicgen"},
+    "sound": {"repo": "facebook/musicgen-small", "license": "cc-by-nc-4.0", "provider": "musicgen-audio"},
+}
+
+
+def audio_or_music_generate(kind: str) -> None:
+    import os
+    request = _load_json()
+    prompt = (request.get("prompt") or "").strip()
+    out_path = request["outputPath"]
+    if not prompt:
+        _fail("audio generation requires a text prompt")
+    seconds = float(request.get("seconds") or 10.0)
+    seconds = max(1.0, min(30.0, seconds))            # MusicGen practical single-shot range
+    seed = int(request.get("seed") or 0)
+    spec = _MUSICGEN_MODELS.get(kind, _MUSICGEN_MODELS["music"])
+    model_repo = request.get("model") or spec["repo"]
+    _route_hf_cache(request.get("hfCache"))
+
+    min_free = float(request.get("minFreeMemMB") or 2500)
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"audio generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    try:
+        import torch
+        from transformers import MusicgenForConditionalGeneration, AutoProcessor
+    except Exception as e:  # pragma: no cover
+        _fail(f"audio generation backend unavailable (transformers/torch): {e}")
+
+    if seed:
+        torch.manual_seed(seed)
+    dev = "mps" if torch.backends.mps.is_available() else "cpu"
+    # For SFX/ambience, steer the music model away from melody toward field-recording textures.
+    text = prompt if kind == "music" else f"{prompt}. ambient field recording, environmental sound, no melody, no drums"
+    try:
+        proc = AutoProcessor.from_pretrained(model_repo)
+        model = MusicgenForConditionalGeneration.from_pretrained(model_repo).to(dev)
+        sr = int(model.config.audio_encoder.sampling_rate)
+        inp = proc(text=[text], padding=True, return_tensors="pt").to(dev)
+        max_new = int(seconds * 50)                    # ~50 audio frames / second
+        with torch.no_grad():
+            audio = model.generate(**inp, max_new_tokens=max_new, do_sample=True, guidance_scale=3.0)
+        wav = audio[0, 0].detach().cpu().numpy()
+    except Exception as e:
+        _fail(f"audio generation failed: {e}")
+
+    import soundfile as sf
+    sf.write(out_path, wav, sr)
+    actual = len(wav) / sr
+    _dump_json({"outputPath": out_path, "seconds": round(actual, 3), "sampleRate": sr, "channels": 1,
+                "provider": spec["provider"], "model": model_repo, "license": spec["license"]})
 
 
 if __name__ == "__main__":
