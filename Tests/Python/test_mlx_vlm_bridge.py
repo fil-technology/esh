@@ -261,5 +261,36 @@ class MLXVLMBridgeTests(unittest.TestCase):
             temp_dir.rmdir()
 
 
+    def test_peak_normalize_limits_clipping_and_preserves_dynamics(self):
+        # Regression: the frozen lo-fi music fixture produced peak ~1.462 (clipping). The limiter must
+        # scale the signal so the loudest sample sits at the ceiling, WITHOUT distorting relative dynamics.
+        bridge = load_bridge_module()
+        clipping = np.array([1.462, -0.731, 0.3655, 0.0], dtype=np.float32)  # peak 1.462, ratios 2:1 and 4:1
+        out, peak, normalized = bridge._peak_normalize(clipping, ceiling=0.99)
+        self.assertTrue(normalized)
+        self.assertAlmostEqual(peak, 1.462, places=3)                          # reports the ORIGINAL peak
+        self.assertLessEqual(float(np.max(np.abs(out))), 0.99 + 1e-6)          # no clipping
+        self.assertAlmostEqual(float(np.max(np.abs(out))), 0.99, places=4)     # loudest sits at ceiling
+        # Dynamics preserved: every pairwise ratio is unchanged (pure linear gain).
+        self.assertAlmostEqual(out[0] / out[1], clipping[0] / clipping[1], places=5)
+        self.assertAlmostEqual(out[0] / out[2], clipping[0] / clipping[2], places=5)
+
+    def test_peak_normalize_leaves_safe_output_untouched(self):
+        # "Do not alter already-safe outputs unnecessarily": a signal under the ceiling passes through
+        # unchanged (same object semantics not required, but values must be identical) and normalized=False.
+        bridge = load_bridge_module()
+        safe = np.array([0.5, -0.25, 0.10, 0.0], dtype=np.float32)
+        out, peak, normalized = bridge._peak_normalize(safe, ceiling=0.99)
+        self.assertFalse(normalized)
+        self.assertAlmostEqual(peak, 0.5, places=5)
+        np.testing.assert_allclose(out, safe)
+
+    def test_peak_normalize_handles_silence(self):
+        bridge = load_bridge_module()
+        out, peak, normalized = bridge._peak_normalize(np.zeros(8, dtype=np.float32))
+        self.assertFalse(normalized)
+        self.assertEqual(peak, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

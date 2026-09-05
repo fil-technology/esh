@@ -15,6 +15,29 @@ def _fail(msg: str) -> None:
     sys.exit(1)
 
 
+def _resolve_revision(repo: str) -> "str | None":
+    """Best-effort HF snapshot commit hash for `repo` from the local cache (provenance; never fails hard)."""
+    import os
+    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME", ""), "hub")
+    snaps = os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots")
+    try:
+        dirs = [d for d in os.listdir(snaps) if not d.startswith(".")]
+        return dirs[0] if dirs else None
+    except Exception:
+        return None
+
+
+def _peak_normalize(arr, ceiling: float = 0.99):
+    """Deterministic true-peak limiter (mirrors Tools/mlx_vlm_bridge.py._peak_normalize — keep in sync):
+    scale down by a single constant only if the signal would clip; safe outputs are returned untouched.
+    Linear gain preserves relative dynamics. Returns (arr, original_peak, normalized?)."""
+    import numpy as np
+    peak = float(np.max(np.abs(arr))) if getattr(arr, "size", 0) else 0.0
+    if peak > ceiling:
+        return arr * (ceiling / peak), peak, True
+    return arr, peak, False
+
+
 def main() -> None:
     try:
         req = json.loads(sys.stdin.read() or "{}")
@@ -43,6 +66,7 @@ def main() -> None:
         channels = 1 if arr.shape[1] == 1 else arr.shape[1]
         if channels == 1:
             arr = arr[:, 0]
+        arr, peak, normalized = _peak_normalize(arr)   # clip guard (AudioGen SFX is usually safe; no-op then)
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         sf.write(out_path, arr, sr)
         dur = arr.shape[0] / sr
@@ -50,7 +74,8 @@ def main() -> None:
         _fail(f"audio generation failed: {e}")
     print(json.dumps({"outputPath": out_path, "seconds": round(dur, 3), "sampleRate": sr,
                       "channels": channels, "provider": "audiogen-mlx", "model": model_id,
-                      "license": "cc-by-nc-4.0"}), flush=True)
+                      "revision": _resolve_revision(model_id), "license": "cc-by-nc-4.0",
+                      "peak": round(peak, 4), "normalized": normalized}), flush=True)
 
 
 if __name__ == "__main__":

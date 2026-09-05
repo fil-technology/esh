@@ -131,9 +131,16 @@ struct SplitMix64 {
 public struct AudioGenResult: Sendable {
     public let seconds: Double, sampleRate: Int, channels: Int
     public let provider: String, model: String, license: String
-    public init(seconds: Double, sampleRate: Int, channels: Int, provider: String, model: String, license: String) {
+    /// Resolved model revision (HF snapshot commit hash) when known — provenance.
+    public let revision: String?
+    /// Peak amplitude (0…1+) of the generated signal BEFORE any limiting, and whether a deterministic
+    /// peak-normalization was applied to prevent clipping. Recorded in artifact provenance.
+    public let peak: Double?, normalized: Bool
+    public init(seconds: Double, sampleRate: Int, channels: Int, provider: String, model: String, license: String,
+                revision: String? = nil, peak: Double? = nil, normalized: Bool = false) {
         self.seconds = seconds; self.sampleRate = sampleRate; self.channels = channels
         self.provider = provider; self.model = model; self.license = license
+        self.revision = revision; self.peak = peak; self.normalized = normalized
     }
 }
 
@@ -252,12 +259,14 @@ enum AudioGenRunner {
 
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     let validation = AudioArtifactComposer.validateWAV(bytes, expectedSeconds: result.seconds)
-                    let meta: [String: JSONValue] = [
+                    var meta: [String: JSONValue] = [
                         "durationSeconds": .double((validation.isValid ? result.seconds : 0)),
                         "sampleRate": .int(result.sampleRate), "channels": .int(result.channels),
                         "byteSize": .int(bytes.count), "prompt": .string(prompt), "seed": .int(seed),
                         "provider": .string(result.provider), "model": .string(result.model), "license": .string(result.license),
-                        "format": .string("wav")]
+                        "format": .string("wav"), "normalized": .bool(result.normalized)]
+                    if let peak = result.peak { meta["peak"] = .double(peak) }   // pre-limiter peak amplitude
+                    if let rev = result.revision { meta["revision"] = .string(rev) }
                     let artifact = Artifact(
                         kind: .audio, mimeType: "audio/wav", entrypoint: "result.wav", metadata: meta,
                         generatedBy: ArtifactProvenance(providerID: providerID, modelID: result.model, capability: capability),
@@ -295,7 +304,8 @@ public struct AudioGenService: Sendable {
                              sampleRate: sampleRate, minFreeMemMB: minFreeMemMB, hfCache: hfCache),
             as: Response.self)
         return AudioGenResult(seconds: r.seconds, sampleRate: r.sampleRate, channels: r.channels,
-                              provider: r.provider, model: r.model, license: r.license)
+                              provider: r.provider, model: r.model, license: r.license,
+                              revision: r.revision, peak: r.peak, normalized: r.normalized ?? false)
     }
     private struct Request: Codable, Sendable {
         let prompt: String; let outputPath: String; let seconds: Double; let seed: Int
@@ -304,5 +314,6 @@ public struct AudioGenService: Sendable {
     private struct Response: Codable, Sendable {
         let outputPath: String; let seconds: Double; let sampleRate: Int; let channels: Int
         let provider: String; let model: String; let license: String
+        let revision: String?; let peak: Double?; let normalized: Bool?
     }
 }

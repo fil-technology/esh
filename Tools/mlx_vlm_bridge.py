@@ -2161,6 +2161,18 @@ def _generate_sfx_isolated(request: dict) -> None:
     _dump_json(res)
 
 
+def _peak_normalize(arr, ceiling: float = 0.99):
+    """Deterministic true-peak limiter: if the signal would clip (peak > ceiling), scale it down by a single
+    constant so the loudest sample sits at `ceiling`. Linear gain preserves relative dynamics exactly; safe
+    outputs (peak <= ceiling) are returned untouched. Returns (arr, original_peak, normalized?).
+    Mirrored in Tools/esh_audiogen.py (the isolated SFX worker) — keep the two in sync."""
+    import numpy as np
+    peak = float(np.max(np.abs(arr))) if getattr(arr, "size", 0) else 0.0
+    if peak > ceiling:
+        return arr * (ceiling / peak), peak, True
+    return arr, peak, False
+
+
 def audio_or_music_generate(kind: str) -> None:
     import os
     request = _load_json()
@@ -2204,6 +2216,7 @@ def audio_or_music_generate(kind: str) -> None:
     try:
         proc = AutoProcessor.from_pretrained(model_repo, cache_dir=hub_cache)
         model = MusicgenForConditionalGeneration.from_pretrained(model_repo, cache_dir=hub_cache).to(dev)
+        revision = getattr(model.config, "_commit_hash", None)   # resolved HF revision (provenance)
         sr = int(model.config.audio_encoder.sampling_rate)
         inp = proc(text=[text], padding=True, return_tensors="pt").to(dev)
         max_new = int(seconds * 50)                    # ~50 audio frames / second
@@ -2214,10 +2227,12 @@ def audio_or_music_generate(kind: str) -> None:
         _fail(f"audio generation failed: {e}")
 
     import soundfile as sf
+    wav, peak, normalized = _peak_normalize(wav)   # prevent clipping (MusicGen can exceed full scale)
     sf.write(out_path, wav, sr)
     actual = len(wav) / sr
     _dump_json({"outputPath": out_path, "seconds": round(actual, 3), "sampleRate": sr, "channels": 1,
-                "provider": spec["provider"], "model": model_repo, "license": spec["license"]})
+                "provider": spec["provider"], "model": model_repo, "revision": revision, "license": spec["license"],
+                "peak": round(peak, 4), "normalized": normalized})
 
 
 if __name__ == "__main__":
