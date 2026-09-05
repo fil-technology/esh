@@ -2047,6 +2047,55 @@ _MUSICGEN_MODELS = {
 }
 
 
+def _isolated_audiogen_python() -> "str | None":
+    """Locate the ISOLATED audio-runtime venv (mlx-audiocraft / AudioGen) — env override, then known paths.
+    Kept separate from the main esh venv so its deps never destabilize the MLX LLM/VLM runtime."""
+    import os
+    cand = [os.environ.get("ESH_AUDIOGEN_PYTHON")]
+    cand += [
+        "/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv/bin/python",
+        os.path.expanduser("~/.esh/runtime/audio/audiogen-mlx/venv/bin/python"),
+    ]
+    for c in cand:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _generate_sfx_isolated(request: dict) -> None:
+    """audio.generate SFX → run AudioGen inside the isolated venv (Tools/esh_audiogen.py), RAM-floor guarded."""
+    import os, subprocess, json as _json
+    py = _isolated_audiogen_python()
+    if not py:
+        _fail("the AudioGen SFX runtime is not installed — run scripts/setup-audio-runtime.sh "
+              "(installs mlx-audiocraft into an isolated venv on managed storage)")
+    min_free = float(request.get("minFreeMemMB") or 6000)   # AudioGen-medium + T5 is memory-heavy
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"sound generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_audiogen.py")
+    env = dict(os.environ)
+    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1"})
+    hf = request.get("hfCache")
+    if hf:
+        env["HF_HOME"] = hf; env["HF_HUB_CACHE"] = os.path.join(hf, "hub")
+    try:
+        # New session → own process group, so cancellation (parent death) reclaims the child + no orphans.
+        proc = subprocess.run([py, script], input=_json.dumps(request), capture_output=True, text=True,
+                              env=env, start_new_session=True, timeout=1200)
+    except subprocess.TimeoutExpired:
+        _fail("sound generation timed out")
+    if proc.returncode != 0:
+        _fail(f"sound generation failed: {(proc.stderr or proc.stdout or '')[-300:]}")
+    line = [l for l in proc.stdout.strip().splitlines() if l.strip().startswith("{")]
+    if not line:
+        _fail(f"sound generation produced no result: {(proc.stdout or proc.stderr or '')[-200:]}")
+    res = _json.loads(line[-1])
+    if res.get("error"):
+        _fail(res["error"])
+    _dump_json(res)
+
+
 def audio_or_music_generate(kind: str) -> None:
     import os
     request = _load_json()
@@ -2054,6 +2103,11 @@ def audio_or_music_generate(kind: str) -> None:
     out_path = request["outputPath"]
     if not prompt:
         _fail("audio generation requires a text prompt")
+    # SFX/ambience → the qualified AudioGen model in the isolated runtime (not MusicGen).
+    if kind == "sound":
+        _route_hf_cache(request.get("hfCache"))
+        _generate_sfx_isolated(request)
+        return
     seconds = float(request.get("seconds") or 10.0)
     seconds = max(1.0, min(30.0, seconds))            # MusicGen practical single-shot range
     seed = int(request.get("seed") or 0)
