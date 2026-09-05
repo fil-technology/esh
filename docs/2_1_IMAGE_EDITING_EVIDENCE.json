@@ -1,0 +1,45 @@
+{
+  "suite": "image-editing",
+  "version": 1,
+  "date": "2026-09-05",
+  "hardware": {
+    "chip": "Apple M1 Pro",
+    "unifiedMemoryGB": 32,
+    "os": "macOS 26.5.1"
+  },
+  "capability": "image.edit",
+  "backend": "flux2-klein",
+  "model": {
+    "repo": "black-forest-labs/FLUX.2-klein-4B",
+    "license": "apache-2.0",
+    "commercial": true,
+    "quantAtLoad": 4,
+    "peakGB": 5.19
+  },
+  "fixtures": [
+    {
+      "id": "C_background",
+      "dim": "background edit / subject preservation",
+      "pass": true,
+      "seconds": 58.4,
+      "minFreePct": 66.0
+    },
+    {
+      "id": "E_preserve",
+      "dim": "localized change / preservation",
+      "pass": true,
+      "seconds": 58.5,
+      "minFreePct": 67.0
+    },
+    {
+      "id": "A_remove",
+      "dim": "object removal",
+      "pass": true,
+      "seconds": 57.5,
+      "minFreePct": 66.0
+    }
+  ],
+  "provenance": "source->result via sourceArtifactID verified",
+  "regression": "543 green",
+  "verdict": "IMAGE EDITING & ARTIFACT TRANSFORMATION PRODUCTION-READY"
+}
