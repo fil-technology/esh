@@ -1,5 +1,17 @@
 import Foundation
 
+/// One Server-Sent Event line for streaming capability execution (POST /v1/execute?stream=1).
+/// `type` ∈ status | delta | reasoning | preview | artifact | done | error.
+struct ExecEventDTO: Encodable {
+    let type: String
+    var text: String? = nil
+    var url: String? = nil
+    var message: String? = nil
+    var artifact: Artifact? = nil
+    var outputs: [Artifact]? = nil
+    var plan: ExecutionPlan? = nil
+}
+
 public struct OpenAICompatibleHTTPRequest: Sendable {
     public var method: String
     public var path: String
@@ -125,6 +137,39 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             // UCMR (2.1): additive capability endpoints. All v2.0 routes above are unchanged.
             case ("POST", "/v1/execute"):
                 let decoded = try JSONCoding.decoder.decode(ExecutionRequest.self, from: request.body)
+                // Live streaming (POST /v1/execute?stream=1): forward CapabilityEvents as SSE so the web chat
+                // can show the generation in progress (status + text deltas), expandable/collapsible.
+                if queryItems(from: request.path)["stream"] == "1", let events = service.executeStream(decoded) {
+                    return streamingResponse { write in
+                        // COMPACT encoder: SSE frames are delimited by "\n\n", so each event's JSON must be a
+                        // single line. (Pretty-printed JSON renders empty {}/[] as "{\n\n}", which would split
+                        // one event into two and corrupt parsing.)
+                        let sse = JSONEncoder()
+                        func send(_ dto: ExecEventDTO) {
+                            if let data = try? sse.encode(dto) {
+                                write(Data("data: ".utf8)); write(data); write(Data("\n\n".utf8))
+                            }
+                        }
+                        var outputs: [Artifact] = []
+                        do {
+                            for try await ev in events {
+                                switch ev {
+                                case .status(let s): send(ExecEventDTO(type: "status", text: s))
+                                case .textDelta(let t): send(ExecEventDTO(type: "delta", text: t))
+                                case .reasoningDelta(let t): send(ExecEventDTO(type: "reasoning", text: t))
+                                case .previewReady(let url): send(ExecEventDTO(type: "preview", url: url))
+                                case .planResolved(let p): send(ExecEventDTO(type: "plan", plan: p))
+                                case .artifactProduced(let a): outputs.append(a); send(ExecEventDTO(type: "artifact", artifact: a))
+                                default: break
+                                }
+                            }
+                            send(ExecEventDTO(type: "done", outputs: outputs))
+                        } catch {
+                            send(ExecEventDTO(type: "error", message: error.localizedDescription))
+                        }
+                        write(Data("data: [DONE]\n\n".utf8))
+                    }
+                }
                 let result = try await service.execute(decoded)
                 return try jsonResponse(statusCode: 200, payload: result)
             case ("POST", "/v1/route"):

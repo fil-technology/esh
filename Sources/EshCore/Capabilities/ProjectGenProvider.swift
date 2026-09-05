@@ -414,7 +414,20 @@ public struct ProjectGenProvider: CapabilityProvider {
                     let prompt = req.inputs.compactMap { input -> String? in
                         if case .text(let t) = input.payload { return t }; return nil
                     }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let userPrompt = prompt.isEmpty ? "a small interactive browser project" : prompt
+                    let base = prompt.isEmpty ? "a small interactive browser project" : prompt
+                    // Iterative edit: when a prior project is referenced (sourceArtifactID, set by the client's
+                    // "Edit" affordance), load its app.js so the model REVISES it in place instead of starting
+                    // fresh — the conversational "now make it yellow" flow, with the current code as context.
+                    let sourceID = VideoUnderstandingProvider.stringOption(req, "sourceArtifactID").flatMap(UUID.init)
+                    var userPrompt = base
+                    if let sourceID, (try? context.artifactStore.load(id: sourceID)) != nil,
+                       let data = try? context.artifactStore.data(id: sourceID, file: "app.js"),
+                       let priorCode = String(data: data, encoding: .utf8), !priorCode.isEmpty {
+                        cont.yield(.status("revising existing scene"))
+                        userPrompt = "Here is the CURRENT app.js of an existing scene:\n\n" + priorCode
+                            + "\n\nApply this change while keeping everything else the same, and return the FULL "
+                            + "updated files as JSON:\n" + base
+                    }
                     let maxTokens = TextToSVGProvider.intOption(req, "maxTokens") ?? 4000
                     let cacheRoot = context.root.cachesURL.appendingPathComponent("web-libs", isDirectory: true)
                     let resolver = DependencyResolver(cacheRoot: cacheRoot)
@@ -578,12 +591,13 @@ public struct ProjectGenProvider: CapabilityProvider {
                     var meta: [String: JSONValue] = [
                         "fileCount": .int(payload.count), "byteSize": .int(totalBytes), "selfContained": .bool(true),
                         "repairAttempts": .int(repairAttempts), "validation": report,
+                        "projectType": .string(projectType.rawValue),   // so the client's Edit re-runs the right tier
                         "files": .array(payload.keys.sorted().map { .string($0) }),
                         "dependencies": .array(depList.map { .string($0) })]
                     if let pj = try? manifest.asJSONValue() { meta[ProjectManifestV2.metadataKey] = pj }
                     let artifact = Artifact(
                         kind: .webProject, mimeType: "text/html", entrypoint: "index.html", metadata: meta,
-                        generatedBy: ArtifactProvenance(providerID: providerID, modelID: usedModel, capability: .projectGenerate),
+                        generatedBy: ArtifactProvenance(providerID: providerID, modelID: usedModel, capability: .projectGenerate, sourceArtifactID: sourceID),
                         validation: ArtifactValidation(isValid: true, findings: []),
                         preview: PreviewDescriptor(mode: .managed, privilege: .previewSandboxed))
                     let saved = try context.artifactStore.save(artifact, files: payload)
