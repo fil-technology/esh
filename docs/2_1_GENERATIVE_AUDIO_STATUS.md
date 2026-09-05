@@ -1,9 +1,10 @@
 # esh 2.1 — Generative Audio Runtime (audio.generate + music.generate)
 
-**Status (2026-09-05, closure pass):** two Universal Capability Runtime capabilities, distinct from
-speech/diarize/understand. This revision closes the production gaps from the initial build: a *genuine* SFX
-model (AudioGen) now backs neural `audio.generate` in an **isolated runtime**, MusicGen is confined to
-`music.generate`, cancellation is orphan-free, model weights are SSD-only, and `doctor` reports audio state.
+**Status (2026-09-05, production closure):** two Universal Capability Runtime capabilities, distinct from
+speech/diarize/understand. The SFX listening gate **passed**, so neural `audio.generate` (AudioGen) is now
+**production-ready**. A *genuine* SFX model backs it in an **isolated runtime**, MusicGen is confined to
+`music.generate`, cancellation is orphan-free, outputs are clip-safe, weights are SSD-only, and `doctor`
+reports audio state. MusicGen remains **experimental** (CC-BY-NC + limited quality evaluation).
 
 ## Capability taxonomy
 - **`audio.generate`** — non-speech environmental sound, ambience, SFX, Foley.
@@ -42,18 +43,26 @@ MLX LLM/VLM runtime. Only 1 candidate was pulled for live eval (no blind multi-G
 ## Install-and-Resume + Model Fit
 Neural audio is first-class in the canonical flow (request → Router → capability → provider missing →
 InstallRequirement → user approves → install to SSD → verify → resume). No hidden multi-GB fetch.
-- `CapabilityRequirementCatalog`: `audio.generate` → `audiogen-medium` (~3600 MB), `music.generate` → `musicgen-small` (~1200 MB).
+- `CapabilityRequirementCatalog`: `audio.generate` → `audiogen-medium` (~3600 MB), `music.generate` → `musicgen-small` (~2200 MB).
 - Deterministic waveforms are **exempt** from the install requirement (they need no model).
 - `esh doctor` reports: SFX runtime discoverable? SFX/music model cached? — with licenses, in human + `--json`.
+
+**Live-verified (isolated test root):** with the model absent, `POST /v1/route` for an SFX prompt returned
+`installRequired` carrying the `InstallRequirement` (component "AudioGen (SFX, isolated runtime)", repo
+`facebook/audiogen-medium`, 3600 MB) + Model Fit ("comfortable", peak ~6.9 GB) + a `pendingId`. After the
+model was installed to the managed SSD volume, the same request routed `ready` and `POST /v1/execute` produced
+a valid AudioArtifact — the original prompt resumed end-to-end.
 
 **Model Fit — predicted vs measured (on-disk):**
 | Model | Catalog estimate | Measured on SSD | Note |
 |---|---|---|---|
 | AudioGen-medium | ~3600 MB | **3.6 GB** | matches |
-| MusicGen-small | ~1200 MB | **2.2 GB** | estimate low — cache includes T5 encoder + EnCodec + fp32; catalog figure should be raised |
+| MusicGen-small | ~2200 MB (corrected from 1200) | **2.2 GB** | **catalog updated to measured** — cache includes T5 encoder + EnCodec + fp32 |
 
-Memory-fit is reported separately from speed: SFX enforces a **6000 MB** free-RAM floor before launch,
-music a 2500 MB floor. Both refuse to start (clear error) rather than thrash near the ceiling.
+Three dimensions are reported **separately** (never conflated): **weights/storage** (the catalog `approxSizeMB`,
+matched to on-disk), **peak runtime memory** (the bridge free-RAM floors: SFX 6000 MB, music 2500 MB; Model Fit
+estimates ~6.9 GB peak for AudioGen → "comfortable" on 32 GB), and **performance** (generation RTF: SFX
+~5.6–6.3×, music ~1.4–1.9×). Both backends refuse to start on low memory (clear error) rather than thrash.
 
 ## Frozen benchmark — SFX (AudioGen-medium, isolated runtime, cold load 12.7 s)
 | Fixture | Prompt | Dur | Gen | RTF (gen) | kHz | Peak | Valid |
@@ -66,7 +75,9 @@ music a 2500 MB floor. Both refuse to start (clear error) rather than thrash nea
 | F_thunder_rain | distant thunder and rain | 8 s | 49.3 s | 6.16× | 16 | 0.155 | ✓ |
 | G_night_forest | calm nighttime forest, loopable | 8 s | 49.9 s | 6.24× | 16 | 0.093 | ✓ |
 
-All 7 non-silent, structurally valid, no clipping (peaks ≤ 0.83). 16 kHz mono (AudioGen native).
+All 7 non-silent, structurally valid, 16 kHz mono (AudioGen native). Peaks are stochastic (`do_sample`); a
+re-run saw two fixtures exceed 1.0 (footsteps 1.03, night-forest 1.06) and the **same limiter** normalized
+them clip-free — SFX gets the identical clip-safety guarantee as music.
 
 ## Frozen benchmark — music (MusicGen-small, cold load 9.2 s)
 | Fixture | Prompt | Dur | Gen | RTF | kHz | Peak | Valid |
@@ -77,7 +88,11 @@ All 7 non-silent, structurally valid, no clipping (peaks ≤ 0.83). 16 kHz mono 
 | D_piano | melancholic solo piano with a motif | 11.94 s | 16.9 s | 1.42× | 32 | 0.352 | ✓ |
 | E_retro_game | retro chiptune game soundtrack loop | 11.94 s | 17.2 s | 1.44× | 32 | 0.697 | ✓ |
 
-Structurally valid; **C_lofi clips (peak 1.462 > 1.0)** — a real quality defect (needs peak normalization/limiter before production).
+All valid. **Clipping fixed:** a deterministic true-peak limiter (ceiling 0.99, linear gain → dynamics
+preserved, no-op when safe) now caps any output that would clip. On a re-run C_lofi generated peak ~1.09 →
+**normalized (clip-free)**; safe fixtures untouched. `peak` (pre-limiter) + `normalized` are in provenance;
+regression covered by `Tests/Python/test_mlx_vlm_bridge.py` (limiter caps clipping, preserves ratios, leaves
+safe/silent output alone). Peaks vary per run (`do_sample`), so the limiter — not any single fixture — is the guarantee.
 
 ## Lifecycle (measured) — on-demand, no warm pool
 Both neural families spawn a **fresh process per call** (SFX = isolated worker; music = bridge), load the
@@ -117,22 +132,28 @@ a warm pool only if audio generation becomes high-frequency.
 - Full suite **550 green** (incl. audio routing/validation + new doctor audio test).
 
 ## Honest limitations
-- **SFX + music quality are pending a human listening gate.** Structural validity, routing, RTF, RAM, and
-  clipping are machine-verified; whether "rain" *sounds* like rain, and whether music is coherent, is an
-  ear judgment. Bundles (7 SFX + 5 music) delivered to the operator; **neural SFX is not marked production
-  until that gate passes.**
-- MusicGen **C_lofi clips** — needs a limiter/normalizer before any production music claim.
-- Cold-load dominates latency (on-demand). Acceptable, documented, revisitable.
+- **SFX listening gate PASSED** — neural `audio.generate` is production. Music quality is still evaluated
+  only lightly, and MusicGen is **CC-BY-NC** (non-commercial), so `music.generate` stays experimental.
+- Cold-load dominates latency (on-demand, no warm pool). Acceptable, documented, revisitable if usage grows.
+- Model Fit reuses the image fit model, so its working-memory reason mentions "1024x1024" — cosmetic; the
+  memory numbers and fit class are conservative and correct. An audio-specific fit descriptor is a minor follow-up.
 
 ## Verdicts
-- **`AUDIO.GENERATE`: PARTIAL.** Deterministic DSP path is **PRODUCTION-READY** (exact, instant, validated,
-  through `/v1/execute`, Web player). Neural SFX (AudioGen, isolated runtime) is **EXPERIMENTAL** — real SFX
-  model, canonical install, Model Fit, orphan-free cancel, offline, SSD-only, licensed honestly — **pending
-  the human listening gate** to flip to production.
-- **`MUSIC.GENERATE`: EXPERIMENTAL.** End-to-end, SSD-only, cancellable, licensed (CC-BY-NC); not
-  production-gated (clipping defect + listening gate + NC license outstanding).
+- **`AUDIO.GENERATE`: PRODUCTION-READY.** Deterministic DSP (exact noise/tones/sweeps) **and** neural SFX
+  (AudioGen, isolated runtime) are both production: real SFX model, listening gate passed, canonical
+  Install-and-Resume (live-verified), Model Fit, clip-safe output, orphan-free cancellation, offline, SSD-only,
+  licenses surfaced honestly, through `/v1/execute` with a Web player.
+- **`MUSIC.GENERATE`: EXPERIMENTAL.** End-to-end, SSD-only, cancellable, clip-safe, licensed (CC-BY-NC);
+  held experimental by the non-commercial license and limited quality evaluation — **not** a blocker on
+  shipping `audio.generate`.
+
+## Scheduler (final dispatch)
+```
+white/pink/brown noise → deterministic DSP     tone/sweep/silence → deterministic DSP
+environmental sound / Foley / ambience → AudioGen (neural SFX)     music → MusicGen
+```
+No hard-coded permanent model IDs in provider logic; MusicGen is never an environmental-SFX fallback.
 
 ## Next (do not auto-start)
-Await the operator's listening judgment on both bundles. Then, if approved: add peak-normalization to the
-music path, raise the MusicGen catalog size estimate to ~2.2 GB, and consider a warm pool only if usage
-warrants. Do **not** start audio.edit / music remix / video in this milestone.
+Optional future work only: an audio-specific Model Fit descriptor, and a warm pool if audio becomes
+high-frequency. Do **not** start audio.edit / music remix / Voice 2.1 / video in this milestone.
