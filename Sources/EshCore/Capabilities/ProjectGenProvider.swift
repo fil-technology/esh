@@ -385,11 +385,14 @@ public struct ProjectGenProvider: CapabilityProvider {
     (style.css optional). In app.js: build objects with THREE and ADD them to the EXISTING global `scene` via \
     scene.add(...). Do NOT create a renderer, camera, scene, or animation loop and do NOT call renderer.render — \
     esh runs the loop. For animation assign globalThis.eshTick = (dt) => { /* runs each frame, dt seconds */ }. \
-    For controls (pause, toggle) create <button> elements, append them to a <div class="ui"> you add to \
-    document.body, and wire click handlers that flip simple boolean flags your eshTick reads. Use ONLY CORE \
+    esh ALSO provides built-in mouse/touch camera orbit (drag to rotate, wheel/pinch to zoom) — do NOT add your \
+    own camera controls or override camera.position every frame. Add UI controls ONLY if genuinely needed; keep \
+    them MINIMAL and COMPACT — a single short label or a small glyph (e.g. "⏸") in a <div class="ui"> appended \
+    to document.body, wired to flip simple boolean flags your eshTick reads (esh styles .ui buttons subtly, so \
+    do not set loud background colors). Use ONLY CORE \
     THREE classes (Scene, Mesh, *Geometry, MeshStandardMaterial/MeshBasicMaterial, lights, Group, Vector3, \
-    Color) — do NOT use THREE.OrbitControls or ANY addon/example/loader class (they are NOT available); if you \
-    want the camera or object to move, rotate your object inside eshTick instead. Use ONLY procedural \
+    Color) — do NOT use THREE.OrbitControls or ANY addon/example/loader class (they are NOT available); rotate \
+    your object inside eshTick for object motion, but leave the CAMERA to esh's built-in orbit. Use ONLY procedural \
     geometry/colors/math — NO network, NO external textures/images/fonts, NO fetch, NO require()/module.exports, \
     NO URL/CDN imports. THREE is a global so no import is needed. app.js is PURE JavaScript, style.css PURE CSS \
     (no <script>/<style> tags, no markdown). CRITICAL JSON FORMAT: each "content" value MUST be a standard \
