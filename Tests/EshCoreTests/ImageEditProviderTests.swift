@@ -15,9 +15,9 @@ struct ImageEditProviderTests {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
         let provider = ImageEditProvider(edit: { _, outPath, instruction, backend, _, _, _, _ in
             #expect(instruction == "change the sky to sunset")
-            #expect(backend == .qwenEdit)
+            #expect(backend == .flux2Klein)   // universal-fit default (Apache-2.0, runs on 32GB)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
-            return ImageEditResult(width: 1024, height: 1024, backend: "qwen-edit", model: "qwen-image-edit",
+            return ImageEditResult(width: 1024, height: 1024, backend: "flux2-klein", model: "flux2-klein-4b",
                                    license: "apache-2.0", commercial: true)
         })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)

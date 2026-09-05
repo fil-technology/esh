@@ -1391,6 +1391,10 @@ IMAGE_EDIT_BACKENDS = {
                   "steps": 8, "commercial": True, "image_arg": "--image-paths"},
     "kontext":   {"cli": "mflux-generate-kontext", "model": "dev-kontext", "license": "flux-1-dev-non-commercial",
                   "steps": 28, "commercial": False, "image_arg": "--image-path"},
+    # FLUX.2 Klein 4B (Apache-2.0, commercial-safe) — the practical fit on 32GB Macs. mflux quantizes the
+    # official weights to 4-bit at load (`quantize` below); a distilled/fast model so few steps suffice.
+    "flux2-klein": {"cli": "mflux-generate-flux2-edit", "model": "flux2-klein-4b", "license": "apache-2.0",
+                    "steps": 6, "commercial": True, "image_arg": "--image-paths", "quantize": 4},
 }
 
 
@@ -1407,7 +1411,7 @@ def image_edit() -> None:
     in_path = request["imagePath"]
     out_path = request["outputPath"]
     instruction = (request.get("instruction") or request.get("prompt") or "").strip()
-    backend = request.get("backend") or "qwen-edit"
+    backend = request.get("backend") or "flux2-klein"
     if backend not in IMAGE_EDIT_BACKENDS:
         _fail(f"unknown image-edit backend '{backend}' (supported: {', '.join(IMAGE_EDIT_BACKENDS)})")
     spec = IMAGE_EDIT_BACKENDS[backend]
@@ -1433,8 +1437,16 @@ def image_edit() -> None:
     seed = int(request.get("seed") or 0)
     cmd = [cli, "--model", str(model), spec["image_arg"], in_path, "--prompt", instruction,
            "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
-    if request.get("quantize") is not None:
-        cmd += ["--quantize", str(int(request["quantize"]))]
+    # Quantization: request override, else the backend's default (e.g. flux2-klein loads full weights and
+    # quantizes to 4-bit at load so it fits a 32GB Mac).
+    quant = request.get("quantize", spec.get("quantize"))
+    if quant is not None:
+        cmd += ["--quantize", str(int(quant))]
+    # A third-party / pre-quantized HuggingFace repo needs its base architecture named (mflux --base-model),
+    # e.g. `qwen-image` for a custom Qwen-Image-Edit repo. Request override, else the backend default.
+    base_model = request.get("baseModel") or spec.get("base_model")
+    if base_model:
+        cmd += ["--base-model", str(base_model)]
     if request.get("guidance") is not None:
         cmd += ["--guidance", str(float(request["guidance"]))]
     if request.get("width") is not None:
