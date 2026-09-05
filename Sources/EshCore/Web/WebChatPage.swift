@@ -566,6 +566,15 @@ const ACT={
   pickReasoning:(v)=>{ S.prefs.reasoning=v; savePrefs(); render(); },
   goPane:(p)=>{ S.settingsPane=p; render(); },
   // Iterative web editing: revise a prior webProject artifact by id (lineage via sourceArtifactID).
+  editProjectArtifact:(id)=>{ const c=cur(); if(!c||S.capBusy)return;
+    let pt='threejs'; for(const m of c.messages){ const a=(m.artifacts||[]).find(x=>x&&x.id===id); if(a){ pt=(a.metadata&&a.metadata.projectType)||pt; break; } }
+    const instr=prompt('How should I change this project?'); if(!instr||!instr.trim())return;
+    const request={schemaVersion:'esh.execute.request.v1',capability:'project.generate',
+      inputs:[{payload:{text:{_0:instr.trim()}}}],
+      output:{modality:'text',format:'application/vnd.esh.project'},
+      options:{values:{projectType:pt,sourceArtifactID:id,maxTokens:8000}}};
+    c.messages.push({id:uid(),role:'user',content:'Edit: '+instr.trim()}); saveChats();
+    runCapabilityRequest(c, request, 'Revising project…'); },
   editWebArtifact:(id)=>{ const c=cur(); if(!c||S.capBusy)return; const instr=prompt('How should I change this page?'); if(!instr||!instr.trim())return;
     const request={schemaVersion:'esh.execute.request.v1',capability:'webArtifact.generate',
       inputs:[{payload:{text:{_0:instr.trim(),_1:'instruction'}}}],
@@ -758,10 +767,15 @@ function artifactHTML(a){
     // Isolated preview: sandbox WITHOUT allow-same-origin → the page's JS runs but can't touch the parent,
     // cookies, storage, or navigate the top window. Served same-origin but the sandbox gives it an opaque origin.
     const entry=url+'/'+encodeURIComponent(a.entrypoint||'index.html');
+    // A multi-file project (project.generate) revises via project.generate with its prior code as context;
+    // a single-page webArtifact revises via webArtifact.generate. Both keep lineage via sourceArtifactID.
+    const isProject = a.generatedBy && a.generatedBy.capability==='project.generate';
+    const editAct = isProject ? 'editProjectArtifact' : 'editWebArtifact';
+    const kindLabel = isProject ? ((a.metadata&&a.metadata.projectType)||'project') : 'web page';
     return `<div class="astart"><iframe class="astweb" src="${entry}" sandbox="allow-scripts allow-pointer-lock"`
       +` title="web artifact preview" loading="lazy" style="width:100%;height:360px;border:0;border-radius:10px;background:#fff"></iframe>`
-      +`<div class="astartbar"><span class="mono">web page · sandboxed</span>`
-      +`<span><a class="alink" data-act="editWebArtifact" data-arg="${esch(a.id)}">Edit</a> · <a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
+      +`<div class="astartbar"><span class="mono">${esch(kindLabel)} · sandboxed</span>`
+      +`<span><a class="alink" data-act="${editAct}" data-arg="${esch(a.id)}">Edit</a> · <a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
   }
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }
