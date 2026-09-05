@@ -74,6 +74,18 @@ enum DoctorCommand {
             lines.append("  fix: `esh model remove <id>` then reinstall")
         }
 
+        // Generative audio backends (isolated SFX runtime + in-bridge music)
+        lines.append("")
+        lines.append("audio runtime:")
+        if let py = report.audio.isolatedRuntimePath {
+            lines.append("  sfx runtime: installed (\(py))")
+        } else {
+            lines.append("  sfx runtime: not installed")
+            lines.append("  fix: run scripts/setup-audio-runtime.sh (isolated AudioGen venv on managed storage)")
+        }
+        lines.append("  sfx model (AudioGen, cc-by-nc-4.0): \(report.audio.sfxModelInstalled ? "cached" : "not downloaded")")
+        lines.append("  music model (MusicGen, cc-by-nc-4.0): \(report.audio.musicModelInstalled ? "cached" : "not downloaded")")
+
         // Apple Intelligence (zero-download provider)
         lines.append("")
         lines.append("apple intelligence: \(report.appleIntelligence.available ? "available" : report.appleIntelligence.availability.rawValue)")

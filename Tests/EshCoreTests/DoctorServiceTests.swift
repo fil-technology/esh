@@ -21,6 +21,15 @@ struct DoctorServiceTests {
     }
 
     @Test
+    func reportsAudioRuntimeStateForFreshRoot() {
+        // A fresh root has no audio model weights cached; the report must say so honestly (no false "cached").
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let report = DoctorService().report(root: root, version: nil)
+        #expect(report.audio.sfxModelInstalled == false)
+        #expect(report.audio.musicModelInstalled == false)
+    }
+
+    @Test
     func reportIsDegradedWhenAssetsVolumeUnavailable() throws {
         let state = temporaryDirectory()
         let externalParent = temporaryDirectory()
