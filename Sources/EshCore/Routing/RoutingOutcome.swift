@@ -73,5 +73,11 @@ public enum CapabilityRequirementCatalog {
                           componentName: "FLUX.2 Klein 4B (Apache-2.0)", recommendedRepo: "black-forest-labs/FLUX.2-klein-4B", approxSizeMB: 24000),
         .audioDiarize: .init(capability: .audioDiarize, kind: .assetFile(relativePath: "diarization-models/segmentation.onnx"),
                              componentName: "sherpa-onnx diarization", recommendedRepo: "sherpa-onnx speaker models", approxSizeMB: 45),
+        // audio.generate NEURAL SFX (deterministic noise/tones are gated out in IntentResolver): AudioGen via
+        // the isolated audio runtime. music.generate: MusicGen. Both download to the SSD audio-models cache.
+        .audioGenerate: .init(capability: .audioGenerate, kind: .assetFile(relativePath: "audio-models/hub/models--facebook--audiogen-medium"),
+                              componentName: "AudioGen (SFX, isolated runtime)", recommendedRepo: "facebook/audiogen-medium", approxSizeMB: 3600),
+        .musicGenerate: .init(capability: .musicGenerate, kind: .assetFile(relativePath: "audio-models/hub/models--facebook--musicgen-small"),
+                              componentName: "MusicGen (CC-BY-NC)", recommendedRepo: "facebook/musicgen-small", approxSizeMB: 1200),
     ]
 }

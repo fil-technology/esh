@@ -48,8 +48,10 @@ public struct IntentResolver: Sendable {
             }
             let request = Self.buildRequest(capability: capability, intent: intent, message: message, attachments: attachments)
 
-            // Requirement / install-state check (spec §9B, §10).
-            if let req = CapabilityRequirementCatalog.requirements[capability],
+            // Requirement / install-state check (spec §9B, §10). audio.generate deterministic waveforms
+            // (white/pink/brown noise, tones, sweeps, silence) need NO model — never gate them on an install.
+            let deterministicAudio = capability == .audioGenerate && DeterministicAudio.classify(message) != nil
+            if let req = CapabilityRequirementCatalog.requirements[capability], !deterministicAudio,
                !Self.isSatisfied(req, installs: installs, root: root) {
                 let installKind: String = { if case .visionModel = req.kind { return "model" }; return "asset" }()
                 let requirement = InstallRequirement(
