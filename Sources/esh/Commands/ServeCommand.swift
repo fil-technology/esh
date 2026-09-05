@@ -52,6 +52,33 @@ enum ServeCommand {
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
 
         server.start()
+
+        // Voice 2.1 realtime duplex endpoint (WebSocket) on a companion port. Thin clients (browser/simulator)
+        // stream mic PCM and receive typed VoiceEvents + binary TTS; the server owns VAD/STT/LLM/TTS + barge-in,
+        // sharing the same warm lifecycle pool. Best-effort so it never breaks the HTTP server.
+        let voicePort: UInt16 = port == 65535 ? port - 1 : port + 1
+        var voiceServerRef: VoiceWebSocketServer?
+        do {
+            let vStore = FileModelStore(root: root)
+            let vInference = ExternalInferenceService(modelStore: vStore, sessionStore: FileSessionStore(root: root),
+                                                      cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
+            let vInstalls = (try? vStore.listInstalls()) ?? []
+            let vLLM = vInstalls.first(where: { $0.spec.backend == .mlx })?.id ?? vInstalls.first?.id
+            let vServer = try VoiceWebSocketServer(port: voicePort) { cfg in
+                VoiceSessionOrchestrator(
+                    config: cfg,
+                    transcriber: SpeechRuntimeTranscriber(lifecycleManager: pool),
+                    responder: LanguageResponder(inference: vInference, resolveModel: { pin in pin ?? cfg.inferenceModel ?? vLLM }),
+                    speaker: BufferedTTSSpeaker(lifecycleManager: pool))
+            }
+            vServer.start()
+            voiceServerRef = vServer
+            print("esh Voice realtime (WebSocket) listening on ws://\(host):\(voicePort)/v1/voice/stream")
+        } catch {
+            fputs("warning: Voice realtime endpoint unavailable: \(error.localizedDescription)\n", stderr)
+        }
+        _ = voiceServerRef   // retained for the process lifetime
+
         if host == "0.0.0.0" || host == "::" {
             fputs("warning: binding to \(host) exposes the API — and any loaded model — to other machines on the network.\n", stderr)
             if apiKey == nil {
