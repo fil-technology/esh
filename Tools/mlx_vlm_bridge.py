@@ -2160,6 +2160,26 @@ def _run_sfx_worker(py: str, script: str, env: dict, request: dict):
     return None, proc.returncode, _clean_worker_stderr(err or out or "")
 
 
+def _strip_appledouble(root: str) -> int:
+    """Delete AppleDouble ._* sidecars under `root`. On exFAT (the SSD), macOS recreates these over time; the
+    isolated venv's site-packages then holds ._*.py files that mlx-audiocraft/transformers' module scan reads as
+    source, poisoning multiprocessing workers -> the worker dies (SIGKILL + 'leaked semaphore'). Stripping them
+    before each run is the durable fix for the recurring 'sound generation failed' crash."""
+    import os
+    removed = 0
+    try:
+        for dirpath, _dirs, files in os.walk(root):
+            for f in files:
+                if f.startswith("._"):
+                    try:
+                        os.remove(os.path.join(dirpath, f)); removed += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return removed
+
+
 def _generate_sfx_isolated(request: dict) -> None:
     """audio.generate SFX → run AudioGen inside the isolated venv (Tools/esh_audiogen.py), RAM-floor guarded.
     The audiocraft/multiprocessing stack occasionally tears down uncleanly and the worker dies with a signal
@@ -2174,6 +2194,7 @@ def _generate_sfx_isolated(request: dict) -> None:
     avail = _available_mem_mb()
     if avail is not None and avail < min_free:
         _fail(f"sound generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+    _strip_appledouble(os.path.join(os.path.dirname(os.path.dirname(py)), "lib"))  # clear exFAT ._* sidecars (crash cause)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_audiogen.py")
     env = dict(os.environ)
     env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1",
@@ -2183,7 +2204,7 @@ def _generate_sfx_isolated(request: dict) -> None:
         env["HF_HOME"] = hf; env["HF_HUB_CACHE"] = os.path.join(hf, "hub")
 
     last_code, last_err = None, ""
-    for attempt in range(2):   # one retry: the crash is transient and usually passes on a fresh worker
+    for attempt in range(3):   # up to two retries: the crash is transient (often ._* poisoning) and passes on a fresh worker
         res, code, errtext = _run_sfx_worker(py, script, env, request)
         if res is not None:
             if res.get("error"):
