@@ -811,6 +811,7 @@ public struct OpenAICompatibleService: Sendable {
     /// UCMR (2.1): optional capability execution (POST /v1/execute) and artifact serving
     /// (GET /v1/artifacts/{id}). Additive; nil in processes that don't wire the capability runtime.
     private let executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
+    private let executeStreamClosure: (@Sendable (ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error>)?
     private let artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
     /// UCMR 2.1 Capability Intent Router: POST /v1/route (message+attachments → RouteDecision) and
     /// /v1/route/resume (pendingId → RouteDecision). Additive; nil when the router isn't wired.
@@ -836,6 +837,7 @@ public struct OpenAICompatibleService: Sendable {
         transcribe: (@Sendable (OpenAIAudioTranscriptionRequest) async throws -> OpenAIAudioTranscriptionResponse)? = nil,
         webData: (@Sendable (WebDataRequest) async throws -> Data)? = nil,
         execute: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)? = nil,
+        executeStream: (@Sendable (ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error>)? = nil,
         artifact: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)? = nil,
         route: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)? = nil,
         resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
@@ -851,6 +853,7 @@ public struct OpenAICompatibleService: Sendable {
         self.transcribeClosure = transcribe
         self.webDataClosure = webData
         self.executeClosure = execute
+        self.executeStreamClosure = executeStream
         self.artifactClosure = artifact
         self.routeClosure = route
         self.resumeRouteClosure = resumeRoute
@@ -895,6 +898,12 @@ public struct OpenAICompatibleService: Sendable {
             throw OpenAICompatibleError.unsupported("Capability execution is not available in this process.")
         }
         return try await executeClosure(request)
+    }
+
+    /// Streaming variant of `execute` (POST /v1/execute?stream=1): yields live CapabilityEvents (status /
+    /// text deltas / artifacts) so the web chat can show a generation in progress and let the user expand it.
+    public func executeStream(_ request: ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error>? {
+        executeStreamClosure.map { $0(request) }
     }
 
     /// Fetch a generated artifact's bytes (GET /v1/artifacts/{id}[/{file}]).
@@ -993,6 +1002,7 @@ public struct OpenAICompatibleService: Sendable {
         // POST /v1/execute and GET /v1/artifacts work. Stage 0 registers the language.generate provider
         // (bridging to the existing text stream); non-text providers are added in later stages.
         var executeClosure: (@Sendable (ExecutionRequest) async throws -> ExecutionResult)?
+        var executeStreamClosure: (@Sendable (ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error>)?
         var artifactClosure: (@Sendable (UUID, String?) async throws -> ArtifactBytes?)?
         var routeClosure: (@Sendable (String, [EshAttachment], String?) async -> RouteDecision)?
         var resumeRouteClosure: (@Sendable (String, String?) async -> RouteDecision)?
@@ -1160,6 +1170,7 @@ public struct OpenAICompatibleService: Sendable {
                 scheduler: capabilityScheduler,
                 candidateModels: { _ in [] })
             executeClosure = { req in try await execSvc.executeCollecting(req) }
+            executeStreamClosure = { req in execSvc.execute(req) }
             // Capability Intent Router (spec 86eyucfbu): message + attachments → RouteDecision, with an
             // in-memory Install-and-Resume store. Uses the live registry + installs + assets root.
             let routerStore = PendingInvocationStore()
@@ -1311,6 +1322,7 @@ public struct OpenAICompatibleService: Sendable {
             transcribe: transcribe,
             webData: webData,
             execute: executeClosure,
+            executeStream: executeStreamClosure,
             artifact: artifactClosure,
             route: routeClosure,
             resumeRoute: resumeRouteClosure,

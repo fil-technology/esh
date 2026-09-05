@@ -41,6 +41,17 @@ public enum WebChatPage {
   /* Blinking dot on a sidebar chat row while that chat is generating. */
   .genrowdot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:#2563eb; margin-right:7px; flex:0 0 auto; animation:eshpulse 1.1s ease-in-out infinite; }
   .chatitem.generating .clabel{ opacity:.9; }
+  /* Expandable/collapsible live generation panel. */
+  .genpanel{ margin-top:8px; border:1px solid rgba(32,30,27,.08); border-radius:10px; overflow:hidden; background:rgba(32,30,27,.02); }
+  .gpsum{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; font-size:12px; color:var(--muted); user-select:none; list-style:none; }
+  .gpsum::-webkit-details-marker{ display:none; }
+  .gpsum::before{ content:'▸'; font-size:10px; width:10px; display:inline-block; flex:0 0 auto; }
+  .genpanel[open] > .gpsum::before{ content:'▾'; }
+  .genpanel.gen > .gpsum::before{ content:''; width:0; }
+  .gpsum:hover{ background:rgba(32,30,27,.03); }
+  .gpbody{ padding:4px 12px 10px; border-top:1px solid rgba(32,30,27,.06); }
+  .gpstep{ font-size:11px; color:var(--muted); padding:2px 0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .gpstream{ font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; margin:6px 0 0; padding:8px; background:rgba(32,30,27,.05); border-radius:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   @keyframes eshbar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
   @keyframes eshtype{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1);opacity:1}}
   @keyframes eshdot{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-4px);opacity:1}}
@@ -791,6 +802,24 @@ async function execRequest(request, signal){
   if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
   return await r.json();
 }
+// Streaming execute (SSE): calls onEvent for each {type,...} — status / delta / plan / artifact / preview /
+// done / error — so the chat shows the generation live and expandable.
+async function execRequestStream(request, signal, onEvent){
+  const r=await fetch('/v1/execute?stream=1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request),signal});
+  if(!r.ok){ let m='execute failed ('+r.status+')'; try{ const e=await r.json(); m=(e.error&&e.error.message)||m; }catch(_){ } throw new Error(m); }
+  const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
+  while(true){
+    const {value,done}=await reader.read(); if(done) break;
+    buf+=dec.decode(value,{stream:true}); let i;
+    while((i=buf.indexOf('\n\n'))>=0){
+      const chunk=buf.slice(0,i); buf=buf.slice(i+2);
+      const line=chunk.startsWith('data: ')?chunk.slice(6):chunk;
+      if(line.trim()==='[DONE]') return;
+      let ev; try{ ev=JSON.parse(line); }catch(_){ continue; }
+      onEvent(ev);
+    }
+  }
+}
 // "Why this execution plan?" — renders the composed pipeline (steps + rationale) for a typed result.
 function planInspectorHTML(plan){
   if(!plan||!plan.steps||!plan.steps.length) return '';
@@ -800,9 +829,22 @@ function planInspectorHTML(plan){
     +`<div class="rc"><div style="font-weight:600;margin-bottom:4px">Pipeline (${plan.steps.length} step${plan.steps.length>1?'s':''})</div>${steps}`
     +(why?`<ul style="margin:8px 0 0 16px;padding:0">${why}</ul>`:'')+`</div></details>`;
 }
+// Expandable/collapsible live generation panel — streamed status milestones (+ any text stream). Open while
+// generating; collapsed but re-openable afterwards, so any generation can be watched live or inspected later.
+function genPanelHTML(m){
+  const log=(m.statusLog||[]);
+  if(!m.generating && !log.length && !(m.streamText&&m.streamText.trim())) return '';
+  // Native <details> so expand/collapse works without app state — open while generating, collapsed after.
+  const head = m.generating
+    ? `<span class="typing"><i></i><i></i><i></i></span><span>${esch(m.genLabel||'Working…')}</span>`
+    : `<span>Generation details${log.length?(' · '+log.length+' step'+(log.length>1?'s':'')):''}</span>`;
+  const body = log.map(s=>`<div class="gpstep">${esch(s)}</div>`).join('')
+    + ((m.streamText&&m.streamText.trim())?`<pre class="gpstream">${esch(m.streamText)}</pre>`:'');
+  return `<details class="genpanel${m.generating?' gen':''}" ${m.generating?'open':''}><summary class="gpsum">${head}</summary><div class="gpbody">${body}</div></details>`;
+}
 // Run a validated ExecutionRequest and land the typed result in an assistant message.
 async function runCapabilityRequest(c, request, label){
-  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…'};
+  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…',statusLog:[],streamOpen:true};
   // For image.edit, keep the SOURCE image so the result can be shown as a before/after compare.
   if(request&&request.capability==='image.edit'){
     try{ const img=(request.inputs||[]).map(i=>i&&i.payload&&i.payload.attachment&&i.payload.attachment._0).find(a=>a&&a.kind==='image');
@@ -810,10 +852,22 @@ async function runCapabilityRequest(c, request, label){
   }
   c.messages.push(msg); S.genChatId=c.id; S.capBusy=true; S.capController=new AbortController(); saveChats(); render();
   try{
-    const res=await execRequest(request, S.capController.signal);
-    msg.generating=false; msg.artifacts=res.outputs||[]; msg.plan=res.plan||null;
-    if(res.text) msg.content=res.text;
-    if(!(msg.artifacts&&msg.artifacts.length) && !res.text) msg.content='Done.';
+    let outputs=[], streamErr=null; msg.streamText='';
+    let _paint=0; const _throttle=()=>{ const n=Date.now(); if(n-_paint>80){ _paint=n; render(); } };
+    await execRequestStream(request, S.capController.signal, (ev)=>{
+      if(ev.type==='status'){ msg.genLabel=ev.text; if(ev.text) msg.statusLog.push(ev.text); _throttle(); }
+      else if(ev.type==='delta'){ msg.streamText+=(ev.text||''); _throttle(); }
+      else if(ev.type==='reasoning'){ /* reasoning deltas — kept out of the main content */ }
+      else if(ev.type==='plan'){ if(ev.plan) msg.plan=ev.plan; }
+      else if(ev.type==='artifact'){ if(ev.artifact) outputs.push(ev.artifact); }
+      else if(ev.type==='preview'){ if(ev.url) msg.previewURL=ev.url; }
+      else if(ev.type==='done'){ if(ev.outputs&&ev.outputs.length) outputs=ev.outputs; }
+      else if(ev.type==='error'){ streamErr=ev.message||'generation failed'; }
+    });
+    if(streamErr) throw new Error(streamErr);
+    msg.generating=false; msg.artifacts=outputs; msg.streamOpen=false;   // collapse the live panel once done
+    if(msg.streamText) msg.content=msg.streamText;
+    if(!(msg.artifacts&&msg.artifacts.length) && !msg.content) msg.content='Done.';
   }catch(e){
     msg.generating=false;
     if(e&&e.name==='AbortError'){ msg.content='⏹ Stopped. (The local model may still be finishing on the server.)'; }
@@ -900,8 +954,9 @@ function renderMsg(m){
     h+=`<details class="reason"><summary>${label}</summary><div class="rc">${esch(s.reason)}</div></details>`; }
   const ans=s.answer||(s.thinking?'':m.content);
   if(ans) h+=`<div class="asttext">${md(ans)}</div>`;
-  // UCMR Stage 3: generation progress for typed capabilities (e.g. image.generate).
-  if(m.generating){ h+=`<div class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>${esch(m.genLabel||'Working…')}</div>`; }
+  // UCMR Stage 3: generation progress for typed capabilities — an expandable/collapsible live panel that
+  // streams status milestones (and any text stream), so any generation can be expanded to watch or inspect.
+  h+=genPanelHTML(m);
   // UCMR: typed capability results (image/svg/file) rendered from /v1/artifacts.
   // image.edit shows a before/after compare when the source image is known; otherwise the plain result.
   if(m.artifacts && m.artifacts.length){
