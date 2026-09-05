@@ -1,8 +1,34 @@
 # esh 2.1 — Voice 2.1 / Conversational Voice Runtime (status)
 
-**Status (2026-09-05):** foundation increment. A canonical, server-owned **VoiceSession runtime core** is built
-and unit-tested. Live audio I/O, streaming STT/TTS, a duplex transport, echo handling, and the live frozen
-benchmark are **not** done. **Verdict: VOICE 2.1 NOT READY** (honest — see gates below).
+**Status (2026-09-05, live-path pass):** the canonical server-owned **VoiceSession runtime core** is now wired
+to the **real local backends** and a real server-owned conversational turn (STT→LLM→TTS) is **proven headlessly**
+(WAV-driven, no live mic). A server-side acoustic VAD/endpointer is built and unit-tested. Live-mic realtime
+duplex transport, acoustic barge-in/echo, warm co-residency, and the live frozen benchmark remain.
+**Verdict: VOICE 2.1 EXPERIMENTAL** (the live path works; material realtime/UX limitations remain — see gates).
+
+## Live path (this pass) — real backends, proven server-owned turn
+- **Real adapters** (`Sources/esh/Voice/VoiceAdapters.swift`): `SpeechRuntimeTranscriber` → warm
+  `SpeechRuntimeManager` (parakeet, whole-file); `LanguageResponder` → `ExternalInferenceService.inferStream`
+  (real streamed deltas, Scheduler-selectable model, honors pins); `BufferedTTSSpeaker` → `AudioSpeechGenerator`
+  (TTSMLX; buffered per phrase → audible on first phrase).
+- **Server-side VAD** (`Sources/EshCore/Voice/EnergyVAD.swift`): acoustic RMS + start/end hysteresis + max-utterance
+  cap; runs during playback (for barge-in); unit-tested. Research note: Silero/sherpa-onnx VAD is the evidence-driven
+  upgrade; the endpointer is a seam so a learned model drops in.
+- **Real turn proof** (`esh voice-turn --in <wav>`): drove a recorded utterance through the orchestrator with real
+  STT+LLM+TTS. Result: STT transcribed "What is the capital of France?" → llama-3.2-3B replied (streamed) →
+  pocket-TTS produced assistant audio. Cold latencies (per-stage cold loads, no warm pool): **finalSTT ≈ 7.5 s**,
+  **speech-end→audible ≈ 38 s**. These are cold-load-dominated, NOT production realtime latency.
+- **Transport decision:** **WebSocket** is chosen for the duplex realtime transport (continuous mic chunks up,
+  typed `VoiceEvent` down as JSON control frames + binary audio frames). WebRTC is not justified for a local
+  loopback runtime. The WebSocket transport + browser-client migration are the primary remaining build and are
+  **not implemented** this pass (cannot be verified headlessly without a browser mic).
+
+### Honest live-path limitations
+- Latency is **cold** (no warm co-residency; TTS still load-per-call). Warm residency via `RuntimeLifecycleManager`
+  is the key latency fix and is not yet wired.
+- Multi-phrase reply audio is currently concatenated per-phrase WAVs (only the first is a valid standalone WAV);
+  streaming PCM (`TTSMLX.synthesizeStream`) or PCM merge is needed for a single clean reply stream.
+- The proof is **WAV-driven**, not a live microphone; realtime duplex, acoustic barge-in, and echo are unproven.
 
 ## esh / Ashex boundary (spec §1)
 esh owns: mic streaming, VAD/endpointing, STT, partial transcripts, inference execution, TTS, playback/chunks,
@@ -71,12 +97,13 @@ co-reside under one 32 GB budget with eviction under pressure; keep TTS resident
 
 ## Verdict
 ```
-VOICE 2.1 NOT READY
+VOICE 2.1 EXPERIMENTAL
 ```
-A strong, tested, server-owned runtime core exists (state machine, typed events, bounded context, barge-in +
-cancellation semantics, latency-metric model). It is **not** a working end-to-end live voice runtime yet:
-real adapters, streaming STT/TTS, server-side VAD, a duplex transport, acoustic barge-in/echo testing, the live
-benchmark, multilingual verification, voice Install-and-Resume, and offline/packaging remain.
+The server-owned runtime core is wired to the real local stack and a real conversational turn (STT→LLM→TTS)
+is proven headlessly, with a tested server-side VAD. It is **experimental**, not production: latency is cold
+(no warm co-residency), and the realtime gates — live-mic duplex transport, acoustic barge-in, echo/speakerphone,
+the live frozen benchmark, multilingual-by-ear, voice Install-and-Resume, and offline/packaging — are not met.
+Remaining production gates (spec §22) keep **PR #8 DRAFT**.
 
 ## Recommended next milestone (do not auto-start)
 **Voice 2.1 — Live Path & Duplex Transport:** wire the three real adapters into the runtime core; add a
