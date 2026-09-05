@@ -12,7 +12,8 @@ import Foundation
 // RAM-guarded + killable (cancellation reclaims the subprocess). Model downloads on first use to the SSD.
 
 public enum ImageEditBackend: String, Sendable, CaseIterable {
-    case qwenEdit = "qwen-edit"     // default: Qwen-Image-Edit, Apache-2.0 (commercial-safe)
+    case qwenEdit = "qwen-edit"     // Qwen-Image-Edit, Apache-2.0 (commercial-safe) — best fidelity, needs >32GB
+    case flux2Klein = "flux2-klein" // FLUX.2 Klein 4B, Apache-2.0 (commercial-safe) — the practical fit on 32GB
     case kontext = "kontext"        // experimental: FLUX.1 Kontext [dev], non-commercial license
 }
 
@@ -102,7 +103,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     try StorageService().ensureAssetsAvailable(root: context.root)   // never fill internal disk
                     let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
-                    let backend = ImageEditBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .qwenEdit
+                    let backend = ImageEditBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .flux2Klein
                     let modelOverride = VideoUnderstandingProvider.stringOption(req, "model")
                     let quantize = TextToSVGProvider.intOption(req, "quantize")
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")

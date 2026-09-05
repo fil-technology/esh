@@ -65,10 +65,12 @@ public enum CapabilityRequirementCatalog {
                                 componentName: "nanoLLaVA (vision)", recommendedRepo: "mlx-community/nanoLLaVA-1.5-4bit", approxSizeMB: 610),
         .imageGenerate: .init(capability: .imageGenerate, kind: .assetFile(relativePath: "image-models/hub/models--filipstrand--Z-Image-Turbo-mflux-4bit"),
                               componentName: "Z-Image Turbo (4-bit)", recommendedRepo: "filipstrand/Z-Image-Turbo-mflux-4bit", approxSizeMB: 6500),
-        // image.edit default backend = Qwen-Image-Edit (Apache-2.0, commercial-safe). Large download (mflux
-        // fetches the full weights and quantizes at load) — surfaced honestly via Model Fit.
-        .imageEdit: .init(capability: .imageEdit, kind: .assetFile(relativePath: "image-models/hub/models--Qwen--Qwen-Image-Edit-2509"),
-                          componentName: "Qwen-Image-Edit (Apache-2.0)", recommendedRepo: "Qwen/Qwen-Image-Edit-2509", approxSizeMB: 40000),
+        // image.edit default backend = FLUX.2 Klein 4B (Apache-2.0, commercial-safe) — the universal fit:
+        // ~5GB peak at 4-bit so it runs on a 32GB Mac, where Qwen-Image-Edit (~25-27GB weights) does not.
+        // mflux fetches the weights and quantizes to 4-bit at load; size surfaced honestly via Model Fit.
+        // A >32GB machine can opt into the higher-fidelity `qwen-edit` backend explicitly.
+        .imageEdit: .init(capability: .imageEdit, kind: .assetFile(relativePath: "image-models/hub/models--black-forest-labs--FLUX.2-klein-4B"),
+                          componentName: "FLUX.2 Klein 4B (Apache-2.0)", recommendedRepo: "black-forest-labs/FLUX.2-klein-4B", approxSizeMB: 24000),
         .audioDiarize: .init(capability: .audioDiarize, kind: .assetFile(relativePath: "diarization-models/segmentation.onnx"),
                              componentName: "sherpa-onnx diarization", recommendedRepo: "sherpa-onnx speaker models", approxSizeMB: 45),
     ]
