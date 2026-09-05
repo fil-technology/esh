@@ -81,6 +81,8 @@ private struct CLI {
             try await AudioCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "voice-turn":
             try await VoiceTurnCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
+        case "voice-bench":
+            try await VoiceBenchCommand.run(arguments: Array(command.dropFirst()), currentDirectoryURL: currentDirectoryURL)
         case "apple":
             try await AppleCommand.run(arguments: Array(command.dropFirst()))
         case "session":

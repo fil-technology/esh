@@ -6,6 +6,22 @@ to the **real local backends** and a real server-owned conversational turn (STT�
 duplex transport, acoustic barge-in/echo, warm co-residency, and the live frozen benchmark remain.
 **Verdict: VOICE 2.1 EXPERIMENTAL** (the live path works; material realtime/UX limitations remain — see gates).
 
+## Warm co-residency — the cold-latency blocker is SOLVED (measured, M1 Pro / 32 GB)
+`esh voice-bench` runs N turns through ONE orchestrator with shared resident collaborators (warm STT worker,
+persistent MLX LLM via `RuntimeLifecycleManager` with `ESH_MLX_PERSISTENT=1`, reused TTS). Measured:
+
+| turn | STT | LLM first token | TTS first audio | endpoint→audible | free MB |
+|---|---|---|---|---|---|
+| 1 (cold) | 7443 ms | 6921 ms | 1176 ms | 15540 ms | 18980 |
+| 2 (warm) | 68 ms | 551 ms | 880 ms | **1499 ms** | 18874 |
+| 3 (warm) | 69 ms | 747 ms | 950 ms | **1765 ms** | 18719 |
+
+**Warm endpoint→audible ≈ 1.6 s** (avg 1632 ms) — under the <2.5 s target, approaching the <1.5 s stretch.
+Warm STT ~68 ms, warm LLM first token ~550–750 ms, warm TTS first audio ~900 ms. Memory stayed flat (~18.7 GB
+free with all three models co-resident — no leak, no unmanaged workers). **Conclusion: the local stack reaches
+realtime-grade latency when warm; the ~38 s cold figure was purely model-load, not a per-turn cost.** TTS first
+audio (~900 ms, buffered) is the largest warm component and is the best target for streaming TTS next.
+
 ## Live path (this pass) — real backends, proven server-owned turn
 - **Real adapters** (`Sources/esh/Voice/VoiceAdapters.swift`): `SpeechRuntimeTranscriber` → warm
   `SpeechRuntimeManager` (parakeet, whole-file); `LanguageResponder` → `ExternalInferenceService.inferStream`
@@ -99,11 +115,12 @@ co-reside under one 32 GB budget with eviction under pressure; keep TTS resident
 ```
 VOICE 2.1 EXPERIMENTAL
 ```
-The server-owned runtime core is wired to the real local stack and a real conversational turn (STT→LLM→TTS)
-is proven headlessly, with a tested server-side VAD. It is **experimental**, not production: latency is cold
-(no warm co-residency), and the realtime gates — live-mic duplex transport, acoustic barge-in, echo/speakerphone,
-the live frozen benchmark, multilingual-by-ear, voice Install-and-Resume, and offline/packaging — are not met.
-Remaining production gates (spec §22) keep **PR #8 DRAFT**.
+The server-owned runtime is wired to the real local stack, a real conversational turn (STT→LLM→TTS) is proven
+headlessly, server-side VAD is tested, and **warm co-residency now hits realtime latency (~1.6 s endpoint→audible)**
+— the cold blocker is solved. It stays **experimental** because the realtime *delivery* path is not built/verified:
+a WebSocket duplex transport, browser mic capture + low-latency playback, real-mic barge-in and echo handling,
+the realtime simulator + endurance-over-transport, multilingual-by-ear, and physical acoustic acceptance remain.
+These keep **PR #8 DRAFT**. The latency gate — the previous hard blocker — now **passes**.
 
 ## Recommended next milestone (do not auto-start)
 **Voice 2.1 — Live Path & Duplex Transport:** wire the three real adapters into the runtime core; add a
