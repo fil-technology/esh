@@ -167,7 +167,7 @@ public enum BrowserModuleComposer {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>\(safeTitle)</title>
-          <style>html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#eee;font-family:system-ui,sans-serif}#app{position:fixed;inset:0}#app canvas{display:block;width:100%;height:100%}.ui{position:fixed;top:10px;left:10px;z-index:10;display:flex;gap:8px}.ui button{padding:6px 10px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font:inherit}</style>\(styleLink)
+          <style>html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#eee;font-family:system-ui,sans-serif}#app{position:fixed;inset:0}#app canvas{display:block;width:100%;height:100%}.ui{position:fixed;top:10px;left:10px;z-index:10;display:flex;gap:6px}.ui button{padding:5px 9px;border:1px solid rgba(255,255,255,.14);border-radius:8px;background:rgba(20,20,22,.5);color:#e9e9ec;cursor:pointer;font:inherit;font-size:12px;line-height:1;opacity:.82;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:opacity .12s,background .12s}.ui button:hover{opacity:1;background:rgba(20,20,22,.68)}</style>\(styleLink)
           <script type="importmap">
         \(mapJSON)
           </script>
