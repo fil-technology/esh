@@ -120,6 +120,38 @@ public enum BrowserModuleComposer {
             renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
           }
           _resize(); window.addEventListener('resize', _resize);
+          // Built-in mouse/touch orbit so any scene is inspectable — drag to rotate, wheel/pinch to zoom.
+          // esh owns camera controls (the OrbitControls addon isn't bundled); the model only fills the scene.
+          const _target = new THREE.Vector3(0, 0, 0);
+          let _radius = camera.position.length() || 5;
+          let _theta = Math.atan2(camera.position.x, camera.position.z);
+          let _phi = Math.acos(Math.min(1, Math.max(-1, camera.position.y / _radius)));
+          globalThis.eshOrbit = true;   // a scene may set this false to take over the camera
+          function _applyCam() {
+            if (globalThis.eshOrbit === false) return;
+            const s = Math.sin(_phi);
+            camera.position.set(_target.x + _radius * s * Math.sin(_theta),
+                                _target.y + _radius * Math.cos(_phi),
+                                _target.z + _radius * s * Math.cos(_theta));
+            camera.lookAt(_target);
+          }
+          _applyCam();
+          let _drag = false, _px = 0, _py = 0;
+          const _el = renderer.domElement; _el.style.touchAction = 'none';
+          _el.addEventListener('pointerdown', (e) => { _drag = true; _px = e.clientX; _py = e.clientY; try { _el.setPointerCapture(e.pointerId); } catch (_) {} });
+          _el.addEventListener('pointermove', (e) => {
+            if (!_drag) return;
+            _theta -= (e.clientX - _px) * 0.01;
+            _phi = Math.min(Math.PI - 0.02, Math.max(0.02, _phi - (e.clientY - _py) * 0.01));
+            _px = e.clientX; _py = e.clientY; _applyCam();
+          });
+          const _end = () => { _drag = false; };
+          _el.addEventListener('pointerup', _end); _el.addEventListener('pointercancel', _end);
+          _el.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            _radius = Math.min(2000, Math.max(0.3, _radius * (1 + (e.deltaY > 0 ? 0.1 : -0.1))));
+            _applyCam();
+          }, { passive: false });
           let _last = performance.now();
           function _loop(now) {
             const dt = Math.min(0.1, (now - _last) / 1000); _last = now;

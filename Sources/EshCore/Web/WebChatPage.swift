@@ -38,6 +38,9 @@ public enum WebChatPage {
   .icon{ display:flex; }
   @keyframes eshblink{0%,49%{opacity:1}50%,100%{opacity:0}}
   @keyframes eshpulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.12);opacity:1}}
+  /* Blinking dot on a sidebar chat row while that chat is generating. */
+  .genrowdot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:#2563eb; margin-right:7px; flex:0 0 auto; animation:eshpulse 1.1s ease-in-out infinite; }
+  .chatitem.generating .clabel{ opacity:.9; }
   @keyframes eshbar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
   @keyframes eshtype{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1);opacity:1}}
   @keyframes eshdot{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-4px);opacity:1}}
@@ -642,7 +645,9 @@ function chatRow(ch){
   if(S.renaming && S.renaming.type==='chat' && S.renaming.id===ch.id){
     return `<div class="chatitem active"><input class="renameinput" id="renameinput" data-rename="chat" data-arg="${ch.id}" value="${escAttr(ch.title||'')}" maxlength="80"></div>`;
   }
-  return `<div class="chatitem ${ch.id===S.current?'active':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}"><span class="clabel">${esch(ch.title||'New chat')}</span></div>`;
+  const gen=(S.capBusy&&S.genChatId===ch.id)||(S.streaming&&S.current===ch.id);
+  const dot=gen?`<span class="genrowdot" title="Generating…"></span>`:'';
+  return `<div class="chatitem ${ch.id===S.current?'active':''} ${gen?'generating':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}" style="display:flex;align-items:center">${dot}<span class="clabel">${esch(ch.title||'New chat')}</span></div>`;
 }
 function folderRow(f, chats){
   const collapsed=!!f.collapsed;
