@@ -58,6 +58,10 @@ enum ServeCommand {
         // sharing the same warm lifecycle pool. Best-effort so it never breaks the HTTP server.
         let voicePort: UInt16 = port == 65535 ? port - 1 : port + 1
         var voiceServerRef: VoiceWebSocketServer?
+        // Free the companion Voice port if a previous esh server (e.g. left after a Ctrl+Z) is still holding it,
+        // otherwise the realtime Voice endpoint would silently fail to bind and /voice would not connect.
+        let voicePortReady = PortConflictResolver.ensureEshCompanionPortFree(host: host, port: voicePort, label: "Voice")
+        if voicePortReady {
         do {
             let vStore = FileModelStore(root: root)
             let vInference = ExternalInferenceService(modelStore: vStore, sessionStore: FileSessionStore(root: root),
@@ -135,6 +139,9 @@ enum ServeCommand {
             print("esh Voice realtime (WebSocket) listening on ws://\(host):\(voicePort)/v1/voice/stream")
         } catch {
             fputs("warning: Voice realtime endpoint unavailable: \(error.localizedDescription)\n", stderr)
+        }
+        } else {
+            fputs("warning: Voice realtime endpoint disabled — companion port \(voicePort) is in use.\n", stderr)
         }
         _ = voiceServerRef   // retained for the process lifetime
 
