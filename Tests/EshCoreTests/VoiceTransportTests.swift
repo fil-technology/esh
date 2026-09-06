@@ -131,6 +131,53 @@ struct VoiceTransportTests {
     }
 
     @Test
+    func enduranceTwentyTurnsOverWebSocket() async throws {
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // Pace turns: send the next utterance only after the previous turn finishes (tts.finished → listening).
+        let utter = loudPCM(ms: 400) + silencePCM(ms: 1600)
+        let completed = await withTimeout(30) { () -> Int? in
+            var done = 0, transcripts = 0
+            client.sendAudioPCM(utter)
+            for await m in client.messages {
+                if case .event(let e) = m {
+                    if e.t == "transcript.final" { transcripts += 1 }
+                    if e.t == "session.error" { return -1 }
+                    if e.t == "tts.finished" { done += 1; if done >= 20 { return transcripts }; client.sendAudioPCM(utter) }
+                }
+                if case .closed = m { return transcripts }
+            }
+            return transcripts
+        }
+        client.close()
+        #expect(completed == 20, "expected 20 completed turns over one persistent connection, got \(completed ?? -99)")
+    }
+
+    @Test
+    func malformedFramesAndUnknownControlKeepServerHealthy() async throws {
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // Garbage the server must tolerate without dying: non-JSON text, unknown control op, stray tiny binary.
+        client.sendControlRaw(Data("not json at all {{{".utf8))
+        client.sendControl(VoiceControl(t: "bogus-op-should-be-ignored"))
+        client.sendAudioPCM(Data([0x00]))   // 1 byte, sub-frame — must not crash the VAD accumulator
+        // A valid turn must still work afterwards → server stayed healthy.
+        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+        let ok = await withTimeout(8) { () -> Bool? in
+            for await m in client.messages { if case .event(let e) = m, e.t == "transcript.final" { return true } }
+            return false
+        }
+        client.close()
+        #expect(ok == true, "server must tolerate malformed/unknown input and still complete a valid turn")
+    }
+
+    @Test
     func disconnectMidTurnLeavesServerHealthy() async throws {
         let (srv, port) = try await startServer({ SlowSpeaker() })
         defer { srv.stop() }

@@ -47,12 +47,15 @@ public struct EnergyVADEndpointer: Sendable {
     }
 
     /// Feed one frame of normalized samples; returns the signals it produced (in order). Deterministic.
-    public func process(frame: [Float], state: inout State) -> [VADSignal] {
+    /// `thresholdScale` raises the speech bar (e.g. while the assistant is speaking, for echo suppression):
+    /// quiet echo stays below the raised bar while genuinely louder user speech still crosses it — the VAD is
+    /// never disabled during playback, so barge-in remains possible (spec §8).
+    public func process(frame: [Float], state: inout State, thresholdScale: Double = 1.0) -> [VADSignal] {
         guard !frame.isEmpty else { return [] }
         let frameMs = Int((Double(frame.count) / Double(sampleRate)) * 1000.0)
         let rms = Self.rms(frame)
         var out: [VADSignal] = [.level(rms)]
-        let isSpeech = rms >= energyThreshold
+        let isSpeech = rms >= energyThreshold * max(1.0, thresholdScale)
 
         if !state.started {
             if isSpeech {

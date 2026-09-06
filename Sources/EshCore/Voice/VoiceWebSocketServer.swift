@@ -123,6 +123,7 @@ final class VoiceWSConnection: @unchecked Sendable {
     private var inSpeech = false
     private var turn: UInt32 = 0
     private var audioSeq: UInt32 = 0
+    private let echoGuardScale = 3.0   // during playback, require ~3× the base energy to count as barge-in
     var onClose: (@Sendable () -> Void)?
 
     init(connection: NWConnection, factory: @escaping VoiceWebSocketServer.SessionFactory, queue: DispatchQueue) {
@@ -245,7 +246,11 @@ final class VoiceWSConnection: @unchecked Sendable {
             let frame = pcmFrameAccum.prefix(frameBytes)
             pcmFrameAccum.removeFirst(frameBytes)
             let floats = EnergyVADEndpointer.pcm16ToFloat(Data(frame))
-            for sig in vad.process(frame: floats, state: &vadState) {
+            // Echo/self-trigger guard: while the assistant is speaking, raise the VAD bar (playback-reference
+            // aware) so its own audio bleeding into the mic doesn't self-interrupt, while louder genuine user
+            // speech still barges in. The VAD is NOT disabled during playback (spec §8).
+            let scale = (orchState == .speaking) ? echoGuardScale : 1.0
+            for sig in vad.process(frame: floats, state: &vadState, thresholdScale: scale) {
                 switch sig {
                 case .level(let l):
                     if inSpeech || l > 0 { /* could emit input.level; kept light */ }

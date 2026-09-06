@@ -72,6 +72,9 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 )
             case ("GET", "/web"), ("GET", "/chat"):
                 return htmlResponse(WebChatPage.html(toolVersion: toolVersion))
+            case ("GET", "/voice"):
+                // Server-owned realtime voice client (thin: capture + transport + playback + UI).
+                return htmlResponse(VoiceClientPage.html(toolVersion: toolVersion))
             case ("GET", "/v1/models"):
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):

@@ -111,6 +111,8 @@ public final class VoiceWebSocketClient: @unchecked Sendable {
         send(WSFrame(opcode: .text, payload: data))
     }
     public func sendAudioPCM(_ pcm: Data) { send(WSFrame(opcode: .binary, payload: pcm)) }
+    /// Send an arbitrary TEXT-frame payload (for robustness tests: malformed JSON etc.).
+    public func sendControlRaw(_ data: Data) { send(WSFrame(opcode: .text, payload: data)) }
     public func close() { send(WSFrame(opcode: .close)); open = false; connection.cancel() }
 
     private func send(_ frame: WSFrame) {

@@ -55,6 +55,28 @@ struct EnergyVADTests {
     }
 
     @Test
+    func echoGuardSuppressesQuietEchoButNotLoudSpeechDuringPlayback() {
+        // While the assistant speaks, the server raises the VAD bar (thresholdScale). Quiet echo (~0.08 RMS)
+        // stays below the raised bar (0.045×3 = 0.135) so it can't self-interrupt; genuine louder speech (~0.24)
+        // still crosses it and barges in. Base threshold 0.045; minSpeech 60 ms.
+        let policy = VoiceEndpointPolicy(trailingSilenceMs: 200, speechEnergyThreshold: 0.045)
+        let vad = EnergyVADEndpointer(sampleRate: sr, policy: policy, minSpeechMs: 60)
+
+        var echoState = EnergyVADEndpointer.State(); var echoSignals: [VADSignal] = []
+        for _ in 0..<20 { echoSignals += vad.process(frame: frame(0.08), state: &echoState, thresholdScale: 3.0) }
+        #expect(!echoSignals.contains(.speechStarted), "quiet echo must NOT trigger speech during playback")
+
+        var loudState = EnergyVADEndpointer.State(); var loudSignals: [VADSignal] = []
+        for _ in 0..<20 { loudSignals += vad.process(frame: frame(0.24), state: &loudState, thresholdScale: 3.0) }
+        #expect(loudSignals.contains(.speechStarted), "loud genuine speech must still barge in during playback")
+
+        // And with no playback (scale 1.0) the same quiet 0.08 DOES count as speech (bar is only raised while speaking).
+        var normalState = EnergyVADEndpointer.State(); var normalSignals: [VADSignal] = []
+        for _ in 0..<20 { normalSignals += vad.process(frame: frame(0.08), state: &normalState, thresholdScale: 1.0) }
+        #expect(normalSignals.contains(.speechStarted))
+    }
+
+    @Test
     func rmsAndPCM16Conversion() {
         #expect(EnergyVADEndpointer.rms([0.5, -0.5, 0.5, -0.5]) == 0.5)
         var d = Data(); var s: Int16 = 16384; withUnsafeBytes(of: s.littleEndian) { d.append(contentsOf: $0) }
