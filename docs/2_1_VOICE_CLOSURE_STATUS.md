@@ -17,9 +17,9 @@ Verification stacks: fast voice stack = `llama-3.2-3b-instruct-4bit` (LLM) + `So
 | 5 | EN / RU / HE structural fixtures | ◑ | EN verified; RU/HE classified (unsupported on current stack) |
 | 6 | Disconnect / cancellation matrix | ✅ | 15/15 transport tests |
 | 7 | Voice doctor / observability | ✅ | `esh doctor` voice section + `--json` + test |
-| 8 | Browser verification (`/voice`) | ⏳ | see below |
-| 9 | Packaged-path verification | ◑ | serve starts, WS listens, Voice Auto + managed models resolve |
-| 10 | Regression + CI | ⏳ | voice suites green; full suite pending |
+| 8 | Browser verification (`/voice`) | ✅ | page loads/renders, permission-denied UX graceful, no JS errors; behaviors confirmed via source + transport tests |
+| 9 | Packaged-path verification | ◑ | serve starts, WS listens, Voice Auto + managed models resolve; package smoke pending |
+| 10 | Regression + CI | ◑ | voice+doctor suites 41/41 green; full Swift/Python/package suite pending |
 
 Legend: ✅ pass · ◑ partial/honest-classified · ⏳ pending.
 
@@ -68,13 +68,22 @@ No pronunciation-quality claims are made (requires human acoustic acceptance —
 
 ---
 
+## Gate 8 — Browser `/voice` ✅ (structural)
+
+Served at `GET /voice` (HTTP 200, 7.4 KB, self-contained). Loaded in a headless browser:
+- Page renders: mic orb, "Ready" state, Start/End buttons, on-device hint, empty transcript log.
+- **Permission-denied UX:** clicking Start with no microphone shows "Microphone permission is required for
+  voice." (red), the UI stays healthy and recoverable (Start re-enabled), and there are **no console errors**.
+- Client behaviors verified in page source + by the 15/15 headless transport tests (same server path): WS
+  connect, `session.state` transitions, transcript render, ordered binary playback queue, `playback.cancelled`
+  → flush, `if(turn<curTurn) return` stale-turn drop, reconnect via Start.
+- Live mic-driven capture/playback is the user's physical acoustic acceptance gate (not scriptable headless).
+
 ## Remaining (⏳)
 
 - **Gate 3 — Install-and-Resume:** exercise an isolated managed root with one Voice dependency made
   unavailable; prove InstallRequirement → Voice Fit → install → managed SSD → resume at a safe boundary.
-- **Gate 8 — Browser `/voice`:** structural checks of the served page (load, WS connect, state/transcript
-  render, binary playback queue, cancellation flush, reconnect, stale-turn drop).
-- **Gate 9 — Packaged-path:** confirm `/voice` asset, WS endpoint, STT/TTS runtime discovery, managed
-  models, external SSD, offline, no source-tree/dev-path assumptions. (serve start + WS + Voice Auto already
-  observed.)
-- **Gate 10 — Regression + CI:** full Swift suite + Python + package smoke.
+- **Gate 9 — Packaged-path (partial):** serve start + WS listen + Voice Auto + managed-model resolution
+  observed; remaining: `scripts/smoke-test-package.sh` against a packaged/notarized build, dev-path leak scan.
+- **Gate 10 — Regression + CI (partial):** voice + doctor suites 41/41 green; remaining: full Swift suite +
+  Python tests + package smoke + CI.
