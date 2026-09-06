@@ -2110,9 +2110,82 @@ def _isolated_audiogen_python() -> "str | None":
     return None
 
 
+def _clean_worker_stderr(text: str) -> str:
+    """Drop noise (HF rate-limit notice, tqdm weight-loading bars, multiprocessing resource_tracker
+    leaked-semaphore warnings) so a surfaced error shows the real cause, not the shutdown chatter."""
+    keep = []
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if "resource_tracker" in low or "leaked semaphore" in low or "warnings.warn(" in low:
+            continue
+        if "loading weights" in low or "you are sending unauthenticated" in low:
+            continue
+        keep.append(s)
+    return "\n".join(keep[-4:])
+
+
+def _run_sfx_worker(py: str, script: str, env: dict, request: dict):
+    """One AudioGen worker attempt. Returns (result_dict | None, returncode, cleaned_stderr)."""
+    import os, subprocess, signal, json as _json
+    try:
+        proc = subprocess.Popen([py, script], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"failed to launch: {type(exc).__name__}: {exc}"
+    _register_child_pgid(proc.pid)
+    try:
+        out, err = proc.communicate(input=_json.dumps(request), timeout=1200)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except Exception:  # noqa: BLE001
+            pass
+        return None, "timeout", "timed out"
+    finally:
+        _unregister_child_pgid(proc.pid)
+    if proc.returncode == 0:
+        for ln in (out or "").strip().splitlines():
+            if ln.strip().startswith("{"):
+                try:
+                    return _json.loads(ln), 0, ""
+                except Exception:  # noqa: BLE001
+                    pass
+    return None, proc.returncode, _clean_worker_stderr(err or out or "")
+
+
+def _strip_appledouble(root: str) -> int:
+    """Delete AppleDouble ._* sidecars under `root`. On exFAT (the SSD), macOS recreates these over time; the
+    isolated venv's site-packages then holds ._*.py files that mlx-audiocraft/transformers' module scan reads as
+    source, poisoning multiprocessing workers -> the worker dies (SIGKILL + 'leaked semaphore'). Stripping them
+    before each run is the durable fix for the recurring 'sound generation failed' crash."""
+    import os
+    removed = 0
+    try:
+        for dirpath, _dirs, files in os.walk(root):
+            for f in files:
+                if f.startswith("._"):
+                    try:
+                        os.remove(os.path.join(dirpath, f)); removed += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return removed
+
+
 def _generate_sfx_isolated(request: dict) -> None:
-    """audio.generate SFX → run AudioGen inside the isolated venv (Tools/esh_audiogen.py), RAM-floor guarded."""
-    import os, subprocess, json as _json
+    """audio.generate SFX → run AudioGen inside the isolated venv (Tools/esh_audiogen.py), RAM-floor guarded.
+    The audiocraft/multiprocessing stack occasionally tears down uncleanly and the worker dies with a signal
+    (SIGKILL / negative returncode) leaving only a 'leaked semaphore' warning — a transient, non-deterministic
+    crash. We retry once on such a crash and surface a clear message (not the shutdown chatter) if it persists."""
+    import os
     py = _isolated_audiogen_python()
     if not py:
         _fail("the AudioGen SFX runtime is not installed — run scripts/setup-audio-runtime.sh "
@@ -2121,44 +2194,39 @@ def _generate_sfx_isolated(request: dict) -> None:
     avail = _available_mem_mb()
     if avail is not None and avail < min_free:
         _fail(f"sound generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+    _strip_appledouble(os.path.join(os.path.dirname(os.path.dirname(py)), "lib"))  # clear exFAT ._* sidecars (crash cause)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_audiogen.py")
     env = dict(os.environ)
-    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1"})
+    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1",
+                "OMP_NUM_THREADS": "1", "TOKENIZERS_PARALLELISM": "false"})  # fewer worker semaphores → fewer leaks
     hf = request.get("hfCache")
     if hf:
         env["HF_HOME"] = hf; env["HF_HUB_CACHE"] = os.path.join(hf, "hub")
-    import signal
-    # Own process group (start_new_session) so we can kill the whole worker tree at once. Registered with the
-    # SIGTERM reaper so a bridge cancellation tears the worker down instead of orphaning it (see _install_child_reaper).
-    try:
-        proc = subprocess.Popen([py, script], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"sound generation failed to launch: {type(exc).__name__}: {exc}")
-    _register_child_pgid(proc.pid)
-    try:
-        out, err = proc.communicate(input=_json.dumps(request), timeout=1200)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # kill the group, not just the leader
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            proc.communicate(timeout=5)
-        except Exception:  # noqa: BLE001
-            pass
+
+    last_code, last_err = None, ""
+    for attempt in range(3):   # up to two retries: the crash is transient (often ._* poisoning) and passes on a fresh worker
+        res, code, errtext = _run_sfx_worker(py, script, env, request)
+        if res is not None:
+            if res.get("error"):
+                _fail(res["error"])
+            _dump_json(res)
+            return
+        last_code, last_err = code, errtext
+        # Only retry a signal/crash with no useful diagnostic; a real error (non-empty message) fails fast.
+        crashed = (isinstance(code, int) and code != 0) or code == "timeout"
+        if not (crashed and not last_err):
+            break
+
+    if last_code == "timeout":
         _fail("sound generation timed out")
-    finally:
-        _unregister_child_pgid(proc.pid)
-    if proc.returncode != 0:
-        _fail(f"sound generation failed: {(err or out or '')[-300:]}")
-    line = [l for l in (out or "").strip().splitlines() if l.strip().startswith("{")]
-    if not line:
-        _fail(f"sound generation produced no result: {(out or err or '')[-200:]}")
-    res = _json.loads(line[-1])
-    if res.get("error"):
-        _fail(res["error"])
-    _dump_json(res)
+    signal_hint = ""
+    if isinstance(last_code, int) and last_code < 0:
+        signal_hint = f" (audio model exited on signal {-last_code})"
+    elif last_code == 137:
+        signal_hint = " (audio model was killed, signal 9)"
+    detail = f": {last_err}" if last_err else ""
+    _fail(f"sound generation crashed{signal_hint} — this is usually a transient audio-runtime issue; "
+          f"please try again{detail}")
 
 
 def _peak_normalize(arr, ceiling: float = 0.99):
