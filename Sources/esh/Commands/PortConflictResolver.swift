@@ -61,6 +61,31 @@ enum PortConflictResolver {
         }
     }
 
+    /// Ensure a COMPANION esh port (e.g. the realtime Voice WebSocket on serve-port + 1) is free before we
+    /// bind it. Unlike `resolve`, this port is fixed (it can't move), so we only offer to stop a previous esh
+    /// server holding it — which is the common case after a Ctrl+Z/stale run left the companion port bound.
+    /// Interactive: prompt to stop. Non-interactive: auto-stop our own stale esh (never a foreign process).
+    /// Returns true if the port is free (or was freed).
+    static func ensureEshCompanionPortFree(host: String, port: UInt16, label: String) -> Bool {
+        if isAvailable(host: host, port: port) { return true }
+        let holders = listeningPIDs(port: port)
+        let eshHolders = holders.filter { isEshProcess($0) }
+        guard !eshHolders.isEmpty else {
+            fputs("notice: \(label) port \(port) is in use by another (non-esh) process — \(label) disabled.\n", stderr)
+            return false
+        }
+        let interactive = isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0
+        if interactive {
+            print("The \(label) port \(port) is held by a previous esh server (pid \(eshHolders.map(String.init).joined(separator: ", "))).")
+            print("  [s] stop it and start   [c] leave \(label) disabled")
+            if choice(allowStop: true) != "s" { return false }
+        } else {
+            fputs("notice: stopping a previous esh server holding the \(label) port \(port) (pid \(eshHolders.map(String.init).joined(separator: ", "))).\n", stderr)
+        }
+        stop(pids: eshHolders)
+        return waitUntilFree(host: host, port: port)
+    }
+
     private static func alternateOrCancel(host: String, port: UInt16) -> Resolution {
         if let alt = nextAvailablePort(host: host, from: port) {
             print("Using free port \(alt).")

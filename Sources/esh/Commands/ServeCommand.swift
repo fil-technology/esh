@@ -52,6 +52,99 @@ enum ServeCommand {
         let server = try OpenAICompatibleLocalServer(host: host, port: port, handler: handler)
 
         server.start()
+
+        // Voice 2.1 realtime duplex endpoint (WebSocket) on a companion port. Thin clients (browser/simulator)
+        // stream mic PCM and receive typed VoiceEvents + binary TTS; the server owns VAD/STT/LLM/TTS + barge-in,
+        // sharing the same warm lifecycle pool. Best-effort so it never breaks the HTTP server.
+        let voicePort: UInt16 = port == 65535 ? port - 1 : port + 1
+        var voiceServerRef: VoiceWebSocketServer?
+        // Free the companion Voice port if a previous esh server (e.g. left after a Ctrl+Z) is still holding it,
+        // otherwise the realtime Voice endpoint would silently fail to bind and /voice would not connect.
+        let voicePortReady = PortConflictResolver.ensureEshCompanionPortFree(host: host, port: voicePort, label: "Voice")
+        if voicePortReady {
+        do {
+            let vStore = FileModelStore(root: root)
+            let vInference = ExternalInferenceService(modelStore: vStore, sessionStore: FileSessionStore(root: root),
+                                                      cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
+            let vInstalls = (try? vStore.listInstalls()) ?? []
+            // Voice Auto (spec §10): pick the smallest installed LLM whose WHOLE warm voice stack (STT+LLM+TTS
+            // +KV+buffers) fits — realtime-friendly. The previous "first MLX install" could grab a 14B coder,
+            // pushing warm endpoint→playable to ~5.5s; Voice Auto's small pick lands it under the 2.5s gate
+            // (measured in voice-ws-bench). Falls back to first install only if the planner finds nothing.
+            let vHost = HostMachineProfileService().currentProfile()
+            // A manifest can list a model whose files were deleted/moved off the SSD. Selecting such a phantom
+            // makes the turn crash at load time ("install path does not exist"), so Voice Auto must only
+            // consider installs whose files are actually present on disk.
+            let vPresent: @Sendable (ModelInstall) -> Bool = { i in
+                let fm = FileManager.default
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: i.installPath, isDirectory: &isDir), isDir.boolValue else { return false }
+                return !(((try? fm.contentsOfDirectory(atPath: i.installPath)) ?? []).isEmpty)
+            }
+            let vMLX = vInstalls.filter { $0.spec.backend == .mlx && vPresent($0) }
+                .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
+            // Opt-in override: ESH_VOICE_LLM pins a specific installed model for voice (e.g. a higher-quality
+            // 3B) instead of Voice Auto's smallest-fitting pick. Honored only if that model is actually present.
+            let vOverride = ProcessInfo.processInfo.environment["ESH_VOICE_LLM"].flatMap { id in
+                vMLX.contains(where: { $0.id == id }) ? id : nil
+            }
+            let vAuto = VoiceAuto.selectLLM(installed: vMLX, pinned: vOverride, host: vHost)
+            let vLLM = vAuto?.id ?? vInstalls.first(where: { $0.spec.backend == .mlx && vPresent($0) })?.id
+            if let vAuto { print("esh Voice Auto: LLM \(vAuto.id) — \(vAuto.reason)") }
+            // Install-and-Resume preflight (spec §3): on each session start, re-check that a voice LLM is
+            // installed and the WHOLE warm voice stack fits. If not, the server holds at a safe boundary and
+            // emits install.required (with combined Voice Fit) instead of failing mid-turn; installing the
+            // recommended model to managed storage and re-starting resumes. Re-lists installs each call so a
+            // model installed while serving is picked up on the next start.
+            let voicePreflight: VoiceWebSocketServer.Preflight = { cfg in
+                let host = HostMachineProfileService().currentProfile()
+                let installs = (try? vStore.listInstalls()) ?? []
+                let mlx = installs.filter { $0.spec.backend == .mlx && vPresent($0) }
+                    .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
+                // Honor a client pin (on-screen model picker) first, then the ESH_VOICE_LLM override, else Voice Auto.
+                let pin = cfg.inferenceModel ?? vOverride
+                let picked = VoiceAuto.selectLLM(installed: mlx, pinned: pin, host: host)
+                guard let picked, let m = mlx.first(where: { $0.id == picked.id }) else {
+                    let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: 1.0), host: host)
+                    return .installRequired(
+                        component: "voice LLM",
+                        recommendedRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                        voiceFit: fit.reason,
+                        summary: "No installed MLX language model fits the warm voice stack. Install a small LLM (e.g. Llama-3.2-3B-Instruct-4bit) with `esh model install`, then start voice again.")
+                }
+                let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: m.weightsGB), host: host)
+                if fit.fitClass == .unsupported || fit.fitClass == .unlikely {
+                    return .installRequired(
+                        component: "voice LLM",
+                        recommendedRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                        voiceFit: fit.reason,
+                        summary: "The selected LLM (\(picked.id)) does not fit the warm voice stack on this machine. Install a smaller LLM and start voice again.")
+                }
+                return .ready
+            }
+            let vServer = try VoiceWebSocketServer(port: voicePort, preflight: voicePreflight) { cfg in
+                VoiceSessionOrchestrator(
+                    config: cfg,
+                    transcriber: SpeechRuntimeTranscriber(lifecycleManager: pool),
+                    responder: LanguageResponder(inference: vInference, resolveModel: { pin in pin ?? cfg.inferenceModel ?? vLLM }),
+                    // Phrase-chunked buffered TTS: the orchestrator already streams audio phrase-by-phrase to the
+                    // browser as the LLM generates (VoicePhraseChunker), so first audio arrives after the first
+                    // phrase, not the whole reply. Sub-phrase StreamingTTSSpeaker is deliberately NOT used here:
+                    // TTSMLX.synthesizeStream is @MainActor and deadlocks under the actor-driven turn loop
+                    // (proven in voice-bench --stream-tts). Re-enable once TTSMLX ships a non-MainActor stream.
+                    speaker: BufferedTTSSpeaker(lifecycleManager: pool))
+            }
+            vServer.start()
+            voiceServerRef = vServer
+            print("esh Voice realtime (WebSocket) listening on ws://\(host):\(voicePort)/v1/voice/stream")
+        } catch {
+            fputs("warning: Voice realtime endpoint unavailable: \(error.localizedDescription)\n", stderr)
+        }
+        } else {
+            fputs("warning: Voice realtime endpoint disabled — companion port \(voicePort) is in use.\n", stderr)
+        }
+        _ = voiceServerRef   // retained for the process lifetime
+
         if host == "0.0.0.0" || host == "::" {
             fputs("warning: binding to \(host) exposes the API — and any loaded model — to other machines on the network.\n", stderr)
             if apiKey == nil {

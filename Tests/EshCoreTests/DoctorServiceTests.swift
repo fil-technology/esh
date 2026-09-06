@@ -44,6 +44,24 @@ struct DoctorServiceTests {
         #expect(report.storage.reason != nil)
     }
 
+    @Test
+    func reportsVoiceRealtimeStack() {
+        // Voice 2.1 §7 observability: the report must carry a static voice stack section derived from pure
+        // probes — endpoint, VAD provider, STT/TTS, Voice Auto, Fit — without starting a server.
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let report = DoctorService().report(root: root, version: nil)
+        #expect(report.voice.websocketPath == "/v1/voice/stream")
+        #expect(report.voice.defaultEndpoint.contains("/v1/voice/stream"))
+        #expect(!report.voice.vadProvider.isEmpty)
+        #expect(!report.voice.sttModel.isEmpty)
+        #expect(!report.voice.warmState.isEmpty)
+        // A fresh root has no installed LLM → Voice Auto finds nothing and the turn cannot run offline.
+        #expect(report.voice.autoSelectedLLM == nil)
+        #expect(report.voice.offlineReady == false)
+        // Still encodes to stable JSON with the new section.
+        #expect(throws: Never.self) { _ = try JSONEncoder().encode(report) }
+    }
+
     private func temporaryDirectory() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

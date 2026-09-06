@@ -92,6 +92,29 @@ enum DoctorCommand {
         lines.append("  \(report.appleIntelligence.detail)")
         if let fix = report.appleIntelligence.suggestedFix { lines.append("  fix: \(fix)") }
 
+        // Voice 2.1 realtime stack (spec §7)
+        let v = report.voice
+        lines.append("")
+        lines.append("voice (realtime):")
+        lines.append("  websocket: \(v.defaultEndpoint)")
+        lines.append("  vad: \(v.vadProvider)")
+        lines.append("  stt model: \(v.sttModel)")
+        if let llm = v.autoSelectedLLM {
+            lines.append("  voice auto llm: \(llm)")
+            if let why = v.voiceAutoReason { lines.append("    (\(why))") }
+        } else {
+            lines.append("  voice auto llm: NONE FITS — install a smaller MLX model")
+        }
+        lines.append("  tts model: \(v.ttsModel ?? "(none configured — set defaults.tts_model)")")
+        if let fc = v.voiceFitClass {
+            lines.append("  voice fit: \(fc)")
+            if let fr = v.voiceFitReason { lines.append("    \(fr)") }
+        }
+        lines.append("  languages: \(v.languageSupport)")
+        lines.append("  warm state: \(v.warmState)")
+        lines.append("  offline ready: \(v.offlineReady ? "yes (STT+LLM+TTS resolvable locally)" : "no — needs a local LLM and TTS model")")
+        lines.append("  managed storage: \(v.managedStorageRoot)")
+
         // Config
         lines.append("")
         lines.append("config: \(report.configPath)")
