@@ -34,6 +34,37 @@ private struct SlowSpeaker: VoiceSpeaker {
     }
 }
 
+/// STT that blocks long enough to disconnect "during STT". Honors cancellation so no worker is orphaned.
+private struct SlowTranscriber: VoiceTranscriber {
+    let text: String
+    let delayMs: Int
+    func transcribe(_ a: VoiceAudioInput, language: String?, model: String?) async throws -> String {
+        try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+        try Task.checkCancellation()
+        return text
+    }
+}
+/// LLM whose stream stalls between the first and later deltas so we can disconnect "during LLM".
+private struct SlowResponder: VoiceResponder {
+    let deltas: [String]
+    let gapMs: Int
+    func respond(context: [VoiceTurn], language: String?, model: String?) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { c in
+            let task = Task {
+                do {
+                    for (i, d) in deltas.enumerated() {
+                        if i > 0 { try await Task.sleep(nanoseconds: UInt64(gapMs) * 1_000_000) }
+                        try Task.checkCancellation()
+                        c.yield(d)
+                    }
+                    c.finish()
+                } catch { c.finish(throwing: error) }
+            }
+            c.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
 private func loudPCM(ms: Int, sr: Int = 16000) -> Data {
     let n = sr * ms / 1000; var d = Data(capacity: n * 2)
     let amp: Int16 = 8000
@@ -61,6 +92,32 @@ private func startServer(_ speaker: @escaping @Sendable () -> VoiceSpeaker,
     let port = try await srv.startAndWait()
     FileHandle.standardError.write(Data("RESOLVED_PORT=\(port)\n".utf8))
     return (srv, port)
+}
+
+/// Flexible server for the disconnect/cancellation matrix: inject any transcriber/responder/speaker so we can
+/// stall a specific turn phase (STT/LLM/TTS) and then hard-disconnect or interrupt inside it.
+private func startServerCustom(transcriber: @escaping @Sendable () -> VoiceTranscriber,
+                               responder: @escaping @Sendable () -> VoiceResponder,
+                               speaker: @escaping @Sendable () -> VoiceSpeaker) async throws -> (VoiceWebSocketServer, UInt16) {
+    let srv = try VoiceWebSocketServer(port: 0) { cfg in
+        VoiceSessionOrchestrator(config: cfg, transcriber: transcriber(), responder: responder(), speaker: speaker())
+    }
+    let port = try await srv.startAndWait()
+    return (srv, port)
+}
+
+/// A fresh connection completes one full turn — the canonical "server is still healthy" probe.
+private func newSessionCompletes(port: UInt16, timeout: Double = 8) async -> Bool {
+    let client = VoiceWebSocketClient(port: port)
+    do { try await client.connect() } catch { return false }
+    client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+    client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+    let ok = await withTimeout(timeout) { () -> Bool? in
+        for await m in client.messages { if case .event(let e) = m, e.t == "transcript.final" { return true } }
+        return false
+    }
+    client.close()
+    return ok == true
 }
 
 @Suite(.serialized)
@@ -204,5 +261,224 @@ struct VoiceTransportTests {
         }
         c2.close()
         #expect(ok == true, "a new session after a mid-turn disconnect must still complete")
+    }
+
+    // MARK: - Disconnect / cancellation matrix (spec §6)
+
+    @Test
+    func disconnectDuringListeningLeavesServerHealthy() async throws {
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let c1 = VoiceWebSocketClient(port: port)
+        try await c1.connect()
+        c1.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // Never speak — disconnect while the session is idle in listening.
+        c1.close()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let ok = await newSessionCompletes(port: port)
+        #expect(ok, "a new session after a disconnect during listening must complete")
+    }
+
+    @Test
+    func disconnectDuringSTTLeavesServerHealthy() async throws {
+        let (srv, port) = try await startServerCustom(
+            transcriber: { SlowTranscriber(text: "hello there", delayMs: 1500) },
+            responder: { FakeResponder(deltas: ["Hi. "]) }, speaker: { FastSpeaker() })
+        defer { srv.stop() }
+        let c1 = VoiceWebSocketClient(port: port)
+        try await c1.connect()
+        c1.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        c1.sendAudioPCM(loudPCM(ms: 400)); c1.sendAudioPCM(silencePCM(ms: 1600))
+        // Disconnect while STT is still running (before transcript.final).
+        _ = await withTimeout(2) { () -> Bool? in
+            for await m in c1.messages { if case .event(let e) = m, e.t == "vad.speech_ended" { return true } }
+            return false
+        }
+        c1.close()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await newSessionCompletes(port: port), "server must survive a disconnect during STT")
+    }
+
+    @Test
+    func disconnectDuringLLMLeavesServerHealthy() async throws {
+        let (srv, port) = try await startServerCustom(
+            transcriber: { FakeTranscriber(text: "hello there") },
+            responder: { SlowResponder(deltas: ["First. ", "second clause here. ", "third. "], gapMs: 800) },
+            speaker: { FastSpeaker() })
+        defer { srv.stop() }
+        let c1 = VoiceWebSocketClient(port: port)
+        try await c1.connect()
+        c1.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        c1.sendAudioPCM(loudPCM(ms: 400)); c1.sendAudioPCM(silencePCM(ms: 1600))
+        // Disconnect after the first token but before the stream completes (mid-LLM).
+        _ = await withTimeout(4) { () -> Bool? in
+            for await m in c1.messages { if case .event(let e) = m, e.t == "assistant.text_delta" { return true } }
+            return false
+        }
+        c1.close()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await newSessionCompletes(port: port), "server must survive a disconnect during LLM generation")
+    }
+
+    @Test
+    func disconnectWithQueuedPlaybackLeavesServerHealthy() async throws {
+        // SlowSpeaker emits many chunks over time; disconnect while chunks are still queued/streaming.
+        let (srv, port) = try await startServer({ SlowSpeaker() })
+        defer { srv.stop() }
+        let c1 = VoiceWebSocketClient(port: port)
+        try await c1.connect()
+        c1.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        c1.sendAudioPCM(loudPCM(ms: 400)); c1.sendAudioPCM(silencePCM(ms: 1600))
+        _ = await withTimeout(6) { () -> Bool? in
+            var chunks = 0
+            for await m in c1.messages { if case .audio = m { chunks += 1; if chunks >= 2 { return true } } }
+            return false
+        }
+        c1.close()   // disconnect with playback still queued
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(await newSessionCompletes(port: port), "server must survive a disconnect with queued playback")
+    }
+
+    @Test
+    func sessionEndWhileSpeakingStopsCleanly() async throws {
+        let (srv, port) = try await startServer({ SlowSpeaker() })
+        defer { srv.stop() }
+        let c1 = VoiceWebSocketClient(port: port)
+        try await c1.connect()
+        c1.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        c1.sendAudioPCM(loudPCM(ms: 400)); c1.sendAudioPCM(silencePCM(ms: 1600))
+        let sawAudio = await withTimeout(6) { () -> Bool? in
+            for await m in c1.messages { if case .audio = m { return true } }
+            return false
+        }
+        c1.sendControl(VoiceControl(t: "end"))   // end the session mid-playback
+        c1.close()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(sawAudio == true)
+        #expect(await newSessionCompletes(port: port), "server must accept a new session after end-while-speaking")
+    }
+
+    @Test
+    func repeatedBargeInsStayHealthy() async throws {
+        let (srv, port) = try await startServer({ SlowSpeaker() }, deltas: ["A long spoken answer here. "])
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        let result = await withTimeout(15) { () -> Int? in
+            var cancels = 0
+            client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+            for await m in client.messages {
+                if case .audio = m {
+                    // Each time it starts speaking, barge in again (explicit interrupt) — up to 3 times.
+                    if cancels < 3 { client.sendControl(VoiceControl(t: "interrupt")) }
+                }
+                if case .event(let e) = m, e.t == "playback.cancelled" {
+                    cancels += 1
+                    if cancels >= 3 { return cancels }
+                    // Kick off another turn after each cancel.
+                    client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+                }
+            }
+            return cancels
+        }
+        client.close()
+        #expect((result ?? 0) >= 3, "repeated barge-ins must each cancel playback without wedging the session")
+    }
+
+    @Test
+    func oddLengthBinaryFrameKeepsServerHealthy() async throws {
+        // Malformed *payload* (odd byte count → not whole PCM16 samples) must not crash the VAD/int16 path.
+        // (Malformed WS *framing* and oversize frames are covered by VoiceWireTests.)
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        client.sendAudioPCM(Data([0x01, 0x02, 0x03]))   // 3 bytes — odd, sub-sample
+        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+        let ok = await withTimeout(8) { () -> Bool? in
+            for await m in client.messages { if case .event(let e) = m, e.t == "transcript.final" { return true } }
+            return false
+        }
+        client.close()
+        #expect(ok == true, "server must tolerate an odd-length binary payload and still complete a valid turn")
+    }
+
+    @Test
+    func wrongSessionControlIsIgnored() async throws {
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // A control stamped with a bogus/mismatched session id must not disrupt the live session.
+        client.sendControl(VoiceControl(t: "interrupt", session: "not-this-session"))
+        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+        let ok = await withTimeout(8) { () -> Bool? in
+            for await m in client.messages { if case .event(let e) = m, e.t == "transcript.final" { return true } }
+            return false
+        }
+        client.close()
+        #expect(ok == true, "a control carrying a wrong session id must be ignored, not break the session")
+    }
+
+    @Test
+    func unexpectedClientSilenceKeepsServerHealthy() async throws {
+        let (srv, port) = try await startServer({ FastSpeaker() })
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // Prolonged silence (no speech) then a real utterance, all on one connection. Pure silence must not
+        // endpoint (no spurious turn); the real utterance must still complete → the VAD isn't wedged by
+        // leading silence. Single message iterator (AsyncStream is single-consumer).
+        client.sendAudioPCM(silencePCM(ms: 2000))
+        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+        let outcome = await withTimeout(10) { () -> (transcripts: Int, ended: Bool)? in
+            var transcripts = 0
+            for await m in client.messages {
+                if case .event(let e) = m {
+                    if e.t == "transcript.final" { transcripts += 1 }
+                    if e.t == "tts.finished" { return (transcripts, true) }
+                }
+            }
+            return (transcripts, false)
+        }
+        client.close()
+        #expect(outcome?.ended == true, "a real utterance after prolonged silence must still complete a turn")
+        #expect(outcome?.transcripts == 1, "prolonged leading silence must produce exactly one turn, not zero or spurious extra turns")
+    }
+
+    @Test
+    func staleTurnAudioCarriesMonotonicTurnIds() async throws {
+        // Turn isolation at the wire level: after a barge-in, new audio must carry a HIGHER turn id so the
+        // client can drop late frames from the cancelled turn (no stale audio).
+        let (srv, port) = try await startServer({ SlowSpeaker() }, deltas: ["A fairly long first answer. "])
+        defer { srv.stop() }
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        let result = await withTimeout(15) { () -> (Int, Int)? in
+            var firstTurn: Int? = nil
+            var secondTurn: Int? = nil
+            client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+            for await m in client.messages {
+                if case .audio(let af) = m {
+                    if firstTurn == nil {
+                        firstTurn = Int(af.turn)
+                        client.sendControl(VoiceControl(t: "interrupt"))   // barge in
+                        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+                    } else if let f = firstTurn, Int(af.turn) > f {
+                        secondTurn = Int(af.turn)
+                        return (f, secondTurn!)
+                    }
+                }
+            }
+            return nil
+        }
+        client.close()
+        #expect(result != nil, "expected audio from two distinct turns")
+        if let (a, b) = result { #expect(b > a, "post-barge-in audio must carry a higher turn id than the cancelled turn") }
     }
 }
