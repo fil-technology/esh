@@ -477,7 +477,9 @@ struct WebChatPageTests {
     @Test
     func sidebarChatRowsAreVerticallyCentered() {
         let html = WebChatPage.html(toolVersion: nil)
-        #expect(html.contains("class=\"clabel\">${esch(ch.title||'New chat')}</span>"))
+        // Title lives in a .clabel span with an inner .clabtx (marquee-capable) so ellipsis works and, when
+        // the selected row overflows, the name gently scrolls; the row stays flex-centered.
+        #expect(html.contains("class=\"clabel\"><span class=\"clabtx\">${esch(ch.title||'New chat')}</span></span>"))
         #expect(html.contains(".chatitem{ display:flex; align-items:center;"))
         #expect(html.contains(".chatitem .clabel{"))
     }

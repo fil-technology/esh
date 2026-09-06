@@ -100,6 +100,12 @@ public enum WebChatPage {
   .sgroup{ padding:4px 12px; margin-top:8px; font:500 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
   .chatitem{ display:flex; align-items:center; min-height:30px; padding:2px 12px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.75); cursor:pointer; }
   .chatitem .clabel{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chatitem .clabel .clabtx{ display:inline-block; }
+  /* Selected chat with an overflowing title: gently marquee it back and forth so the full name is readable. */
+  .chatitem .clabel.marq{ text-overflow:clip; }
+  .chatitem .clabel.marq .clabtx{ animation:eshmarq var(--marqt,7s) ease-in-out infinite alternate; }
+  @keyframes eshmarq{ from{ transform:translateX(0); } to{ transform:translateX(var(--marqd,0)); } }
+  @media (prefers-reduced-motion: reduce){ .chatitem .clabel.marq .clabtx{ animation:none; } .chatitem .clabel.marq{ text-overflow:ellipsis; } }
   .chatitem:hover{ background:rgba(32,30,27,.04); }
   .chatitem.active{ background:rgba(32,30,27,.05); color:var(--ink); }
   .chatitem[draggable="true"]{ cursor:pointer; }
@@ -514,6 +520,7 @@ const ACT={
   pickOptimize:(v)=>{ S.optimize=v; S.focusInput=true; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
   openExec:(id)=>{ S.execMsgId=id; S.execOpen=true; render(); },
   closeExec:()=>{ S.execOpen=false; render(); },
+  fullscreenArt:(id)=>{ let f=null; try{ f=document.querySelector('[data-artframe="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]'); }catch(e){} if(f&&f.requestFullscreen){ f.requestFullscreen().catch(()=>{}); } },
   copyExec:(id)=>{ const m=cur().messages.find(x=>x.id===id); if(m&&m.exec){ try{ navigator.clipboard.writeText(JSON.stringify(m.exec.profile||m.exec,null,2)); }catch(e){} } },
   send:()=>send(), stop:()=>{ S._stopQueue=true; if(S.controller)S.controller.abort(); if(S.capController)S.capController.abort(); },
   removeQueued:(i)=>{ const c=cur(); if(c&&c.queue)c.queue.splice(+i,1); S.focusInput=true; render(); },
@@ -667,7 +674,7 @@ function chatRow(ch){
   }
   const gen=(S.capBusy&&S.genChatId===ch.id)||(S.streaming&&S.current===ch.id);
   const dot=gen?`<span class="genrowdot" title="Generating…"></span>`:'';
-  return `<div class="chatitem ${ch.id===S.current?'active':''} ${gen?'generating':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}" style="display:flex;align-items:center">${dot}<span class="clabel">${esch(ch.title||'New chat')}</span></div>`;
+  return `<div class="chatitem ${ch.id===S.current?'active':''} ${gen?'generating':''}" draggable="true" data-chat="${ch.id}" data-act="switchChat" data-arg="${ch.id}" style="display:flex;align-items:center">${dot}<span class="clabel"><span class="clabtx">${esch(ch.title||'New chat')}</span></span></div>`;
 }
 function folderRow(f, chats){
   const collapsed=!!f.collapsed;
@@ -721,6 +728,24 @@ function moveChatToFolder(chatId,folderId){
 // Wire the sidebar's imperative bits after each render: focus the rename input and
 // bind its commit/cancel keys; make chats draggable into folders / back to Recent.
 function wireSidebar(){
+  // Marquee the SELECTED chat's title only when it actually overflows (idempotent across re-renders so the
+  // animation doesn't restart on each streaming tick).
+  try{
+    const act=document.querySelector('.chatitem.active');
+    if(act){
+      const lab=act.querySelector('.clabel'), tx=lab&&lab.querySelector('.clabtx');
+      if(lab&&tx){
+        const over=tx.scrollWidth-lab.clientWidth;
+        if(over>4){
+          if(!lab.classList.contains('marq')){
+            lab.classList.add('marq');
+            lab.style.setProperty('--marqd', (-(over+4))+'px');
+            lab.style.setProperty('--marqt', Math.max(3, (over+4)/40)+'s');  // ~40px/s one-way, gentle ping-pong
+          }
+        } else { lab.classList.remove('marq'); lab.style.removeProperty('--marqd'); lab.style.removeProperty('--marqt'); }
+      }
+    }
+  }catch(e){}
   const inp=document.getElementById('renameinput');
   if(inp && !inp._wired){ inp._wired=true;
     inp.focus(); try{ inp.select(); }catch(e){}
@@ -780,10 +805,10 @@ function artifactHTML(a){
     const isProject = a.generatedBy && a.generatedBy.capability==='project.generate';
     const editAct = isProject ? 'editProjectArtifact' : 'editWebArtifact';
     const kindLabel = isProject ? ((a.metadata&&a.metadata.projectType)||'project') : 'web page';
-    return `<div class="astart"><iframe class="astweb" src="${entry}" sandbox="allow-scripts allow-pointer-lock"`
+    return `<div class="astart"><iframe class="astweb" data-artframe="${esch(a.id)}" src="${entry}" sandbox="allow-scripts allow-pointer-lock" allowfullscreen allow="fullscreen"`
       +` title="web artifact preview" loading="lazy" style="width:100%;height:360px;border:0;border-radius:10px;background:#fff"></iframe>`
       +`<div class="astartbar"><span class="mono">${esch(kindLabel)} · sandboxed</span>`
-      +`<span><a class="alink" data-act="${editAct}" data-arg="${esch(a.id)}">Edit</a> · <a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
+      +`<span><a class="alink" data-act="fullscreenArt" data-arg="${esch(a.id)}">Fullscreen</a> · <a class="alink" data-act="${editAct}" data-arg="${esch(a.id)}">Edit</a> · <a class="alink" href="${entry}" target="_blank" rel="noopener">Open</a> · <a class="alink" href="${entry}" download>Download</a></span></div></div>`;
   }
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }
