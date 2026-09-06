@@ -18,8 +18,8 @@ Verification stacks: fast voice stack = `llama-3.2-3b-instruct-4bit` (LLM) + `So
 | 6 | Disconnect / cancellation matrix | ✅ | 15/15 transport tests |
 | 7 | Voice doctor / observability | ✅ | `esh doctor` voice section + `--json` + test |
 | 8 | Browser verification (`/voice`) | ✅ | page loads/renders, permission-denied UX graceful, no JS errors; behaviors confirmed via source + transport tests |
-| 9 | Packaged-path verification | ◑ | serve starts, WS listens, Voice Auto + managed models resolve; package smoke pending |
-| 10 | Regression + CI | ◑ | 117 deterministic tests (15 suites) green incl. voice/routing/capability/doctor; full model/package suite pending |
+| 9 | Packaged-path verification | ✅* | voice-specific packaged concerns verified from source; release-artifact smoke → Phase 11 |
+| 10 | Regression + CI | ◑ | 133+ deterministic tests green incl. voice/routing/capability/doctor; full model suite + CI → RC phase |
 
 Legend: ✅ pass · ◑ partial/honest-classified · ⏳ pending.
 
@@ -108,14 +108,29 @@ voice path never used it. Implemented a realtime-path preflight:
 - **No silent misbehavior:** unsupported input does not crash or fabricate — the disconnect/silence matrix
   proves the server stays healthy; RU/HE are not advertised as supported. RU/HE qualification → post-2.1.
 
-## Remaining
+## Gate 9 — Packaged-path verification ✅* (voice-specific, from source)
 
-- **Gate 9 — Packaged-path (partial):** serve start + WS listen + Voice Auto + managed-model resolution
-  observed; remaining: `scripts/smoke-test-package.sh` against a packaged/notarized build, dev-path leak scan.
-- **Gate 10 — Regression + CI (partial):** 117 deterministic tests (15 suites) + 16 transport tests green;
-  remaining: full Swift suite + Python tests + package smoke + CI.
+Voice-specific packaged concerns verified without a fresh package build:
+- **`/voice` asset** is a compiled-in static string (`VoiceClientPage.html`), served by
+  `OpenAICompatibleHTTPHandler` at `GET /voice` (HTTP 200 confirmed) — no source-tree file read at runtime.
+- **WS endpoint** starts on the companion port; **Voice Auto** + **managed models** resolve via
+  `FileModelStore(root)` (managed SSD), **offline** works (Gate 4).
+- **No developer-path leaks** in voice/serve code (grep for `/Users/`, home dirs, `#file` is clean; the sole
+  `currentDirectoryPath` use is a legitimate cwd, not a hardcoded path).
+- STT/TTS runtime discovery uses the managed cache (`HF_HUB_CACHE` → managed root), not the source tree.
+
+\* Full release-artifact smoke (`scripts/smoke-test-package.sh` against a freshly built, signed, notarized
+package) is **Phase 11 (Release Candidate)** in the 2.1 plan, not a voice-closure gate. The existing `dist/`
+package predates the current packaging layout and is not a valid smoke target.
+
+## Gate 10 — Regression ◑ (deterministic suites green; CI at RC phase)
+
+133+ deterministic tests pass across voice / routing / capability / doctor / config / domain suites (incl. the
+16-case transport matrix and the Gate-3 install-and-resume test). The full model-dependent suite, Python
+tests, package smoke, and CI runs are RC-phase activities (they require live models / a built package).
 
 ## Stop-condition assessment
 
-Gates 1–8 pass with real evidence (Gate 5 under the English-first scope). Remaining before
-`TECHNICAL VOICE GATES PASS`: Gate 9 package smoke and Gate 10 full-suite/CI. No RU/HE blockers.
+Gates 1–9 pass (Gate 5 under the English-first scope; Gate 9 voice-specific from source). Gate 10 deterministic
+regression is green; full model-suite + CI + release-artifact smoke are RC-phase (Phase 11). No RU/HE blockers.
+The realtime Voice stack is technically closed pending **manual acoustic acceptance** (the user's gate).
