@@ -91,7 +91,6 @@ public enum VoiceClientPage {
           </div>
           <div class="wrap">
             <div class="orb" id="orb" title="Tap to start"></div>
-            <div class="state" id="state">Ready</div>
             <div class="log" id="log"></div>
             <div class="hint" id="hint">Tap to start</div>
             <div class="err" id="err"></div>
@@ -101,7 +100,7 @@ public enum VoiceClientPage {
         <script>
         (function(){
           const $=id=>document.getElementById(id);
-          const orb=$('orb'), stateEl=$('state'), logEl=$('log'), errEl=$('err'), hintEl=$('hint'),
+          const orb=$('orb'), logEl=$('log'), errEl=$('err'), hintEl=$('hint'),
                 endBtn=$('endbtn'), foot=$('foot'), llmSel=$('llmSel'), ttsSel=$('ttsSel');
           let ws=null, audioCtx=null, micStream=null, proc=null, playing=false, playQueue=[], curSource=null, curTurn=0;
           let active=false, cur='idle', youT=null, eshT=null;
@@ -116,9 +115,10 @@ public enum VoiceClientPage {
             if(BARS.has(s))  return '<span class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
             return '<span class="dot-wrap"><span class="dot"></span></span>';
           }
-          function labelFor(s){ return ({listening:'Listening',speechDetected:'Listening',transcribing:'Transcribing',thinking:'Thinking',speaking:'Speaking',idle:'Ready',ended:'Ready',error:'Error'})[s]||s; }
-          function hintFor(s){ if(!active) return 'Tap to start'; if(s==='speaking') return 'Tap to interrupt'; if(PULSE.has(s)) return 'Listening… speak now'; if(s==='thinking') return 'Thinking…'; if(s==='transcribing') return 'Transcribing…'; return ''; }
-          function setState(s){ cur=s; orb.innerHTML=orbHTML(s); stateEl.textContent=labelFor(s); hintEl.textContent=hintFor(s); }
+          // The per-turn status (YOU·listening / ESH·thinking…) is the single source of truth for the stage,
+          // so the hint is ONLY the one actionable instruction — never a repeat of the stage word.
+          function hintFor(){ if(!active) return 'Tap to start'; if(cur==='speaking') return 'Tap to interrupt'; if(PULSE.has(cur) && !youT) return 'Listening… speak now'; return ''; }
+          function setState(s){ cur=s; orb.innerHTML=orbHTML(s); hintEl.textContent=hintFor(); }
 
           function scrollLog(){ requestAnimationFrame(()=>{ logEl.scrollTop=logEl.scrollHeight; }); }
           const DOTS_HTML='<span class="mini"><i></i><i></i><i></i></span>';
@@ -137,6 +137,10 @@ public enum VoiceClientPage {
           function live(t,on){ if(t) t.bubble.classList.toggle('live',!!on); }
           function indicator(t){ if(t){ t.bubble.classList.add('empty'); t.bubble.innerHTML=DOTS_HTML; } }
           function settext(t,txt){ if(t){ t.bubble.classList.remove('empty'); t.bubble.textContent=txt; } }
+          function isEmpty(t){ return !t || t.bubble.classList.contains('empty') || !(t.bubble.textContent||'').trim(); }
+          // Remove a turn that never got real content (a cancelled/barge-in "thinking" bubble, or a spurious
+          // VAD trigger that transcribed to nothing) so the transcript never accumulates orphan indicators.
+          function dropIfEmpty(t){ if(t && isEmpty(t)){ t.el.remove(); return true; } return false; }
 
           function wsURL(){ const p=(parseInt(location.port||'80',10)+1); return (location.protocol==='https:'?'wss://':'ws://')+location.hostname+':'+p+'/v1/voice/stream'; }
           function startMsg(){ const m={t:'start',sampleRate:SR}; if(llmSel.value) m.inferenceModel=llmSel.value; if(ttsSel.value) m.ttsModel=ttsSel.value; return m; }
@@ -193,33 +197,37 @@ public enum VoiceClientPage {
 
               // ---- YOU side ----
               case 'vad.speech_started':
+                // A new user turn begins: discard any half-formed turns first so nothing orphans.
+                dropIfEmpty(eshT); eshT=null; dropIfEmpty(youT);
                 youT=makeTurn('you'); status(youT,'listening'); indicator(youT); setState('listening'); break;
               case 'input.level':
                 if(youT){ const s=Math.min(1,(m.level||0)*6); youT.bubble.style.opacity=(0.55+0.45*s).toFixed(2); } break;
               case 'vad.speech_ended':
                 if(youT){ status(youT,'transcribing'); indicator(youT); youT.bubble.style.opacity=''; } setState('transcribing'); break;
               case 'transcript.final':
-                if(!youT) youT=makeTurn('you');
-                if((m.text||'').trim()){ status(youT,''); settext(youT,m.text); }
-                else { status(youT,'no speech'); settext(youT,'…'); }
+                if((m.text||'').trim()){ if(!youT) youT=makeTurn('you'); status(youT,''); settext(youT,m.text); }
+                else { dropIfEmpty(youT); }   // heard nothing intelligible → no empty bubble
                 youT=null; scrollLog(); break;
 
-              // ---- ESH side ----
+              // ---- ESH side ---- (reuse a pending empty esh bubble instead of stacking a new one)
               case 'assistant.thinking_started':
-                eshT=makeTurn('esh'); status(eshT,'thinking'); indicator(eshT); break;
+                if(!eshT || !isEmpty(eshT)) eshT=makeTurn('esh');
+                status(eshT,'thinking'); indicator(eshT); break;
               case 'assistant.text_delta':
-                if(!eshT){ eshT=makeTurn('esh'); }
+                if(!eshT) eshT=makeTurn('esh');
                 if(eshT.bubble.classList.contains('empty')) settext(eshT,'');
                 status(eshT,'generating'); live(eshT,true); eshT.bubble.textContent+=(m.text||''); scrollLog(); break;
               case 'assistant.text_final':
                 if(eshT){ if((m.text||'').length) settext(eshT,m.text); } break;
               case 'tts.started':
-                if(eshT){ status(eshT,'speaking'); const d=document.createElement('span'); d.className='live-dot'; eshT.who.appendChild(d);} break;
+                if(eshT && !eshT.who.querySelector('.live-dot')){ status(eshT,'speaking'); const d=document.createElement('span'); d.className='live-dot'; eshT.who.appendChild(d);} break;
               case 'tts.finished':
-                if(eshT){ live(eshT,false); status(eshT,''); const d=eshT.who.querySelector('.live-dot'); if(d) d.remove(); } eshT=null; break;
+                if(eshT){ live(eshT,false); status(eshT,''); const d=eshT.who.querySelector('.live-dot'); if(d) d.remove(); if(dropIfEmpty(eshT)){} } eshT=null; break;
 
-              case 'interruption.detected': if(eshT){ status(eshT,'interrupted'); live(eshT,false);} break;
-              case 'playback.cancelled': flushPlayback(); if(eshT){ live(eshT,false); status(eshT,''); const d=eshT.who.querySelector('.live-dot'); if(d) d.remove(); } break;
+              case 'interruption.detected': if(eshT){ live(eshT,false); if(!dropIfEmpty(eshT)) status(eshT,'interrupted'); } break;
+              case 'playback.cancelled':
+                flushPlayback();
+                if(eshT){ live(eshT,false); const d=eshT.who.querySelector('.live-dot'); if(d) d.remove(); if(!dropIfEmpty(eshT)) status(eshT,''); } break;
               case 'install.required': setState('idle'); errEl.textContent=(m.message||'A voice model needs to be installed.')+(m.text?(' ('+m.text+')'):''); active=false; teardown(); break;
               case 'session.error': errEl.textContent=m.message||'error'; break;
             }
