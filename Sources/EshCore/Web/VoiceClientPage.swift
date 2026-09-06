@@ -77,10 +77,11 @@ public enum VoiceClientPage {
           .hint{font-size:12px;color:var(--ink-3);min-height:16px;text-align:center}
           .err{color:#c0392b;font-size:13px;text-align:center;max-width:520px;min-height:1em}
           @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .err{color:#ff8f7a}}
-          .end{position:absolute;bottom:24px;left:0;right:0;text-align:center}
-          .end button{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);
-            background:none;border:none;cursor:pointer;padding:8px 14px;border-radius:999px}
-          .end button:hover{color:var(--ink);background:var(--bubble)}
+          .end{position:absolute;bottom:26px;left:0;right:0;display:flex;justify-content:center}
+          .end button{width:46px;height:46px;border-radius:50%;background:var(--ink);color:var(--paper);
+            border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+            transition:opacity .15s,transform .1s}
+          .end button:hover{opacity:.85} .end button:active{transform:scale(.94)}
           .foot{position:absolute;bottom:10px;left:0;right:0;text-align:center;font:400 10px var(--mono);color:var(--ink-3)}
         </style></head>
         <body>
@@ -95,7 +96,7 @@ public enum VoiceClientPage {
             <div class="hint" id="hint">Tap to start</div>
             <div class="err" id="err"></div>
           </div>
-          <div class="end"><button id="endbtn" hidden>End</button></div>
+          <div class="end"><button id="endbtn" title="End voice chat" aria-label="End voice chat" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg></button></div>
           <div class="foot" id="foot" hidden>Everything runs on-device — VAD, STT, model, TTS.</div>
         <script>
         (function(){
@@ -141,6 +142,9 @@ public enum VoiceClientPage {
           // Remove a turn that never got real content (a cancelled/barge-in "thinking" bubble, or a spurious
           // VAD trigger that transcribed to nothing) so the transcript never accumulates orphan indicators.
           function dropIfEmpty(t){ if(t && isEmpty(t)){ t.el.remove(); return true; } return false; }
+          // Show a waiting YOU bubble the moment we're listening, so it visibly awaits your speech (only when
+          // we're actually listening for input — never while esh is thinking/speaking).
+          function ensureListening(){ if(!active||eshT||youT) return; if(!(PULSE.has(cur))) return; youT=makeTurn('you'); status(youT,'listening'); indicator(youT); scrollLog(); }
 
           function wsURL(){ const p=(parseInt(location.port||'80',10)+1); return (location.protocol==='https:'?'wss://':'ws://')+location.hostname+':'+p+'/v1/voice/stream'; }
           function startMsg(){ const m={t:'start',sampleRate:SR}; if(llmSel.value) m.inferenceModel=llmSel.value; if(ttsSel.value) m.ttsModel=ttsSel.value; return m; }
@@ -164,14 +168,14 @@ public enum VoiceClientPage {
             active=true; endBtn.hidden=false; foot.hidden=false;
             ws = new WebSocket(wsURL());
             ws.binaryType='arraybuffer';
-            ws.onopen=()=>{ ws.send(JSON.stringify(startMsg())); startCapture(); setState('listening'); };
+            ws.onopen=()=>{ ws.send(JSON.stringify(startMsg())); startCapture(); setState('listening'); ensureListening(); };
             ws.onclose=()=>{ active=false; setState('ended'); teardown(); };
             ws.onerror=()=>{ errEl.textContent='Could not reach the voice endpoint. Is `esh serve` running?'; };
             ws.onmessage=onMessage;
           }
 
           // Switch model/voice mid-session: start a fresh server session over the SAME socket with the new pins.
-          function applyModelChange(){ if(!active||!ws||ws.readyState!==1) return; flushPlayback(); youT=null; eshT=null; ws.send(JSON.stringify(startMsg())); setState('listening'); }
+          function applyModelChange(){ if(!active||!ws||ws.readyState!==1) return; flushPlayback(); youT=null; eshT=null; ws.send(JSON.stringify(startMsg())); setState('listening'); ensureListening(); }
 
           function startCapture(){
             audioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -193,24 +197,26 @@ public enum VoiceClientPage {
             if(typeof ev.data!=='string'){ return onAudio(ev.data); }
             let m; try{ m=JSON.parse(ev.data); }catch(_){ return; }
             switch(m.t){
-              case 'session.state': setState(m.state||'listening'); break;
+              case 'session.state': setState(m.state||'listening'); ensureListening(); break;
 
               // ---- YOU side ----
               case 'vad.speech_started':
-                // A new user turn begins: discard any half-formed turns first so nothing orphans.
-                dropIfEmpty(eshT); eshT=null; dropIfEmpty(youT);
-                youT=makeTurn('you'); status(youT,'listening'); indicator(youT); setState('listening'); break;
+                // A new user turn begins: discard any half-formed esh turn, then REUSE the waiting YOU bubble.
+                dropIfEmpty(eshT); eshT=null;
+                if(!youT) youT=makeTurn('you');
+                status(youT,'listening'); indicator(youT); youT.bubble.style.opacity=''; setState('listening'); break;
               case 'input.level':
                 if(youT){ const s=Math.min(1,(m.level||0)*6); youT.bubble.style.opacity=(0.55+0.45*s).toFixed(2); } break;
               case 'vad.speech_ended':
                 if(youT){ status(youT,'transcribing'); indicator(youT); youT.bubble.style.opacity=''; } setState('transcribing'); break;
               case 'transcript.final':
-                if((m.text||'').trim()){ if(!youT) youT=makeTurn('you'); status(youT,''); settext(youT,m.text); }
-                else { dropIfEmpty(youT); }   // heard nothing intelligible → no empty bubble
-                youT=null; scrollLog(); break;
+                if((m.text||'').trim()){ if(!youT) youT=makeTurn('you'); status(youT,''); settext(youT,m.text); youT=null; }
+                else if(youT){ status(youT,'listening'); indicator(youT); }   // heard nothing → keep waiting
+                scrollLog(); break;
 
               // ---- ESH side ---- (reuse a pending empty esh bubble instead of stacking a new one)
               case 'assistant.thinking_started':
+                dropIfEmpty(youT); youT=null;   // user turn is captured; stop showing a waiting bubble
                 if(!eshT || !isEmpty(eshT)) eshT=makeTurn('esh');
                 status(eshT,'thinking'); indicator(eshT); break;
               case 'assistant.text_delta':
