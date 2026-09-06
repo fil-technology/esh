@@ -9,10 +9,23 @@ import Network
 //
 // The session factory is injected, so tests drive the REAL transport with fake STT/LLM/TTS over a loopback
 // socket (deterministic, fast), while `esh serve` wires the real adapters.
+/// Voice 2.1 Install-and-Resume (spec §3) preflight decision for a starting session. `ready` starts the
+/// session; `installRequired` holds at a safe boundary (no session, no turns) and the server emits an
+/// `install.required` event carrying the missing component + combined Voice Fit, so the client can install
+/// (via the managed-SSD installer) and re-`start` to resume. Pure value → the server stays model-store-agnostic.
+public enum VoicePreflightDecision: Sendable, Equatable {
+    case ready
+    case installRequired(component: String, recommendedRepo: String, voiceFit: String, summary: String)
+}
+
 public final class VoiceWebSocketServer: @unchecked Sendable {
     public typealias SessionFactory = @Sendable (VoiceSessionConfig) -> VoiceSessionOrchestrator
+    /// Optional gate run on each `start`. Default (nil) = always ready (tests/back-compat). `esh serve`
+    /// injects a real preflight that checks installed models + combined Voice Fit.
+    public typealias Preflight = @Sendable (VoiceSessionConfig) -> VoicePreflightDecision
     private let listener: NWListener
     private let factory: SessionFactory
+    private let preflight: Preflight?
     private let queue = DispatchQueue(label: "esh.voice.ws")
     /// The port actually bound (equals the requested port, or the OS-assigned one when 0 was requested).
     public private(set) var resolvedPort: UInt16 = 0
@@ -21,7 +34,7 @@ public final class VoiceWebSocketServer: @unchecked Sendable {
     private var conns: [ObjectIdentifier: VoiceWSConnection] = [:]
 
     private func accept(_ conn: NWConnection) {
-        let c = VoiceWSConnection(connection: conn, factory: factory, queue: queue)
+        let c = VoiceWSConnection(connection: conn, factory: factory, preflight: preflight, queue: queue)
         queue.async { self.conns[ObjectIdentifier(c)] = c }
         c.onClose = { [weak self, weak c] in
             guard let self, let c else { return }
@@ -31,7 +44,7 @@ public final class VoiceWebSocketServer: @unchecked Sendable {
     }
 
     /// `port: 0` binds an ephemeral OS-assigned port (use `startAndWait` to learn it). loopback-only.
-    public init(port: UInt16 = 0, factory: @escaping SessionFactory) throws {
+    public init(port: UInt16 = 0, preflight: Preflight? = nil, factory: @escaping SessionFactory) throws {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         if port == 0 {
@@ -41,6 +54,7 @@ public final class VoiceWebSocketServer: @unchecked Sendable {
             self.listener = try NWListener(using: params, on: nwPort)
         }
         self.factory = factory
+        self.preflight = preflight
         self.resolvedPort = port
     }
 
@@ -94,6 +108,7 @@ public final class VoiceWebSocketServer: @unchecked Sendable {
 final class VoiceWSConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let factory: VoiceWebSocketServer.SessionFactory
+    private let preflight: VoiceWebSocketServer.Preflight?
     private let queue: DispatchQueue
 
     private enum Phase { case handshake, open, closed }
@@ -126,8 +141,9 @@ final class VoiceWSConnection: @unchecked Sendable {
     private let echoGuardScale = 3.0   // during playback, require ~3× the base energy to count as barge-in
     var onClose: (@Sendable () -> Void)?
 
-    init(connection: NWConnection, factory: @escaping VoiceWebSocketServer.SessionFactory, queue: DispatchQueue) {
-        self.connection = connection; self.factory = factory; self.queue = queue
+    init(connection: NWConnection, factory: @escaping VoiceWebSocketServer.SessionFactory,
+         preflight: VoiceWebSocketServer.Preflight?, queue: DispatchQueue) {
+        self.connection = connection; self.factory = factory; self.preflight = preflight; self.queue = queue
     }
 
     private func dbg(_ s: String) {
@@ -215,6 +231,13 @@ final class VoiceWSConnection: @unchecked Sendable {
             vadState = EnergyVADEndpointer.State()
             let cfg = VoiceSessionConfig(language: ctrl.language, sttModel: ctrl.sttModel,
                                          inferenceModel: ctrl.inferenceModel, ttsModel: ctrl.ttsModel)
+            // Install-and-Resume preflight (spec §3): if a required voice component is missing, hold at a safe
+            // boundary — emit install.required with the combined Voice Fit, start NO session, run NO turns. The
+            // client installs via the managed-SSD installer and re-sends `start` to resume.
+            if let decision = preflight?(cfg), case let .installRequired(component, repo, fit, summary) = decision {
+                sendInstallRequired(component: component, repo: repo, voiceFit: fit, summary: summary)
+                return
+            }
             startSession(cfg)
         case "reset":
             enqueue { await $0.resetContext() }
@@ -291,6 +314,21 @@ final class VoiceWSConnection: @unchecked Sendable {
     }
 
     private func resetUtterance() { pcmFrameAccum.removeAll(); utterance.removeAll(); inSpeech = false; vadState = EnergyVADEndpointer.State() }
+
+    /// Install-and-Resume: emit a typed `install.required` event (a TEXT frame) instead of starting a session
+    /// with a missing component. Reuses the flat envelope — `message` = human summary, `reason` = combined
+    /// Voice Fit, `text` = recommended repo, `state` = component — so no wire schema change is needed.
+    private func sendInstallRequired(component: String, repo: String, voiceFit: String, summary: String) {
+        var env = VoiceEventEnvelope(t: "install.required")
+        env.session = sessionID
+        env.state = component
+        env.text = repo
+        env.message = summary
+        env.reason = voiceFit
+        if let json = try? JSONEncoder().encode(env) {
+            sendFrame(WSFrame(opcode: .text, payload: json))
+        }
+    }
 
     private func sendFrame(_ frame: WSFrame) { sendRaw(WebSocketCodec.encode(frame, mask: false)) }
     private func sendRaw(_ data: Data) {

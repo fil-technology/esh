@@ -73,7 +73,38 @@ enum ServeCommand {
             let vAuto = VoiceAuto.selectLLM(installed: vMLX, pinned: nil, host: vHost)
             let vLLM = vAuto?.id ?? vInstalls.first(where: { $0.spec.backend == .mlx })?.id ?? vInstalls.first?.id
             if let vAuto { print("esh Voice Auto: LLM \(vAuto.id) — \(vAuto.reason)") }
-            let vServer = try VoiceWebSocketServer(port: voicePort) { cfg in
+            // Install-and-Resume preflight (spec §3): on each session start, re-check that a voice LLM is
+            // installed and the WHOLE warm voice stack fits. If not, the server holds at a safe boundary and
+            // emits install.required (with combined Voice Fit) instead of failing mid-turn; installing the
+            // recommended model to managed storage and re-starting resumes. Re-lists installs each call so a
+            // model installed while serving is picked up on the next start.
+            let voicePreflight: VoiceWebSocketServer.Preflight = { cfg in
+                let host = HostMachineProfileService().currentProfile()
+                let installs = (try? vStore.listInstalls()) ?? []
+                let mlx = installs.filter { $0.spec.backend == .mlx }
+                    .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
+                // Honor an explicit pin from the client; otherwise Voice Auto over current installs.
+                let pin = cfg.inferenceModel
+                let picked = VoiceAuto.selectLLM(installed: mlx, pinned: pin, host: host)
+                guard let picked, let m = mlx.first(where: { $0.id == picked.id }) else {
+                    let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: 1.0), host: host)
+                    return .installRequired(
+                        component: "voice LLM",
+                        recommendedRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                        voiceFit: fit.reason,
+                        summary: "No installed MLX language model fits the warm voice stack. Install a small LLM (e.g. Llama-3.2-3B-Instruct-4bit) with `esh model install`, then start voice again.")
+                }
+                let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: m.weightsGB), host: host)
+                if fit.fitClass == .unsupported || fit.fitClass == .unlikely {
+                    return .installRequired(
+                        component: "voice LLM",
+                        recommendedRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                        voiceFit: fit.reason,
+                        summary: "The selected LLM (\(picked.id)) does not fit the warm voice stack on this machine. Install a smaller LLM and start voice again.")
+                }
+                return .ready
+            }
+            let vServer = try VoiceWebSocketServer(port: voicePort, preflight: voicePreflight) { cfg in
                 VoiceSessionOrchestrator(
                     config: cfg,
                     transcriber: SpeechRuntimeTranscriber(lifecycleManager: pool),

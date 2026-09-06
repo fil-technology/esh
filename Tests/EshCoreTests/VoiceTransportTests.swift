@@ -65,6 +65,13 @@ private struct SlowResponder: VoiceResponder {
     }
 }
 
+/// Thread-safe boolean for the install-and-resume test's preflight (flips from "missing" to "ready").
+private final class ReadyFlag: @unchecked Sendable {
+    private let lock = NSLock(); private var v = false
+    func get() -> Bool { lock.lock(); defer { lock.unlock() }; return v }
+    func set(_ nv: Bool) { lock.lock(); v = nv; lock.unlock() }
+}
+
 private func loudPCM(ms: Int, sr: Int = 16000) -> Data {
     let n = sr * ms / 1000; var d = Data(capacity: n * 2)
     let amp: Int16 = 8000
@@ -480,5 +487,55 @@ struct VoiceTransportTests {
         client.close()
         #expect(result != nil, "expected audio from two distinct turns")
         if let (a, b) = result { #expect(b > a, "post-barge-in audio must carry a higher turn id than the cancelled turn") }
+    }
+
+    // MARK: - Install-and-Resume (spec §3)
+
+    @Test
+    func installRequiredHoldsAtSafeBoundaryThenResumes() async throws {
+        // Preflight reports the voice LLM missing until an "install" completes (flag flips to ready). A start
+        // with a missing component must emit install.required + combined Voice Fit, start NO session and run
+        // NO turn (audio ignored); after install + re-start the session resumes and completes a turn.
+        let ready = ReadyFlag()
+        let srv = try VoiceWebSocketServer(port: 0, preflight: { _ in
+            ready.get() ? .ready
+                        : .installRequired(component: "voice LLM",
+                                           recommendedRepo: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                                           voiceFit: "voice stack peak ~4.0 GB fits (comfortable)",
+                                           summary: "No installed MLX language model fits the warm voice stack.")
+        }) { cfg in
+            VoiceSessionOrchestrator(config: cfg, transcriber: FakeTranscriber(text: "hello there"),
+                                     responder: FakeResponder(deltas: ["Hi there. "]), speaker: FastSpeaker())
+        }
+        let port = try await srv.startAndWait()
+        defer { srv.stop() }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let client = VoiceWebSocketClient(port: port)
+        try await client.connect()
+        client.sendControl(VoiceControl(t: "start", sampleRate: 16000))
+        // Audio while held must NOT start a turn (no session yet).
+        client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+        // Single iterator across both phases (AsyncStream is single-consumer).
+        let outcome = await withTimeout(12) { () -> (installSummary: String, installFit: String, resumed: Bool)? in
+            var summary: String? = nil
+            var fit: String? = nil
+            for await m in client.messages {
+                guard case .event(let e) = m else { continue }
+                if e.t == "install.required", summary == nil {
+                    summary = e.message ?? ""
+                    fit = e.reason ?? ""
+                    ready.set(true)                                   // "install" completes
+                    client.sendControl(VoiceControl(t: "start", sampleRate: 16000))   // resume
+                    client.sendAudioPCM(loudPCM(ms: 400)); client.sendAudioPCM(silencePCM(ms: 1600))
+                } else if e.t == "transcript.final" {
+                    return (summary ?? "", fit ?? "", summary != nil)   // resumed only after an install prompt
+                }
+            }
+            return (summary ?? "", fit ?? "", false)
+        }
+        client.close()
+        #expect(outcome?.installSummary.isEmpty == false, "expected install.required with a human summary")
+        #expect(outcome?.installFit.isEmpty == false, "install.required must carry the combined Voice Fit")
+        #expect(outcome?.resumed == true, "after install + re-start the session must resume and complete a turn")
     }
 }

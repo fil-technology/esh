@@ -100,6 +100,7 @@ public enum VoiceClientPage {
               case 'assistant.text_final': if(asstDiv) asstDiv.lastChild.textContent=m.text; break;
               case 'interruption.detected': setState('interrupted'); break;
               case 'playback.cancelled': flushPlayback(); break;   // barge-in: stop stale audio immediately
+              case 'install.required': setState('idle'); errEl.textContent=(m.message||'A voice model needs to be installed.')+(m.text?(' ('+m.text+')'):''); teardown(); break;
               case 'session.error': errEl.textContent=m.message||'error'; break;
             }
           }

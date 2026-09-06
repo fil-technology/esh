@@ -110,6 +110,7 @@ enum DoctorCommand {
             lines.append("  voice fit: \(fc)")
             if let fr = v.voiceFitReason { lines.append("    \(fr)") }
         }
+        lines.append("  languages: \(v.languageSupport)")
         lines.append("  warm state: \(v.warmState)")
         lines.append("  offline ready: \(v.offlineReady ? "yes (STT+LLM+TTS resolvable locally)" : "no — needs a local LLM and TTS model")")
         lines.append("  managed storage: \(v.managedStorageRoot)")

@@ -62,16 +62,18 @@ public struct VoiceRuntimeStatus: Codable, Sendable {
     public var voiceFitReason: String?
     public var warmState: String              // "static (no live session at doctor time)"
     public var offlineReady: Bool             // STT+LLM+TTS all resolvable locally → a turn can run offline
+    public var languageSupport: String        // production vs non-production languages of the selected stack
     public var managedStorageRoot: String
     public init(websocketPath: String, defaultEndpoint: String, vadProvider: String, sttModel: String,
                 autoSelectedLLM: String?, voiceAutoReason: String?, ttsModel: String?,
                 voiceFitClass: String?, voiceFitReason: String?, warmState: String,
-                offlineReady: Bool, managedStorageRoot: String) {
+                offlineReady: Bool, languageSupport: String, managedStorageRoot: String) {
         self.websocketPath = websocketPath; self.defaultEndpoint = defaultEndpoint
         self.vadProvider = vadProvider; self.sttModel = sttModel
         self.autoSelectedLLM = autoSelectedLLM; self.voiceAutoReason = voiceAutoReason
         self.ttsModel = ttsModel; self.voiceFitClass = voiceFitClass; self.voiceFitReason = voiceFitReason
-        self.warmState = warmState; self.offlineReady = offlineReady; self.managedStorageRoot = managedStorageRoot
+        self.warmState = warmState; self.offlineReady = offlineReady; self.languageSupport = languageSupport
+        self.managedStorageRoot = managedStorageRoot
     }
 }
 
@@ -213,6 +215,9 @@ public struct DoctorService: Sendable {
             voiceFitReason: fitReason,
             warmState: "static (no live session at doctor time; measure warm via voice-ws-bench)",
             offlineReady: offlineReady,
+            // 2.1 scope: English is the production Voice language. STT (Parakeet) and the installed TTS models
+            // are English-only; RU/HE are non-production (not advertised, no silent misbehavior).
+            languageSupport: "EN production · RU/HE non-production (English-only STT + installed TTS)",
             managedStorageRoot: storage.assetsRoot
         )
     }
