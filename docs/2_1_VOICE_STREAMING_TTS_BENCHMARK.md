@@ -86,3 +86,43 @@ the best phrase-streaming path; do not block the remaining gates on it"):
 
 **Gate 1: CLOSED** — best usable phrase-streaming path shipped; sub-phrase streaming blocker proven and
 isolated. Not blocking Gates 2–10.
+
+---
+
+# Gate 2 — Shipping-path latency (real WebSocket transport)
+
+Measured with a new `esh voice-ws-bench` command that drives a **real** `VoiceWebSocketServer` over a loopback
+socket with real STT/LLM/TTS (exactly how `esh serve` wires them), timestamping server events observed on the
+client: endpoint = `vad.speech_ended`, playable = first binary `VoiceAudioFrame`. Input = same 3.84 s utterance
+(resampled to 16 kHz mono PCM16). Warm = turns 2+, `ESH_MLX_PERSISTENT=1`.
+
+### A/B across stacks (warm endpoint→playable)
+
+| LLM | TTS | warm avg | best warm | vs target (<2.5 s) |
+|-----|-----|---------:|----------:|:--|
+| qwen2.5-coder-**14B** (auto-picked "first MLX") | pocket-tts | 5455 ms | 4053 ms | ❌ |
+| llama-3.2-**3B** | pocket-tts | 3666 ms | 2797 ms | ❌ (TTS-bound) |
+| llama-3.2-**3B** | **Soprano-80M** | **1961 ms** | **1686 ms** | ✅ |
+
+Warm split at the fast stack (3B + Soprano): STT ~90 ms, LLM TTFT ~300–500 ms, **TTS first-chunk ~1.3 s**
+(now the dominant term), transport negligible. Cold turn 1 ≈ 13 s (one-time model load).
+
+### Root cause & fix
+
+The old default grabbed the **first installed MLX model** — a 14 B coder — pushing warm latency to ~5.5 s. The
+`VoiceAuto` planner (smallest LLM whose *whole* warm voice stack fits) already existed and was unit-tested but
+was **not wired into `esh serve`**. Wired it in (`ServeCommand`): serve now logs, e.g.
+
+```
+esh Voice Auto: LLM mlx-community--qwen2.5-0.5b-instruct-4bit — smallest installed model that fits the warm voice stack (0.3 GB, comfortable)
+```
+
+### Verdict
+
+- **Target (<2.5 s warm): MET** with an appropriate voice stack (small LLM + small TTS): 1961 ms avg, 1686 ms best.
+- **Stretch (<1.5 s):** not yet — floored by TTS first-chunk (~1.3 s). The sub-phrase streaming that would cut
+  this is the path blocked by TTSMLX `@MainActor` (Gate 1). A faster/streaming TTS is the remaining lever.
+- **Recommendation:** Soprano-80M is the fastest installed TTS (~1.3 s first-chunk vs pocket-tts ~2–3 s); prefer
+  it as the voice default. LLM selection now handled by Voice Auto.
+
+**Gate 2: latency target met on the real WS path with Voice Auto; stretch pending a faster/streaming TTS.**

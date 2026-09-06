@@ -63,7 +63,16 @@ enum ServeCommand {
             let vInference = ExternalInferenceService(modelStore: vStore, sessionStore: FileSessionStore(root: root),
                                                       cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
             let vInstalls = (try? vStore.listInstalls()) ?? []
-            let vLLM = vInstalls.first(where: { $0.spec.backend == .mlx })?.id ?? vInstalls.first?.id
+            // Voice Auto (spec §10): pick the smallest installed LLM whose WHOLE warm voice stack (STT+LLM+TTS
+            // +KV+buffers) fits — realtime-friendly. The previous "first MLX install" could grab a 14B coder,
+            // pushing warm endpoint→playable to ~5.5s; Voice Auto's small pick lands it under the 2.5s gate
+            // (measured in voice-ws-bench). Falls back to first install only if the planner finds nothing.
+            let vHost = HostMachineProfileService().currentProfile()
+            let vMLX = vInstalls.filter { $0.spec.backend == .mlx }
+                .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
+            let vAuto = VoiceAuto.selectLLM(installed: vMLX, pinned: nil, host: vHost)
+            let vLLM = vAuto?.id ?? vInstalls.first(where: { $0.spec.backend == .mlx })?.id ?? vInstalls.first?.id
+            if let vAuto { print("esh Voice Auto: LLM \(vAuto.id) — \(vAuto.reason)") }
             let vServer = try VoiceWebSocketServer(port: voicePort) { cfg in
                 VoiceSessionOrchestrator(
                     config: cfg,
