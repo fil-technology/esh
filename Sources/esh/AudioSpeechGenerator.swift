@@ -2,6 +2,7 @@ import Foundation
 import EshCore
 import Metal
 import TTSMLX
+import AVFoundation
 
 enum AudioSpeechGenerator {
     /// TTS models known not to run through the current TTSMLX build. Marvis fails to load with a
@@ -123,6 +124,48 @@ enum AudioSpeechGenerator {
         )
 
         return SynthesisResult(url: result.url, modelID: result.modelID, sampleRate: result.sampleRate)
+    }
+
+    /// Streaming synthesis (Voice 2.1): yields PCM16 chunks as they are generated (TTSMLX.synthesizeStream),
+    /// so audible output can begin well before the phrase finishes. Same model resolution / Metal / memory
+    /// setup as the buffered path. Cancellation of the surrounding Task stops generation promptly.
+    static func synthesizeStream(text: String, model: String?, voice: String?, language: String?,
+                                 currentDirectoryURL: URL, lifecycleManager: RuntimeLifecycleManager? = nil,
+                                 streamingInterval: Double = 0.6,
+                                 onChunk: @escaping @Sendable (_ pcm16: Data, _ sampleRate: Int) -> Void) async throws {
+        let m = try resolveModel(model)
+        try ensureMLXMetalLibrary(currentDirectoryURL: currentDirectoryURL)
+        try ensureMetalDeviceAvailable()
+        try await prepareMemoryForTTS(pool: lifecycleManager)
+        let root = PersistenceRoot.default()
+        try StorageService().ensureAssetsAvailable(root: root)
+        let modelCacheURL = root.audioURL.appendingPathComponent("tts-models", isDirectory: true)
+        try FileManager.default.createDirectory(at: modelCacheURL, withIntermediateDirectories: true)
+        setenv("HF_HUB_CACHE", modelCacheURL.path, 1)
+        let synthesizer = TTSSpeechSynthesizer(modelStore: TTSModelStore(cacheRoots: [modelCacheURL]))
+        let stream = try await synthesizer.synthesizeStream(
+            text, using: m,
+            options: TTSSynthesisOptions(language: language.map(TTSLanguage.init(_:)),
+                                         voice: voice.map(TTSVoice.init(_:)),
+                                         streamingInterval: streamingInterval))
+        for try await chunk in stream {
+            if Task.isCancelled { return }
+            let pcm = pcm16LE(from: chunk.buffer)
+            if !pcm.isEmpty { onChunk(pcm, chunk.sampleRate) }
+        }
+    }
+
+    /// Convert a mono float AVAudioPCMBuffer to little-endian PCM16 bytes.
+    static func pcm16LE(from buf: AVAudioPCMBuffer) -> Data {
+        let n = Int(buf.frameLength)
+        guard n > 0, let ch = buf.floatChannelData else { return Data() }
+        var d = Data(count: n * 2)
+        d.withUnsafeMutableBytes { raw in
+            let p = raw.bindMemory(to: Int16.self)
+            let src = ch[0]
+            for i in 0..<n { let s = max(-1.0, min(1.0, src[i])); p[i] = Int16(s < 0 ? s * 32768 : s * 32767) }
+        }
+        return d
     }
 
     static func generateResponse(

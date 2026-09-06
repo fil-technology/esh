@@ -32,13 +32,14 @@ enum VoiceBenchCommand {
             cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
         let transcriber = SpeechRuntimeTranscriber(lifecycleManager: pool)
         let responder = LanguageResponder(inference: inference, resolveModel: { _ in llm })
-        let speaker = BufferedTTSSpeaker(lifecycleManager: pool)
+        let streamTTS = arguments.contains("--stream-tts")
+        let speaker: VoiceSpeaker = streamTTS ? StreamingTTSSpeaker(lifecycleManager: pool) : BufferedTTSSpeaker(lifecycleManager: pool)
         let orch = VoiceSessionOrchestrator(
             config: VoiceSessionConfig(inferenceModel: llm, ttsModel: ttsModel),
             transcriber: transcriber, responder: responder, speaker: speaker)
 
         func e(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
-        e("voice-bench: llm=\(llm) tts=\(ttsModel ?? "default") turns=\(turns) persistentMLX=\(ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1")")
+        e("voice-bench: llm=\(llm) tts=\(ttsModel ?? "default") turns=\(turns) streamTTS=\(streamTTS) persistentMLX=\(ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1")")
 
         // Drain events so the stream never backpressures; we read metrics via lastTurnMetrics().
         let drain = Task { for await _ in orch.events {} }

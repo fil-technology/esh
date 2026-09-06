@@ -122,3 +122,45 @@ public struct BufferedTTSSpeaker: VoiceSpeaker {
         }
     }
 }
+
+/// Streaming TTS adapter over AudioSpeechGenerator.synthesizeStream (TTSMLX). Emits multiple audio chunks per
+/// phrase as they are generated — first audio arrives at the first streaming interval rather than after the
+/// whole phrase — each wrapped as a small standalone WAV so the browser's ordered blob-queue plays them
+/// gaplessly (no Web Audio rewrite). Cancellation between/within chunks stops synthesis promptly (barge-in).
+public struct StreamingTTSSpeaker: VoiceSpeaker {
+    private let workingDirectory: URL
+    private let lifecycleManager: RuntimeLifecycleManager?
+    public init(workingDirectory: URL = FileManager.default.temporaryDirectory,
+                lifecycleManager: RuntimeLifecycleManager? = nil) {
+        self.workingDirectory = workingDirectory
+        self.lifecycleManager = lifecycleManager
+    }
+    public func speak(_ text: String, language: String?, model: String?) -> AsyncThrowingStream<VoiceAudioChunk, Error> {
+        let dir = workingDirectory, pool = lifecycleManager
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await AudioSpeechGenerator.synthesizeStream(
+                        text: text, model: model, voice: nil, language: language,
+                        currentDirectoryURL: dir, lifecycleManager: pool
+                    ) { pcm, sr in
+                        continuation.yield(VoiceAudioChunk(bytes: Self.wrapWAV(pcm, sampleRate: sr), sampleRate: sr, format: "wav"))
+                    }
+                    continuation.finish()
+                } catch is CancellationError { continuation.finish() }
+                catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+    /// Minimal PCM16-mono WAV container for one streamed chunk.
+    static func wrapWAV(_ pcm: Data, sampleRate: Int) -> Data {
+        var d = Data(); func s(_ x: String){ d.append(contentsOf: x.utf8) }
+        func u32(_ v: UInt32){ for i in 0..<4 { d.append(UInt8((v >> (8*UInt32(i))) & 0xFF)) } }
+        func u16(_ v: UInt16){ d.append(UInt8(v & 0xFF)); d.append(UInt8((v >> 8) & 0xFF)) }
+        let n = UInt32(pcm.count)
+        s("RIFF"); u32(36 + n); s("WAVE"); s("fmt "); u32(16); u16(1); u16(1)
+        u32(UInt32(sampleRate)); u32(UInt32(sampleRate * 2)); u16(2); u16(16); s("data"); u32(n); d.append(pcm)
+        return d
+    }
+}

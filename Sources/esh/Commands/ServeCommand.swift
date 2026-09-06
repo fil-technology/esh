@@ -69,6 +69,11 @@ enum ServeCommand {
                     config: cfg,
                     transcriber: SpeechRuntimeTranscriber(lifecycleManager: pool),
                     responder: LanguageResponder(inference: vInference, resolveModel: { pin in pin ?? cfg.inferenceModel ?? vLLM }),
+                    // Phrase-chunked buffered TTS: the orchestrator already streams audio phrase-by-phrase to the
+                    // browser as the LLM generates (VoicePhraseChunker), so first audio arrives after the first
+                    // phrase, not the whole reply. Sub-phrase StreamingTTSSpeaker is deliberately NOT used here:
+                    // TTSMLX.synthesizeStream is @MainActor and deadlocks under the actor-driven turn loop
+                    // (proven in voice-bench --stream-tts). Re-enable once TTSMLX ships a non-MainActor stream.
                     speaker: BufferedTTSSpeaker(lifecycleManager: pool))
             }
             vServer.start()
