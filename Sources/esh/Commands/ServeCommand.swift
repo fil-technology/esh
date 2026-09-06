@@ -68,10 +68,24 @@ enum ServeCommand {
             // pushing warm endpoint→playable to ~5.5s; Voice Auto's small pick lands it under the 2.5s gate
             // (measured in voice-ws-bench). Falls back to first install only if the planner finds nothing.
             let vHost = HostMachineProfileService().currentProfile()
-            let vMLX = vInstalls.filter { $0.spec.backend == .mlx }
+            // A manifest can list a model whose files were deleted/moved off the SSD. Selecting such a phantom
+            // makes the turn crash at load time ("install path does not exist"), so Voice Auto must only
+            // consider installs whose files are actually present on disk.
+            let vPresent: @Sendable (ModelInstall) -> Bool = { i in
+                let fm = FileManager.default
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: i.installPath, isDirectory: &isDir), isDir.boolValue else { return false }
+                return !(((try? fm.contentsOfDirectory(atPath: i.installPath)) ?? []).isEmpty)
+            }
+            let vMLX = vInstalls.filter { $0.spec.backend == .mlx && vPresent($0) }
                 .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
-            let vAuto = VoiceAuto.selectLLM(installed: vMLX, pinned: nil, host: vHost)
-            let vLLM = vAuto?.id ?? vInstalls.first(where: { $0.spec.backend == .mlx })?.id ?? vInstalls.first?.id
+            // Opt-in override: ESH_VOICE_LLM pins a specific installed model for voice (e.g. a higher-quality
+            // 3B) instead of Voice Auto's smallest-fitting pick. Honored only if that model is actually present.
+            let vOverride = ProcessInfo.processInfo.environment["ESH_VOICE_LLM"].flatMap { id in
+                vMLX.contains(where: { $0.id == id }) ? id : nil
+            }
+            let vAuto = VoiceAuto.selectLLM(installed: vMLX, pinned: vOverride, host: vHost)
+            let vLLM = vAuto?.id ?? vInstalls.first(where: { $0.spec.backend == .mlx && vPresent($0) })?.id
             if let vAuto { print("esh Voice Auto: LLM \(vAuto.id) — \(vAuto.reason)") }
             // Install-and-Resume preflight (spec §3): on each session start, re-check that a voice LLM is
             // installed and the WHOLE warm voice stack fits. If not, the server holds at a safe boundary and
@@ -81,10 +95,10 @@ enum ServeCommand {
             let voicePreflight: VoiceWebSocketServer.Preflight = { cfg in
                 let host = HostMachineProfileService().currentProfile()
                 let installs = (try? vStore.listInstalls()) ?? []
-                let mlx = installs.filter { $0.spec.backend == .mlx }
+                let mlx = installs.filter { $0.spec.backend == .mlx && vPresent($0) }
                     .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
-                // Honor an explicit pin from the client; otherwise Voice Auto over current installs.
-                let pin = cfg.inferenceModel
+                // Honor the ESH_VOICE_LLM override, then a client pin, otherwise Voice Auto over current installs.
+                let pin = vOverride ?? cfg.inferenceModel
                 let picked = VoiceAuto.selectLLM(installed: mlx, pinned: pin, host: host)
                 guard let picked, let m = mlx.first(where: { $0.id == picked.id }) else {
                     let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: 1.0), host: host)

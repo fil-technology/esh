@@ -15,26 +15,64 @@ public enum VoiceClientPage {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>esh — Voice</title>
         <style>
-          :root{--paper:#fbfaf8;--ink:#201e1b;--muted:#6b6760;--line:rgba(32,30,27,.1);--accent:#201e1b}
+          :root{
+            --paper:#faf9f7;--panel:#ffffff;--ink:#1c1a17;--muted:#6b6760;--line:rgba(28,26,23,.10);
+            --accent:#2f6d5b;--accent-soft:#e7f1ec;--you:#2f6d5b;--esh-bubble:#f1efec;
+            --glow:rgba(47,109,91,.28);
+          }
+          @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+            --paper:#161513;--panel:#201e1b;--ink:#f2efe9;--muted:#a29c92;--line:rgba(255,255,255,.12);
+            --accent:#4fb598;--accent-soft:#1e2f2a;--you:#4fb598;--esh-bubble:#2a2825;--glow:rgba(79,181,152,.30);
+          }}
           *{box-sizing:border-box} html,body{margin:0;height:100%}
-          body{background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px}
-          .orb{width:96px;height:96px;border-radius:50%;background:#eee;display:grid;place-items:center;transition:transform .15s,background .2s;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-          .orb.listening{background:#e8f0ff} .orb.speechDetected{background:#dbe8ff;transform:scale(1.06)}
-          .orb.transcribing{background:#fff3d6} .orb.thinking{background:#f0e8ff} .orb.speaking{background:#daf5e4;transform:scale(1.04)}
-          .orb.error{background:#ffe0e0} .orb.ended,.orb.idle{background:#eee}
-          .state{font-weight:600;text-transform:capitalize} .muted{color:var(--muted);font-size:13px}
-          .row{display:flex;gap:10px} button{font:inherit;padding:9px 16px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer}
-          button.primary{background:var(--accent);color:#fff;border-color:var(--accent)} button:disabled{opacity:.5;cursor:default}
-          .log{width:min(560px,92vw);max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
-          .turn{margin:6px 0} .turn .who{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-          .lvl{width:min(560px,92vw);height:4px;border-radius:2px;background:#eee;overflow:hidden}
-          .lvl i{display:block;height:100%;width:0;background:#8ab;transition:width .08s}
-          .err{color:#a33;font-size:13px}
+          body{background:radial-gradient(1200px 600px at 50% -10%,var(--accent-soft),transparent 60%),var(--paper);
+            color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:32px 20px;min-height:100%}
+          .brand{position:fixed;top:18px;left:20px;font-weight:700;letter-spacing:.02em;color:var(--muted);font-size:13px}
+          .stage{display:flex;flex-direction:column;align-items:center;gap:14px}
+          .orb{width:112px;height:112px;border-radius:50%;display:grid;place-items:center;font-size:40px;
+            background:radial-gradient(circle at 35% 30%,#fff6,transparent 55%),var(--esh-bubble);
+            box-shadow:0 6px 24px rgba(0,0,0,.10),inset 0 0 0 1px var(--line);transition:transform .25s,background .3s;position:relative}
+          .orb::after{content:"";position:absolute;inset:-6px;border-radius:50%;pointer-events:none;
+            box-shadow:0 0 0 0 var(--glow);transition:box-shadow .3s}
+          .orb.listening,.orb.speechDetected{background:radial-gradient(circle at 35% 30%,#fff8,transparent 55%),var(--accent-soft)}
+          .orb.listening::after,.orb.speechDetected::after{animation:pulse 1.8s ease-out infinite}
+          .orb.speechDetected{transform:scale(1.06)}
+          .orb.transcribing{background:#fff3d6} .orb.thinking{background:var(--accent-soft)}
+          .orb.thinking::after{animation:pulse 1.2s ease-out infinite}
+          .orb.speaking{transform:scale(1.05)}
+          .orb.speaking::after{animation:pulse .9s ease-out infinite}
+          .orb.error{background:#f6dede} .orb.ended,.orb.idle{filter:saturate(.6)}
+          @keyframes pulse{0%{box-shadow:0 0 0 0 var(--glow)}70%{box-shadow:0 0 0 22px transparent}100%{box-shadow:0 0 0 0 transparent}}
+          .state{font-weight:650;text-transform:capitalize;font-size:18px;letter-spacing:.01em}
+          .muted{color:var(--muted);font-size:13px;text-align:center;max-width:420px}
+          .row{display:flex;gap:10px}
+          button{font:inherit;font-weight:600;padding:11px 20px;border-radius:999px;border:1px solid var(--line);
+            background:var(--panel);color:var(--ink);cursor:pointer;transition:transform .1s,box-shadow .2s,opacity .2s}
+          button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.10)}
+          button:active:not(:disabled){transform:translateY(0)}
+          button.primary{background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 4px 16px var(--glow)}
+          button:disabled{opacity:.45;cursor:default}
+          .lvl{width:min(520px,90vw);height:5px;border-radius:999px;background:var(--line);overflow:hidden}
+          .lvl i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--you));transition:width .08s}
+          .err{color:#c0392b;font-size:13px;text-align:center;max-width:520px;min-height:1em}
+          @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .err{color:#ff8f7a}}
+          .log{width:min(560px,92vw);max-height:44vh;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:4px}
+          .log:empty{display:none}
+          .turn{display:flex;flex-direction:column;gap:3px;max-width:82%}
+          .turn .who{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:0 4px}
+          .turn div:last-child{padding:10px 14px;border-radius:16px;background:var(--esh-bubble);white-space:pre-wrap;word-break:break-word}
+          .turn.you{align-self:flex-end;align-items:flex-end}
+          .turn.you div:last-child{background:var(--accent);color:#fff;border-bottom-right-radius:5px}
+          .turn.esh{align-self:flex-start} .turn.esh div:last-child{border-bottom-left-radius:5px}
         </style></head>
         <body>
-          <div class="orb idle" id="orb">🎙️</div>
-          <div class="state" id="state">Ready</div>
-          <div class="lvl"><i id="lvl"></i></div>
+          <div class="brand">esh · voice</div>
+          <div class="stage">
+            <div class="orb idle" id="orb">🎙️</div>
+            <div class="state" id="state">Ready</div>
+            <div class="lvl"><i id="lvl"></i></div>
+          </div>
           <div class="row">
             <button class="primary" id="start">Start voice</button>
             <button id="stop" disabled>End</button>
@@ -50,7 +88,7 @@ public enum VoiceClientPage {
           const SR=16000;
 
           function setState(s){ orb.className='orb '+s; stateEl.textContent=s; }
-          function addTurn(who,text){ const d=document.createElement('div'); d.className='turn'; d.innerHTML='<div class="who">'+who+'</div><div>'+(text||'')+'</div>'; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d; }
+          function addTurn(who,text){ const d=document.createElement('div'); d.className='turn '+who; const w=document.createElement('div'); w.className='who'; w.textContent=who; const b=document.createElement('div'); b.textContent=(text||''); d.appendChild(w); d.appendChild(b); logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d; }
           let userDiv=null, asstDiv=null;
 
           function wsURL(){ const p=(parseInt(location.port||'80',10)+1); return (location.protocol==='https:'?'wss://':'ws://')+location.hostname+':'+p+'/v1/voice/stream'; }
