@@ -138,6 +138,7 @@ final class VoiceWSConnection: @unchecked Sendable {
     private var inSpeech = false
     private var turn: UInt32 = 0
     private var audioSeq: UInt32 = 0
+    private var levelTick: UInt32 = 0  // throttles input.level emission during speech
     private let echoGuardScale = 3.0   // during playback, require ~3× the base energy to count as barge-in
     var onClose: (@Sendable () -> Void)?
 
@@ -276,10 +277,19 @@ final class VoiceWSConnection: @unchecked Sendable {
             for sig in vad.process(frame: floats, state: &vadState, thresholdScale: scale) {
                 switch sig {
                 case .level(let l):
-                    if inSpeech || l > 0 { /* could emit input.level; kept light */ }
+                    // Live input meter so the UI shows it is hearing the mic (throttled ~10/s). Only while the
+                    // user is actually speaking, to avoid a jittery idle meter.
+                    if inSpeech {
+                        levelTick &+= 1
+                        if levelTick % 5 == 0 { emit(.inputLevel(l)) }
+                    }
                 case .speechStarted:
                     inSpeech = true
                     utterance = Data(frame)   // include the onset frame
+                    // Tell the client immediately so it can show a live "listening / you are speaking" state —
+                    // without this the UI looks frozen until the endpoint. (Emitted for every onset, not just
+                    // barge-in.)
+                    emit(.vadSpeechStarted)
                     // Only signal the orchestrator when this onset is a BARGE-IN (assistant mid-turn); a normal
                     // listening onset needs no call — the turn is driven by submitUtterance at the endpoint.
                     if orchState == .thinking || orchState == .speaking || orchState == .transcribing {
@@ -287,6 +297,7 @@ final class VoiceWSConnection: @unchecked Sendable {
                     }
                 case .speechEnded:
                     inSpeech = false
+                    emit(.vadSpeechEnded)   // client shows "transcribing…" while STT runs
                     let wav = Self.wrapPCM16(utterance, sampleRate: sampleRate)
                     utterance = Data()
                     turn &+= 1; audioSeq = 0

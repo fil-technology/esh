@@ -97,8 +97,8 @@ enum ServeCommand {
                 let installs = (try? vStore.listInstalls()) ?? []
                 let mlx = installs.filter { $0.spec.backend == .mlx && vPresent($0) }
                     .map { (id: $0.id, weightsGB: Double($0.sizeBytes) / 1_000_000_000) }
-                // Honor the ESH_VOICE_LLM override, then a client pin, otherwise Voice Auto over current installs.
-                let pin = vOverride ?? cfg.inferenceModel
+                // Honor a client pin (on-screen model picker) first, then the ESH_VOICE_LLM override, else Voice Auto.
+                let pin = cfg.inferenceModel ?? vOverride
                 let picked = VoiceAuto.selectLLM(installed: mlx, pinned: pin, host: host)
                 guard let picked, let m = mlx.first(where: { $0.id == picked.id }) else {
                     let fit = VoiceFit.assess(VoiceFitInput(llmWeightsGB: 1.0), host: host)
