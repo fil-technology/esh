@@ -6,6 +6,23 @@ to the **real local backends** and a real server-owned conversational turn (STT�
 duplex transport, acoustic barge-in/echo, warm co-residency, and the live frozen benchmark remain.
 **Verdict: VOICE 2.1 EXPERIMENTAL** (the live path works; material realtime/UX limitations remain — see gates).
 
+## Technical closure (this pass) — live end-to-end + browser client + more gates
+- **Live server-owned turn over the WebSocket with REAL models, verified.** A browser-shaped raw-WS client
+  streamed a recorded utterance's PCM to the live `esh serve` endpoint; the server ran VAD → Parakeet STT
+  ("…capital of France") → qwen2.5 ("Yes, that's right! Paris is the capital of France.") → TTS, streaming
+  binary audio frames back with the full typed event sequence. Proves the whole path with real backends over
+  the real transport (only a live browser mic remains, for acoustic acceptance).
+- **Browser server-owned voice client** at `GET /voice`: captures mic → 16 kHz PCM16 → WebSocket; renders typed
+  VoiceEvents (state + transcripts); plays ordered TTS audio frames, dropping stale/late frames and flushing on
+  barge-in. Thin client (capture + transport + playback + UI); the server owns VAD/STT/LLM/TTS/session/barge-in.
+- **Echo / self-trigger guard**: while speaking, the server raises the VAD bar (playback-reference-aware) so its
+  own audio can't self-interrupt, while louder genuine speech still barges in — VAD never disabled. VAD-level tested.
+- **20-turn endurance** over one WS connection + **malformed/unknown-input tolerance** (server stays healthy,
+  next valid turn completes) — transport tests.
+- **Combined Voice Fit** (whole resident stack) + **Voice Auto** (honor pin, else smallest installed model that
+  fits) — unit-tested.
+- Fixed: the `ESHEXEC` telemetry sentinel is now stripped from assistant replies (never shown/spoken).
+
 ## Realtime duplex transport (this pass) — server-owned voice over WebSocket, verified headlessly
 A real WebSocket duplex transport now carries the whole loop server-side, verified end-to-end over a loopback
 socket with a headless simulator (no browser/mic needed):

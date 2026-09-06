@@ -57,8 +57,28 @@ public struct LanguageResponder: VoiceResponder {
             model: chosen,
             messages: messages,
             generation: GenerationConfig(maxTokens: 200, temperature: 0.7))
-        // inferStream already yields raw text deltas and propagates cancellation into generation.
-        return inference.inferStream(request: request)
+        // The inference stream appends an out-of-band telemetry frame ("\u{01}ESHEXEC:{…}"). Strip it (and
+        // anything after) so it is never shown as transcript or spoken by TTS. Cancellation propagates.
+        let base = inference.inferStream(request: request)
+        return AsyncThrowingStream { cont in
+            let task = Task {
+                do {
+                    var cut = false
+                    for try await delta in base {
+                        if cut { continue }
+                        if let r = delta.range(of: "\u{01}") {
+                            let head = String(delta[..<r.lowerBound])
+                            if !head.isEmpty { cont.yield(head) }
+                            cut = true
+                        } else {
+                            cont.yield(delta)
+                        }
+                    }
+                    cont.finish()
+                } catch { cont.finish(throwing: error) }
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
     }
 }
 
