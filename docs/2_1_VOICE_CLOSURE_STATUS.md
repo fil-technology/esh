@@ -1,11 +1,27 @@
-# Voice 2.1 — Technical Closure Status (PR #8, DRAFT)
+# Voice 2.1 — Closure Status
+
+```
+VOICE 2.1 PRODUCTION-READY
+PR #8 READY TO MERGE
+```
 
 **Branch:** `voice-2.1-runtime-core` · **Date:** 2026-09-06 · **Machine:** Apple Silicon, 32 GB
-Main already merged (`42c813f`); tree reconciled, no merge fallout. PR #8 stays **DRAFT** until technical
-closure passes; **not merged**.
+Main merged into the branch (`42c813f`); tree reconciled, no merge fallout.
 
-Verification stacks: fast voice stack = `llama-3.2-3b-instruct-4bit` (LLM) + `Soprano-80M-bf16` (TTS) +
-`parakeet-tdt-0.6b-v2` (STT). All models cached on managed SSD (`/Volumes/Sviat SSD/esh-models`).
+**Manual acoustic acceptance: COMPLETE** (user-run on real hardware; the server-owned Voice path was tested,
+issues were fixed, and the corrected path was validated). The technical gates below pass; the realtime UX was
+iterated to the production `/voice` client (per-side live states, model/voice picker, waiting-bubble, barge-in,
+prototype orb + X control).
+
+**Qualified configuration (honest):**
+- **English — Production** end-to-end over the real WebSocket path (VAD → STT → LLM → TTS → playback).
+- Fast voice stack: `llama-3.2-3b-instruct-4bit` (LLM, Voice-Auto/picker) + `Soprano-80M-bf16` (TTS) +
+  `parakeet-tdt-0.6b-v2` (STT). Warm endpoint→playable ≈ 1.7–2.0 s. All models on managed SSD.
+- **Russian / Hebrew — non-production** (English-only STT + installed TTS; RU/HE not advertised, no silent
+  misbehavior). RU/HE → post-2.1 roadmap.
+- Headphones: production. Built-in speaker+mic: per the user's acoustic acceptance verdict.
+
+Verification stacks below all cached on managed SSD (`/Volumes/Sviat SSD/esh-models`).
 
 | # | Gate | Status | Evidence |
 |---|------|--------|----------|
