@@ -29,6 +29,9 @@ cp "$(esh::repo_root)/scripts/verify-env.sh" "$PAYLOAD_DIR/scripts/verify-env.sh
 cp "$(esh::repo_root)/scripts/lib/common.sh" "$PAYLOAD_DIR/scripts/lib/common.sh"
 cp "$(esh::repo_root)/Tools/mlx_vlm_bridge.py" "$PAYLOAD_DIR/Tools/mlx_vlm_bridge.py"
 cp "$(esh::repo_root)/Tools/triattention_runtime.py" "$PAYLOAD_DIR/Tools/triattention_runtime.py"
+# The neural SFX worker (audio.generate / AudioGen) runs inside the isolated audiogen venv but the script
+# itself ships in the package payload; without it audio.generate crashes with "can't open esh_audiogen.py".
+cp "$(esh::repo_root)/Tools/esh_audiogen.py" "$PAYLOAD_DIR/Tools/esh_audiogen.py"
 cp "$(esh::repo_root)/Tools/python-requirements.txt" "$PAYLOAD_DIR/Tools/python-requirements.txt"
 
 # Bundle a self-contained llama-server (static ggml + embedded Metal, no dlopen,
