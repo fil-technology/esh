@@ -25,6 +25,30 @@ esh 2.1 is under a **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) until `v2.1
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-07
+
+**esh 2.1 — capabilities, realtime Voice, and generative media.** Promotion of the `2.1.0-rc.2` tree
+(behaviorally identical; only this version/changelog change). The rc.2 notarized artifact passed full packaged
+validation against the **actual distributed build** (`docs/2_1_RC2_PUBLISHED_AND_VERIFIED.md`) following a
+1–2 day real-use soak with no release-blocking regressions. (rc.1 was published then withdrawn after
+distribution validation caught a missing packaged worker script; see rc entries below.)
+
+Highlights of the 2.1 line (authoritative status in `docs/2_1_RELEASE_QUALIFICATION_MATRIX.md`):
+
+- **Realtime Voice** (`/voice`) — server-owned VoiceSession with VAD, streaming STT (Parakeet), LLM, and
+  sentence-streamed TTS with barge-in and model/voice pickers. Production for English (headphones); RU/HE
+  non-production.
+- **Universal Capability runtime** — `image.generate`/`edit`/`upscale`/`understand`/`segment`,
+  `audio.generate` (neural SFX / AudioGen), `music.generate`, `vector.generate`, `project.generate` (+ Three.js),
+  `video.understand`, `STT`/`TTS` — selected by natural-language capability with install-and-resume.
+- **`image.edit` → Production** (default FLUX.2 Klein 4B, Apache-2.0; FLUX `kontext` stays Experimental,
+  non-commercial). **`audio.generate` → Production** (deterministic DSP + neural AudioGen; the AudioGen model
+  is CC-BY-NC-4.0, disclosed). Apple Foundation Models, MLX, and a self-contained static/Metal GGUF runtime.
+- **Signed + notarized, self-contained** distribution; offline-capable; managed model storage on external SSD.
+
+### Changed
+- Version promoted from `2.1.0-rc.2` to `2.1.0`. No code changes from rc.2.
+
 ### Added
 - **esh 2.1 UCMR — project.generate reliability pass -> PRODUCTION-READY (untagged).** Closed the "valid files
   but broken project" gap. `ProjectConsistency` (layer 2) adds cheap, conservative, deterministic CROSS-FILE
