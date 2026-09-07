@@ -137,8 +137,27 @@ esh::bootstrap_python() {
     echo "$ESH_BOOTSTRAP_PYTHON"
     return
   fi
-  command -v python3 >/dev/null 2>&1 || esh::die "python3 is required for bootstrap."
-  command -v python3
+  # Reject a conda/anaconda python: a venv created from a conda interpreter is NOT relocatable — its
+  # pyvenv.cfg `home` points into the conda base and its stdlib resolves there, so the packaged runtime
+  # breaks on any machine without that exact conda install (observed: bundled python importing base64/struct
+  # from ~/anaconda3). Prefer a clean python.org/Homebrew/system interpreter (>= 3.10).
+  local py; py="$(command -v python3 2>/dev/null || true)"
+  local is_conda=1
+  if [[ -n "$py" ]]; then
+    "$py" -c 'import sys; p=(sys.prefix+" "+getattr(sys,"base_prefix","")).lower(); raise SystemExit(0 if ("conda" in p or "anaconda" in p) else 1)' >/dev/null 2>&1 && is_conda=0
+  fi
+  if [[ -n "$py" && "$is_conda" -ne 0 ]]; then
+    echo "$py"; return
+  fi
+  # PATH python is conda (or missing): find a clean, non-conda python3 >= 3.10.
+  local c
+  for c in /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.10 \
+           /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    [[ -x "$c" ]] || continue
+    "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,10) else 1)' >/dev/null 2>&1 || continue
+    echo "$c"; return
+  done
+  esh::die "python3 on PATH is a conda/anaconda interpreter (non-relocatable for packaging) and no clean python3>=3.10 was found. Install Homebrew python or set ESH_BOOTSTRAP_PYTHON to a python.org interpreter."
 }
 
 esh::swift_binary() {
