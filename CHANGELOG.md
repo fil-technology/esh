@@ -4,6 +4,25 @@ All notable changes to Esh should be documented in this file.
 
 The format is based on Keep a Changelog, and Esh follows Semantic Versioning.
 
+## 2.1 Capability Status (authoritative — supersedes earlier per-entry labels below)
+
+The dated status/closure docs are the current source of truth; historical entries in this file keep the label
+they had **when written** and are not rewritten. As of the Voice 2.1 merge (`63552f4`, 2026-09-06), the
+authoritative status is in `docs/2_1_RELEASE_QUALIFICATION_MATRIX.md`. Notable updates vs. earlier entries:
+
+- **image.edit → PRODUCTION** (default FLUX.2 Klein 4B, Apache-2.0; FLUX `kontext` stays Experimental,
+  non-commercial). Earlier entry below labels it EXPERIMENTAL — that was its state at the time.
+- **Voice 2.1 → PRODUCTION** for English (headphones), realtime `/voice`. RU/HE are non-production. Earlier
+  `docs/2_1_VOICE_STATUS.md` labeled Voice EXPERIMENTAL (cold-load latency) — superseded by
+  `docs/2_1_VOICE_CLOSURE_STATUS.md`.
+- **Non-commercial models (CC-BY-NC-4.0), opt-in and labeled:** `music.generate` (Experimental), neural
+  `audio.generate` (SFX), and the `image.edit` `kontext` backend. Do not use these in a commercial context.
+- Experimental (labeled): `music.generate`, `image.segment`, `audio.diarize`, FLUX `kontext` edit.
+- Unsupported / out of scope for 2.1: Tier C (Node) managed runtime, video generation, audio
+  editing/stems/remix, `audio.understand`.
+
+esh 2.1 is under a **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) until `v2.1.0`.
+
 ## [Unreleased]
 
 ### Added
