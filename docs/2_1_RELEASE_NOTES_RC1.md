@@ -20,9 +20,13 @@ Text / chat / reasoning / summarize / translate / classify / extract · structur
 Scheduler · **Model Fit** · **Install-and-Resume** · managed / **external SSD** storage · **offline** execution ·
 runtime lifecycle / memory-aware residency.
 
+**`audio.generate` is Production** — both the deterministic DSP path and the neural **AudioGen** SFX path passed
+the listening gate. Its neural model (**AudioGen-medium**) is **CC-BY-NC-4.0 (non-commercial)** and is clearly
+disclosed in `doctor`/docs; this is a licensing disclosure, not an experimental classification.
+
 ## Experimental (labeled — use with that expectation)
 
-- `music.generate` (MusicGen) and neural `audio.generate` (AudioGen) — **non-commercial (CC-BY-NC-4.0)** models.
+- `music.generate` (MusicGen) — **non-commercial (CC-BY-NC-4.0)**, limited quality evaluation.
 - `image.edit` `kontext` backend (FLUX.1 Kontext) — **non-commercial**; the default edit path (FLUX.2 Klein) is
   Apache-2.0.
 - `image.segment` (rembg) and `audio.diarize` (sherpa-onnx) — require optional dependencies.
