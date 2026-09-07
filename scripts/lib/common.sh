@@ -241,10 +241,13 @@ esh::build_mlx_metallib() {
 
   xcrun_path="$(command -v xcrun)" || esh::die "xcrun is required to build the MLX Metal runtime library."
 
+  # Exclude macOS AppleDouble sidecars (._*.metal): on an exFAT managed volume (a common .build location on an
+  # external SSD) macOS writes "._"-prefixed resource-fork files next to every source; they are not valid Metal
+  # and previously broke the metallib compile (and silently aborted packaging). Skip them defensively.
   local metal_files=()
   while IFS= read -r -d '' file; do
     metal_files+=("$file")
-  done < <(find "$shader_root" -name '*.metal' -type f -print0 | sort -z)
+  done < <(find "$shader_root" -name '*.metal' -type f ! -name '._*' -print0 | sort -z)
 
   [[ "${#metal_files[@]}" -gt 0 ]] || esh::die "No MLX Metal shader files were found at $shader_root."
 
