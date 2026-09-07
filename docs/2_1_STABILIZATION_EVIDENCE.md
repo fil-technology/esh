@@ -18,6 +18,32 @@ Verified against `main` (post Voice merge `63552f4`). This log converts qualific
   isolated requests; with a resident session (chat UI / `ESH_MLX_PERSISTENT`) it stays warm. Not a blocker;
   flagged for the latency pass.
 
+## `/v1/execute` capability path (verified 2026-09-06/07)
+Typed input encoding: `inputs:[{payload:{text:{_0:"…"}}}]`, `output:{modality,format}`, `options:{values:{}}`.
+
+| Capability | Result |
+|---|---|
+| `vector.generate` (SVG) | ✅ executed, success result (artifact reference), no error |
+| `webArtifact.generate` | ✅ executed, success result (artifact reference), no error |
+| `language.embed` without a model | ✅ graceful: *"embeddings/rerank require an explicit model id"* |
+| unknown capability `nonsense.doThing` | ✅ graceful: *"No local provider for … Install or enable a provider"* |
+
+## Failure / recovery (Phase 6, verified)
+| Case | Result |
+|---|---|
+| Malformed JSON body | ✅ clean HTTP 400 `invalid_request_error` |
+| Unsupported capability | ✅ clear "no local provider" message, no crash |
+| Missing model (embeddings) | ✅ clear "explicit model id required", no crash |
+| Offline (`HF_HUB_OFFLINE=1`) chat | ✅ returns correct reply from the resident model |
+| Server restart | ✅ health recovers; a fast restart while the port is briefly held moves to a free port (non-interactive resolver) — graceful, not a failure |
+
+## Fresh-user lifecycle + storage (Phase 5, isolated `ESH_HOME`/`ESH_ASSETS_HOME` root)
+| Scenario | Result |
+|---|---|
+| Fresh empty managed root | ✅ `installed: 0`; Voice Auto "NONE FITS — install a smaller MLX model"; "offline ready: no" — correct install-required entry |
+| External SSD path not mounted | ✅ storage "UNAVAILABLE — no directory is mounted at this path" + fix "reconnect the volume, or `esh storage use-internal`" |
+| Voice with no installed LLM (Gate 3) | ✅ realtime preflight emits `install.required` + Voice Fit, holds at a safe boundary, resumes after install (tested in `VoiceTransportTests`) |
+
 ## Still to exercise end-to-end before RC1 (remain `○` in the matrix)
 - `/v1/execute` per-capability cold+warm: image.understand/OCR/generate/edit/upscale, vector/webArtifact/
   project/Three.js, video.understand, SFX. (Model-heavy; run selectively with the right installed models.)
