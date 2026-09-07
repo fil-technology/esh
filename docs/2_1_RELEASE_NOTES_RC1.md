@@ -1,8 +1,12 @@
-# esh 2.1.0-rc.1 — Release Notes (Release Candidate)
+# esh 2.1.0-rc.2 — Release Notes (Release Candidate)
 
 **esh 2.1** turns your Mac into a local AI runtime: give it a capability and constraints, and esh picks the
 best compatible on-device model and runs it — **on-device, private, offline-capable**. This is a **release
 candidate** for soak testing; not the stable release.
+
+> **rc.2 (supersedes rc.1):** fixes a packaging omission where the neural SFX worker (`Tools/esh_audiogen.py`)
+> was missing from the distributed payload, which crashed `audio.generate` in the built artifact. Caught by
+> validating the actual CI-built package. rc.1 was withdrawn.
 
 ## Headline: server-owned realtime Voice
 
