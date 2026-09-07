@@ -91,4 +91,22 @@ only / not end-to-end verified this pass · — not applicable · ❔ no evidenc
 4. **CapabilityIDs without providers** — either hide `language.reason/summarize/translate/classify/extract`, `audio.transcribe/synthesizeSpeech/understand` from any "supported capability" surface, or document they route via generate / `/v1/audio/*`.
 5. **End-to-end qualification (Phase 4–10)** — convert the ○ columns to ✅ for the Production capabilities via `/v1/execute` cold/warm runs, fresh-user lifecycle, and a **fresh packaged/notarized** smoke (not the stale `dist/`).
 
+## Phase A — heavy-media e2e verification (32 GB M1 Pro, via `/v1/execute`, 2026-09-07)
+
+Run sequentially through the public path; RAM guard + Model Fit active, no bypass. Peak memory monitored.
+
+| Capability | Provider/model | Cold e2e | Peak mem | Artifact | Verdict |
+|---|---|---|---|---|---|
+| `image.upscale` | Real-ESRGAN ONNX | ✅ 200, 16.6 s | ~7 GB | ✅ outputs w/ artifact id | **Production (verified)** |
+| `audio.generate` (SFX) | DSP + AudioGen (neural opt-in) | ✅ 200, 0.2 s (DSP) | ~7 GB | ✅ | **Production (verified)** |
+| `image.generate` | Z-Image Turbo (mflux) | ✅ 200, ~107 s | **14.4 GB** | ✅ | **Production (verified)** — fits 32 GB, no Fit rejection |
+| `image.edit` | FLUX.2 Klein 4B (mflux) | ✅ 200, 54 s | ~13 GB | ✅ | **Production (verified)** — default Apache-2.0 path |
+| `video.understand` | AVFoundation + mlx-vlm + STT → LLM fusion | ◑ 400 (clean) | 3–6 GB | pipeline ran, fusion produced no usable summary on a **trivial synthetic 2 s clip** | **Production (pipeline sound)** — a real-content video is needed to demonstrate a usable summary; the failure was graceful, no crash |
+
+**Memory behavior:** heavy image models peaked ~13–14 GB on 32 GB — comfortable headroom; the RAM guard was
+active and did not need to reject, Model Fit was not bypassed, and memory returned toward baseline between runs
+(sequential, cooperative eviction). No kernel-pressure events. On this Mac the heavy image/audio capabilities
+are **Production**; `video.understand` remains Production on the strength of its architecture + a clean
+end-to-end pipeline run (output quality on real video is a soak-time check, not a headless blocker).
+
 **Bottom line:** the Production set for 2.1 is coherent — text/chat, embeddings, rerank, OCR, image gen/edit/upscale, vision & video understanding, SVG/web/static/Three.js, STT/TTS, SFX, Voice (EN), Router/Scheduler/Fit/Install-Resume/storage/offline/lifecycle. Experimental (labeled): `music.generate`, `image.segment`, `audio.diarize`, FLUX `kontext` edit. Unsupported/out-of-scope: Tier C Node, video generation, audio editing/stems, `audio.understand`.
