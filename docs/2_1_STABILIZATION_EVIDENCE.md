@@ -25,6 +25,7 @@ Typed input encoding: `inputs:[{payload:{text:{_0:"…"}}}]`, `output:{modality,
 |---|---|
 | `vector.generate` (SVG) | ✅ executed, success result (artifact reference), no error |
 | `webArtifact.generate` | ✅ executed, success result (artifact reference), no error |
+| TTS `/v1/audio/speech` (Soprano-80M) | ✅ HTTP 200, valid 1.28 s WAV returned |
 | `language.embed` without a model | ✅ graceful: *"embeddings/rerank require an explicit model id"* |
 | unknown capability `nonsense.doThing` | ✅ graceful: *"No local provider for … Install or enable a provider"* |
 
