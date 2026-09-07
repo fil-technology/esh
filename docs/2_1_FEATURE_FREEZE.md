@@ -1,8 +1,13 @@
 # esh 2.1 — Feature Freeze
 
 ```
-ESH 2.1 FEATURE FREEZE
+ESH 2.1 FEATURE FREEZE — CONCLUDED (v2.1.0 released 2026-09-07)
 ```
+
+> **CONCLUDED 2026-09-07.** `v2.1.0` is released and verified (stable tag `v2.1.0` → `0e2405b`, GitHub
+> Latest, Homebrew cask `2.1.0`; see CHANGELOG `[2.1.0]` and `docs/2_1_RC2_PUBLISHED_AND_VERIFIED.md`). The
+> freeze below governed the run-up to the release and is now lifted. Post-2.1 work resumes under normal
+> planning (2.2+); do **not** begin 2.2 as a side effect of this note.
 
 **Effective:** 2026-09-06, immediately after Voice 2.1 merged to `main` (PR #8, merge `63552f4`).
 Voice was the final major capability addition for 2.1.

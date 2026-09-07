@@ -21,7 +21,8 @@ authoritative status is in `docs/2_1_RELEASE_QUALIFICATION_MATRIX.md`. Notable u
 - Unsupported / out of scope for 2.1: Tier C (Node) managed runtime, video generation, audio
   editing/stems/remix, `audio.understand`.
 
-esh 2.1 is under a **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) until `v2.1.0`.
+esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the **`v2.1.0`** release
+(2026-09-07). esh 2.1 is **complete and shipped** — see `[2.1.0]` below.
 
 ## [Unreleased]
 

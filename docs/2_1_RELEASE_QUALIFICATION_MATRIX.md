@@ -1,5 +1,10 @@
 # esh 2.1 — Release Qualification Matrix (authoritative)
 
+> **✅ RELEASED — `v2.1.0` (2026-09-07).** esh 2.1 is complete and shipped: stable tag `v2.1.0` → `0e2405b`
+> (promotion of the qualified `v2.1.0-rc.2` tree), GitHub Latest, Homebrew cask `2.1.0`, signed + notarized,
+> validated on the installed stable build. See `docs/2_1_RC2_PUBLISHED_AND_VERIFIED.md` and CHANGELOG `[2.1.0]`.
+> The honesty preface below reflects the pre-tag repo state at qualification time and is retained as history.
+
 **Date:** 2026-09-06 · **Branch:** `main` (post Voice 2.1 merge `63552f4`) · **Machine of record:** Apple Silicon, 32 GB.
 
 **Status legend:** `PROD` = Production · `EXP` = Experimental · `UNSUP` = Unsupported/out-of-scope.
