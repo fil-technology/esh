@@ -1462,12 +1462,27 @@ def image_edit() -> None:
         cmd += ["--vae-tiling"]
     if request.get("mlxCacheLimitGB") is not None:
         cmd += ["--mlx-cache-limit-gb", str(int(request["mlxCacheLimitGB"]))]
+    # Generic LoRA adapters (esh 2.1 — Qwen Image Edit + LoRA). `lora` is a path or list of paths to
+    # adapter .safetensors already installed under the SSD cache; `loraScale` an optional matching
+    # scale or list. mflux applies them to the base at load. This is model-agnostic — the base model
+    # (e.g. Qwen-Image-Edit) decides compatibility; esh never hard-codes a specific adapter here.
+    lora = request.get("lora")
+    if lora:
+        loras = lora if isinstance(lora, list) else [lora]
+        loras = [str(p) for p in loras if p]
+        if loras:
+            cmd += ["--lora-paths", *loras]
+            scales = request.get("loraScale")
+            if scales is not None:
+                scale_list = scales if isinstance(scales, list) else [scales]
+                cmd += ["--lora-scales", *[str(float(s)) for s in scale_list]]
 
     # mflux runs as a separate child process group, so peak memory is sampled externally by the benchmark
     # (bridge RSS here would not reflect the child's footprint).
     out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "backend": backend,
-                "model": model, "license": spec["license"], "commercial": spec["commercial"]})
+                "model": model, "license": spec["license"], "commercial": spec["commercial"],
+                "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
 
 
 def mlx_serve() -> None:

@@ -1,0 +1,33 @@
+# esh 2.1 — Qwen Image Edit 2511 + generic LoRA (image.edit) — status
+
+**Task:** ClickUp `86eyv38pc` (esh) · consumer `86eyv38qu` (Ashex). **Date:** 2026-09-08. **Machine of record:** Apple Silicon / **32 GB**.
+
+Adds **Qwen-Image-Edit-2511** as a selectable `image.edit` backend with **generic LoRA adapter** support (first validation adapter: a neutral **`3d-animation`** style). This is an extension of the existing production `image.edit` capability (default FLUX.2 Klein 4B), **not** a parallel pipeline or a model-specific API.
+
+## What shipped (code)
+- **Generic LoRA wiring** in the mflux bridge (`Tools/mlx_vlm_bridge.py` `image_edit()`): `--lora-paths` / `--lora-scales`, model-agnostic (the base decides compatibility; no adapter hard-coded).
+- **`ImageEditOptions`** (backend, model pin, baseModel, loraPaths/scales, seed, steps, guidance, width, height, quantize) — freeform `/v1/execute` options map onto it; the capability contract is unchanged.
+- **`ImageAdapter` + `ImageAdapterCatalog`** (`Sources/EshCore/Capabilities/ImageAdapter.swift`): typed adapter independent of the base — id, compatible backend/base, source repo + file, default scale, license, size; neutral aliases; install-path resolver; installed-check. Initial entry `3d-animation` → `prithivMLmods/Qwen-Image-Edit-2511-Pixar-Inspired-3D` / `PI3_20.safetensors` (Apache-2.0). **No brand name in any user-facing id/label** — upstream name kept as diagnostic provenance only.
+- **`ImageEditProvider`** resolves a requested adapter → verifies base compatibility (a Qwen LoRA can't attach to FLUX) → resolves the installed LoRA file → applies it, and selects the adapter's recommended base weights. Unknown adapter, incompatible backend, and not-installed all return typed errors. Artifact provenance records the adapter id.
+- **Model Fit** (`ImageEditModelFit`): honest per-backend memory model — FLUX.2 Klein comfortable on 32 GB; **Qwen-Image-Edit-2511 tight/unlikely on 32 GB** (surfaced for Scheduler/install-card gating).
+- Tests: adapter resolution, alias, unknown/not-installed/incompatible, LoRA on/off, neutral-naming, Model-Fit gating; existing edit/routing tests updated.
+
+## Measured spike (through the RAM-guarded bridge, 512px, 8 steps, staged low-RAM)
+| Run | Model | On-disk | Result | Time | Min free RAM |
+|---|---|---|---|---|---|
+| base | `…2511-mflux-q4` | 29 GB | ❌ RAM guard halted at load | 26 s | 17 MB |
+| **base** | `…2511-mflux-q3` | 24.7 GB | ✅ **valid 512×512 PNG** | **~346 s (5.8 min)** | 14 MB |
+| base + `3d-animation` LoRA | q3 + `PI3_20` | +0.24 GB | ❌ guard halted at load (×2) | 30–39 s | ~0 (2.4 GB avail) |
+
+**Component sizes (both quants share the encoder):** Qwen2.5-VL text encoder **15.5 GB full-precision** (the anchor), DiT q4 13.2 GB / q3 8.9 GB, VAE 0.24 GB.
+
+## Findings
+- **Base Qwen-Image-Edit-2511-q3 runs end-to-end on 32 GB** — but only just: ~5.8 min/edit at 512px, running against the memory ceiling via compression. Not a comfortable/fast path.
+- **q4 does not fit 32 GB**; the 15.5 GB full-precision text encoder is identical across quants, so smaller quants only shrink the DiT.
+- **The generic LoRA path is validated** (mflux accepts `--lora-paths` and enters model load), but **base + LoRA is ~1–2 GB short of completing on this loaded 32 GB Mac** (apps hold ~10 GB) — the guard correctly halts it. It needs a couple GB freed (close an app) or a >32 GB machine; resolution changes don't help (weights dominate).
+- **RAM guard works correctly throughout** — no panic on any over-subscription.
+
+## Verdict / recommendation
+- **Default `image.edit` stays FLUX.2 Klein 4B** (Apache-2.0, comfortable on 32 GB). **Qwen-Image-Edit-2511 is a documented opt-in** for machines with headroom — Model Fit reports it tight/unlikely on 32 GB and the base+LoRA needs ~2 GB more free than a fully-loaded 32 GB Mac has.
+- **Generic LoRA/adapter architecture is complete and tested**, ready for any Qwen-Image-Edit adapter (add a catalog entry, no code change).
+- **To finish the live LoRA benchmark:** re-run with ~2 GB more free RAM (close a heavy app) or on a >32 GB / CI Apple-Silicon host. Reproduction: `image.edit` via `/v1/execute` with `options.adapter = "3d-animation"`.

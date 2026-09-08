@@ -1088,9 +1088,8 @@ public struct OpenAICompatibleService: Sendable {
             // Instruction-based image editing (image + instruction → image). Default backend: Qwen-Image-Edit
             // (Apache-2.0, commercial-safe); FLUX.1 Kontext selectable but experimental/non-commercial.
             let imageEditService = ImageEditService()
-            registryUCMR.register(ImageEditProvider(edit: { inPath, outPath, instruction, backend, model, quantize, minFree, hfCache in
-                try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction,
-                                          backend: backend, model: model, quantize: quantize, minFreeMemMB: minFree, hfCache: hfCache)
+            registryUCMR.register(ImageEditProvider(edit: { inPath, outPath, instruction, options in
+                try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction, options: options)
             }))
             // audio.generate (SFX/ambience) + music.generate. Deterministic DSP (noise/tones/sweeps) needs no
             // model; neural requests (rain, footsteps, music) go through the RAM-guarded bridge (AudioGen /

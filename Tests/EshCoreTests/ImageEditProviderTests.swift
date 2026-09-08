@@ -10,22 +10,28 @@ struct ImageEditProviderTests {
                                  artifactStore: FileArtifactStore(rootURL: dir.appendingPathComponent("artifacts"))), dir)
     }
 
+    private func imageAndText(_ instruction: String, options: [String: JSONValue] = [:]) -> ExecutionRequest {
+        ExecutionRequest(
+            capability: .imageEdit,
+            inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1,2]).base64EncodedString())),
+                     .text(instruction)],
+            output: .init(modality: .image),
+            options: ExecutionOptions(options))
+    }
+
     @Test
     func producesEditedImageArtifactWithLicenseProvenance() async throws {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
-        let provider = ImageEditProvider(edit: { _, outPath, instruction, backend, _, _, _, _ in
+        let provider = ImageEditProvider(edit: { _, outPath, instruction, options in
             #expect(instruction == "change the sky to sunset")
-            #expect(backend == .flux2Klein)   // universal-fit default (Apache-2.0, runs on 32GB)
+            #expect(options.backend == .flux2Klein)   // universal-fit default (Apache-2.0, runs on 32GB)
+            #expect(options.loraPaths.isEmpty)          // no adapter requested → LoRA disabled
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
             return ImageEditResult(width: 1024, height: 1024, backend: "flux2-klein", model: "flux2-klein-4b",
                                    license: "apache-2.0", commercial: true)
         })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
-        let result = try await svc.executeCollecting(ExecutionRequest(
-            capability: .imageEdit,
-            inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1,2]).base64EncodedString())),
-                     .text("change the sky to sunset")],
-            output: .init(modality: .image)))
+        let result = try await svc.executeCollecting(imageAndText("change the sky to sunset"))
         let art = try #require(result.outputs.first)
         #expect(art.kind == .image)
         #expect(art.metadata["license"] == .string("apache-2.0"))
@@ -36,14 +42,12 @@ struct ImageEditProviderTests {
     @Test
     func requiresAnImageAndAnInstruction() async {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
-        let provider = ImageEditProvider(edit: { _, _, _, _, _, _, _, _ in
+        let provider = ImageEditProvider(edit: { _, _, _, _ in
             ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
-        // No image → error.
         await #expect(throws: CapabilityError.self) {
             _ = try await svc.executeCollecting(ExecutionRequest(capability: .imageEdit, inputs: [.text("change the sky")], output: .init(modality: .image)))
         }
-        // Image but no instruction → error.
         await #expect(throws: CapabilityError.self) {
             _ = try await svc.executeCollecting(ExecutionRequest(capability: .imageEdit,
                 inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1]).base64EncodedString()))],
@@ -53,9 +57,123 @@ struct ImageEditProviderTests {
 
     @Test
     func dispatchedForEditImageToImage() {
-        let reg = CapabilityRegistry(providers: [ImageEditProvider(edit: { _, _, _, _, _, _, _, _ in
+        let reg = CapabilityRegistry(providers: [ImageEditProvider(edit: { _, _, _, _ in
             ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })])
         #expect(reg.providers(for: .imageEdit, inputs: [.image, .text], output: .image).count == 1)
+    }
+
+    // MARK: - Generic LoRA / adapter architecture
+
+    /// Install a fake adapter weight file where the provider looks (image-models/hub/<repo>/snapshots/<rev>/<file>).
+    private func installAdapter(_ id: String, into ctx: ExecutionContext) throws -> String {
+        let adapter = try #require(ImageAdapterCatalog.resolve(id))
+        let dir = ctx.root.cachesURL.appendingPathComponent("image-models/hub/\(adapter.cacheDirName)/snapshots/testrev", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent(adapter.file)
+        try Data([0x00]).write(to: path)
+        return path.path
+    }
+
+    @Test
+    func neutralAdapterCatalogHasNoBrandNames() {
+        // The catalog id/label/aliases must be neutral (no Pixar/Disney branding). Upstream name is provenance only.
+        for (id, a) in ImageAdapterCatalog.adapters {
+            #expect(!id.lowercased().contains("pixar"))
+            #expect(!a.displayName.lowercased().contains("pixar"))
+            #expect(!a.displayName.lowercased().contains("disney"))
+        }
+        let a = ImageAdapterCatalog.resolve("3d-animation")
+        #expect(a?.backend == .qwenEdit)          // a Qwen-Image-Edit LoRA
+        #expect(a?.license == "apache-2.0")
+    }
+
+    @Test
+    func installedAdapterResolvesToLoRAPathAndBaseModel() async throws {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        let loraPath = try installAdapter("3d-animation", into: ctx)
+        let provider = ImageEditProvider(edit: { _, outPath, _, options in
+            #expect(options.backend == .qwenEdit)                  // adapter dictates the base family
+            #expect(options.loraPaths.count == 1)                   // resolved a local LoRA file
+            #expect(options.loraPaths.first?.hasSuffix("/PI3_20.safetensors") == true)
+            #expect(options.loraScales == [1.0])                    // default scale
+            _ = loraPath
+            #expect(options.model == "mflux-community/qwen-image-edit-2511-mflux-q4")  // adapter's base
+            #expect(options.baseModel == "qwen-image")
+            try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
+            return ImageEditResult(width: 512, height: 512, backend: "qwen-edit",
+                                   model: "mflux-community/qwen-image-edit-2511-mflux-q4",
+                                   license: "apache-2.0", commercial: true)
+        })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        let result = try await svc.executeCollecting(imageAndText("Make this a polished 3D animated character",
+            options: ["adapter": .string("3d-animation")]))
+        let art = try #require(result.outputs.first)
+        #expect(art.metadata["adapter"] == .string("3d-animation"))   // provenance records the adapter
+    }
+
+    @Test
+    func adapterAliasResolves() async throws {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try installAdapter("3d-animation", into: ctx)
+        let provider = ImageEditProvider(edit: { _, outPath, _, _ in
+            try Data([0x89]).write(to: URL(fileURLWithPath: outPath))
+            return ImageEditResult(width: 512, height: 512, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true)
+        })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        // "animated-3d" is an alias → the artifact provenance must record the canonical "3d-animation".
+        let result = try await svc.executeCollecting(imageAndText("stylize", options: ["adapter": .string("animated-3d")]))
+        let art = try #require(result.outputs.first)
+        #expect(art.metadata["adapter"] == .string("3d-animation"))
+    }
+
+    @Test
+    func unknownAdapterThrows() async {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        let provider = ImageEditProvider(edit: { _, _, _, _ in
+            ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        await #expect(throws: CapabilityError.self) {
+            _ = try await svc.executeCollecting(imageAndText("stylize", options: ["adapter": .string("no-such-style")]))
+        }
+    }
+
+    @Test
+    func requestedButNotInstalledAdapterThrows() async {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        // Do NOT install the adapter file → provider must report install-required, not silently ignore it.
+        let provider = ImageEditProvider(edit: { _, _, _, _ in
+            ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        await #expect(throws: CapabilityError.self) {
+            _ = try await svc.executeCollecting(imageAndText("stylize", options: ["adapter": .string("3d-animation")]))
+        }
+    }
+
+    @Test
+    func incompatibleBackendPinWithAdapterThrows() async throws {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try installAdapter("3d-animation", into: ctx)
+        let provider = ImageEditProvider(edit: { _, _, _, _ in
+            ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        // A Qwen LoRA cannot attach to a FLUX base → explicit incompatible backend pin must error.
+        await #expect(throws: CapabilityError.self) {
+            _ = try await svc.executeCollecting(imageAndText("stylize",
+                options: ["adapter": .string("3d-animation"), "backend": .string("flux2-klein")]))
+        }
+    }
+
+    // MARK: - Model Fit: honest hardware viability
+
+    @Test
+    func qwenEditIsNotComfortableOn32GBButKleinIs() {
+        let svc = ImageModelFitService()
+        let host = HostMachineProfile(chipDescription: "Apple M-test", totalMemoryGB: 32, availableMemoryGB: 20, safeBudgetGB: 24)
+        let qwen = svc.assess(input: ImageEditModelFit.input(for: .qwenEdit, width: 1024, height: 1024), host: host, root: PersistenceRoot(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent("esh-fit-\(UUID().uuidString)")))
+        #expect(qwen.fitClass == .tight || qwen.fitClass == .unlikely)   // honest: does not comfortably fit 32GB
+        #expect(qwen.requiresConfirmation)
+        let klein = svc.assess(input: ImageEditModelFit.input(for: .flux2Klein, width: 512, height: 512), host: host, root: PersistenceRoot(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent("esh-fit-\(UUID().uuidString)")))
+        #expect(klein.fitClass == .comfortable || klein.fitClass == .fits)
     }
 
     // MARK: - Tier-0 routing: edit vs segment vs clarify (preserve Router Auto safety)
@@ -75,7 +193,7 @@ struct ImageEditProviderTests {
 
     @Test func backgroundRemovalStaysSegmentation() {
         #expect(route("remove the background").capability == .imageSegment)
-        #expect(route("make the background transparent").capability != .imageEdit)   // segment, not edit
+        #expect(route("make the background transparent").capability != .imageEdit)
     }
 
     @Test func vagueImproveStaysClarify() {
