@@ -27,6 +27,12 @@ Adds **Qwen-Image-Edit-2511** as a selectable `image.edit` backend with **generi
 - **The generic LoRA path is validated** (mflux accepts `--lora-paths` and enters model load), but **base + LoRA is ~1–2 GB short of completing on this loaded 32 GB Mac** (apps hold ~10 GB) — the guard correctly halts it. It needs a couple GB freed (close an app) or a >32 GB machine; resolution changes don't help (weights dominate).
 - **RAM guard works correctly throughout** — no panic on any over-subscription.
 
+## Bake attempt (option 1 — quantize the encoder + merge LoRA via `mflux-save`, guarded)
+Added a RAM-guarded `image-edit-bake` bridge command (wraps `mflux-save --quantize --lora`). Measured on 32 GB:
+- Bake from the q3 snapshot @ q4 → 27 GB (text_encoder 13 GB, transformer 14 GB); @ q3 → 27 GB (encoder 13 GB, transformer 14 GB).
+- **`mflux-save` does NOT meaningfully quantize the Qwen2.5-VL text encoder (~13 GB floor)**, and baking from an already-quantized snapshot *bloats* the DiT. A proper small snapshot needs baking from the **fp original (40 GB)**, but `mflux-save` **loads the whole model** (the bake hit 14 MB free loading 24.7 GB — no streaming), so it can't run on 32 GB.
+- **Net: option 1 does not rescue 32 GB.** The ~13 GB VL text encoder is a hard mflux floor; base+LoRA (~26 GB) + the unkillable ~5 GB Claude app exceeds the guard's safe ceiling.
+
 ## Verdict / recommendation
 - **Default `image.edit` stays FLUX.2 Klein 4B** (Apache-2.0, comfortable on 32 GB). **Qwen-Image-Edit-2511 is a documented opt-in** for machines with headroom — Model Fit reports it tight/unlikely on 32 GB and the base+LoRA needs ~2 GB more free than a fully-loaded 32 GB Mac has.
 - **Generic LoRA/adapter architecture is complete and tested**, ready for any Qwen-Image-Edit adapter (add a catalog entry, no code change).
