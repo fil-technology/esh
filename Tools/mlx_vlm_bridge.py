@@ -1485,6 +1485,87 @@ def image_edit() -> None:
                 "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
 
 
+def _run_guarded_save_cli(cmd: list, out_dir: str, min_free: float, label: str) -> None:
+    """Run a non-image mflux CLI (e.g. mflux-save) as a killable, RAM-guarded process group — same memory
+    protection as _run_guarded_image_cli, but the artifact is a directory (a saved model) rather than an
+    image. Never run these mflux CLIs unguarded (a raw heavy load once contributed to a watchdog panic)."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"{label} failed to launch: {type(exc).__name__}: {exc}")
+    _register_child_pgid(proc.pid)
+
+    def _kill() -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM); proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            try: os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception: pass  # noqa: BLE001
+
+    while proc.poll() is None:
+        time.sleep(1.0)
+        avail = _available_mem_mb()
+        low = avail is not None and avail < min_free
+        pressure_and_low = _mem_pressure_critical() and (avail is None or avail < min_free * 2)
+        if low or pressure_and_low:
+            _kill()
+            detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
+            _fail(f"{label} stopped to protect the machine: low memory ({detail})")
+
+    _unregister_child_pgid(proc.pid)
+    stderr = ""
+    try: stderr = (proc.stderr.read() if proc.stderr else "") or ""
+    except Exception: pass  # noqa: BLE001
+    if proc.returncode != 0:
+        _fail(f"{label} failed (exit {proc.returncode}): {stderr.strip()[-500:]}")
+    if not (os.path.isdir(out_dir) and os.listdir(out_dir)):
+        _fail(f"{label} produced no saved model at {out_dir}")
+
+
+def image_edit_bake() -> None:
+    """Bake a quantized (and optionally LoRA-merged) image-edit model to disk via `mflux-save`, RAM-guarded.
+
+    Produces an installable, fully-quantized snapshot so a large edit model (e.g. Qwen-Image-Edit-2511, whose
+    full-precision text encoder alone is ~15.5 GB) fits a constrained Mac at RUN time: quantizing the encoder
+    too drops the whole model to ~13 GB, and merging the adapter means no separate LoRA load at inference.
+    Reads {model, baseModel?, quantize(3..8), lora?[paths], loraScale?[scales], outputPath, hfCache?,
+    minFreeMemMB?}. Returns {outputPath, model, quantize, lora}."""
+    import os
+
+    request = _load_json()
+    model = request["model"]
+    out_dir = request["outputPath"]
+    quantize = int(request.get("quantize") or 4)
+    _route_hf_cache(request.get("hfCache"))
+    min_free = float(request.get("minFreeMemMB") or 3000)
+
+    cli = os.path.join(os.path.dirname(sys.executable), "mflux-save")
+    if not os.path.exists(cli):
+        _fail("mflux-save not available (install with: pip install mflux)")
+    os.makedirs(out_dir, exist_ok=True)
+    cmd = [cli, "--model", str(model), "--path", out_dir, "--quantize", str(quantize)]
+    base_model = request.get("baseModel")
+    if base_model:
+        cmd += ["--base-model", str(base_model)]
+    lora = request.get("lora")
+    if lora:
+        loras = [str(p) for p in (lora if isinstance(lora, list) else [lora]) if p]
+        if loras:
+            cmd += ["--lora-paths", *loras]
+            scales = request.get("loraScale")
+            if scales is not None:
+                sc = scales if isinstance(scales, list) else [scales]
+                cmd += ["--lora-scales", *[str(float(s)) for s in sc]]
+    _run_guarded_save_cli(cmd, out_dir, min_free, f"image-edit bake ({model} q{quantize})")
+    _dump_json({"outputPath": out_dir, "model": model, "quantize": quantize,
+                "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
+
+
 def mlx_serve() -> None:
     """Persistent MLX worker: load the model ONCE, then serve many requests over stdio.
 
@@ -1992,6 +2073,7 @@ def main() -> None:
             "image-segment",
             "image-generate",
             "image-edit",
+            "image-edit-bake",
             "image-upscale",
             "image-upscale-onnx",
             "audio-generate",
@@ -2028,6 +2110,8 @@ def main() -> None:
         image_generate()
     elif args.command == "image-edit":
         image_edit()
+    elif args.command == "image-edit-bake":
+        image_edit_bake()
     elif args.command == "image-upscale":
         image_upscale()
     elif args.command == "image-upscale-onnx":
