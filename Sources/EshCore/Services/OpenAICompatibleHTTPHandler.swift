@@ -113,6 +113,7 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                  ("GET", "/v1/resources"),
                  ("GET", "/v1/capability-models"),
                  ("POST", "/v1/config"),
+                 ("POST", "/v1/image/preview"),
                  ("POST", "/v1/models/install"), ("GET", "/v1/models/install"),
                  ("POST", "/v1/models/install/cancel"):
                 let data = try await service.webData(WebDataRequest(
