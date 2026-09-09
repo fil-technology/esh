@@ -221,6 +221,9 @@ public enum WebChatPage {
   .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; }
   .schip{ font-size:12px; color:rgba(32,30,27,.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(32,30,27,.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
   .schip:hover{ background:rgba(32,30,27,.06); color:var(--ink); }
+  /* Direct style-apply action chip (distinct from the fill-the-composer suggestions) */
+  .schip.style3d{ color:var(--paper); background:var(--ink); border-color:var(--ink); font-weight:500; }
+  .schip.style3d:hover{ background:#000; color:var(--paper); }
   .cchip:hover{ background:rgba(32,30,27,.09); }
   .cchip .chev{ font-size:8px; color:var(--faint); }
   .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(32,30,27,.05); }
@@ -531,6 +534,7 @@ const ACT={
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
   suggest:(t)=>{ if(!t)return; S.draft=t; S.focusInput=true; render(); },   // fill the composer (user tweaks then sends)
+  apply3d:()=>{ apply3DAnimation(); },   // apply the 3d-animation style adapter to the attached image directly
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ if(S.renaming)return; S.current=id; render(); },
   renameChat:(id)=>{ S.chatMenu=null; startRename('chat',id); },
@@ -1075,14 +1079,31 @@ function renderMiniPlayer(){
      <span class="mptime mono" id="mptime">0:00</span>
      <button class="mpbtn" data-act="speakStop" title="Stop">${ICON.xmark}</button></div>`;
 }
+// Directly apply the installed "3d-animation" style adapter to the attached image (interim shortcut before
+// the full adapter-picker UI). Builds an image.edit request with options.adapter and runs it. If the adapter
+// isn't installed, the typed provider error surfaces in the message.
+function apply3DAnimation(){
+  const imgAtt=(S.pendingAtts||[]).find(x=>x && x.kind==='image');
+  if(!imgAtt) return;
+  const c=cur()||(newChat(),cur());
+  const att=attToEsh([imgAtt])[0];
+  const request={schemaVersion:'esh.execute.request.v1', capability:'image.edit',
+    inputs:[{payload:{attachment:{_0:att}}},{payload:{text:{_0:'Turn this into a polished 3D animated character'}}}],
+    output:{modality:'image'},
+    options:{values:{adapter:'3d-animation'}}};
+  S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
+  runCapabilityRequest(c, request, 'Applying 3D animation…');
+}
 // Suggested-prompt starters above the composer. Shown only on a fresh/empty chat, and CAPABILITY-AWARE:
-// with an image attached we suggest EDITS (an image is required to edit); otherwise generation + general
-// starters. Clicking fills the composer (does not auto-send) so the user can tweak before sending.
+// with an image attached we offer a direct "3D animation" style action + EDIT starters (an image is required
+// to edit); otherwise generation + general starters. Text starters FILL the composer (no auto-send); the
+// "3D animation" chip APPLIES the adapter directly.
 function renderSuggests(){
   const c=cur();
   if(c && c.messages && c.messages.length) return '';         // only on an empty chat
   if(S.streaming || S.capBusy) return '';
   const hasImg = (S.pendingAtts||[]).some(x=>x && x.kind==='image');
+  const styleChip = hasImg ? `<button class="schip style3d" data-act="apply3d" title="Apply the 3D-animation style to the attached image">3D animation</button>` : '';
   const list = hasImg ? [
     'Make this a polished 3D animated character',
     'Change the background to a snowy mountain',
@@ -1095,7 +1116,7 @@ function renderSuggests(){
     'Summarize a document I paste',
   ];
   const chips = list.map(t=>`<button class="schip" data-act="suggest" data-arg="${escAttr(t)}" title="${escAttr(t)}">${esch(t)}</button>`).join('');
-  return `<div class="suggests" aria-label="Suggested prompts">${chips}</div>`;
+  return `<div class="suggests" aria-label="Suggested prompts">${styleChip}${chips}</div>`;
 }
 function renderComposer(){
   const c=el('div',{cls:'composer'});
