@@ -26,6 +26,49 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-09
+
+**esh 2.2 — the web studio: Imagine and Sound, dark mode, and honest fresh-install behavior.** A UI-focused
+minor release on top of the 2.1 runtime (no runtime/capability contract changes). The local web app grows from
+a chat surface into a three-mode studio, and a fresh install now behaves honestly about what needs setup.
+
+Highlights:
+
+- **Imagine mode** — a dedicated image studio: create from a description or drop a photo to edit it, with
+  style adapters (incl. generic 3D-animation), a quality-vs-speed control (working resolution), queued
+  requests while generating, drag-and-drop / paste, tap-to-enlarge lightbox with zoom/drag and gallery
+  navigation, elapsed-time clocks, HEIC photos shown (converted to JPEG on attach), a prettier rounded
+  before/after export with an overlaid watermark, and a faint watermark baked into generated images.
+- **Sound mode** — a local audio studio: Sound FX (`audio.generate`), Music (`music.generate`), Speech (TTS)
+  and Transcribe (STT), each mapped to a real esh runtime with inline playback.
+- **Dark mode** — Light / Dark / Auto, in Settings → Advanced; the whole app is theme-aware.
+- **Settings → Models** grouped by studio (Chat / Imagine / Sound), with Vision under Chat, SVG under Imagine,
+  and Sound linking to Voice.
+- **Fresh-install readiness (graceful failures).** Chat, Speech and Transcribe work out of the box. Imagine,
+  Sound FX and Music run on optional local engines (mflux, AudioGen, MusicGen) that need a one-time
+  command-line setup; when one isn't installed, esh now shows an honest "this feature needs a one-time setup"
+  card pointing to `esh doctor` (raw error under "Show details") instead of a bare `pip install …` line or a
+  Python traceback. Onboarding no longer promises a "zero-download start" unless Apple Intelligence is actually
+  available.
+
+### Added
+- **Imagine web studio** (#10–#13): create-from-text and photo-edit paths, Qwen-Image-Edit / FLUX.2 Klein
+  backends and generic LoRA/style adapters, quality-vs-speed working-resolution control, request queue,
+  drag-and-drop/paste, HEIC display, lightbox (zoom/drag + gallery), elapsed-time clocks, rounded before/after
+  export with overlaid + baked-in watermarks, content-derived chat titles, and last-chat restore on refresh.
+- **Sound web studio** (#14): SFX / Music / Speech / Transcribe in one mode with inline audio playback.
+- **Dark mode** (#16): Light / Dark / Auto in Settings → Advanced; theme-aware palette across the app.
+- **Models settings grouped by studio** (#15): Chat / Imagine / Sound sections with sensible per-mode defaults.
+- Switching studio mode starts a new chat when the current one has content.
+
+### Changed
+- Onboarding's final step promises a zero-download start only when Apple Intelligence is available; otherwise
+  it guides the user to install one local chat model first.
+
+### Fixed
+- A capability failure caused by a missing optional runtime (mflux / AudioGen / torch+transformers / rembg /
+  onnxruntime / sherpa-onnx) now renders as an honest, feature-named setup card instead of a raw error (#17).
+
 ## [2.1.0] - 2026-09-07
 
 **esh 2.1 — capabilities, realtime Voice, and generative media.** Promotion of the `2.1.0-rc.2` tree
