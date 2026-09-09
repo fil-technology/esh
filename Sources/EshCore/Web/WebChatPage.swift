@@ -351,7 +351,7 @@ public enum WebChatPage {
 <body>
 <div class="app" id="app"><!-- rendered by JS --></div>
 <script>
-const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1", FOLD="esh.folders.v1";
+const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1", FOLD="esh.folders.v1", CUR="esh.current.v1";
 const ICON={
   sidebar:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg>',
   settings:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 17h16"/><circle cx="9.5" cy="7" r="2.4"/><circle cx="14.5" cy="17" r="2.4"/></svg>',
@@ -386,7 +386,7 @@ function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}cat
     if(m.installCard&&m.installCard.installing){ m.installCard.installing=false; }
   } } }catch(e){}
 }
-function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
+function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats)); localStorage.setItem(CUR,S.current||'')}catch(e){} }
 function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
@@ -848,7 +848,12 @@ function renderLog(){
   (c?c.messages:[]).forEach(m=>{ th.appendChild(renderMsg(m)); });
   if(S.streaming&&S.genChatId===S.current){ const d=el('div',{cls:'msg'}); d.innerHTML=`<div class="asst" id="streamwrap">${streamInner()}</div>`; th.appendChild(d); }
   log.appendChild(th);
-  setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
+  const pin=()=>{ log.scrollTop=log.scrollHeight; };
+  setTimeout(pin,0);
+  // Images load after the initial scroll and change the height — re-pin to the newest message when they finish,
+  // but only if the user is still near the bottom (don't yank them down while reading history).
+  setTimeout(()=>{ log.querySelectorAll('img').forEach(im=>{ if(im._sc)return; im._sc=true;
+    im.addEventListener('load',()=>{ if(log.scrollHeight-log.scrollTop-log.clientHeight < 260) pin(); }); }); },0);
   return log;
 }
 // UCMR: render one typed artifact (image/svg inline; other kinds as a download pill). Bytes are fetched
@@ -1320,6 +1325,7 @@ async function apply3DAnimation(){
     options:{values:{adapter:'3d-animation', maxEditSide:imgQualitySide()}}};
   // Show the user's turn (the photo they sent + what we're doing) above the generation, like a typed edit.
   c.messages.push({id:uid(), role:'user', content:'Apply 3D animation', attachments:[imgAtt]});
+  if(c.title==='New chat') c.title='3D animation';   // name the chat by the action
   S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
   // Install-and-resume: if the adapter isn't installed, show an install card that downloads it, then resumes
   // this exact edit (the image is already baked into `request`, so the user never re-attaches or re-types).
@@ -1433,6 +1439,7 @@ function renderImagineSuggests(){
 }
 function imgPreflight(){
   if(S.capBusy||S.streaming) return '';          // never nag while a generation is already running
+  if(S.draft && S.draft.trim()) return '';       // typing a description → we'll create from it, no nag
   if(!imgNeedsImage()) return '';
   const why = S.imgStyle!=='None'
     ? 'Styles apply when you edit a photo.'
@@ -1511,14 +1518,20 @@ async function sendImagine(queued){
   }
   const img=atts.find(a=>a&&a.kind==='image');
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
-  if(c.title==='New chat'&&text) c.title=text.slice(0,40);
+  // Name the chat by what happened: the typed prompt if any, else the edit action (style name, or "Photo edit").
+  if(c.title==='New chat'){
+    const styleName=(imgStyle!=='None')?((imgStyleById(imgStyle)||{}).label||'Style'):null;
+    c.title = text ? text.slice(0,40) : (img ? (styleName||'Photo edit') : 'New image');
+  }
   if(!img){
-    // No photo. An edit-only model/style was picked → guide instead of failing. Otherwise create from text.
-    if(imgModel!=='Auto' || imgStyle!=='None'){
-      c.messages.push({id:uid(),role:'assistant',content:'That model edits an existing photo. Attach an image to edit, or switch the model chip to **Auto** to create an image from your description.'});
+    // No photo. With a description, CREATE from text — editing needs a photo, so an edit model/style simply
+    // doesn't apply here (no more confusing refusal). With nothing typed, gently guide.
+    if(!text){
+      if(imgModel!=='Auto' || imgStyle!=='None'){
+        c.messages.push({id:uid(),role:'assistant',content:'Attach a photo to edit it with **'+((imgStyle!=='None'?(imgStyleById(imgStyle)||{}).label:imgModelLabel())||'this model')+'**, or just describe an image and I\'ll create it.'});
+      }
       saveChats(); render(); maybeSendQueue(c.id); return;
     }
-    if(!text){ saveChats(); render(); maybeSendQueue(c.id); return; }
     const request={schemaVersion:'esh.execute.request.v1',capability:'image.generate',
       inputs:[{payload:{text:{_0:text}}}], output:{modality:'image'}};
     saveChats(); await runCapabilityRequest(c, request, 'Creating image…'); maybeSendQueue(c.id); return;
@@ -1585,6 +1598,9 @@ function renderComposer(){
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
+     // Grow to fit a programmatically-filled draft (e.g. a suggestion chip) — otherwise a multi-line prompt is
+     // clipped to one line showing only its tail.
+     ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
      ta.oncompositionstart=()=>{ S._composing=true; }; ta.oncompositionend=()=>{ S._composing=false; };
      ta.onkeydown=e=>{ if(e.key!=='Enter')return;
@@ -2442,7 +2458,11 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 loadChats(); loadPrefs(); loadFolders();
 // On small screens the sidebar overlays the chat, so start it collapsed regardless of the saved pref.
 if(window.innerWidth<=768) S.sidebarOpen=false;
-if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id;
+// Restore the chat the user was last in (with its images/history), not just the newest-created one — a fresh
+// empty "New chat" would otherwise hide the conversation they were actually working in.
+if(!Object.keys(S.chats).length) newChat();
+else { let saved=null; try{saved=localStorage.getItem(CUR)}catch(e){}
+  S.current=(saved&&S.chats[saved])?saved:Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id; }
 S.focusInput=true;
 // First run (no prior prefs and no history) → show onboarding once, then remember.
 if(!S.prefs.onboarded && Object.values(S.chats).every(c=>!c.messages.length)){ S.view='onboarding'; S.onbStep=0; }
