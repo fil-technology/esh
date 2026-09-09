@@ -276,7 +276,15 @@ public actor RuntimeLifecycleManager {
     /// warm LLM is holding RAM it isn't using for the image op, so we reclaim it up front rather than let
     /// the Python RAM guard refuse the run for low memory.
     @discardableResult
-    public func reclaimForHeavyTask() async -> [String] {
+    public func reclaimForHeavyTask(ifAvailableBelowGB threshold: Double = .greatestFiniteMagnitude) async -> [String] {
+        // Gate: when the machine already has enough free RAM for the heavy task, keep the warm chat model
+        // resident (no reason to pay a reload). Only reclaim when we're below the caller's headroom target.
+        // A probe failure errs toward reclaiming (safer than letting the run get refused). `.greatestFinite‐
+        // Magnitude` (the default) always reclaims — used by tests that assert eviction regardless of host RAM.
+        if threshold != .greatestFiniteMagnitude, let snap = SystemMemory.snapshot() {
+            let availableGB = Double(snap.availableBytes) / 1_073_741_824.0
+            if availableGB >= threshold { return [] }
+        }
         var evicted: [String] = []
         for resident in Array(residents.values) where resident.activeRequests == 0 {
             let runtime = resident.runtime

@@ -1231,6 +1231,14 @@ function statusInfo(){
   const extDown=!!(st.external && st.status && st.status!=='available');
   const engDown=!!(e&&e.status&&e.status!=='ok'&&e.status!=='ready');
   if(extDown) return {label:'External storage disconnected',amber:true};
+  // Imagine mode uses the image pipeline (Z-Image Turbo / FLUX), never the chat LLM — so the status line
+  // reflects the image studio, not whatever chat model happens to be warm.
+  if(S.mode==='imagine'){
+    if(S.capBusy) return {label:'Local · Image studio · generating',amber:false};
+    const im = S.imgStyle!=='None' ? ((imgStyleById(S.imgStyle)||{}).label||'style')
+             : (S.imgModel==='Auto' ? 'Auto' : ((imgBackendById(S.imgModel)||{}).label||'edit'));
+    return {label:'Local · Image · '+im+' · Ready',amber:false};
+  }
   const name=S.modelSel==='Auto' ? (S.schedule&&S.schedule.selectedModelID?shortModel(S.schedule.selectedModelID):'Auto')
                                  : (S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   if(!e) return {label:'Local · …',amber:false};

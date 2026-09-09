@@ -211,7 +211,9 @@ public struct ImageEditProvider: CapabilityProvider {
                     // 32 GB Mac. The image model isn't in this pool (subprocess CLI) — this only drops idle
                     // LLM/speech, which the edit doesn't need.
                     if let lifecycle = context.lifecycle {
-                        let evicted = await lifecycle.reclaimForHeavyTask()
+                        // Only reclaim when RAM is actually tight for the diffusion editor (FLUX.2 Klein
+                        // ~8.6 GB peak); on a roomy machine the warm chat model is left alone.
+                        let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
                         if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                     }
                     cont.yield(.status("editing image (\(backend.rawValue)\(adapterID.map { " + " + $0 } ?? ""))"))

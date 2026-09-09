@@ -87,7 +87,9 @@ public struct ImageGenerationProvider: CapabilityProvider {
                     // the Python RAM guard doesn't refuse the run for low memory on a 32 GB Mac. The image
                     // model isn't in this pool (it's a subprocess CLI), so this only drops idle LLM/speech.
                     if let lifecycle = context.lifecycle {
-                        let evicted = await lifecycle.reclaimForHeavyTask()
+                        // Only reclaim when RAM is actually tight for a ~8 GB diffusion run; on a roomy machine
+                        // the warm chat model is left alone (no needless reload).
+                        let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
                         if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                     }
                     cont.yield(.status("generating image"))
