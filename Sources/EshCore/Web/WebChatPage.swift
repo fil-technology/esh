@@ -999,8 +999,17 @@ async function exportBeforeAfter(id){
 }
 /* ---------- attachments: file input + drag-drop + paste ---------- */
 function addFilesList(files){ const arr=[...(files||[])].filter(Boolean); let pending=arr.length; if(!pending)return;
+  const done=()=>{ if(--pending===0){ S.focusInput=true; render(); } };
   arr.forEach(f=>{ const kind=(f.type||'').startsWith('image/')?'image':(f.type||'').startsWith('audio/')?'audio':'document';
-    const r=new FileReader(); r.onload=()=>{ S.pendingAtts.push({kind,name:f.name,size:fmtSize(f.size),mime:f.type,dataURL:r.result}); if(--pending===0){ S.focusInput=true; render(); } }; r.readAsDataURL(f); }); }
+    // iPhone photos are HEIC, which the browser can't render in <img>. macOS decodes it, so convert to a
+    // JPEG server-side (via /v1/image/preview) and use that for display + editing.
+    const isHeic = kind==='image' && (/heic|heif/i.test(f.type||'') || /\.hei[cf]$/i.test(f.name||''));
+    const r=new FileReader(); r.onload=async()=>{ let dataURL=r.result;
+      if(isHeic){ try{ const b64=(String(dataURL).split(',')[1])||''; const resp=await fetch('/v1/image/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base64:b64})});
+        if(resp.ok){ const j=await resp.json(); if(j&&j.dataURL) dataURL=j.dataURL; } }catch(e){} }
+      const name = isHeic ? f.name.replace(/\.hei[cf]$/i,'.jpg') : f.name;
+      S.pendingAtts.push({kind,name,size:fmtSize(f.size),mime:(isHeic?'image/jpeg':f.type),dataURL}); done(); };
+    r.readAsDataURL(f); }); }
 let _dndWired=false;
 function wireGlobalDrop(){ if(_dndWired)return; _dndWired=true;
   const hasFiles=e=>{ const t=e.dataTransfer&&e.dataTransfer.types; return t && [].slice.call(t).indexOf('Files')>=0; };

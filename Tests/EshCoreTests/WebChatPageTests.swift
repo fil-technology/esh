@@ -586,6 +586,9 @@ struct WebChatPageTests {
         #expect(html.contains("class=\"lbx-stage\""))
         #expect(html.contains("img.zoomable"))
         #expect(html.contains("Scroll or pinch to zoom"))
+        // HEIC photos convert to a renderable JPEG on attach (browser can't decode HEIC in <img>).
+        #expect(html.contains("'/v1/image/preview'"))
+        #expect(html.contains("/heic|heif/i.test"))
         // Drag-and-drop + paste to attach.
         #expect(html.contains("function wireGlobalDrop("))
         #expect(html.contains("addFilesList(e.dataTransfer.files)"))

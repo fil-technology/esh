@@ -76,6 +76,15 @@ enum WebExperienceData {
                 try store.save(config)
                 return try enc.encode(config)
 
+            case ("POST", "/v1/image/preview"):
+                // HEIC (and any ImageIO-decodable format) -> a browser-renderable JPEG data URL, so the web UI
+                // can show iPhone photos it can't decode itself. Best-effort: dataURL is null if undecodable.
+                struct PreviewReq: Decodable { let base64: String; let maxSide: Int? }
+                struct PreviewResp: Encodable { let dataURL: String? }
+                let pr = try? JSONDecoder().decode(PreviewReq.self, from: request.body)
+                let url = pr.flatMap { ImagePreview.normalizedJPEGDataURL(fromBase64: $0.base64, maxSide: $0.maxSide ?? 1600) }
+                return try enc.encode(PreviewResp(dataURL: url))
+
             case ("GET", "/v1/capability-models"):
                 return try enc.encode(capabilityModels(root: root))
 
