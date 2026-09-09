@@ -351,7 +351,7 @@ public enum WebChatPage {
 <body>
 <div class="app" id="app"><!-- rendered by JS --></div>
 <script>
-const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1", FOLD="esh.folders.v1";
+const $=s=>document.querySelector(s), LS="esh.chats.v1", PREF="esh.prefs.v1", FOLD="esh.folders.v1", CUR="esh.current.v1";
 const ICON={
   sidebar:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg>',
   settings:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16"/><path d="M4 17h16"/><circle cx="9.5" cy="7" r="2.4"/><circle cx="14.5" cy="17" r="2.4"/></svg>',
@@ -386,7 +386,7 @@ function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}cat
     if(m.installCard&&m.installCard.installing){ m.installCard.installing=false; }
   } } }catch(e){}
 }
-function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
+function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats)); localStorage.setItem(CUR,S.current||'')}catch(e){} }
 function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
@@ -1320,6 +1320,7 @@ async function apply3DAnimation(){
     options:{values:{adapter:'3d-animation', maxEditSide:imgQualitySide()}}};
   // Show the user's turn (the photo they sent + what we're doing) above the generation, like a typed edit.
   c.messages.push({id:uid(), role:'user', content:'Apply 3D animation', attachments:[imgAtt]});
+  if(c.title==='New chat') c.title='3D animation';   // name the chat by the action
   S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
   // Install-and-resume: if the adapter isn't installed, show an install card that downloads it, then resumes
   // this exact edit (the image is already baked into `request`, so the user never re-attaches or re-types).
@@ -1511,7 +1512,11 @@ async function sendImagine(queued){
   }
   const img=atts.find(a=>a&&a.kind==='image');
   c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
-  if(c.title==='New chat'&&text) c.title=text.slice(0,40);
+  // Name the chat by what happened: the typed prompt if any, else the edit action (style name, or "Photo edit").
+  if(c.title==='New chat'){
+    const styleName=(imgStyle!=='None')?((imgStyleById(imgStyle)||{}).label||'Style'):null;
+    c.title = text ? text.slice(0,40) : (img ? (styleName||'Photo edit') : 'New image');
+  }
   if(!img){
     // No photo. An edit-only model/style was picked → guide instead of failing. Otherwise create from text.
     if(imgModel!=='Auto' || imgStyle!=='None'){
@@ -2442,7 +2447,11 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 loadChats(); loadPrefs(); loadFolders();
 // On small screens the sidebar overlays the chat, so start it collapsed regardless of the saved pref.
 if(window.innerWidth<=768) S.sidebarOpen=false;
-if(!Object.keys(S.chats).length) newChat(); else S.current=Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id;
+// Restore the chat the user was last in (with its images/history), not just the newest-created one — a fresh
+// empty "New chat" would otherwise hide the conversation they were actually working in.
+if(!Object.keys(S.chats).length) newChat();
+else { let saved=null; try{saved=localStorage.getItem(CUR)}catch(e){}
+  S.current=(saved&&S.chats[saved])?saved:Object.values(S.chats).sort((a,b)=>b.created-a.created)[0].id; }
 S.focusInput=true;
 // First run (no prior prefs and no history) → show onboarding once, then remember.
 if(!S.prefs.onboarded && Object.values(S.chats).every(c=>!c.messages.length)){ S.view='onboarding'; S.onbStep=0; }

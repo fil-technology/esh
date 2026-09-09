@@ -603,6 +603,13 @@ struct WebChatPageTests {
         #expect(html.contains("data-act=\"exportBeforeAfter\""))
         #expect(html.contains("esh-before-after.png"))
         #expect(html.contains("edited on-device"))
+        // Image chats get a meaningful title (typed prompt, else the edit action) — not a stuck "New chat".
+        #expect(html.contains("c.title = text ? text.slice(0,40) : (img ? (styleName||'Photo edit') : 'New image')"))
+        #expect(html.contains("if(c.title==='New chat') c.title='3D animation'"))
+        // Refresh restores the chat you were last in (with its images/history), not just the newest-created.
+        #expect(html.contains("CUR=\"esh.current.v1\""))
+        #expect(html.contains("localStorage.setItem(CUR,S.current||'')"))
+        #expect(html.contains("S.current=(saved&&S.chats[saved])?saved:"))
         // Mode persists across reload.
         #expect(html.contains("S.prefs.mode='imagine'"))
         #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))

@@ -1336,6 +1336,40 @@ def image_upscale() -> None:
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
 
 
+def _watermark_png(path: str, text: str = "esh") -> None:
+    """Bake a FAINT provenance mark into the bottom-right corner of a generated/edited PNG. Subtle by design —
+    visible on close inspection, unobtrusive otherwise (a light glyph + an even fainter dark shadow so it reads
+    on both light and dark images). Best-effort: leaves the image untouched on any error."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        im = Image.open(path).convert("RGBA")
+        w, h = im.size
+        overlay = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(overlay)
+        fs = max(12, int(h * 0.02))
+        font = None
+        for fp in ("/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/Helvetica.ttc",
+                   "/Library/Fonts/Arial.ttf"):
+            try:
+                font = ImageFont.truetype(fp, fs)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+        try:
+            tw = d.textlength(text, font=font)
+        except Exception:  # noqa: BLE001
+            tw = fs * len(text) * 0.6
+        margin = max(8, int(h * 0.015))
+        x, y = w - tw - margin, h - fs - margin
+        d.text((x + 1, y + 1), text, font=font, fill=(0, 0, 0, 22))     # ~8% dark shadow
+        d.text((x, y), text, font=font, fill=(255, 255, 255, 40))       # ~16% light glyph
+        Image.alpha_composite(im, overlay).convert("RGB").save(path, "PNG")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def image_generate() -> None:
     """Text -> image generation (UCMR 2.1, Stage 3). Reads {prompt, outputPath, steps?, seed?, width?,
     height?, quantize?, minFreeMemMB?} and writes a PNG via mflux's Z-Image Turbo CLI (Apache-2.0, ~8
@@ -1382,6 +1416,7 @@ def image_generate() -> None:
         cmd += ["--height", str(int(height))]
 
     out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, "image generation")
+    _watermark_png(out_path)
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
 
 
@@ -1536,6 +1571,7 @@ def image_edit() -> None:
                 os.remove(edit_in)
             except OSError:
                 pass
+    _watermark_png(out_path)
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "backend": backend,
                 "model": model, "license": spec["license"], "commercial": spec["commercial"],
                 "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
