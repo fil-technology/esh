@@ -31,6 +31,26 @@ struct WebChatPageTests {
         #expect(html.contains("<svg"))
     }
 
+    // Dark mode: a Light/Dark/Auto control (Settings → Advanced) with a dark palette. Ink tints derive from
+    // --ink-rgb so one override flips borders/muted/hovers; Auto follows prefers-color-scheme.
+    @Test
+    func supportsLightDarkAutoTheme() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("--ink-rgb:32,30,27"))                       // light tint base
+        #expect(html.contains("rgba(var(--ink-rgb),"))                     // tints derive from it
+        #expect(html.contains("@media (prefers-color-scheme: dark)"))      // Auto follows system
+        #expect(html.contains(":root[data-theme=\"dark\"]"))               // forced dark wins
+        #expect(html.contains("--ink-rgb:236,233,227"))                    // dark tint base (flipped)
+        #expect(html.contains("function applyTheme("))
+        #expect(html.contains("data-act=\"pickTheme\""))
+        #expect(html.contains("pickTheme:(v)=>"))
+        #expect(html.contains("applyTheme();"))                            // applied on boot + on change
+        // No stray hardcoded ink tints left to break dark mode; surfaces use the themeable var. (The one
+        // remaining #fff is the web-artifact iframe, which must stay a white canvas for rendered pages.)
+        #expect(!html.contains("rgba(32,30,27,"))
+        #expect(html.contains("background:var(--surface)"))
+    }
+
     @Test
     func hasTheProgressiveDisclosureSurfaces() {
         let html = WebChatPage.html(toolVersion: nil)

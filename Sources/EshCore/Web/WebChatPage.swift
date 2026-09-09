@@ -24,9 +24,17 @@ public enum WebChatPage {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root{ --paper:#fbfaf8; --ink:#201e1b; --panel:#f7f4ee; --panel2:#f3f1ec; --userbubble:#efede8;
-         --line:rgba(32,30,27,.08); --line2:rgba(32,30,27,.14); --muted:rgba(32,30,27,.55);
-         --faint:rgba(32,30,27,.4); --amber:#b0761f; --mono:'IBM Plex Mono',ui-monospace,monospace; }
+  /* Light palette (default). Ink tints derive from --ink-rgb so a single dark-mode override flips borders,
+     muted text and hovers automatically. Dark mode redefines the tokens below; nothing hard-codes a color. */
+  :root{ --paper:#fbfaf8; --ink:#201e1b; --ink-rgb:32,30,27; --surface:#fff; --panel:#f7f4ee; --panel2:#f3f1ec; --userbubble:#efede8;
+         --line:rgba(var(--ink-rgb),.08); --line2:rgba(var(--ink-rgb),.14); --muted:rgba(var(--ink-rgb),.55);
+         --faint:rgba(var(--ink-rgb),.4); --amber:#b0761f; --mono:'IBM Plex Mono',ui-monospace,monospace; color-scheme:light; }
+  /* Auto (system) dark — applies unless the user forced light. */
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --paper:#1b1a17; --ink:#ece9e3; --ink-rgb:236,233,227; --surface:#232120; --panel:#211f1d; --panel2:#262320; --userbubble:#2b2823; --amber:#d69a4a; color-scheme:dark; } }
+  /* Forced dark (wins regardless of system). */
+  :root[data-theme="dark"]{
+    --paper:#1b1a17; --ink:#ece9e3; --ink-rgb:236,233,227; --surface:#232120; --panel:#211f1d; --panel2:#262320; --userbubble:#2b2823; --amber:#d69a4a; color-scheme:dark; }
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; }
   body{ font:14px/1.5 -apple-system,system-ui,sans-serif; color:var(--ink); background:var(--paper); overflow:hidden; }
@@ -42,16 +50,16 @@ public enum WebChatPage {
   .genrowdot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:#2563eb; margin-right:7px; flex:0 0 auto; animation:eshpulse 1.1s ease-in-out infinite; }
   .chatitem.generating .clabel{ opacity:.9; }
   /* Expandable/collapsible live generation panel. */
-  .genpanel{ margin-top:8px; border:1px solid rgba(32,30,27,.08); border-radius:10px; overflow:hidden; background:rgba(32,30,27,.02); }
+  .genpanel{ margin-top:8px; border:1px solid rgba(var(--ink-rgb),.08); border-radius:10px; overflow:hidden; background:rgba(var(--ink-rgb),.02); }
   .gpsum{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; font-size:12px; color:var(--muted); user-select:none; list-style:none; }
   .gpsum::-webkit-details-marker{ display:none; }
   .gpsum::before{ content:'▸'; font-size:10px; width:10px; display:inline-block; flex:0 0 auto; }
   .genpanel[open] > .gpsum::before{ content:'▾'; }
   .genpanel.gen > .gpsum::before{ content:''; width:0; }
-  .gpsum:hover{ background:rgba(32,30,27,.03); }
-  .gpbody{ padding:4px 12px 10px; border-top:1px solid rgba(32,30,27,.06); }
+  .gpsum:hover{ background:rgba(var(--ink-rgb),.03); }
+  .gpbody{ padding:4px 12px 10px; border-top:1px solid rgba(var(--ink-rgb),.06); }
   .gpstep{ font-size:11px; color:var(--muted); padding:2px 0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  .gpstream{ font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; margin:6px 0 0; padding:8px; background:rgba(32,30,27,.05); border-radius:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .gpstream{ font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; margin:6px 0 0; padding:8px; background:rgba(var(--ink-rgb),.05); border-radius:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   @keyframes eshbar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
   @keyframes eshtype{0%,80%,100%{transform:scale(.55);opacity:.4}40%{transform:scale(1);opacity:1}}
   @keyframes eshdot{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-4px);opacity:1}}
@@ -65,40 +73,40 @@ public enum WebChatPage {
   .vlabel{ font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
   .vlive{ font-size:17px; font-weight:500; line-height:1.5; max-width:560px; text-align:center; letter-spacing:-.01em; }
   .vquote{ font-size:13px; color:var(--faint); line-height:1.5; max-width:520px; text-align:center; }
-  .vanswer{ font-size:14.5px; line-height:1.65; max-width:560px; color:rgba(32,30,27,.85); text-align:center; }
+  .vanswer{ font-size:14.5px; line-height:1.65; max-width:560px; color:rgba(var(--ink-rgb),.85); text-align:center; }
   .vhint{ font-size:12px; color:var(--faint); min-height:16px; }
   .vorb{ height:96px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-  .vpulse{ width:84px; height:84px; border-radius:50%; background:rgba(32,30,27,.07); display:flex; align-items:center; justify-content:center; animation:eshpulse 1.6s ease-in-out infinite; }
+  .vpulse{ width:84px; height:84px; border-radius:50%; background:rgba(var(--ink-rgb),.07); display:flex; align-items:center; justify-content:center; animation:eshpulse 1.6s ease-in-out infinite; }
   .vpulse>span{ width:36px; height:36px; border-radius:50%; background:var(--ink); }
   .vdots{ display:flex; gap:8px; } .vdots i{ width:9px; height:9px; border-radius:50%; background:var(--ink); animation:eshdot 1.1s ease-in-out infinite; }
   .vwave{ display:flex; align-items:center; gap:4px; cursor:pointer; } .vwave i{ width:4px; border-radius:2px; background:var(--ink); animation:eshbar .9s ease-in-out infinite; }
   .vctrls{ display:flex; justify-content:center; gap:22px; padding-bottom:36px; }
   .vctrlcol{ display:flex; flex-direction:column; align-items:center; gap:7px; }
   .vctrl{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-  .vctrl.line{ border:1px solid rgba(32,30,27,.14); color:rgba(32,30,27,.7); background:#fff; }
-  .vctrl.line:hover{ background:rgba(32,30,27,.05); }
+  .vctrl.line{ border:1px solid rgba(var(--ink-rgb),.14); color:rgba(var(--ink-rgb),.7); background:var(--surface); }
+  .vctrl.line:hover{ background:rgba(var(--ink-rgb),.05); }
   .vctrl.solid{ background:var(--ink); color:var(--paper); } .vctrl.solid:hover{ opacity:.85; }
   .vctrllbl{ font-size:10.5px; color:var(--faint); }
-  .vfoot{ position:absolute; bottom:14px; left:0; right:0; display:flex; justify-content:center; font:400 10px var(--mono); color:rgba(32,30,27,.35); }
+  .vfoot{ position:absolute; bottom:14px; left:0; right:0; display:flex; justify-content:center; font:400 10px var(--mono); color:rgba(var(--ink-rgb),.35); }
   /* Header */
-  .topbar{ display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid rgba(32,30,27,.06); }
+  .topbar{ display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid rgba(var(--ink-rgb),.06); }
   .topbar .brand{ font-weight:600; font-size:15px; letter-spacing:-.01em; }
   .installchip{ display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border:1px solid var(--line2); border-radius:999px; background:var(--panel2); cursor:pointer; color:var(--ink); }
-  .installchip:hover{ background:rgba(32,30,27,.06); }
+  .installchip:hover{ background:rgba(var(--ink-rgb),.06); }
   .installchip .ispin{ width:7px; height:7px; border-radius:50%; background:var(--ink); animation:eshpulse 1s ease-in-out infinite; }
   .installchip .ilbl{ font-size:11px; color:var(--muted); }
   .topbar .sp{ flex:1; }
   .iconbtn{ color:var(--faint); cursor:pointer; display:flex; padding:4px; border:none; background:none; border-radius:6px; }
   .iconbtn:hover{ color:var(--ink); }
-  .modelbtn{ font-size:13px; color:rgba(32,30,27,.8); padding:5px 10px; border-radius:7px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:5px; border:none; background:none; }
-  .modelbtn:hover{ background:rgba(32,30,27,.05); }
+  .modelbtn{ font-size:13px; color:rgba(var(--ink-rgb),.8); padding:5px 10px; border-radius:7px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:5px; border:none; background:none; }
+  .modelbtn:hover{ background:rgba(var(--ink-rgb),.05); }
   /* Layout */
   .body{ flex:1; display:flex; min-height:0; position:relative; }
-  .sidebar{ width:220px; border-right:1px solid rgba(32,30,27,.06); padding:14px 10px; display:flex; flex-direction:column; gap:2px; flex-shrink:0; overflow-y:auto; }
+  .sidebar{ width:220px; border-right:1px solid rgba(var(--ink-rgb),.06); padding:14px 10px; display:flex; flex-direction:column; gap:2px; flex-shrink:0; overflow-y:auto; }
   .newchat{ display:flex; align-items:center; justify-content:center; gap:8px; padding:7px 12px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; border:1px solid var(--line2); margin-bottom:10px; background:none; }
-  .newchat:hover{ background:rgba(32,30,27,.03); }
+  .newchat:hover{ background:rgba(var(--ink-rgb),.03); }
   .sgroup{ padding:4px 12px; margin-top:8px; font:500 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
-  .chatitem{ display:flex; align-items:center; min-height:30px; padding:2px 12px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.75); cursor:pointer; }
+  .chatitem{ display:flex; align-items:center; min-height:30px; padding:2px 12px; border-radius:8px; font-size:13px; color:rgba(var(--ink-rgb),.75); cursor:pointer; }
   .chatitem .clabel{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .chatitem .clabel .clabtx{ display:inline-block; }
   /* Selected chat with an overflowing title: gently marquee it back and forth so the full name is readable. */
@@ -106,17 +114,17 @@ public enum WebChatPage {
   .chatitem .clabel.marq .clabtx{ animation:eshmarq var(--marqt,7s) ease-in-out infinite alternate; }
   @keyframes eshmarq{ from{ transform:translateX(0); } to{ transform:translateX(var(--marqd,0)); } }
   @media (prefers-reduced-motion: reduce){ .chatitem .clabel.marq .clabtx{ animation:none; } .chatitem .clabel.marq{ text-overflow:ellipsis; } }
-  .chatitem:hover{ background:rgba(32,30,27,.04); }
-  .chatitem.active{ background:rgba(32,30,27,.05); color:var(--ink); }
+  .chatitem:hover{ background:rgba(var(--ink-rgb),.04); }
+  .chatitem.active{ background:rgba(var(--ink-rgb),.05); color:var(--ink); }
   .chatitem[draggable="true"]{ cursor:pointer; }
   .chatitem.dragging{ opacity:.4; }
   .sbhead{ display:flex; align-items:center; gap:6px; margin-bottom:10px; }
   .sbhead .newchat{ flex:1; margin-bottom:0; }
   .nfbtn{ width:34px; height:34px; flex-shrink:0; border:1px solid var(--line2); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:none; cursor:pointer; }
-  .nfbtn:hover{ background:rgba(32,30,27,.03); color:var(--ink); }
-  .folderrow{ display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; font-size:13px; color:rgba(32,30,27,.82); cursor:pointer; user-select:none; }
-  .folderrow:hover{ background:rgba(32,30,27,.04); }
-  .folderrow.dropover{ background:rgba(32,30,27,.10); box-shadow:inset 0 0 0 1px var(--line2); }
+  .nfbtn:hover{ background:rgba(var(--ink-rgb),.03); color:var(--ink); }
+  .folderrow{ display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; font-size:13px; color:rgba(var(--ink-rgb),.82); cursor:pointer; user-select:none; }
+  .folderrow:hover{ background:rgba(var(--ink-rgb),.04); }
+  .folderrow.dropover{ background:rgba(var(--ink-rgb),.10); box-shadow:inset 0 0 0 1px var(--line2); }
   .fchev{ display:inline-flex; width:12px; flex-shrink:0; transition:transform .15s; color:var(--faint); }
   .fchev.open{ transform:rotate(90deg); }
   .ficon{ display:inline-flex; flex-shrink:0; color:var(--muted); }
@@ -125,8 +133,8 @@ public enum WebChatPage {
   .folderchats{ margin-left:13px; padding-left:8px; border-left:1px solid var(--line); display:flex; flex-direction:column; gap:2px; margin-top:2px; }
   .folderempty{ padding:5px 10px; font-size:11px; color:var(--faint); font-style:italic; }
   .rootchats{ display:flex; flex-direction:column; gap:2px; min-height:10px; border-radius:6px; }
-  .rootchats.dropover, .sgroup.dropover{ background:rgba(32,30,27,.06); box-shadow:inset 0 0 0 1px var(--line2); }
-  .renameinput{ width:100%; box-sizing:border-box; border:1px solid rgba(32,30,27,.35); border-radius:6px; padding:5px 8px; font-size:13px; font-family:inherit; color:var(--ink); background:var(--paper); outline:none; }
+  .rootchats.dropover, .sgroup.dropover{ background:rgba(var(--ink-rgb),.06); box-shadow:inset 0 0 0 1px var(--line2); }
+  .renameinput{ width:100%; box-sizing:border-box; border:1px solid rgba(var(--ink-rgb),.35); border-radius:6px; padding:5px 8px; font-size:13px; font-family:inherit; color:var(--ink); background:var(--paper); outline:none; }
   .main{ flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
   .empty{ flex:1; display:flex; align-items:center; justify-content:center; padding-bottom:60px; font-size:26px; font-weight:500; letter-spacing:-.02em; }
   .log{ flex:1; overflow-y:auto; padding:28px 24px; }
@@ -156,20 +164,20 @@ public enum WebChatPage {
   .asttext .mdhr{ border:none; border-top:1px solid var(--line2); margin:14px 0; }
   .asttext a{ color:var(--ink); text-decoration:underline; text-underline-offset:2px; } .asttext a:hover{ opacity:.7; }
   /* Lightweight syntax highlighting — restrained warm palette (no teal/blue) */
-  .hlc{ color:rgba(32,30,27,.42); font-style:italic; } .hls{ color:#5f7346; } .hlk{ color:#201e1b; font-weight:600; } .hln{ color:#9a6a30; } .hlt{ color:#6a5a86; }
+  .hlc{ color:rgba(var(--ink-rgb),.42); font-style:italic; } .hls{ color:#5f7346; } .hlk{ color:#201e1b; font-weight:600; } .hln{ color:#9a6a30; } .hlt{ color:#6a5a86; }
   .asttext img{ max-width:100%; border-radius:10px; margin:6px 0; display:block; } .asttext audio{ width:100%; margin:6px 0; }
   .userbubble img{ max-width:220px; border-radius:10px; margin:2px 0 6px; display:block; } .userbubble audio{ width:220px; margin:2px 0 6px; }
   .attwrap{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
   .transcap{ font-size:12.5px; color:var(--muted); line-height:1.45; font-style:italic; padding-top:2px; }
   .transcap.loading{ display:flex; align-items:center; gap:8px; font-style:normal; color:var(--faint); }
   .attpill{ display:flex; align-items:center; gap:8px; background:var(--paper); border:1px solid var(--line2); border-radius:9px; padding:6px 10px 6px 6px; }
-  .attpill .ai{ width:26px; height:26px; border-radius:6px; background:var(--ink); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .attpill .ai{ width:26px; height:26px; border-radius:6px; background:var(--ink); color:var(--paper); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .attpill .an{ display:flex; flex-direction:column; min-width:0; } .attpill .an b{ font-size:12px; font-weight:600; max-width:170px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   /* Custom audio player (no native controls) — on-brand play/pause + progress + mono time */
   .aplayer{ display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:7px 12px 7px 8px; min-width:180px; max-width:260px; }
   .aplayer .pp{ width:30px; height:30px; border-radius:50%; background:var(--ink); color:var(--paper); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; border:none; }
   .aplayer .pp:hover{ opacity:.88; } .aplayer .pp svg{ display:block; }
-  .aplayer .track{ flex:1; height:4px; background:rgba(32,30,27,.14); border-radius:2px; position:relative; cursor:pointer; min-width:60px; }
+  .aplayer .track{ flex:1; height:4px; background:rgba(var(--ink-rgb),.14); border-radius:2px; position:relative; cursor:pointer; min-width:60px; }
   .aplayer .fill{ position:absolute; left:0; top:0; height:100%; background:var(--ink); border-radius:2px; width:0%; }
   .aplayer .knobd{ position:absolute; top:50%; width:9px; height:9px; border-radius:50%; background:var(--ink); transform:translate(-50%,-50%); left:0%; }
   .aplayer .atime{ font:400 10.5px var(--mono); color:var(--muted); flex-shrink:0; min-width:30px; text-align:right; }
@@ -183,18 +191,18 @@ public enum WebChatPage {
   .typing i{ width:7px; height:7px; border-radius:50%; background:var(--faint); animation:eshtype 1.2s infinite ease-in-out both; }
   .typing i:nth-child(2){ animation-delay:.16s } .typing i:nth-child(3){ animation-delay:.32s }
   .errcard{ border:1px solid var(--line2); border-radius:12px; padding:16px 18px; }
-  .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(32,30,27,.7); margin-top:5px; }
+  .errcard .t{ font-size:13.5px; font-weight:600; } .errcard .d{ font-size:12.5px; line-height:1.55; color:rgba(var(--ink-rgb),.7); margin-top:5px; }
   /* Composer */
   .composer{ padding:0 24px 10px; flex-shrink:0; position:relative; }
-  .miniplayer{ display:flex; align-items:center; gap:10px; padding:8px 12px; max-width:640px; margin:0 auto 8px; border:1px solid var(--line2); border-radius:12px; background:var(--paper); box-shadow:0 2px 10px rgba(32,30,27,.05); }
+  .miniplayer{ display:flex; align-items:center; gap:10px; padding:8px 12px; max-width:640px; margin:0 auto 8px; border:1px solid var(--line2); border-radius:12px; background:var(--paper); box-shadow:0 2px 10px rgba(var(--ink-rgb),.05); }
   .mpbtn{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex-shrink:0; border:none; border-radius:8px; background:var(--panel2); color:var(--ink); cursor:pointer; padding:0; }
-  .mpbtn:hover{ background:rgba(32,30,27,.08); }
+  .mpbtn:hover{ background:rgba(var(--ink-rgb),.08); }
   .mpmeta{ flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
   .mplbl{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .mptrack{ height:4px; border-radius:2px; background:rgba(32,30,27,.10); overflow:hidden; }
+  .mptrack{ height:4px; border-radius:2px; background:rgba(var(--ink-rgb),.10); overflow:hidden; }
   .mpfill{ height:100%; width:0%; background:var(--ink); border-radius:2px; }
   .mptime{ font-size:11px; color:var(--faint); flex-shrink:0; }
-  .mpspin{ width:16px; height:16px; flex-shrink:0; box-sizing:border-box; border:2px solid rgba(32,30,27,.15); border-top-color:var(--ink); border-radius:50%; animation:eshspin .7s linear infinite; margin:7px; }
+  .mpspin{ width:16px; height:16px; flex-shrink:0; box-sizing:border-box; border:2px solid rgba(var(--ink-rgb),.15); border-top-color:var(--ink); border-radius:50%; animation:eshspin .7s linear infinite; margin:7px; }
   @keyframes eshspin{ to{ transform:rotate(360deg); } }
   /* Fade the thread out as it scrolls under the composer (transparent → paper) */
   .composer::before{ content:''; position:absolute; left:0; right:0; top:-54px; height:54px; background:linear-gradient(to bottom, rgba(251,250,248,0), var(--paper) 82%); pointer-events:none; }
@@ -204,40 +212,40 @@ public enum WebChatPage {
   @keyframes eshslidein{ from{ transform:translateX(-100%); opacity:.5 } to{ transform:none; opacity:1 } }
   @media(max-width:768px){
     .sidebar{ position:absolute; top:0; left:0; right:0; bottom:0; z-index:60; width:100%; max-width:100%; background:var(--paper); box-shadow:none; animation:eshslidein .18s cubic-bezier(.2,.8,.2,1); }
-    .sbackdrop{ display:block; position:absolute; inset:0; background:rgba(32,30,27,.28); z-index:55; animation:eshfade .15s ease-out; }
+    .sbackdrop{ display:block; position:absolute; inset:0; background:rgba(var(--ink-rgb),.28); z-index:55; animation:eshfade .15s ease-out; }
     .settingsbody{ flex-direction:column !important; }
-    .paneside{ width:100% !important; flex-direction:row !important; overflow-x:auto; border-right:none !important; border-bottom:1px solid rgba(32,30,27,.07); gap:4px; padding:10px 12px; }
+    .paneside{ width:100% !important; flex-direction:row !important; overflow-x:auto; border-right:none !important; border-bottom:1px solid rgba(var(--ink-rgb),.07); gap:4px; padding:10px 12px; }
     .paneitem{ white-space:nowrap; flex-shrink:0; }
   }
-  .cbox{ max-width:640px; margin:0 auto; background:#fff; border:1px solid var(--line2); border-radius:15px; box-shadow:0 1px 2px rgba(32,30,27,.04); padding:11px 14px; display:flex; flex-direction:column; gap:10px; position:relative; }
+  .cbox{ max-width:640px; margin:0 auto; background:var(--surface); border:1px solid var(--line2); border-radius:15px; box-shadow:0 1px 2px rgba(var(--ink-rgb),.04); padding:11px 14px; display:flex; flex-direction:column; gap:10px; position:relative; }
   .crow{ display:flex; align-items:center; gap:10px; }
   .cround{ width:26px; height:26px; border:1px solid var(--line2); border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--muted); cursor:pointer; flex-shrink:0; background:none; }
-  .cround:hover{ background:rgba(32,30,27,.05); }
+  .cround:hover{ background:rgba(var(--ink-rgb),.05); }
   .cinput{ flex:1; border:none; outline:none; font-size:14px; background:transparent; color:var(--ink); resize:none; max-height:160px; line-height:1.4; }
-  .send{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; flex-shrink:0; border:none; }
+  .send{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--paper); cursor:pointer; flex-shrink:0; border:none; }
   /* In-composer controls: model chip + effort chip + divider before mic/send (progressive disclosure lives here) */
-  .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(32,30,27,.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(32,30,27,.05); }
+  .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(var(--ink-rgb),.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(var(--ink-rgb),.05); }
   /* Suggested-prompt starter chips above the composer (new/empty chat; capability-aware) */
   .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; max-width:640px; margin:0 auto; }
-  .schip{ font-size:12px; color:rgba(32,30,27,.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(32,30,27,.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
-  .schip:hover{ background:rgba(32,30,27,.06); color:var(--ink); }
+  .schip{ font-size:12px; color:rgba(var(--ink-rgb),.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(var(--ink-rgb),.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+  .schip:hover{ background:rgba(var(--ink-rgb),.06); color:var(--ink); }
   /* Direct style-apply action chip (distinct from the fill-the-composer suggestions) */
   .schip.style3d{ color:var(--paper); background:var(--ink); border-color:var(--ink); font-weight:500; }
   .schip.style3d:hover{ background:#000; color:var(--paper); }
-  .cchip:hover{ background:rgba(32,30,27,.09); }
+  .cchip:hover{ background:rgba(var(--ink-rgb),.09); }
   .cchip .chev{ font-size:8px; color:var(--faint); }
-  .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(32,30,27,.05); }
+  .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(var(--ink-rgb),.05); }
   /* Chat | Imagine mode toggle (top bar) — a segmented pill matching the prototype. */
-  .modepill{ display:inline-flex; background:rgba(32,30,27,.05); border:1px solid var(--line); border-radius:999px; padding:2px; gap:2px; }
+  .modepill{ display:inline-flex; background:rgba(var(--ink-rgb),.05); border:1px solid var(--line); border-radius:999px; padding:2px; gap:2px; }
   .modeopt{ font-size:12.5px; font-weight:500; color:var(--muted); padding:4px 14px; border-radius:999px; cursor:pointer; border:none; background:none; line-height:1.45; }
-  .modeopt.on{ background:var(--paper); color:var(--ink); box-shadow:0 1px 3px rgba(32,30,27,.12); }
+  .modeopt.on{ background:var(--paper); color:var(--ink); box-shadow:0 1px 3px rgba(var(--ink-rgb),.12); }
   /* Imagine empty state — "What should we make?" with the two entry actions + active-model line. */
   .imagine-empty{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding-bottom:60px; gap:11px; text-align:center; animation:eshfade .3s ease-out; }
   .imagine-empty h2{ font-size:26px; font-weight:500; letter-spacing:-.02em; margin:0; }
   .imagine-empty .sub{ font-size:13.5px; color:var(--muted); max-width:380px; line-height:1.5; }
   .imagine-empty .entries{ display:flex; gap:10px; margin-top:4px; flex-wrap:wrap; justify-content:center; }
-  .imagine-empty .entry{ display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); background:#fff; border:1px solid var(--line2); border-radius:11px; padding:9px 14px; cursor:pointer; }
-  .imagine-empty .entry:hover{ background:rgba(32,30,27,.03); }
+  .imagine-empty .entry{ display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); background:var(--surface); border:1px solid var(--line2); border-radius:11px; padding:9px 14px; cursor:pointer; }
+  .imagine-empty .entry:hover{ background:rgba(var(--ink-rgb),.03); }
   .imagine-empty .amline{ font:400 11px var(--mono); color:var(--faint); margin-top:8px; }
   /* Imagine preflight notice (composer): editing model/style selected but no photo attached. */
   .imnote{ display:flex; align-items:flex-start; gap:8px; font-size:12px; color:#8a5a13; background:rgba(154,100,16,.06); border:1px solid rgba(154,100,16,.18); border-radius:9px; padding:8px 11px; line-height:1.45; max-width:640px; margin:0 auto 9px; box-sizing:border-box; width:100%; }
@@ -246,7 +254,7 @@ public enum WebChatPage {
   .fitdot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .fitdot.comfortable,.fitdot.fits{ background:#3f7d4e; } .fitdot.tight{ background:var(--amber); }
   .fitdot.unlikely,.fitdot.unsupported{ background:#c0392b; } .fitdot.unknown{ background:var(--faint); }
-  .lic{ font:500 9.5px var(--mono); letter-spacing:.04em; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:rgba(32,30,27,.06); color:var(--muted); white-space:nowrap; }
+  .lic{ font:500 9.5px var(--mono); letter-spacing:.04em; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:rgba(var(--ink-rgb),.06); color:var(--muted); white-space:nowrap; }
   .lic.nc{ background:rgba(192,57,49,.09); color:#a5342c; }
   .pdesc{ font-size:11px; color:var(--muted); }
   /* Live elapsed clock on a generation panel. */
@@ -273,20 +281,20 @@ public enum WebChatPage {
   .statusbtn:hover{ color:var(--ink); }
   .dot{ width:6px; height:6px; border-radius:50%; background:var(--ink); }
   /* Popups */
-  .pop{ position:absolute; background:var(--paper); border:1px solid var(--line2); border-radius:12px; box-shadow:0 12px 36px rgba(32,30,27,.14); z-index:40; }
+  .pop{ position:absolute; background:var(--paper); border:1px solid var(--line2); border-radius:12px; box-shadow:0 12px 36px rgba(var(--ink-rgb),.14); z-index:40; }
   .menuhead{ padding:10px 20px 4px; font:500 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
   .menurow{ padding:7px 20px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:8px; }
-  .menurow:hover{ background:rgba(32,30,27,.04); }
-  .radio{ width:14px; height:14px; border-radius:50%; box-sizing:border-box; flex-shrink:0; border:1.5px solid rgba(32,30,27,.3); }
+  .menurow:hover{ background:rgba(var(--ink-rgb),.04); }
+  .radio{ width:14px; height:14px; border-radius:50%; box-sizing:border-box; flex-shrink:0; border:1.5px solid rgba(var(--ink-rgb),.3); }
   .radio.on{ border:4.5px solid var(--ink); }
-  .sep{ height:1px; background:rgba(32,30,27,.07); margin:4px 0; }
+  .sep{ height:1px; background:rgba(var(--ink-rgb),.07); margin:4px 0; }
   /* Model picker — one consistent row pattern: rounded highlight + right-aligned check on the selected row */
   .pickrow{ margin:2px 8px; padding:8px 12px; border-radius:9px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:8px; }
-  .pickrow:hover{ background:rgba(32,30,27,.04); }
-  .pickrow.sel{ background:rgba(32,30,27,.06); }
+  .pickrow:hover{ background:rgba(var(--ink-rgb),.04); }
+  .pickrow.sel{ background:rgba(var(--ink-rgb),.06); }
   .ck{ font-size:12px; line-height:1; } .resdot{ width:5px; height:5px; border-radius:50%; background:var(--ink); flex-shrink:0; }
   /* Right panel (execution) — an overlay drawer so it never squeezes the chat at narrow widths */
-  .rightpanel{ position:absolute; top:0; right:0; bottom:0; width:340px; max-width:88vw; border-left:1px solid var(--line2); overflow-y:auto; background:var(--paper); z-index:45; box-shadow:-12px 0 36px rgba(32,30,27,.10); }
+  .rightpanel{ position:absolute; top:0; right:0; bottom:0; width:340px; max-width:88vw; border-left:1px solid var(--line2); overflow-y:auto; background:var(--paper); z-index:45; box-shadow:-12px 0 36px rgba(var(--ink-rgb),.10); }
   .kv{ display:flex; justify-content:space-between; font-size:12.5px; } .kv .k{ color:var(--muted); }
   .panelhead{ display:flex; align-items:center; padding:16px 20px 12px; font-size:14px; font-weight:600; }
   /* Views: models + settings */
@@ -294,31 +302,31 @@ public enum WebChatPage {
   .backbtn{ font-size:13px; color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:5px; border:none; background:none; }
   .backbtn:hover{ color:var(--ink); }
   .chip{ padding:5px 12px; border-radius:99px; font-size:12px; cursor:pointer; border:1px solid var(--line2); background:none; color:var(--muted); }
-  .chip.on{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  .chip.on{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
   .mrow{ display:flex; align-items:center; gap:14px; padding:14px 24px; border-bottom:1px solid var(--line); }
-  .mrow:hover{ background:rgba(32,30,27,.02); }
+  .mrow:hover{ background:rgba(var(--ink-rgb),.02); }
   .mrow .mleft{ flex:1; min-width:0; cursor:pointer; }
   .mrow .mdesc{ font-size:11.5px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mrow .mname{ font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mrow .mmeta{ display:flex; align-items:center; gap:14px; flex-shrink:0; }
   .mrow .mfit{ width:88px; font-size:12px; } .mrow .mmem{ width:74px; } .mrow .mspeed{ width:96px; } .mrow .maction{ min-width:78px; text-align:right; font-size:12px; }
   @media(max-width:720px){ .mrow .mmem, .mrow .mspeed{ display:none; } }
-  .btn{ background:var(--ink); color:#fff; font-size:13px; font-weight:500; padding:9px 22px; border-radius:9px; border:none; cursor:pointer; }
-  .btn.ghost{ background:none; border:1px solid var(--line2); color:rgba(32,30,27,.75); }
-  .overlay{ position:absolute; inset:0; background:rgba(32,30,27,.22); display:flex; align-items:center; justify-content:center; z-index:50; }
-  .modal{ background:var(--paper); border-radius:14px; box-shadow:0 24px 60px rgba(32,30,27,.25); }
+  .btn{ background:var(--ink); color:var(--paper); font-size:13px; font-weight:500; padding:9px 22px; border-radius:9px; border:none; cursor:pointer; }
+  .btn.ghost{ background:none; border:1px solid var(--line2); color:rgba(var(--ink-rgb),.75); }
+  .overlay{ position:absolute; inset:0; background:rgba(var(--ink-rgb),.22); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .modal{ background:var(--paper); border-radius:14px; box-shadow:0 24px 60px rgba(var(--ink-rgb),.25); }
   .toggle{ width:34px; height:20px; border-radius:10px; position:relative; cursor:pointer; transition:background .15s; }
-  .toggle .knob{ position:absolute; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; }
-  .paneside{ width:190px; border-right:1px solid rgba(32,30,27,.07); padding:16px 8px; display:flex; flex-direction:column; gap:1px; flex-shrink:0; }
+  .toggle .knob{ position:absolute; top:2px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:left .15s; }
+  .paneside{ width:190px; border-right:1px solid rgba(var(--ink-rgb),.07); padding:16px 8px; display:flex; flex-direction:column; gap:1px; flex-shrink:0; }
   .paneitem{ padding:7px 14px; font-size:13px; border-radius:7px; cursor:pointer; color:var(--muted); }
-  .paneitem.on{ background:rgba(32,30,27,.06); font-weight:500; color:var(--ink); }
-  .warnbox{ border:1px solid rgba(176,118,31,.35); border-radius:9px; padding:11px 14px; font-size:12.5px; line-height:1.5; color:rgba(32,30,27,.8); }
-  .membar{ height:4px; background:rgba(32,30,27,.08); border-radius:2px; } .membar>div{ height:4px; background:var(--ink); border-radius:2px; transition:width .3s ease; }
+  .paneitem.on{ background:rgba(var(--ink-rgb),.06); font-weight:500; color:var(--ink); }
+  .warnbox{ border:1px solid rgba(176,118,31,.35); border-radius:9px; padding:11px 14px; font-size:12.5px; line-height:1.5; color:rgba(var(--ink-rgb),.8); }
+  .membar{ height:4px; background:rgba(var(--ink-rgb),.08); border-radius:2px; } .membar>div{ height:4px; background:var(--ink); border-radius:2px; transition:width .3s ease; }
   /* Fluid interactions */
   .iconbtn,.modelbtn,.newchat,.chatitem,.menurow,.chip,.cround,.send,.paneitem,.backbtn,.statusbtn,.mrow,.reason summary,.toggle,.btn{ transition:background .14s ease, color .14s ease, opacity .14s ease, border-color .14s ease, transform .12s ease, box-shadow .14s ease; }
   .send:active,.cround:active,.iconbtn:active{ transform:scale(.9); }
   .chip:active,.newchat:active,.btn:active{ transform:scale(.97); }
-  .cbox{ transition:box-shadow .16s ease, border-color .16s ease; } .cbox:focus-within{ border-color:rgba(32,30,27,.28); box-shadow:0 2px 10px rgba(32,30,27,.07); }
+  .cbox{ transition:box-shadow .16s ease, border-color .16s ease; } .cbox:focus-within{ border-color:rgba(var(--ink-rgb),.28); box-shadow:0 2px 10px rgba(var(--ink-rgb),.07); }
   @keyframes eshpop{ from{opacity:0; transform:translateY(-6px) scale(.98)} to{opacity:1; transform:none} }
   /* Animate only on the open transition (added by popAnimPass), never on the full
      re-renders that happen while a popover stays open (e.g. during streaming) — a
@@ -327,7 +335,7 @@ public enum WebChatPage {
   .asstfoot{ display:flex; align-items:center; gap:6px; align-self:flex-start; }
   .astarts{ display:flex; flex-direction:column; gap:10px; margin:8px 0 2px; }
   .astart{ max-width:min(420px,100%); }
-  .astimg{ max-width:100%; border-radius:12px; border:1px solid var(--line2); background:#fff; display:block; }
+  .astimg{ max-width:100%; border-radius:12px; border:1px solid var(--line2); background:var(--surface); display:block; }
   .astarts.bare .astimg{ border:none; background:transparent; }   /* image-only reply: no card chrome */
   .astartbar{ display:flex; align-items:center; gap:12px; margin-top:5px; font-size:11px; color:var(--muted); }
   .astart.filepill{ display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:var(--paper); font-size:12px; }
@@ -389,6 +397,10 @@ function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}cat
 function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats)); localStorage.setItem(CUR,S.current||'')}catch(e){} }
 function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
+// Apply the chosen theme: 'auto' follows the system (no attribute → CSS media query decides); 'light'/'dark'
+// force it via data-theme on the root, overriding the media query.
+function applyTheme(){ const t=(S.prefs&&S.prefs.theme)||'auto';
+  try{ const r=document.documentElement; if(t==='auto')r.removeAttribute('data-theme'); else r.setAttribute('data-theme',t); }catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
   // Restore the last mode (Chat/Imagine) + Imagine model/style so reopening lands where the user left off.
   if(S.prefs.mode==='imagine'||S.prefs.mode==='chat'||S.prefs.mode==='sound')S.mode=S.prefs.mode;
@@ -509,7 +521,7 @@ function splitThink(t,o){ o=o||{}; t=t||''; const c=t.indexOf('</think>');
   // Implicit-open reasoning (only a trailing </think>): show live while streaming when expected.
   if(o.expectReasoning&&t) return {reason:t,answer:'',thinking:!!o.streaming}; return {reason:'',answer:t,thinking:false}; }
 function looksReasoning(id){ return /deepseek-?r1|(^|[^a-z])r1([^a-z]|$)|qwq|magistral|thinking|reason/i.test(id||''); }
-function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(32,30,27,.7)'; }
+function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(var(--ink-rgb),.7)'; }
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
@@ -644,6 +656,7 @@ const ACT={
   toggleRouting:()=>{ S.prefs.autoRouting=!(S.prefs.autoRouting!==false); savePrefs(); render(); },
   pickReasoning:(v)=>{ S.prefs.reasoning=v; savePrefs(); render(); },
   goPane:(p)=>{ S.settingsPane=p; render(); },
+  pickTheme:(v)=>{ S.prefs.theme=(v==='light'||v==='dark')?v:'auto'; savePrefs(); applyTheme(); render(); },
   // Iterative web editing: revise a prior webProject artifact by id (lineage via sourceArtifactID).
   editProjectArtifact:(id)=>{ const c=cur(); if(!c||S.capBusy)return;
     let pt='threejs'; for(const m of c.messages){ const a=(m.artifacts||[]).find(x=>x&&x.id===id); if(a){ pt=(a.metadata&&a.metadata.projectType)||pt; break; } }
@@ -1212,7 +1225,7 @@ function renderMsg(m){
     (m.attachments||[]).forEach((x,ix)=>{
       if(x.kind==='image')a+=`<img src="${x.dataURL}">`;
       else if(x.kind==='audio')a+=`<div style="margin:2px 0 6px">${audioPlayer(x.dataURL,(m.id||'m')+'-'+ix)}</div>`;
-      else a+=`<div class="attpill"><span class="ai"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></span><span class="an"><b>${esch(x.name||'file')}</b><span class="mono" style="font-size:10px;color:var(--muted)">${esch(x.size||'')}</span></span></div>`;
+      else a+=`<div class="attpill"><span class="ai"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg></span><span class="an"><b>${esch(x.name||'file')}</b><span class="mono" style="font-size:10px;color:var(--muted)">${esch(x.size||'')}</span></span></div>`;
     });
     // Audio: a "Transcribing…" indicator while STT runs, then the transcription as
     // a muted caption — distinct from text the user actually typed.
@@ -1733,13 +1746,13 @@ function renderComposer(){
        <textarea class="cinput" id="input" rows="1" placeholder="${escAttr(placeholder)}"></textarea>
        ${chips}
        <span class="cdiv"></span>
-       <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
+       <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:var(--paper)':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
        ${(((S.streaming||S.capBusy)&&S.genChatId===S.current))?((()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
             // While a generation runs, offer a queue button (Imagine → send/queue the next image; Chat → ⌥Enter draft) plus Stop.
             const qb = imagine
               ? `<button class="cround" id="queuebtn" data-act="send" title="Queue this image · runs when the current one finishes" style="border:none;opacity:${on?'1':'.4'}">${ICON.queue}</button>`
               : `<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button>`;
-            return qb+`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`; })()):(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+            return qb+`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`; })()):(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'rgba(var(--ink-rgb),.14)'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
      ${(!imagine&&S.pickerOpen)?renderPicker():''}
@@ -1837,7 +1850,7 @@ function finishAudioRecording(){
 function updateSendState(){ const hasText=!!(S.draft&&S.draft.trim());
   const q=document.querySelector('#queuebtn'); if(q)q.style.opacity=hasText?'1':'.4';   // reflect draft while generating
   const b=document.querySelector('#sendbtn'); if(!b)return; const on=hasText||!!S.pendingAtts.length;
-  b.style.background=on?'var(--ink)':'#dedbd4'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
+  b.style.background=on?'var(--ink)':'rgba(var(--ink-rgb),.14)'; b.style.cursor=on?'pointer':'default'; b.setAttribute('aria-disabled',on?'false':'true'); }
 function renderQueue(){ const q=(cur()&&cur().queue)||[]; if(!q.length)return '';
   let h='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px">';
   h+='<div style="font:500 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">Queued · '+q.length+'</div>';
@@ -1849,13 +1862,13 @@ function renderQueue(){ const q=(cur()&&cur().queue)||[]; if(!q.length)return ''
     <span class="iconbtn" data-act="removeQueued" data-arg="${i}" style="padding:2px;font-size:12px" title="Remove">✕</span></div>`; });
   return h+'</div>'; }
 function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:9px">';
-  S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
+  S.pendingAtts.forEach((a,i)=>{ const ic=a.kind==='image'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>':a.kind==='audio'?'<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="9" width="2.4" height="6" rx="1"/><rect x="8.4" y="6" width="2.4" height="12" rx="1"/><rect x="12.8" y="8" width="2.4" height="8" rx="1"/><rect x="17.2" y="10" width="2.4" height="4" rx="1"/></svg>':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
     if(a.kind==='audio'){
       // A recorded/attached audio clip — playable right in the composer before sending (custom player).
       h+=`<div style="display:flex;align-items:center;gap:6px">${audioPlayer(a.dataURL,'pa'+i)}<span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
     } else {
       h+=`<div style="display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px">
-        <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
+        <span style="width:30px;height:30px;border-radius:7px;background:var(--ink);color:var(--paper);display:flex;align-items:center;justify-content:center;flex-shrink:0">${ic}</span>
         <span style="min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">${esch(a.name)}</div><div class="mono" style="font-size:10.5px;color:var(--muted)">${esch(a.size||'')}</div></span>
         <span class="iconbtn" data-act="removeAtt" data-arg="${i}" style="padding:2px;font-size:14px">✕</span></div>`;
     } });
@@ -1863,9 +1876,9 @@ function renderChips(){ let h='<div style="display:flex;flex-wrap:wrap;gap:8px;m
 function renderAttach(){
   const note=S.modelSel==='Auto'?'Auto — resolved per request':S.modelSel;
   return `<div class="pop" style="left:0;bottom:calc(100% + 10px);width:230px;padding:6px 0">
-    <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:4px"></span>Photo or image</div>
-    <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:2px"></span>Document or text</div>
-    <div class="menurow" data-act="micUpload"><span style="width:16px;height:16px;border:1.5px solid rgba(32,30,27,.35);border-radius:50%"></span>Audio file (transcribe)</div>
+    <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(var(--ink-rgb),.35);border-radius:4px"></span>Photo or image</div>
+    <div class="menurow" data-act="attach"><span style="width:16px;height:16px;border:1.5px solid rgba(var(--ink-rgb),.35);border-radius:2px"></span>Document or text</div>
+    <div class="menurow" data-act="micUpload"><span style="width:16px;height:16px;border:1.5px solid rgba(var(--ink-rgb),.35);border-radius:50%"></span>Audio file (transcribe)</div>
     <div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);border-top:1px solid var(--line);margin-top:4px">Shown for ${esch(note)}</div></div>`;
 }
 // One consistent row for the whole picker: rounded highlight + right-aligned check on the selected row,
@@ -1901,14 +1914,14 @@ function renderEffort(){
   const idx=cur==='Off'?0:{Low:1,Medium:2,High:3}[cur]; const pct=((idx+0.5)/4*100)+'%';
   const hint={Off:'Answers immediately — no reasoning pass.',Low:'A quick reasoning pass for everyday questions.',Medium:'Balanced thinking time. The default.',High:'Takes noticeably longer to think. Best for hard problems.'}[cur];
   let dots='',labels='';
-  stops.forEach(s=>{ dots+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="width:5px;height:5px;border-radius:50%;background:rgba(32,30,27,.25)"></span></div>`;
+  stops.forEach(s=>{ dots+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="width:5px;height:5px;border-radius:50%;background:rgba(var(--ink-rgb),.25)"></span></div>`;
     const on=s===cur; labels+=`<div data-act="pickEffort" data-arg="${s}" style="flex:1;text-align:center;font-size:10.5px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'};font-weight:${on?'600':'400'}">${s}</div>`; });
   const inner=`<div style="display:flex;align-items:baseline;gap:9px"><span style="font-size:15px;font-weight:600">Effort</span><span style="font-size:13.5px;color:var(--muted)">${esch(cur)}</span></div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:16px 0 4px"><span>Faster</span><span>Smarter</span></div>
     <div id="effslider" style="position:relative;height:30px;cursor:pointer;touch-action:none">
-      <div style="position:absolute;left:10px;right:10px;top:13px;height:4px;background:rgba(32,30,27,.1);border-radius:2px;pointer-events:none"></div>
+      <div style="position:absolute;left:10px;right:10px;top:13px;height:4px;background:rgba(var(--ink-rgb),.1);border-radius:2px;pointer-events:none"></div>
       <div style="position:absolute;inset:0;display:flex">${dots}</div>
-      <span id="effknob" style="position:absolute;top:4px;left:${pct};transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;border:1px solid rgba(32,30,27,.18);box-shadow:0 1px 5px rgba(32,30,27,.28);pointer-events:none;transition:left .12s"></span>
+      <span id="effknob" style="position:absolute;top:4px;left:${pct};transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:var(--surface);border:1px solid rgba(var(--ink-rgb),.18);box-shadow:0 1px 5px rgba(var(--ink-rgb),.28);pointer-events:none;transition:left .12s"></span>
     </div>
     <div style="display:flex;margin-top:2px">${labels}</div>
     <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;min-height:34px">${esch(hint)}</div>`;
@@ -1938,7 +1951,7 @@ function renderEngine(){
     <div class="menuhead" style="padding-left:20px">Storage · ${esch(volLabel(st.assetsRoot))}${st.external?' (external)':''}</div>
     <div style="padding:2px 20px 4px">
       <div class="kv" style="margin-bottom:8px"><span class="k">Free</span><span class="mono" style="font-size:12px">${gb(free)} free</span></div>
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(var(--ink-rgb),.07)"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
       <div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px">
         <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--ink)"></span>Models ${gb(modelsB)}</span>
         <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#6f6b64"></span>Caches ${gb(cachesB)}</span>
@@ -1959,11 +1972,11 @@ function liveUsageHTML(){
    <div style="padding:2px 20px 12px;display:flex;flex-direction:column;gap:11px">
      <div>
        <div class="kv" style="margin-bottom:6px"><span class="k">Memory</span><span class="mono" data-res="mem" style="font-size:12px">${r?(usedGB.toFixed(1)+' / '+totGB.toFixed(0)+' GB'):'…'}</span></div>
-       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="membar" style="width:${memPct.toFixed(1)}%;height:100%;background:${memPct>85?'var(--amber)':'var(--ink)'};transition:width .4s ease"></div></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(var(--ink-rgb),.07)"><div data-res="membar" style="width:${memPct.toFixed(1)}%;height:100%;background:${memPct>85?'var(--amber)':'var(--ink)'};transition:width .4s ease"></div></div>
      </div>
      <div>
        <div class="kv" style="margin-bottom:6px"><span class="k">GPU</span><span class="mono" data-res="gpu" style="font-size:12px">${gv==null?'—':(gv.toFixed(0)+'%')}</span></div>
-       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="gpubar" style="width:${gv==null?0:gv.toFixed(1)}%;height:100%;background:var(--ink);transition:width .4s ease"></div></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(var(--ink-rgb),.07)"><div data-res="gpubar" style="width:${gv==null?0:gv.toFixed(1)}%;height:100%;background:var(--ink);transition:width .4s ease"></div></div>
      </div>
    </div>`;
 }
@@ -2004,12 +2017,12 @@ function renderExec(){
   if(pr.optimization||sch.performanceMode) h+=kvrow('Optimizer',pr.optimization||sch.performanceMode);
   h+=`<div style="font:400 10.5px var(--mono);color:var(--faint);margin-top:2px">${src} · $0 · on-device</div>`;
   h+='</div>';
-  h+=`<div style="margin:10px 20px 0;border-top:1px solid rgba(32,30,27,.07);padding:14px 0 4px;font-size:13px;font-weight:600">Why this model?</div>
-     <div style="padding:6px 20px 14px;display:flex;flex-direction:column;gap:7px;font-size:12.5px;line-height:1.45;color:rgba(32,30,27,.8)">`;
+  h+=`<div style="margin:10px 20px 0;border-top:1px solid rgba(var(--ink-rgb),.07);padding:14px 0 4px;font-size:13px;font-weight:600">Why this model?</div>
+     <div style="padding:6px 20px 14px;display:flex;flex-direction:column;gap:7px;font-size:12.5px;line-height:1.45;color:rgba(var(--ink-rgb),.8)">`;
   if(why.length){ why.slice(0,6).forEach(r=>{ h+=`<div style="display:flex;gap:8px"><span>·</span>${esch(r)}</div>`; }); }
   else h+='<div style="color:var(--muted)">This response used the model you selected manually.</div>';
   h+='</div>';
-  if(ex.profile) h+=`<div class="menurow" style="border-top:1px solid rgba(32,30,27,.07);font:400 11px var(--mono)" data-act="copyExec" data-arg="${m.id}">Copy ExecutionProfile JSON</div>`;
+  if(ex.profile) h+=`<div class="menurow" style="border-top:1px solid rgba(var(--ink-rgb),.07);font:400 11px var(--mono)" data-act="copyExec" data-arg="${m.id}">Copy ExecutionProfile JSON</div>`;
   p.innerHTML=h; return p;
 }
 function kvrow(k,v,mono){ return `<div class="kv"><span class="k">${k}</span><span ${mono?'class="mono" style="font-size:12px"':''}>${esch(String(v))}</span></div>`; }
@@ -2041,7 +2054,7 @@ async function startInstall(id){
 function installCell(m){ const st=S.installing[m.id];
   if(st){ if(st.phase==='failed') return `<span style="font-size:12px;color:var(--amber)">Failed</span>`;
     const pct=st.percent||0; const label=st.totalBytes?(pct+'%'):fmtBytes(st.bytesDownloaded);
-    return `<span style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end"><span style="width:60px;height:4px;background:rgba(32,30,27,.1);border-radius:2px"><span style="display:block;width:${pct}%;height:4px;background:var(--ink);border-radius:2px;transition:width .3s"></span></span><span class="mono" style="font-size:10.5px;color:var(--muted)">${esch(label||'…')}</span><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="padding:0;font-size:12px" title="Cancel">✕</span></span>`; }
+    return `<span style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end"><span style="width:60px;height:4px;background:rgba(var(--ink-rgb),.1);border-radius:2px"><span style="display:block;width:${pct}%;height:4px;background:var(--ink);border-radius:2px;transition:width .3s"></span></span><span class="mono" style="font-size:10.5px;color:var(--muted)">${esch(label||'…')}</span><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="padding:0;font-size:12px" title="Cancel">✕</span></span>`; }
   if(m.installed) return '<span style="font-size:12px;color:var(--muted)">Installed ✓</span>';
   if(m.status==='incompatible') return '<span style="font-size:12px;color:var(--amber)">Incompatible</span>';
   return `<span style="font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline" data-act="doInstall" data-arg="${m.id}">Install</span>`;
@@ -2080,7 +2093,7 @@ function renderDetail(){
   const tight=m.fitClass==='tight'||m.fitClass==='unlikely';
   const md_=el('div',{cls:'modal'}); md_.style.width='520px';
   let h=`<div style="padding:22px 26px 0;display:flex;align-items:flex-start"><div><div style="font-size:18px;font-weight:600">${esch(m.name)}</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:10px"><span style="font-size:11px;color:var(--muted)">Fit for this Mac</span><span class="mono" style="font-size:10.5px;letter-spacing:.08em;color:${tight?'var(--amber)':'var(--ink)'};background:${tight?'rgba(176,118,31,.1)':'rgba(32,30,27,.07)'};padding:3px 8px;border-radius:5px">${fitLabel(m.fitClass).toUpperCase()}</span></div></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px"><span style="font-size:11px;color:var(--muted)">Fit for this Mac</span><span class="mono" style="font-size:10.5px;letter-spacing:.08em;color:${tight?'var(--amber)':'var(--ink)'};background:${tight?'rgba(176,118,31,.1)':'rgba(var(--ink-rgb),.07)'};padding:3px 8px;border-radius:5px">${fitLabel(m.fitClass).toUpperCase()}</span></div></div>
     <span class="sp" style="flex:1"></span><span class="iconbtn" data-act="closeDetail" style="font-size:13px">✕</span></div>
     <div style="display:flex;gap:36px;padding:18px 26px 4px">
       <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;min-width:180px">
@@ -2102,7 +2115,7 @@ function renderDetail(){
   const ist=S.installing[m.id];
   if(ist&&(ist.phase==='downloading'||ist.phase==='resolving'||ist.phase==='verifying')){
     const pct=ist.percent||0; const lab=ist.totalBytes?(pct+'% of '+fmtBytes(ist.totalBytes)):fmtBytes(ist.bytesDownloaded);
-    h+=`<div style="flex:1;display:flex;flex-direction:column;gap:7px"><div style="height:5px;background:rgba(32,30,27,.08);border-radius:3px"><div style="width:${pct}%;height:5px;background:var(--ink);border-radius:3px;transition:width .3s"></div></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)"><span class="mono">${esch(ist.phase)} · ${esch(lab||'…')}</span><span>${esch(storageDest())}</span></div></div><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="font-size:13px">✕</span>`;
+    h+=`<div style="flex:1;display:flex;flex-direction:column;gap:7px"><div style="height:5px;background:rgba(var(--ink-rgb),.08);border-radius:3px"><div style="width:${pct}%;height:5px;background:var(--ink);border-radius:3px;transition:width .3s"></div></div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)"><span class="mono">${esch(ist.phase)} · ${esch(lab||'…')}</span><span>${esch(storageDest())}</span></div></div><span class="iconbtn" data-act="cancelInstall" data-arg="${m.id}" style="font-size:13px">✕</span>`;
   } else if(ist&&ist.phase==='failed'){ h+=`<span style="color:var(--amber);font-size:13px">Install failed — ${esch(ist.error||'try again')}</span><button class="btn ghost" data-act="doInstall" data-arg="${m.id}">Retry</button>`; }
   else if(m.installed) h+='<span style="font-size:13px;color:var(--muted)">Installed ✓</span>';
   else if(m.status!=='incompatible') h+=`<button class="btn" data-act="doInstall" data-arg="${m.id}">${tight?'Install anyway':'Install'}</button><span style="font-size:12px;color:var(--muted)">${esch(storageDest())}</span>`;
@@ -2129,7 +2142,7 @@ function renderPane(){
       <div><div style="font-size:12px;color:var(--muted)">Inference</div><div style="display:flex;align-items:center;gap:7px;font-size:13.5px;margin-top:3px"><span class="dot"></span>On this Mac</div></div>
       <div><div style="font-size:12px;color:var(--muted)">Network access</div><div style="font-size:13.5px;margin-top:3px">Model downloads and update checks only</div></div>
       <div><div style="font-size:12px;color:var(--muted)">Conversation history</div><div style="font-size:13.5px;margin-top:3px">Stored locally in this browser, never uploaded</div></div>
-      <div style="border-top:1px solid rgba(32,30,27,.07);padding-top:14px"><div style="font-size:12px;color:var(--muted)">Apple Intelligence</div><div style="font-size:13px;line-height:1.5;margin-top:3px;color:rgba(32,30,27,.75)">The built-in Apple model runs on-device. If a future Apple feature uses Private Cloud Compute, esh will label it before use — it is never assumed.</div></div></div>`;
+      <div style="border-top:1px solid rgba(var(--ink-rgb),.07);padding-top:14px"><div style="font-size:12px;color:var(--muted)">Apple Intelligence</div><div style="font-size:13px;line-height:1.5;margin-top:3px;color:rgba(var(--ink-rgb),.75)">The built-in Apple model runs on-device. If a future Apple feature uses Private Cloud Compute, esh will label it before use — it is never assumed.</div></div></div>`;
   if(p==='Performance'){ const opts=['Auto','Speed','Balanced','Low Memory']; let h=`<div style="font-size:15px;font-weight:600;margin-bottom:14px">Performance</div><div style="display:flex;flex-direction:column;gap:8px;font-size:13.5px;max-width:440px">`;
     opts.forEach(o=>{ const on=o===S.optimize; h+=`<div style="display:flex;align-items:center;gap:9px;cursor:pointer;color:${on?'var(--ink)':'var(--muted)'}" data-act="pickOptimize" data-arg="${o}"><span class="radio ${on?'on':''}"></span>${o}</div>`; });
     h+=`</div><div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;max-width:440px">${({Auto:'esh adapts per request — quality when you wait, speed when you type fast.',Speed:'Prefers smaller resident models and aggressive caching for the fastest replies.',Balanced:'Keeps one model warm and favors quality unless a fast reply is clearly better.','Low Memory':'Unloads models promptly and caps cache size to leave room for other apps.'}[S.optimize])||''}</div>`; return h; }
@@ -2138,7 +2151,7 @@ function renderPane(){
     const seg=v=>total?(v/total*100).toFixed(1):0;
     return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Storage</div><div style="max-width:440px">
       <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:14px;font-weight:600">${esch(volLabel(s.assetsRoot))}</span><span style="font-size:11.5px;color:var(--muted)">${s.external?'External SSD · Connected':'Internal storage'}</span><span class="sp" style="flex:1"></span><span class="mono" style="font-size:12px;color:var(--muted)">${gb(free)} free</span></div>
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07);margin:12px 0 10px"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(var(--ink-rgb),.07);margin:12px 0 10px"><div style="width:${seg(modelsB)}%;background:var(--ink)"></div><div style="width:${seg(cachesB)}%;background:#6f6b64"></div><div style="width:${seg(audioB)}%;background:#b5b1a8"></div></div>
       <div style="display:flex;gap:16px;font-size:11.5px;color:var(--muted)">
         <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--ink)"></span>Models ${gb(modelsB)}</span>
         <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:#6f6b64"></span>Caches ${gb(cachesB)}</span>
@@ -2147,19 +2160,19 @@ function renderPane(){
       <div style="font-size:11.5px;color:var(--muted);margin-top:14px;line-height:1.5">If the drive disconnects, installed models pause — nothing re-downloads internally without asking.</div></div>`; }
   if(p==='General'){ const enterOn=S.prefs.sendEnter!==false, histOn=S.prefs.saveHistory!==false; const n=Object.keys(S.chats).length;
     return `<div style="font-size:15px;font-weight:600;margin-bottom:18px">General</div><div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Send with Enter<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Off uses ⌘/Shift+Enter to send, Enter for a new line</div></span><span class="toggle" data-act="toggleEnter" style="background:${enterOn?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${enterOn?'16px':'2px'}"></span></span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Save conversation history<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Stored only in this browser</div></span><span class="toggle" data-act="toggleHistory" style="background:${histOn?'var(--ink)':'rgba(32,30,27,.2)'}"><span class="knob" style="left:${histOn?'16px':'2px'}"></span></span></div>
-      <div style="border-top:1px solid rgba(32,30,27,.07);padding-top:14px;display:flex;justify-content:space-between;align-items:center">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Send with Enter<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Off uses ⌘/Shift+Enter to send, Enter for a new line</div></span><span class="toggle" data-act="toggleEnter" style="background:${enterOn?'var(--ink)':'rgba(var(--ink-rgb),.2)'}"><span class="knob" style="left:${enterOn?'16px':'2px'}"></span></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Save conversation history<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Stored only in this browser</div></span><span class="toggle" data-act="toggleHistory" style="background:${histOn?'var(--ink)':'rgba(var(--ink-rgb),.2)'}"><span class="knob" style="left:${histOn?'16px':'2px'}"></span></span></div>
+      <div style="border-top:1px solid rgba(var(--ink-rgb),.07);padding-top:14px;display:flex;justify-content:space-between;align-items:center">
         <div><div style="font-size:13.5px">Clear history</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px">${n} conversation${n===1?'':'s'}, stored locally</div></div>
         <span class="btn ghost" style="padding:7px 14px;font-size:12.5px" data-act="clearHistory">Clear…</span></div></div>`; }
   if(p==='Intelligence'){ const routeOn=S.prefs.autoRouting!==false; const rz=S.prefs.reasoning||'Auto';
     const rzHint={Auto:'Reasoning models think when the task benefits — the thought time shows as a collapsed line.',Off:'Responses come straight away, even on reasoning-capable models.',On:'Always reason before answering. Slower, better on hard problems.'}[rz];
-    let seg=''; ['Auto','Off','On'].forEach(o=>{ const on=o===rz; seg+=`<span data-act="pickReasoning" data-arg="${o}" style="padding:7px 18px;cursor:pointer;background:${on?'var(--ink)':'transparent'};color:${on?'#fff':'rgba(32,30,27,.65)'};font-weight:${on?'500':'400'}">${o}</span>`; });
+    let seg=''; ['Auto','Off','On'].forEach(o=>{ const on=o===rz; seg+=`<span data-act="pickReasoning" data-arg="${o}" style="padding:7px 18px;cursor:pointer;background:${on?'var(--ink)':'transparent'};color:${on?'#fff':'rgba(var(--ink-rgb),.65)'};font-weight:${on?'500':'400'}">${o}</span>`; });
     return `<div style="font-size:15px;font-weight:600;margin-bottom:18px">Intelligence</div><div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:13.5px">Auto routing</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.45">esh picks the best model per request based on task, memory, and what's already loaded</div></div><span class="toggle" data-act="toggleRouting" style="background:${routeOn?'var(--ink)':'rgba(32,30,27,.2)'};flex-shrink:0;margin-left:20px"><span class="knob" style="left:${routeOn?'16px':'2px'}"></span></span></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:13.5px">Auto routing</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.45">esh picks the best model per request based on task, memory, and what's already loaded</div></div><span class="toggle" data-act="toggleRouting" style="background:${routeOn?'var(--ink)':'rgba(var(--ink-rgb),.2)'};flex-shrink:0;margin-left:20px"><span class="knob" style="left:${routeOn?'16px':'2px'}"></span></span></div>
       <div><div style="font-size:12px;color:var(--muted);margin-bottom:7px">Reasoning</div><div style="display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden;font-size:12.5px">${seg}</div><div style="font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45">${esch(rzHint)}</div></div>
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px"><span>Default performance</span><span data-act="goPane" data-arg="Performance" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(S.optimize)} <span style="font-size:9px">▸</span></span></div>
-      <div><div style="font-size:12px;color:var(--muted);margin-bottom:7px">System instructions</div><textarea id="sysinstr" data-act="editSysInstr" oninput="ACT.editSysInstr()" placeholder="Optional — applied to every new conversation" style="width:100%;border:1px solid var(--line2);border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.55;color:rgba(32,30,27,.85);min-height:56px;resize:vertical;font-family:inherit;background:#fff">${esch(S.prefs.systemInstr||'')}</textarea><div style="font-size:11px;color:var(--faint);margin-top:6px">Applied to every new conversation</div></div></div>`; }
+      <div><div style="font-size:12px;color:var(--muted);margin-bottom:7px">System instructions</div><textarea id="sysinstr" data-act="editSysInstr" oninput="ACT.editSysInstr()" placeholder="Optional — applied to every new conversation" style="width:100%;border:1px solid var(--line2);border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.55;color:rgba(var(--ink-rgb),.85);min-height:56px;resize:vertical;font-family:inherit;background:var(--surface)">${esch(S.prefs.systemInstr||'')}</textarea><div style="font-size:11px;color:var(--faint);margin-top:6px">Applied to every new conversation</div></div></div>`; }
   if(p==='Models'){ const ids=S.models||[];
     let rows=''; ids.forEach(id=>{ const resident=S.engine&&S.engine.residentModelID===id; rows+=`<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esch(shortModel(id))}</div></div>${resident?'<span style="font-size:11px;color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:2px 7px">Loaded</span>':''}<span class="iconbtn" data-act="openModels" style="font-size:12px" title="Manage">▸</span></div>`; });
     if(!rows) rows='<div style="font-size:12.5px;color:var(--muted);padding:8px 0">No local models installed yet.</div>';
@@ -2169,10 +2182,13 @@ function renderPane(){
         ${renderTaskModels()}
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;margin-top:18px"><span>Model storage</span><span data-act="goPane" data-arg="Storage" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(volLabel(s.assetsRoot))}${s.freeBytes?(' · '+gb(s.freeBytes)+' free'):''} <span style="font-size:9px">▸</span></span></div></div>`; }
   if(p==='Voice') return renderVoicePane();
-  if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Advanced</div><div style="max-width:480px">
+  if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; const th=S.prefs.theme||'auto';
+    const topt=(v,label)=>`<button class="modeopt ${th===v?'on':''}" data-act="pickTheme" data-arg="${v}" aria-selected="${th===v}">${label}</button>`;
+    return `<div style="font-size:15px;font-weight:600;margin-bottom:14px">Advanced</div><div style="max-width:480px">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:18px"><span style="display:flex;flex-direction:column"><span style="font-size:13.5px;font-weight:600">Appearance</span><span style="font-size:12px;color:var(--muted);margin-top:2px">Light, dark, or follow the system.</span></span><span class="sp" style="flex:1"></span><div class="modepill">${topt('light','Light')}${topt('dark','Dark')}${topt('auto','Auto')}</div></div>
       <div style="display:flex;align-items:center;gap:9px"><span style="font-size:13.5px;font-weight:600">API server</span><span class="sp" style="flex:1"></span><span class="dot"></span><span style="font-size:12px;color:var(--muted)">Running</span></div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px"><span class="mono" style="font-size:12.5px">${esch(srv)}</span></div>
-      <div style="padding:12px 0 0;display:flex;gap:14px;font-size:12px;color:rgba(32,30,27,.65)"><span>✓ Native esh</span><span>✓ OpenAI-compatible</span></div>
+      <div style="padding:12px 0 0;display:flex;gap:14px;font-size:12px;color:rgba(var(--ink-rgb),.65)"><span>✓ Native esh</span><span>✓ OpenAI-compatible</span></div>
       <div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5">Structured output, capability resolution and the Request Inspector are surfaced per response in the Execution panel.</div></div>`; }
   return `<div style="font-size:15px;font-weight:600;margin-bottom:10px">${p}</div><div style="font-size:13px;color:var(--muted)">Designed in the canvas — more controls arrive in a later rc.</div>`;
 }
@@ -2196,7 +2212,7 @@ function renderTaskModels(){
     const only=(a.options||[]).length<=1;
     return `<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
       <span style="display:flex;flex-direction:column;min-width:0;padding-right:12px"><span style="font-size:13.5px">${esch(a.label)}</span>${a.note?`<span style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4">${esch(a.note)}</span>`:''}</span>
-      <button class="cchip" ${only?'disabled style="opacity:.6;cursor:default"':`data-act="toggleCapDrop" data-arg="${esch(a.key)}" style="background:${open?'rgba(32,30,27,.09)':'rgba(32,30,27,.05)'}"`}><span class="lbl">${esch(curName)}</span>${only?'':'<span class="chev">▾</span>'}</button>
+      <button class="cchip" ${only?'disabled style="opacity:.6;cursor:default"':`data-act="toggleCapDrop" data-arg="${esch(a.key)}" style="background:${open?'rgba(var(--ink-rgb),.09)':'rgba(var(--ink-rgb),.05)'}"`}><span class="lbl">${esch(curName)}</span>${only?'':'<span class="chev">▾</span>'}</button>
       ${menu}</div>`;
   }
   const fixRow=a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px"><span>${esch(a.label)}</span><span class="mono" style="font-size:11.5px;color:var(--muted)">${esch(a.current)}</span></div>`;
@@ -2224,7 +2240,7 @@ function vdropRow(which,label,valueText,options,act){
   }
   return `<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
     <span style="font-size:13.5px">${esch(label)}</span>
-    <button class="cchip" data-act="toggleVoiceDrop" data-arg="${which}" style="background:${open?'rgba(32,30,27,.09)':'rgba(32,30,27,.05)'}"><span class="lbl">${esch(valueText)}</span><span class="chev">▾</span></button>
+    <button class="cchip" data-act="toggleVoiceDrop" data-arg="${which}" style="background:${open?'rgba(var(--ink-rgb),.09)':'rgba(var(--ink-rgb),.05)'}"><span class="lbl">${esch(valueText)}</span><span class="chev">▾</span></button>
     ${menu}</div>`;
 }
 function renderVoicePane(){
@@ -2264,7 +2280,7 @@ function renderOnboarding(){
   const v=el('div'); v.style.cssText='flex:1;display:flex;align-items:center;justify-content:center';
   const e=S.engine, host=e&&e.host||{};
   if(S.onbStep===0){ v.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;gap:14px;width:400px">
-      <span style="width:44px;height:44px;border-radius:12px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600">e</span>
+      <span style="width:44px;height:44px;border-radius:12px;background:var(--ink);color:var(--paper);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600">e</span>
       <div style="font-size:21px;font-weight:600">Welcome to esh</div><div style="font-size:13.5px;color:var(--muted)">Private AI running on your Mac.</div>
       <button class="btn" style="margin-top:8px" onclick="S.onbStep=1;render()">Continue</button></div>`; }
   else if(S.onbStep===1){ const eng=(e&&e.engines||[]); const apple=e&&e.appleIntelligence&&e.appleIntelligence.available;
@@ -2287,7 +2303,7 @@ function renderVoice(){
   const v=el('div',{cls:'voicewrap'+(S._voiceFadeIn?' enter':'')}); S._voiceFadeIn=false;
   if(S.voice==='error'){
     v.innerHTML=`<div class="vstage"><div style="max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px">
-      <span style="width:52px;height:52px;border-radius:50%;background:rgba(32,30,27,.05);display:flex;align-items:center;justify-content:center;color:rgba(32,30,27,.55)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/><path d="M4 4l16 16"/></svg></span>
+      <span style="width:52px;height:52px;border-radius:50%;background:rgba(var(--ink-rgb),.05);display:flex;align-items:center;justify-content:center;color:rgba(var(--ink-rgb),.55)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/><path d="M4 4l16 16"/></svg></span>
       <div style="font-size:17px;font-weight:600">Voice unavailable</div>
       <div style="font-size:13px;color:var(--muted);line-height:1.55">${esch(S.voiceError||'')}</div>
       <div style="display:flex;gap:10px;margin-top:2px"><button class="btn" style="padding:9px 20px;font-size:13px" data-act="voiceRetry">Try again</button><button class="btn ghost" style="padding:9px 18px;font-size:13px" data-act="voiceText">Back to text</button></div></div></div>
@@ -2620,7 +2636,7 @@ function micUpload(){ const inp=document.createElement('input'); inp.type='file'
 
 
 /* ---------- boot ---------- */
-loadChats(); loadPrefs(); loadFolders();
+loadChats(); loadPrefs(); loadFolders(); applyTheme();
 // On small screens the sidebar overlays the chat, so start it collapsed regardless of the saved pref.
 if(window.innerWidth<=768) S.sidebarOpen=false;
 // Restore the chat the user was last in (with its images/history), not just the newest-created one — a fresh
