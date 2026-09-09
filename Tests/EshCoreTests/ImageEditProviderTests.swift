@@ -151,6 +151,27 @@ struct ImageEditProviderTests {
     }
 
     @Test
+    func qualityControlPassesMaxEditSideClampedToRange() async throws {
+        let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
+        // The "detailed" tier (1536) flows through as options.maxEditSide; an absurd value is clamped to 2048.
+        let provider = ImageEditProvider(edit: { _, outPath, _, options in
+            #expect(options.maxEditSide == 1536)
+            try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
+            return ImageEditResult(width: 1, height: 1, backend: "flux2-klein", model: "m", license: "apache-2.0", commercial: true)
+        })
+        let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
+        _ = try await svc.executeCollecting(imageAndText("stylize", options: ["maxEditSide": .int(1536)]))
+
+        let clamp = ImageEditProvider(edit: { _, outPath, _, options in
+            #expect(options.maxEditSide == 2048)   // 9999 clamped down
+            try Data([0x89]).write(to: URL(fileURLWithPath: outPath))
+            return ImageEditResult(width: 1, height: 1, backend: "flux2-klein", model: "m", license: "apache-2.0", commercial: true)
+        })
+        let svc2 = CapabilityExecutionService(registry: CapabilityRegistry(providers: [clamp]), context: ctx)
+        _ = try await svc2.executeCollecting(imageAndText("stylize", options: ["maxEditSide": .int(9999)]))
+    }
+
+    @Test
     func incompatibleBackendPinWithAdapterThrows() async throws {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
         _ = try installAdapter("3d-animation", into: ctx)
