@@ -370,7 +370,7 @@ const ICON={
   folderPlus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>',
   chevr:'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
 };
-let S={ view:'chat', mode:'chat', imgModel:'Auto', imgStyle:'None', imgOpts:null, imgPickerOpen:false, imgStyleOpen:false, chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
+let S={ view:'chat', mode:'chat', imgModel:'Auto', imgStyle:'None', imgQuality:'balanced', imgOpts:null, imgPickerOpen:false, imgStyleOpen:false, imgQualityOpen:false, chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
@@ -392,7 +392,8 @@ function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{loca
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
   // Restore the last mode (Chat/Imagine) + Imagine model/style so reopening lands where the user left off.
   if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode;
-  if(S.prefs.imgModel)S.imgModel=S.prefs.imgModel; if(S.prefs.imgStyle)S.imgStyle=S.prefs.imgStyle; }
+  if(S.prefs.imgModel)S.imgModel=S.prefs.imgModel; if(S.prefs.imgStyle)S.imgStyle=S.prefs.imgStyle;
+  if(S.prefs.imgQuality)S.imgQuality=S.prefs.imgQuality; }
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function cur(){ return S.chats[S.current]; }
@@ -586,6 +587,8 @@ const ACT={
   toggleImgStyle:()=>{ const was=S.imgStyleOpen; closeAll(); S.imgStyleOpen=!was; if(!S.imgStyleOpen)S.focusInput=true; render(); },
   pickImgModel:(v)=>{ S.imgModel=v; S.prefs.imgModel=v; savePrefs(); closeAll(); S.focusInput=true; render(); },
   pickImgStyle:(v)=>{ S.imgStyle=v; S.prefs.imgStyle=v; if(v!=='None'){ S.imgModel='Auto'; S.prefs.imgModel='Auto'; } savePrefs(); closeAll(); S.focusInput=true; render(); },   // a style pins its own base model
+  toggleImgQuality:()=>{ const was=S.imgQualityOpen; closeAll(); S.imgQualityOpen=!was; if(!S.imgQualityOpen)S.focusInput=true; render(); },
+  pickImgQuality:(v)=>{ S.imgQuality=v; S.prefs.imgQuality=v; savePrefs(); closeAll(); S.focusInput=true; render(); },
   lightbox:(a)=>{ if(a) openLightbox(a); },
   exportBeforeAfter:(id)=>{ exportBeforeAfter(id); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
@@ -654,12 +657,12 @@ const ACT={
     runCapabilityRequest(c, request, 'Editing web page…'); },
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
-function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; S.imgPickerOpen=false; S.imgStyleOpen=false; if(open)S[open]=true; }
+function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; S.imgPickerOpen=false; S.imgStyleOpen=false; S.imgQualityOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); const a=t&&t.getAttribute('data-act');
   // Outside-click closes any open popover, unless the click is inside a popover or on the chip/button
   // that owns it (those toggles handle their own open/close).
-  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen||S.imgPickerOpen||S.imgStyleOpen;
-  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach|ImgModel|ImgStyle)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
+  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen||S.imgPickerOpen||S.imgStyleOpen||S.imgQualityOpen;
+  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach|ImgModel|ImgStyle|ImgQuality)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
   if(S.capDrop && !e.target.closest('.pop') && a!=='toggleCapDrop'){ S.capDrop=null; render(); if(!t)return; }
   if(S.chatMenu && !e.target.closest('.pop')){ S.chatMenu=null; render(); if(!t)return; }
@@ -1305,7 +1308,7 @@ async function apply3DAnimation(){
   const request={schemaVersion:'esh.execute.request.v1', capability:'image.edit',
     inputs:[{payload:{attachment:{_0:att}}},{payload:{text:{_0:'Turn this into a polished 3D animated character'}}}],
     output:{modality:'image'},
-    options:{values:{adapter:'3d-animation'}}};
+    options:{values:{adapter:'3d-animation', maxEditSide:imgQualitySide()}}};
   // Show the user's turn (the photo they sent + what we're doing) above the generation, like a typed edit.
   c.messages.push({id:uid(), role:'user', content:'Apply 3D animation', attachments:[imgAtt]});
   S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
@@ -1367,6 +1370,11 @@ function ensureImgOpts(){ if(S.imgOpts||S._imgOptsLoading)return; S._imgOptsLoad
 function imgBackendById(id){ const o=S.imgOpts; return (o&&(o.backends||[]).find(b=>b.id===id))||null; }
 function imgStyleById(id){ const o=S.imgOpts; return (o&&(o.adapters||[]).find(a=>a.id===id))||null; }
 function imgModelLabel(){ if(S.imgModel==='Auto')return 'Auto'; const b=imgBackendById(S.imgModel); return b?b.label:S.imgModel; }
+// Quality vs speed for edits — maps a tier to the working-resolution cap (maxEditSide). Lower is faster and
+// uses less memory; higher keeps more detail at more memory/time. Create (Z-Image) ignores this.
+const IMG_QUALITY={ fast:{label:'Fast', side:768, note:'Quickest, lowest memory'}, balanced:{label:'Balanced', side:1024, note:'The default — good detail, fits 32 GB'}, detailed:{label:'Detailed', side:1536, note:'More detail; slower, needs more memory'} };
+function imgQualitySide(){ return (IMG_QUALITY[S.imgQuality]||IMG_QUALITY.balanced).side; }
+function imgQualityLabel(){ return (IMG_QUALITY[S.imgQuality]||IMG_QUALITY.balanced).label; }
 function imgStyleLabel(){ if(S.imgStyle==='None')return 'Style'; const a=imgStyleById(S.imgStyle); return a?a.label.replace(/\s*style$/i,''):'Style'; }
 function licenseText(l){ return (l==='apache-2.0')?'Apache-2.0 · commercial-ok':(l&&l.indexOf('non-commercial')>=0?'non-commercial':(l||'')); }
 function fitWord(f){ return ({comfortable:'Comfortable fit',fits:'Fits this Mac',tight:'Tight on this Mac',unlikely:'May not fit',unsupported:'Not supported here',unknown:'Fit unknown'})[f]||f; }
@@ -1461,23 +1469,33 @@ function renderImgStylePicker(){
   h+='<div class="sep"></div><div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);line-height:1.5">Names are neutral by design. A style applies to a photo you attach, using the style\'s own base model.</div>';
   return imgPopWrap(h,'340px');
 }
+function renderImgQualityPicker(){
+  let h='<div class="menuhead">Edit quality</div>';
+  ['fast','balanced','detailed'].forEach(k=>{ const q=IMG_QUALITY[k], sel=S.imgQuality===k;
+    h+=`<div class="pickrow ${sel?'sel':''}" style="flex-direction:column;align-items:stretch;gap:2px" data-act="pickImgQuality" data-arg="${k}">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:13px">${esch(q.label)}</span><span class="sp" style="flex:1"></span><span class="pdesc">${q.side}px</span>${sel?'<span class="ck">✓</span>':''}</div>
+      <div class="pdesc">${esch(q.note)}</div></div>`;
+  });
+  h+='<div class="sep"></div><div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);line-height:1.5">Controls the working resolution when editing a photo. Lower is faster and uses less memory; higher keeps more detail. Creating from text isn\'t affected.</div>';
+  return imgPopWrap(h,'300px');
+}
 // Imagine send: text-only → create (image.generate); photo attached → edit (image.edit) with the chosen
 // backend/style. A style that isn't installed installs-and-resumes the exact edit (never re-typed).
 // When a generation is already running, the new prompt (with/without a photo) is QUEUED and auto-runs when
 // the current one finishes — the style/model chosen at send time travels with the queued item.
 async function sendImagine(queued){
   stopSpeak();
-  let text, atts, c, imgModel, imgStyle, ta=null;
+  let text, atts, c, imgModel, imgStyle, imgQuality, ta=null;
   if(queued){ c=S.chats[queued.chatId]; if(!c)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice();
-    imgModel=queued.imgModel||'Auto'; imgStyle=queued.imgStyle||'None'; }
+    imgModel=queued.imgModel||'Auto'; imgStyle=queued.imgStyle||'None'; imgQuality=queued.imgQuality||'balanced'; }
   else {
     ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); atts=S.pendingAtts.slice();
-    imgModel=S.imgModel; imgStyle=S.imgStyle;
+    imgModel=S.imgModel; imgStyle=S.imgStyle; imgQuality=S.imgQuality;
     if(!text&&!atts.length) return;
     c=cur()||(newChat(),cur());
-    // Busy → queue this request (keeps the picked model/style) and clear the composer, like Chat's queue.
+    // Busy → queue this request (keeps the picked model/style/quality) and clear the composer, like Chat's queue.
     if(S.controller||S.capBusy){
-      c.queue=c.queue||[]; c.queue.push({img:true, text, atts, imgModel, imgStyle});
+      c.queue=c.queue||[]; c.queue.push({img:true, text, atts, imgModel, imgStyle, imgQuality});
       S.pendingAtts=[]; S.draft=''; if(ta)ta.value=''; S.focusInput=true; saveChats(); render(); return;
     }
     S.pendingAtts=[]; S.draft=''; if(ta)ta.value=''; S.focusInput=true;
@@ -1500,7 +1518,7 @@ async function sendImagine(queued){
   // alone; otherwise honour a manually pinned backend.
   const att=attToEsh([img])[0];
   const instruction = text || 'Apply the selected style';
-  const values={};
+  const values={ maxEditSide: (IMG_QUALITY[imgQuality]||IMG_QUALITY.balanced).side };   // quality vs speed (working resolution)
   if(imgStyle!=='None'){ values.adapter=imgStyle; }
   else if(imgModel!=='Auto'){ values.backend=imgModel; }
   const request={schemaVersion:'esh.execute.request.v1',capability:'image.edit',
@@ -1526,7 +1544,8 @@ function renderComposer(){
   // Model + Effort. The attach / textarea / mic / send shell is shared.
   const chips = imagine
     ? `<button class="cchip" data-act="toggleImgStyle" title="Style"><span class="lbl">${esch(imgStyleLabel())}</span><span class="chev">▾</span></button>
-       <button class="cchip" data-act="toggleImgModel" title="Model"><span class="lbl">${esch(imgModelLabel())}</span><span class="chev">▾</span></button>`
+       <button class="cchip" data-act="toggleImgModel" title="Model"><span class="lbl">${esch(imgModelLabel())}</span><span class="chev">▾</span></button>
+       <button class="cchip ghost" data-act="toggleImgQuality" title="Edit quality (working resolution)"><span class="lbl">${esch(imgQualityLabel())}</span><span class="chev">▾</span></button>`
     : `<button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>`;
   const placeholder = imagine ? 'Describe an image to create, or attach one to edit…' : 'Ask anything…';
@@ -1552,6 +1571,7 @@ function renderComposer(){
      ${(!imagine&&S.effortOpen)?renderEffort():''}
      ${(imagine&&S.imgStyleOpen)?renderImgStylePicker():''}
      ${(imagine&&S.imgPickerOpen)?renderImgModelPicker():''}
+     ${(imagine&&S.imgQualityOpen)?renderImgQualityPicker():''}
      <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;

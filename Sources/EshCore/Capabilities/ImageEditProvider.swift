@@ -43,14 +43,16 @@ public struct ImageEditOptions: Sendable {
     public var height: Int?
     public var minFreeMemMB: Int?
     public var hfCache: String?
+    public var maxEditSide: Int?       // working-resolution cap (long side); trades detail for speed + memory
     public init(backend: ImageEditBackend = .flux2Klein, model: String? = nil, baseModel: String? = nil,
                 loraPaths: [String] = [], loraScales: [Double] = [], quantize: Int? = nil, seed: Int? = nil,
                 steps: Int? = nil, guidance: Double? = nil, width: Int? = nil, height: Int? = nil,
-                minFreeMemMB: Int? = nil, hfCache: String? = nil) {
+                minFreeMemMB: Int? = nil, hfCache: String? = nil, maxEditSide: Int? = nil) {
         self.backend = backend; self.model = model; self.baseModel = baseModel
         self.loraPaths = loraPaths; self.loraScales = loraScales; self.quantize = quantize
         self.seed = seed; self.steps = steps; self.guidance = guidance
         self.width = width; self.height = height; self.minFreeMemMB = minFreeMemMB; self.hfCache = hfCache
+        self.maxEditSide = maxEditSide
     }
 }
 
@@ -70,7 +72,8 @@ public struct ImageEditService: Sendable {
                              loraScale: options.loraScales.isEmpty ? nil : options.loraScales,
                              quantize: options.quantize, seed: options.seed, steps: options.steps,
                              guidance: options.guidance, width: options.width, height: options.height,
-                             minFreeMemMB: options.minFreeMemMB, hfCache: options.hfCache),
+                             minFreeMemMB: options.minFreeMemMB, hfCache: options.hfCache,
+                             maxEditSide: options.maxEditSide),
             as: Response.self)
         return ImageEditResult(width: r.width, height: r.height, backend: r.backend, model: r.model,
                                license: r.license, commercial: r.commercial)
@@ -97,6 +100,7 @@ public struct ImageEditService: Sendable {
         let lora: [String]?; let loraScale: [Double]?
         let quantize: Int?; let seed: Int?; let steps: Int?; let guidance: Double?
         let width: Int?; let height: Int?; let minFreeMemMB: Int?; let hfCache: String?
+        let maxEditSide: Int?
     }
     private struct Response: Codable, Sendable {
         let outputPath: String; let width: Int; let height: Int
@@ -193,6 +197,10 @@ public struct ImageEditProvider: CapabilityProvider {
                         adapterID = r.adapterID; adapterModelRepo = r.model; adapterBaseArch = r.baseModel
                     }
 
+                    // Quality vs speed: `maxEditSide` caps the working long side (default 1024). Lower = faster +
+                    // less memory (Fast 768), higher = more detail at more memory/time (Detailed 1536). Clamped to
+                    // a sane range so it can't request a native-resolution run that OOMs.
+                    let maxEditSide = TextToSVGProvider.intOption(req, "maxEditSide").map { max(512, min(2048, $0)) }
                     let options = ImageEditOptions(
                         backend: backend,
                         model: modelPin ?? adapterModelRepo,
@@ -205,7 +213,7 @@ public struct ImageEditProvider: CapabilityProvider {
                         width: TextToSVGProvider.intOption(req, "width"),
                         height: TextToSVGProvider.intOption(req, "height"),
                         minFreeMemMB: TextToSVGProvider.intOption(req, "minFreeMemMB"),
-                        hfCache: hfCache)
+                        hfCache: hfCache, maxEditSide: maxEditSide)
 
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("edit-\(UUID().uuidString).png").path
@@ -223,9 +231,12 @@ public struct ImageEditProvider: CapabilityProvider {
                             if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                         }
                         // Preflight: refuse BEFORE loading the diffusion editor if there still isn't enough RAM.
-                        // Headroom = measured capped-resolution peak + the bridge's 4 GB run-time guard floor, so a
-                        // run that starts won't get killed mid-way (FLUX.2 Klein capped ≈ 12 GB peak → ~16 GB).
-                        let neededGB: Double = { switch backend { case .flux2Klein: return 16; case .kontext: return 18; case .qwenEdit: return 30 } }()
+                        // Baseline headroom = measured 1024-cap peak + the bridge's 4 GB run-time guard floor
+                        // (FLUX.2 Klein ≈ 12 GB peak → ~16 GB), scaled by the chosen resolution since activation
+                        // memory grows with pixel count (Fast 768 needs less, Detailed 1536 more).
+                        let baseNeed: Double = { switch backend { case .flux2Klein: return 16; case .kontext: return 18; case .qwenEdit: return 30 } }()
+                        let sideRatio = Double(maxEditSide ?? 1024) / 1024.0
+                        let neededGB = baseNeed * (0.5 + 0.5 * sideRatio * sideRatio)   // 768→×0.78, 1024→×1.0, 1536→×1.63
                         if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: neededGB, label: "image editing") {
                             throw CapabilityError.failed(reason)
                         }

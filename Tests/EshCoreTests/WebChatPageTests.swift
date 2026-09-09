@@ -593,7 +593,7 @@ struct WebChatPageTests {
         #expect(html.contains("'paste'"))
         // Queue image requests while one is generating (carries the picked model/style).
         #expect(html.contains("async function sendImagine(queued)"))
-        #expect(html.contains("c.queue.push({img:true, text, atts, imgModel, imgStyle})"))
+        #expect(html.contains("c.queue.push({img:true, text, atts, imgModel, imgStyle, imgQuality})"))
         #expect(html.contains("if(item.img){ sendImagine("))
         // Single watermarked before/after export.
         #expect(html.contains("function exportBeforeAfter("))
@@ -603,6 +603,24 @@ struct WebChatPageTests {
         // Mode persists across reload.
         #expect(html.contains("S.prefs.mode='imagine'"))
         #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))
+    }
+
+    // Quality-vs-speed edit control: a composer chip picks the working resolution (maxEditSide) for edits.
+    @Test
+    func imagineEditQualityControl() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function renderImgQualityPicker("))
+        #expect(html.contains("const IMG_QUALITY="))
+        #expect(html.contains("data-act=\"toggleImgQuality\""))
+        #expect(html.contains("data-act=\"pickImgQuality\""))
+        #expect(html.contains("Edit quality"))
+        #expect(html.contains("side:768"))
+        #expect(html.contains("side:1024"))
+        #expect(html.contains("side:1536"))
+        // Flows into the edit request options + persists + travels with the queue.
+        #expect(html.contains("maxEditSide:"))
+        #expect(html.contains("S.prefs.imgQuality=v"))
+        #expect(html.contains("imgModel=S.imgModel; imgStyle=S.imgStyle; imgQuality=S.imgQuality"))
     }
 
     // Engine inspector shows live shared-resource usage (RAM + GPU), fed by /v1/resources and polled while
