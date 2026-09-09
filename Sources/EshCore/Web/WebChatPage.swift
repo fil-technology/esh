@@ -581,9 +581,7 @@ const ACT={
   suggest:(t)=>{ if(!t)return; S.draft=t; S.focusInput=true; render(); },   // fill the composer (user tweaks then sends)
   apply3d:()=>{ apply3DAnimation(); },   // apply the 3d-animation style adapter to the attached image directly
   // Imagine mode: Chat ↔ Imagine switch + the image Model/Style pickers.
-  modeChat:()=>{ S.mode='chat'; S.prefs.mode='chat'; savePrefs(); closeAll(); S.focusInput=true; render(); },
-  modeImagine:()=>{ S.mode='imagine'; S.prefs.mode='imagine'; savePrefs(); closeAll(); ensureImgOpts(); S.focusInput=true; render(); },
-  modeSound:()=>{ S.mode='sound'; S.prefs.mode='sound'; savePrefs(); closeAll(); if(!S.audioModels)refreshAudioModels(); S.focusInput=true; render(); },
+  modeChat:()=>switchMode('chat'), modeImagine:()=>switchMode('imagine'), modeSound:()=>switchMode('sound'),
   soundPick:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); } S.focusInput=true; render(); },
   toggleSoundKind:()=>{ const was=S.soundKindOpen; closeAll(); S.soundKindOpen=!was; if(!S.soundKindOpen)S.focusInput=true; render(); },
   pickSoundKind:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); } closeAll(); S.focusInput=true; render(); },
@@ -1385,6 +1383,15 @@ function renderSuggests(){
 const ICON_INFO='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>';
 const ICON_SPARK='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z"/></svg>';
 const ICON_IMG='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>';
+// Switch the top-bar mode. Each mode's work stays in its own thread: leaving a chat that already has content
+// starts a fresh one (empty chats are reused, so rapid toggling doesn't pile up "New chat" entries).
+function switchMode(m){
+  const same=S.mode===m; S.mode=m; S.prefs.mode=m; savePrefs(); closeAll();
+  if(m==='imagine')ensureImgOpts(); if(m==='sound'&&!S.audioModels)refreshAudioModels();
+  const c=cur();
+  if(!same && c && c.messages && c.messages.length){ newChat(); }   // newChat() renders + focuses
+  else { S.focusInput=true; render(); }
+}
 function renderModeToggle(){
   const opt=(m,label,act)=>`<button class="modeopt ${S.mode===m?'on':''}" data-act="${act}" role="tab" aria-selected="${S.mode===m?'true':'false'}">${label}</button>`;
   return `<div class="modepill" role="tablist" aria-label="Mode">

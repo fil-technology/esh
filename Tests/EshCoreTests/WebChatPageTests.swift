@@ -634,8 +634,10 @@ struct WebChatPageTests {
         #expect(html.contains("CUR=\"esh.current.v1\""))
         #expect(html.contains("localStorage.setItem(CUR,S.current||'')"))
         #expect(html.contains("S.current=(saved&&S.chats[saved])?saved:"))
-        // Mode persists across reload.
-        #expect(html.contains("S.prefs.mode='imagine'"))
+        // Mode persists across reload, and switching mode starts a fresh chat when the current one has content.
+        #expect(html.contains("function switchMode("))
+        #expect(html.contains("S.prefs.mode=m"))
+        #expect(html.contains("if(!same && c && c.messages && c.messages.length){ newChat(); }"))
         #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat'||S.prefs.mode==='sound')S.mode=S.prefs.mode"))
     }
 
