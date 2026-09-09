@@ -33,6 +33,16 @@ Added a RAM-guarded `image-edit-bake` bridge command (wraps `mflux-save --quanti
 - **`mflux-save` does NOT meaningfully quantize the Qwen2.5-VL text encoder (~13 GB floor)**, and baking from an already-quantized snapshot *bloats* the DiT. A proper small snapshot needs baking from the **fp original (40 GB)**, but `mflux-save` **loads the whole model** (the bake hit 14 MB free loading 24.7 GB — no streaming), so it can't run on 32 GB.
 - **Net: option 1 does not rescue 32 GB.** The ~13 GB VL text encoder is a hard mflux floor; base+LoRA (~26 GB) + the unkillable ~5 GB Claude app exceeds the guard's safe ceiling.
 
+## ✅ 32 GB path VALIDATED (option A) — FLUX.2 Klein + 3D LoRA
+The generic LoRA path is now **validated end-to-end on 32 GB** with a commercial-safe combo, and wired as the
+default `3d-animation` adapter:
+- Base **FLUX.2 Klein 4B** (esh's default edit backend, Apache-2.0, ~5 GB peak) + LoRA
+  **`Latentiq/Flux2_Klein_4B_3D2AI_LoRA`** (`Flux_Klein_4B_3D2AI_BF16_R16.safetensors`, 46 MB, **Apache-2.0**).
+- Measured: `image.edit` backend=flux2-klein + `--lora-paths`, 768px, **rc=0, ~131 s**, valid PNG; the LoRA
+  output differs from the no-LoRA Klein edit by ~93/255 per channel (adapter is genuinely applying).
+- Catalog: **`3d-animation` → FLUX.2 Klein path** (validated, 32 GB, commercial-safe). The Qwen path is kept as
+  **`3d-animation-max`** (backend qwen-edit) — SUPPORTED but NOT validated on 32 GB (needs >32 GB; see below).
+
 ## Verdict / recommendation
 - **Default `image.edit` stays FLUX.2 Klein 4B** (Apache-2.0, comfortable on 32 GB). **Qwen-Image-Edit-2511 is a documented opt-in** for machines with headroom — Model Fit reports it tight/unlikely on 32 GB and the base+LoRA needs ~2 GB more free than a fully-loaded 32 GB Mac has.
 - **Generic LoRA/adapter architecture is complete and tested**, ready for any Qwen-Image-Edit adapter (add a catalog entry, no code change).

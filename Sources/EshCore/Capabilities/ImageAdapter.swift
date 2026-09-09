@@ -45,8 +45,21 @@ public enum ImageAdapterCatalog {
     /// the generic LoRA path: a 3D-animation style for Qwen-Image-Edit-2511 (Apache-2.0). Adding a new style
     /// is a data entry here — no code change to the provider/bridge.
     public static let adapters: [String: ImageAdapter] = [
+        // DEFAULT 3D style — VALIDATED on 32 GB, Apache-2.0 (commercial-safe): FLUX.2 Klein 4B (esh's default
+        // edit backend, ~5 GB peak) + a 3D-animation LoRA. Runs end-to-end on a 32 GB Mac.
         "3d-animation": ImageAdapter(
             id: "3d-animation", displayName: "3D animation style",
+            backend: .flux2Klein,
+            baseModelRepo: nil, baseModelArch: nil,   // use the flux2-klein backend's default weights
+            sourceRepo: "Latentiq/Flux2_Klein_4B_3D2AI_LoRA",
+            file: "Flux_Klein_4B_3D2AI_BF16_R16.safetensors", defaultScale: 1.0,
+            license: "apache-2.0", approxSizeMB: 46,
+            upstreamName: "Flux2_Klein_4B_3D2AI_LoRA"),
+        // HIGH-FIDELITY opt-in — SUPPORTED but NOT validated on 32 GB: Qwen-Image-Edit-2511 + its 3D LoRA.
+        // The Qwen VL text encoder anchors the model at ~25-27 GB, so base+LoRA needs a >32 GB Mac (or CI).
+        // See docs/2_1_QWEN_IMAGE_EDIT_LORA_STATUS.md. Both are Apache-2.0.
+        "3d-animation-max": ImageAdapter(
+            id: "3d-animation-max", displayName: "3D animation style (high fidelity — needs >32 GB)",
             backend: .qwenEdit,
             baseModelRepo: "mflux-community/qwen-image-edit-2511-mflux-q4",
             baseModelArch: "qwen-image",

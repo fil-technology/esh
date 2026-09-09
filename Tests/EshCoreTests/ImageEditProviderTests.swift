@@ -83,25 +83,26 @@ struct ImageEditProviderTests {
             #expect(!a.displayName.lowercased().contains("disney"))
         }
         let a = ImageAdapterCatalog.resolve("3d-animation")
-        #expect(a?.backend == .qwenEdit)          // a Qwen-Image-Edit LoRA
+        #expect(a?.backend == .flux2Klein)        // default 3D style: validated on 32GB, commercial-safe
         #expect(a?.license == "apache-2.0")
+        // The high-fidelity variant is the >32GB Qwen path.
+        #expect(ImageAdapterCatalog.resolve("3d-animation-max")?.backend == .qwenEdit)
     }
 
     @Test
     func installedAdapterResolvesToLoRAPathAndBaseModel() async throws {
         let (ctx, dir) = context(); defer { try? FileManager.default.removeItem(at: dir) }
-        let loraPath = try installAdapter("3d-animation", into: ctx)
+        _ = try installAdapter("3d-animation", into: ctx)
+        let expectedFile = try #require(ImageAdapterCatalog.resolve("3d-animation")).file
         let provider = ImageEditProvider(edit: { _, outPath, _, options in
-            #expect(options.backend == .qwenEdit)                  // adapter dictates the base family
+            #expect(options.backend == .flux2Klein)                 // adapter dictates the base family (32GB-fitting)
             #expect(options.loraPaths.count == 1)                   // resolved a local LoRA file
-            #expect(options.loraPaths.first?.hasSuffix("/PI3_20.safetensors") == true)
+            #expect(options.loraPaths.first?.hasSuffix(expectedFile) == true)
             #expect(options.loraScales == [1.0])                    // default scale
-            _ = loraPath
-            #expect(options.model == "mflux-community/qwen-image-edit-2511-mflux-q4")  // adapter's base
-            #expect(options.baseModel == "qwen-image")
+            #expect(options.model == nil)                           // uses the flux2-klein backend default weights
+            #expect(options.baseModel == nil)
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: outPath))
-            return ImageEditResult(width: 512, height: 512, backend: "qwen-edit",
-                                   model: "mflux-community/qwen-image-edit-2511-mflux-q4",
+            return ImageEditResult(width: 512, height: 512, backend: "flux2-klein", model: "flux2-klein-4b",
                                    license: "apache-2.0", commercial: true)
         })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
@@ -156,10 +157,10 @@ struct ImageEditProviderTests {
         let provider = ImageEditProvider(edit: { _, _, _, _ in
             ImageEditResult(width: 1, height: 1, backend: "qwen-edit", model: "m", license: "apache-2.0", commercial: true) })
         let svc = CapabilityExecutionService(registry: CapabilityRegistry(providers: [provider]), context: ctx)
-        // A Qwen LoRA cannot attach to a FLUX base → explicit incompatible backend pin must error.
+        // The 3d-animation adapter is a FLUX.2 Klein LoRA → pinning an incompatible backend (kontext) must error.
         await #expect(throws: CapabilityError.self) {
             _ = try await svc.executeCollecting(imageAndText("stylize",
-                options: ["adapter": .string("3d-animation"), "backend": .string("flux2-klein")]))
+                options: ["adapter": .string("3d-animation"), "backend": .string("kontext")]))
         }
     }
 
