@@ -848,7 +848,12 @@ function renderLog(){
   (c?c.messages:[]).forEach(m=>{ th.appendChild(renderMsg(m)); });
   if(S.streaming&&S.genChatId===S.current){ const d=el('div',{cls:'msg'}); d.innerHTML=`<div class="asst" id="streamwrap">${streamInner()}</div>`; th.appendChild(d); }
   log.appendChild(th);
-  setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
+  const pin=()=>{ log.scrollTop=log.scrollHeight; };
+  setTimeout(pin,0);
+  // Images load after the initial scroll and change the height — re-pin to the newest message when they finish,
+  // but only if the user is still near the bottom (don't yank them down while reading history).
+  setTimeout(()=>{ log.querySelectorAll('img').forEach(im=>{ if(im._sc)return; im._sc=true;
+    im.addEventListener('load',()=>{ if(log.scrollHeight-log.scrollTop-log.clientHeight < 260) pin(); }); }); },0);
   return log;
 }
 // UCMR: render one typed artifact (image/svg inline; other kinds as a download pill). Bytes are fetched
@@ -1434,6 +1439,7 @@ function renderImagineSuggests(){
 }
 function imgPreflight(){
   if(S.capBusy||S.streaming) return '';          // never nag while a generation is already running
+  if(S.draft && S.draft.trim()) return '';       // typing a description → we'll create from it, no nag
   if(!imgNeedsImage()) return '';
   const why = S.imgStyle!=='None'
     ? 'Styles apply when you edit a photo.'
@@ -1518,12 +1524,14 @@ async function sendImagine(queued){
     c.title = text ? text.slice(0,40) : (img ? (styleName||'Photo edit') : 'New image');
   }
   if(!img){
-    // No photo. An edit-only model/style was picked → guide instead of failing. Otherwise create from text.
-    if(imgModel!=='Auto' || imgStyle!=='None'){
-      c.messages.push({id:uid(),role:'assistant',content:'That model edits an existing photo. Attach an image to edit, or switch the model chip to **Auto** to create an image from your description.'});
+    // No photo. With a description, CREATE from text — editing needs a photo, so an edit model/style simply
+    // doesn't apply here (no more confusing refusal). With nothing typed, gently guide.
+    if(!text){
+      if(imgModel!=='Auto' || imgStyle!=='None'){
+        c.messages.push({id:uid(),role:'assistant',content:'Attach a photo to edit it with **'+((imgStyle!=='None'?(imgStyleById(imgStyle)||{}).label:imgModelLabel())||'this model')+'**, or just describe an image and I\'ll create it.'});
+      }
       saveChats(); render(); maybeSendQueue(c.id); return;
     }
-    if(!text){ saveChats(); render(); maybeSendQueue(c.id); return; }
     const request={schemaVersion:'esh.execute.request.v1',capability:'image.generate',
       inputs:[{payload:{text:{_0:text}}}], output:{modality:'image'}};
     saveChats(); await runCapabilityRequest(c, request, 'Creating image…'); maybeSendQueue(c.id); return;
@@ -1590,6 +1598,9 @@ function renderComposer(){
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
   setTimeout(()=>{ const ta=$('#input'); if(ta){ ta.value=S.draft||'';
+     // Grow to fit a programmatically-filled draft (e.g. a suggestion chip) — otherwise a multi-line prompt is
+     // clipped to one line showing only its tail.
+     ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px';
      ta.oninput=()=>{ S.draft=ta.value; ta.style.height='auto'; ta.style.height=Math.min(160,ta.scrollHeight)+'px'; updateSendState(); };
      ta.oncompositionstart=()=>{ S._composing=true; }; ta.oncompositionend=()=>{ S._composing=false; };
      ta.onkeydown=e=>{ if(e.key!=='Enter')return;
