@@ -210,6 +210,7 @@ private struct CapModelArea: Encodable {
     var options: [CapModelOption]
     var fixed: Bool        // true = single built-in backend, not user-selectable
     var note: String?
+    var group: String      // which studio mode this belongs to: "chat" | "imagine" | "sound"
 }
 private struct CapModelsResponse: Encodable {
     var selectable: [CapModelArea]
@@ -226,29 +227,31 @@ extension WebExperienceData {
         func nameFor(_ id: String) -> String {
             installs.first(where: { $0.id == id }).map { $0.spec.displayName.isEmpty ? $0.id : $0.spec.displayName } ?? id
         }
-        func area(_ key: String, _ label: String, _ filter: ModelCapabilityFilter, note: String?) -> CapModelArea {
+        func area(_ key: String, _ label: String, _ filter: ModelCapabilityFilter, note: String?, group: String) -> CapModelArea {
             var opts = [CapModelOption(id: "auto", name: "Auto")]
             for m in installs where m.spec.capabilities.supports(capability: filter) {
                 opts.append(CapModelOption(id: m.id, name: nameFor(m.id)))
             }
             let cur = pins[key].flatMap { $0.isEmpty ? nil : $0 } ?? "auto"
-            return CapModelArea(key: key, label: label, current: cur, options: opts, fixed: false, note: note)
+            return CapModelArea(key: key, label: label, current: cur, options: opts, fixed: false, note: note, group: group)
         }
+        // Grouped by studio mode: Chat (text + vision), Imagine (all visual), Sound (audio — links to Voice).
         let selectable = [
-            area("language.generate", "Chat & reasoning", .chat, note: nil),
-            area("vector.generate", "Vector & SVG (JSON scenes)", .chat,
-                 note: "Auto prefers the most JSON-reliable on-device model (Apple Intelligence when available)."),
+            area("language.generate", "Chat & reasoning", .chat, note: nil, group: "chat"),
             area("image.understand", "Vision — images & video", .imageUnderstanding,
-                 note: "Also used to describe video frames."),
+                 note: "Describes attached images (and video frames) in chat.", group: "chat"),
+            area("vector.generate", "Vector & SVG (JSON scenes)", .chat,
+                 note: "Auto prefers the most JSON-reliable on-device model (Apple Intelligence when available).", group: "imagine"),
         ]
-        func fixedRow(_ label: String, _ model: String) -> CapModelArea {
-            CapModelArea(key: "", label: label, current: model, options: [], fixed: true, note: nil)
+        func fixedRow(_ label: String, _ model: String, group: String) -> CapModelArea {
+            CapModelArea(key: "", label: label, current: model, options: [], fixed: true, note: nil, group: group)
         }
         let fixed = [
-            fixedRow("Image generation", "Z-Image Turbo (mflux)"),
-            fixedRow("Image upscaling", "Real-ESRGAN (ONNX)"),
-            fixedRow("Speaker diarization", "sherpa-onnx"),
-            fixedRow("Text in images (OCR)", "Apple Vision"),
+            fixedRow("Image generation", "Z-Image Turbo (mflux)", group: "imagine"),
+            fixedRow("Image editing", "FLUX.2 Klein 4B (default)", group: "imagine"),
+            fixedRow("Image upscaling", "Real-ESRGAN (ONNX)", group: "imagine"),
+            fixedRow("Text in images (OCR)", "Apple Vision", group: "imagine"),
+            fixedRow("Speaker diarization", "sherpa-onnx", group: "sound"),
         ]
         return CapModelsResponse(selectable: selectable, fixed: fixed)
     }
