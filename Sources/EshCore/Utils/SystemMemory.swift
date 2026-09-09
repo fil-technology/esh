@@ -11,6 +11,26 @@ public struct SystemMemorySnapshot: Sendable {
     }
 }
 
+/// A live snapshot of the machine's shared resources for the Engine inspector's usage meters. RAM is always
+/// present; `gpuUtilizationPercent` is nil when it can't be read (shown as "—", never faked).
+public struct SystemResourcesSnapshot: Codable, Sendable {
+    public let totalMemoryBytes: Int64
+    public let availableMemoryBytes: Int64
+    public let usedMemoryBytes: Int64
+    public let gpuUtilizationPercent: Double?
+
+    public static func current() -> SystemResourcesSnapshot {
+        let mem = SystemMemory.snapshot()
+        let total = mem?.totalBytes ?? Int64(ProcessInfo.processInfo.physicalMemory)
+        let available = mem?.availableBytes ?? 0
+        return SystemResourcesSnapshot(
+            totalMemoryBytes: total,
+            availableMemoryBytes: available,
+            usedMemoryBytes: max(0, total - available),
+            gpuUtilizationPercent: SystemGPU.utilizationPercent())
+    }
+}
+
 public enum SystemMemory {
     public static func snapshot() -> SystemMemorySnapshot? {
         let total = Int64(ProcessInfo.processInfo.physicalMemory)

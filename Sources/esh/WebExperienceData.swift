@@ -33,6 +33,10 @@ enum WebExperienceData {
                 let report = DoctorService().report(root: root, version: toolVersion)
                 return try enc.encode(report)
 
+            case ("GET", "/v1/resources"):
+                // Live shared-resource usage (RAM + GPU) for the Engine inspector's meters. Cheap to poll.
+                return try enc.encode(SystemResourcesSnapshot.current())
+
             case ("GET", "/v1/schedule"):
                 // The real Adaptive Scheduler decision + rationale ("Why this model?"). No policy in JS.
                 let q = request.query

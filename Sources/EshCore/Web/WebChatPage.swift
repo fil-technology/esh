@@ -559,7 +559,7 @@ const ACT={
   togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; if(!S.pickerOpen)S.focusInput=true; render(); },
   toggleEffort:()=>{ const was=S.effortOpen; closeAll(); S.effortOpen=!was; if(!S.effortOpen)S.focusInput=true; render(); },
   pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); S.focusInput=true; render(); },
-  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen)refreshEngine(); else S.focusInput=true; render(); },
+  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen){ refreshEngine(); startResourcePolling(); } else { stopResourcePolling(); S.focusInput=true; } render(); },
   toggleAttach:()=>{ const was=S.attachOpen; closeAll(); S.attachOpen=!was; render(); },
   pickModel:(v)=>{ S.modelSel=v; closeAll(); S.focusInput=true; if(v==='Auto')refreshSchedule(); render(); },
   pickOptimize:(v)=>{ S.optimize=v; S.focusInput=true; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
@@ -1696,6 +1696,7 @@ function renderEngine(){
       <div class="kv"><span class="k">Inference</span><span style="display:flex;align-items:center;gap:6px"><span class="dot"></span>On this Mac</span></div>
       <div class="kv"><span class="k">Apple Intelligence</span><span>${e.appleIntelligence&&e.appleIntelligence.available?'Available':'Unavailable'}</span></div>
     </div>
+    ${liveUsageHTML()}
     <div class="menuhead" style="padding-left:20px">Storage · ${esch(volLabel(st.assetsRoot))}${st.external?' (external)':''}</div>
     <div style="padding:2px 20px 4px">
       <div class="kv" style="margin-bottom:8px"><span class="k">Free</span><span class="mono" style="font-size:12px">${gb(free)} free</span></div>
@@ -1708,6 +1709,39 @@ function renderEngine(){
     </div>
     <div style="padding:12px 20px 16px;display:flex;gap:14px">${engines}</div>`;
   p.innerHTML=h; return p;
+}
+// Live shared-resource meters (RAM + GPU) for the Engine inspector, fed by /v1/resources. Renders with
+// whatever snapshot we have (placeholders when none yet); a poller patches the values in place while open.
+function liveUsageHTML(){
+  const r=S.resources; const GB=1073741824;
+  const usedGB = r?(r.usedMemoryBytes/GB):0, totGB = r?(r.totalMemoryBytes/GB):0;
+  const memPct = (r&&r.totalMemoryBytes)?Math.min(100,r.usedMemoryBytes/r.totalMemoryBytes*100):0;
+  const gv = (!r||r.gpuUtilizationPercent==null)?null:Math.max(0,Math.min(100,r.gpuUtilizationPercent));
+  return `<div class="menuhead" style="padding-left:20px">Live usage</div>
+   <div style="padding:2px 20px 12px;display:flex;flex-direction:column;gap:11px">
+     <div>
+       <div class="kv" style="margin-bottom:6px"><span class="k">Memory</span><span class="mono" data-res="mem" style="font-size:12px">${r?(usedGB.toFixed(1)+' / '+totGB.toFixed(0)+' GB'):'…'}</span></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="membar" style="width:${memPct.toFixed(1)}%;height:100%;background:${memPct>85?'var(--amber)':'var(--ink)'};transition:width .4s ease"></div></div>
+     </div>
+     <div>
+       <div class="kv" style="margin-bottom:6px"><span class="k">GPU</span><span class="mono" data-res="gpu" style="font-size:12px">${gv==null?'—':(gv.toFixed(0)+'%')}</span></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="gpubar" style="width:${gv==null?0:gv.toFixed(1)}%;height:100%;background:var(--ink);transition:width .4s ease"></div></div>
+     </div>
+   </div>`;
+}
+let _resTimer=null;
+function startResourcePolling(){ stopResourcePolling(); refreshResources(); _resTimer=setInterval(refreshResources, 1500); }
+function stopResourcePolling(){ if(_resTimer){ clearInterval(_resTimer); _resTimer=null; } }
+async function refreshResources(){ if(!S.engineOpen){ stopResourcePolling(); return; } try{ const r=await api('/v1/resources'); if(r){ S.resources=r; patchResourceMeters(); } }catch(e){} }
+function patchResourceMeters(){ const r=S.resources; if(!r)return; const GB=1073741824;
+  const mem=document.querySelector('[data-res="mem"]'), membar=document.querySelector('[data-res="membar"]');
+  const gpu=document.querySelector('[data-res="gpu"]'), gpubar=document.querySelector('[data-res="gpubar"]');
+  if(mem) mem.textContent=(r.usedMemoryBytes/GB).toFixed(1)+' / '+(r.totalMemoryBytes/GB).toFixed(0)+' GB';
+  const mp=r.totalMemoryBytes?Math.min(100,r.usedMemoryBytes/r.totalMemoryBytes*100):0;
+  if(membar){ membar.style.width=mp.toFixed(1)+'%'; membar.style.background=mp>85?'var(--amber)':'var(--ink)'; }
+  const gv=(r.gpuUtilizationPercent==null)?null:Math.max(0,Math.min(100,r.gpuUtilizationPercent));
+  if(gpu) gpu.textContent=(gv==null?'—':gv.toFixed(0)+'%');
+  if(gpubar) gpubar.style.width=(gv==null?0:gv.toFixed(1))+'%';
 }
 function renderExec(){
   const m=cur()?cur().messages.find(x=>x.id===S.execMsgId):null;

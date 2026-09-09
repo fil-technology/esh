@@ -605,6 +605,25 @@ struct WebChatPageTests {
         #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))
     }
 
+    // Engine inspector shows live shared-resource usage (RAM + GPU), fed by /v1/resources and polled while
+    // the panel is open; the Imagine status line reflects the image pipeline, never a warm chat model.
+    @Test
+    func engineShowsLiveResourceUsage() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function liveUsageHTML("))
+        #expect(html.contains("Live usage"))
+        #expect(html.contains("data-res=\"mem\""))
+        #expect(html.contains("data-res=\"membar\""))
+        #expect(html.contains("data-res=\"gpu\""))
+        #expect(html.contains("data-res=\"gpubar\""))
+        #expect(html.contains("'/v1/resources'"))
+        #expect(html.contains("function startResourcePolling("))
+        #expect(html.contains("function patchResourceMeters("))
+        // Imagine status line is image-pipeline, not the chat LLM.
+        #expect(html.contains("Local · Image studio · generating"))
+        #expect(html.contains("if(S.mode==='imagine'){"))
+    }
+
     // UCMR Stage 3: a plain image-generation request routes to image.generate (no manual runtime pick),
     // shows generation progress, renders the artifact, and exposes "Why this execution plan?".
     @Test
