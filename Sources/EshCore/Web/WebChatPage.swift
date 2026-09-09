@@ -1172,6 +1172,27 @@ async function runCapabilityRequest(c, request, label){
   S.capBusy=false; S.capController=null; saveChats(); render();
 }
 function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segment':'Remove background','image.generate':'Generate image','image.edit':'Edit image','image.understand':'Understand image','image.ocr':'Read text (OCR)','vector.generate':'Generate SVG','webArtifact.generate':'Generate web page','video.understand':'Understand video','audio.diarize':'Diarize speakers'})[id]||id; }
+// A failure that means "the optional local engine for this feature isn't installed", not "the model broke".
+// Chat, Speech and Transcribe work out of the box; Imagine, Sound FX, Music (and a few image tools) run on
+// optional engines that need a one-time command-line setup. When the bridge reports one missing, we turn its
+// raw "pip install …"/"run the setup script" text into an honest, non-technical card that names the feature
+// and points to `esh doctor` (which prints the exact setup for this Mac) — never a fake one-click fix.
+function setupHint(raw){
+  const s=String(raw||'');
+  if(/\bmflux\b.*(not available|not installed)|mflux edit backend/i.test(s))
+    return {feature:'Image generation & editing', engine:'the image engine (mflux)'};
+  if(/AudioGen SFX runtime is not installed|setup-audio-runtime/i.test(s))
+    return {feature:'Sound effects', engine:'the sound-effects engine (AudioGen)'};
+  if(/backend unavailable \(transformers\/torch\)|\(transformers\/torch\)/i.test(s))
+    return {feature:'Music generation', engine:'the music engine (MusicGen)'};
+  if(/\brembg\b.*not available/i.test(s))
+    return {feature:'Background removal', engine:'the background-removal engine (rembg)'};
+  if(/onnxruntime\/Pillow not available/i.test(s))
+    return {feature:'Image upscaling', engine:'the upscaling engine (Real-ESRGAN)'};
+  if(/sherpa-onnx is not available/i.test(s))
+    return {feature:'Speaker labelling', engine:'the diarization engine (sherpa-onnx)'};
+  return null;
+}
 // Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
 async function handleRoute(c, text, atts){
   let dec; try{ dec=await routeCapability(text, atts, c.id); }catch(e){ return false; }  // route failure → fall back to chat
@@ -1235,9 +1256,20 @@ function renderMsg(m){
     const body=(a?`<div class="attwrap">${a}</div>`:'')+cap+(m.content?md(m.content):'');
     d.innerHTML=`<div class="userrow"><div class="userbubble">${body}</div></div>`; return d; }
   if(m.isError){
+    const raw=(m.detail||'');
+    // Runtime-not-installed → an honest "optional engine needs setup" card, not a scary failure. This is the
+    // expected state on a fresh install for Imagine / Sound FX / Music (Chat, Speech, Transcribe work as-is).
+    const hint=setupHint(raw);
+    if(hint){
+      d.innerHTML=`<div class="errcard" style="border-color:var(--line2)"><div class="t">${esch(hint.feature)} needs a one-time setup</div>
+        <div class="d" style="margin-top:6px">This runs on ${esch(hint.engine)}, an optional local engine that isn’t part of this build. It takes one command-line setup to enable — run <span class="mono" style="font-size:12px">esh doctor</span> in Terminal for the exact steps for this Mac. Everything still runs on-device.</div>
+        <div class="d" style="font-size:12px;color:var(--muted);margin-top:6px">Chat, Speech and Transcribe work without any setup.</div>
+        <details class="reason" style="margin-top:8px"><summary>Show details</summary><div class="rc mono" style="font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto">${esch(raw)}</div></details></div>`;
+      return d;
+    }
     // Long/technical details (e.g. a Python traceback) are collapsed behind "Show details" so the card
     // stays readable; a short human summary shows by default.
-    const raw=(m.detail||''); const longErr=raw.length>180||raw.indexOf('Traceback')>=0;
+    const longErr=raw.length>180||raw.indexOf('Traceback')>=0;
     const summary=longErr?(raw.indexOf('Traceback')>=0?'The local model couldn’t complete this request.':(raw.slice(0,160)+'…')):raw;
     const detailBlock=longErr
       ? `<div class="d">${esch(summary)}</div><details class="reason" style="margin-top:6px"><summary>Show details</summary><div class="rc mono" style="font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto">${esch(raw)}</div></details>`
@@ -2292,9 +2324,15 @@ function renderOnboarding(){
         ${eng.filter(x=>x.ready).map(x=>`<div style="display:flex;gap:9px;align-items:center"><span style="color:var(--ink)">✓</span>${esch(x.id)} ready</div>`).join('')}
         ${(S.engine&&S.engine.storage&&S.engine.storage.external)?`<div style="display:flex;gap:9px;align-items:center"><span style="color:var(--ink)">✓</span>${esch(S.engine.storage.label||'External SSD')} detected</div>`:''}</div>
       <button class="btn" style="margin-top:24px" onclick="S.onbStep=2;render()">Continue</button></div>`; }
-  else { v.innerHTML=`<div style="width:380px"><div style="font-size:17px;font-weight:600;margin-bottom:16px">You're ready</div>
-      <div style="font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:18px">Apple Intelligence gives you a zero-download start. Browse and install local models any time from the model picker.</div>
-      <button class="btn" onclick="S.prefs.onboarded=true;savePrefs();S.view='chat';S.onbStep=0;S.focusInput=true;render()">Start chatting</button></div>`; }
+  else { const apple2=e&&e.appleIntelligence&&e.appleIntelligence.available;
+    // Only Apple Intelligence gives a true zero-download start. Without it, esh still works — the user just
+    // installs one local chat model first — so don't promise a download-free start we can't deliver.
+    const ready = apple2
+      ? `Apple Intelligence gives you a zero-download start. Browse and install local models any time from the model picker.`
+      : `Install one local chat model from the model picker to begin — it’s a one-time download, then everything runs on this Mac.`;
+    v.innerHTML=`<div style="width:380px"><div style="font-size:17px;font-weight:600;margin-bottom:16px">${apple2?"You're ready":'One quick step'}</div>
+      <div style="font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:18px">${ready}</div>
+      <button class="btn" onclick="S.prefs.onboarded=true;savePrefs();S.view='chat';S.onbStep=0;S.focusInput=true;render()">${apple2?'Start chatting':'Open the model picker'}</button></div>`; }
   return v;
 }
 

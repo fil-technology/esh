@@ -464,6 +464,40 @@ struct WebChatPageTests {
         #expect(html.contains("isError:true, model:shortModel(resolved||S.modelSel), lastUser:text"))
     }
 
+    // Release readiness: onboarding's final step must NOT promise a zero-download start unless Apple
+    // Intelligence is actually available — otherwise a fresh install on a Mac without it overpromises.
+    @Test
+    func onboardingZeroDownloadCopyIsConditionalOnAppleIntelligence() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Gated on the actual availability flag.
+        #expect(html.contains("const apple2=e&&e.appleIntelligence&&e.appleIntelligence.available"))
+        // The zero-download promise still exists (for the apple-available branch).
+        #expect(html.contains("Apple Intelligence gives you a zero-download start"))
+        // The no-Apple-Intelligence branch guides to installing one local model instead of claiming ready.
+        #expect(html.contains("Install one local chat model from the model picker to begin"))
+        #expect(html.contains("Open the model picker"))
+    }
+
+    // Release readiness: a "runtime not installed" failure (Imagine/Sound FX/Music on a fresh install) must
+    // render as an honest "optional engine needs a one-time setup" card, not a raw pip/traceback error.
+    @Test
+    func runtimeNotInstalledRendersAsAnHonestSetupCard() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function setupHint(raw)"))
+        // Recognizes each optional engine's missing-runtime signature.
+        #expect(html.contains("mflux edit backend"))
+        #expect(html.contains("setup-audio-runtime"))
+        #expect(html.contains("transformers\\/torch"))
+        #expect(html.contains("rembg"))
+        #expect(html.contains("onnxruntime\\/Pillow not available"))
+        // The card names the feature + points to `esh doctor`, keeps raw detail collapsible, and reassures
+        // that the out-of-the-box set still works.
+        #expect(html.contains("needs a one-time setup"))
+        #expect(html.contains("esh doctor"))
+        #expect(html.contains("Chat, Speech and Transcribe work without any setup."))
+        #expect(html.contains("const hint=setupHint(raw);"))
+    }
+
     // Soak (rc.5): a sent audio clip shows a "Transcribing…" indicator, then its
     // transcription as a caption (not as text the user typed); the model still
     // receives the transcript.
