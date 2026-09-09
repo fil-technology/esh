@@ -1485,6 +1485,27 @@ def image_edit() -> None:
                 "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
 
 
+def image_adapter_install() -> None:
+    """Install (download) a single image-edit LoRA/adapter file into the image-models HF cache. Adapters are
+    small (hundreds of MB) and don't load a model, so this is a plain resumable HF download — no RAM guard.
+    Reads {sourceRepo, file, hfCache?, revision?}. Returns {installed, path, sizeMB}."""
+    import os
+    request = _load_json()
+    repo = request["sourceRepo"]
+    fname = request["file"]
+    _route_hf_cache(request.get("hfCache"))
+    try:
+        from huggingface_hub import hf_hub_download
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"huggingface_hub unavailable: {type(exc).__name__}: {exc}")
+    try:
+        path = hf_hub_download(repo, fname, revision=request.get("revision"))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"adapter download failed ({repo}/{fname}): {type(exc).__name__}: {exc}")
+    _dump_json({"installed": True, "path": path,
+                "sizeMB": round(os.path.getsize(path) / 1_000_000, 1) if os.path.exists(path) else None})
+
+
 def _run_guarded_save_cli(cmd: list, out_dir: str, min_free: float, label: str) -> None:
     """Run a non-image mflux CLI (e.g. mflux-save) as a killable, RAM-guarded process group — same memory
     protection as _run_guarded_image_cli, but the artifact is a directory (a saved model) rather than an
@@ -2079,6 +2100,7 @@ def main() -> None:
             "image-generate",
             "image-edit",
             "image-edit-bake",
+            "image-adapter-install",
             "image-upscale",
             "image-upscale-onnx",
             "audio-generate",
@@ -2117,6 +2139,8 @@ def main() -> None:
         image_edit()
     elif args.command == "image-edit-bake":
         image_edit_bake()
+    elif args.command == "image-adapter-install":
+        image_adapter_install()
     elif args.command == "image-upscale":
         image_upscale()
     elif args.command == "image-upscale-onnx":

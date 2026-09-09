@@ -83,6 +83,13 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 // Discovery for the web pickers: edit backends + installed style adapters, each with this
                 // Mac's honest fit + license/commercial badges.
                 return try jsonResponse(statusCode: 200, payload: service.imageEditOptions())
+            case ("POST", "/v1/capability/image-edit/adapters/install"):
+                // Install-and-resume for style adapters: download the LoRA, then the caller re-runs the edit.
+                struct InstallReq: Decodable { let id: String }
+                struct InstallResp: Encodable { let id: String; let installed: Bool }
+                let req = try JSONCoding.decoder.decode(InstallReq.self, from: request.body)
+                let installed = try await service.installImageAdapter(id: req.id)
+                return try jsonResponse(statusCode: 200, payload: InstallResp(id: req.id, installed: installed))
             case ("POST", "/v1/audio/speech"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIAudioSpeechRequest.self, from: request.body)
                 let response = try await service.audioSpeech(decoded)

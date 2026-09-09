@@ -955,7 +955,12 @@ async function handleRoute(c, text, atts){
 async function installAndResume(card, msg){
   msg.installCard.installing=true; saveChats(); render();
   try{
-    if((card.kind||'model')==='asset'){
+    if(card.kind==='adapter'){
+      // Download the small style-adapter LoRA, then resume the stored edit (image + adapter baked into it).
+      const r=await fetch('/v1/capability/image-edit/adapters/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:card.adapterId})});
+      if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error((e.error&&e.error.message)||('install failed ('+r.status+')')); }
+      await runCapabilityRequest(cur(), card.request, card.label||'Applying style…');
+    } else if((card.kind||'model')==='asset'){
       // The provider's bridge fetches the component on first execution (explicit here, not silent).
       await runCapabilityRequest(cur(), card.request, (friendlyCap(card.cap)+'…'));
     } else {
@@ -1082,7 +1087,7 @@ function renderMiniPlayer(){
 // Directly apply the installed "3d-animation" style adapter to the attached image (interim shortcut before
 // the full adapter-picker UI). Builds an image.edit request with options.adapter and runs it. If the adapter
 // isn't installed, the typed provider error surfaces in the message.
-function apply3DAnimation(){
+async function apply3DAnimation(){
   const imgAtt=(S.pendingAtts||[]).find(x=>x && x.kind==='image');
   if(!imgAtt) return;
   const c=cur()||(newChat(),cur());
@@ -1092,6 +1097,16 @@ function apply3DAnimation(){
     output:{modality:'image'},
     options:{values:{adapter:'3d-animation'}}};
   S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
+  // Install-and-resume: if the adapter isn't installed, show an install card that downloads it, then resumes
+  // this exact edit (the image is already baked into `request`, so the user never re-attaches or re-types).
+  let adapter=null;
+  try{ const r=await fetch('/v1/capability/image-edit/options'); if(r.ok){ const o=await r.json(); adapter=(o.adapters||[]).find(a=>a.id==='3d-animation'); } }catch(e){}
+  if(adapter && adapter.installed===false){
+    c.messages.push({id:uid(), role:'assistant', installCard:{
+      kind:'adapter', adapterId:'3d-animation', cap:'image.edit',
+      name:(adapter.label||'3D animation style'), sizeMB:adapter.approxSizeMB, request, label:'Applying 3D animation…'}});
+    saveChats(); render(); return;
+  }
   runCapabilityRequest(c, request, 'Applying 3D animation…');
 }
 // Suggested-prompt starters above the composer. Shown only on a fresh/empty chat, and CAPABILITY-AWARE:

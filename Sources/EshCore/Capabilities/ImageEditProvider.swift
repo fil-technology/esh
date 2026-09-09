@@ -76,6 +76,21 @@ public struct ImageEditService: Sendable {
                                license: r.license, commercial: r.commercial)
     }
 
+    /// Install (download) a style adapter's LoRA into the image-models HF cache. Idempotent — returns true
+    /// immediately when already present. Small file (hundreds of MB), plain HF download (no RAM guard).
+    @discardableResult
+    public func installAdapter(id: String, hfCache: String) throws -> Bool {
+        guard let adapter = ImageAdapterCatalog.resolve(id) else {
+            throw CapabilityError.failed("unknown image adapter '\(id)'")
+        }
+        if ImageAdapterCatalog.isInstalled(adapter, hfCacheRoot: hfCache) { return true }
+        let r: InstallResponse = try bridge.run(
+            command: "image-adapter-install",
+            request: InstallRequest(sourceRepo: adapter.sourceRepo, file: adapter.file, hfCache: hfCache),
+            as: InstallResponse.self)
+        return r.installed
+    }
+
     private struct Request: Codable, Sendable {
         let imagePath: String; let outputPath: String; let instruction: String; let backend: String
         let model: String?; let baseModel: String?
@@ -87,6 +102,8 @@ public struct ImageEditService: Sendable {
         let outputPath: String; let width: Int; let height: Int
         let backend: String; let model: String; let license: String; let commercial: Bool
     }
+    private struct InstallRequest: Codable, Sendable { let sourceRepo: String; let file: String; let hfCache: String }
+    private struct InstallResponse: Codable, Sendable { let installed: Bool }
 }
 
 public struct ImageEditProvider: CapabilityProvider {
