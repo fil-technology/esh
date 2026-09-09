@@ -453,19 +453,43 @@ struct WebChatPageTests {
         #expect(html.contains("function updateMiniProgress("))
         // It's rendered as part of the composer (suggestion chips + any Imagine preflight sit between it and
         // the input box; Chat mode falls back to renderSuggests with no preflight).
-        #expect(html.contains("${renderMiniPlayer()}${imagine?renderImagineSuggests():renderSuggests()}${imagine?imgPreflight():''}<div class=\"cbox\">"))
+        #expect(html.contains("${renderMiniPlayer()}${suggestsHTML}${preflightHTML}<div class=\"cbox\">"))
     }
 
-    // Chat/Imagine mode switcher: a top-bar pill flips the same view between the chat composer and a
-    // local image studio that maps onto the REAL runtime — create via image.generate, edit via image.edit
-    // with an optional neutral style adapter, model/style fed by the discovery endpoint.
+    // Sound mode: a third studio for audio — SFX (audio.generate), Music (music.generate), Speech (TTS),
+    // and Transcribe (STT) — mapped onto the existing runtimes, with inline audio playback.
+    @Test
+    func soundModeStudio() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("opt('sound','Sound','modeSound')"))
+        #expect(html.contains("modeSound:()=>"))
+        #expect(html.contains("const SOUND_KINDS="))
+        #expect(html.contains("function renderSoundEmpty("))
+        #expect(html.contains("What should we hear?"))
+        #expect(html.contains("function sendSound("))
+        #expect(html.contains("function renderSoundKindPicker("))
+        #expect(html.contains("data-act=\"pickSoundKind\""))
+        #expect(html.contains("data-act=\"toggleSoundVoice\""))
+        // Each kind maps to a real runtime.
+        #expect(html.contains("cap:'audio.generate'"))
+        #expect(html.contains("cap:'music.generate'"))
+        #expect(html.contains("cap:'audio.transcribe'"))
+        #expect(html.contains("await speakBlob(text)"))           // Speech via TTS
+        #expect(html.contains("await transcribeAtts(atts)"))      // Transcribe via STT
+        // Send routing + persistence.
+        #expect(html.contains("if(!queued && S.mode==='sound'){ return sendSound(); }"))
+        #expect(html.contains("S.prefs.soundKind=k"))
+        #expect(html.contains("Local · Sound · "))
+    }
+
     @Test
     func chatImagineModeSwitcher() {
         let html = WebChatPage.html(toolVersion: nil)
-        // Top-bar toggle.
+        // Top-bar toggle (three-way pill built by opt()).
         #expect(html.contains("function renderModeToggle("))
-        #expect(html.contains("data-act=\"modeChat\""))
-        #expect(html.contains("data-act=\"modeImagine\""))
+        #expect(html.contains("opt('chat','Chat','modeChat')"))
+        #expect(html.contains("opt('imagine','Imagine','modeImagine')"))
+        #expect(html.contains("opt('sound','Sound','modeSound')"))
         #expect(html.contains("class=\"modepill\""))
         #expect(html.contains("mode:'chat'"))                                  // default mode
         // Imagine empty state + entry actions + honest active-model line.
@@ -612,7 +636,7 @@ struct WebChatPageTests {
         #expect(html.contains("S.current=(saved&&S.chats[saved])?saved:"))
         // Mode persists across reload.
         #expect(html.contains("S.prefs.mode='imagine'"))
-        #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))
+        #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat'||S.prefs.mode==='sound')S.mode=S.prefs.mode"))
     }
 
     // Quality-vs-speed edit control: a composer chip picks the working resolution (maxEditSide) for edits.
