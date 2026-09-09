@@ -217,6 +217,10 @@ public enum WebChatPage {
   .send{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; flex-shrink:0; border:none; }
   /* In-composer controls: model chip + effort chip + divider before mic/send (progressive disclosure lives here) */
   .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(32,30,27,.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(32,30,27,.05); }
+  /* Suggested-prompt starter chips above the composer (new/empty chat; capability-aware) */
+  .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; }
+  .schip{ font-size:12px; color:rgba(32,30,27,.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(32,30,27,.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+  .schip:hover{ background:rgba(32,30,27,.06); color:var(--ink); }
   .cchip:hover{ background:rgba(32,30,27,.09); }
   .cchip .chev{ font-size:8px; color:var(--faint); }
   .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(32,30,27,.05); }
@@ -526,6 +530,7 @@ const ACT={
   removeQueued:(i)=>{ const c=cur(); if(c&&c.queue)c.queue.splice(+i,1); S.focusInput=true; render(); },
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
+  suggest:(t)=>{ if(!t)return; S.draft=t; S.focusInput=true; render(); },   // fill the composer (user tweaks then sends)
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ if(S.renaming)return; S.current=id; render(); },
   renameChat:(id)=>{ S.chatMenu=null; startRename('chat',id); },
@@ -1070,11 +1075,33 @@ function renderMiniPlayer(){
      <span class="mptime mono" id="mptime">0:00</span>
      <button class="mpbtn" data-act="speakStop" title="Stop">${ICON.xmark}</button></div>`;
 }
+// Suggested-prompt starters above the composer. Shown only on a fresh/empty chat, and CAPABILITY-AWARE:
+// with an image attached we suggest EDITS (an image is required to edit); otherwise generation + general
+// starters. Clicking fills the composer (does not auto-send) so the user can tweak before sending.
+function renderSuggests(){
+  const c=cur();
+  if(c && c.messages && c.messages.length) return '';         // only on an empty chat
+  if(S.streaming || S.capBusy) return '';
+  const hasImg = (S.pendingAtts||[]).some(x=>x && x.kind==='image');
+  const list = hasImg ? [
+    'Make this a polished 3D animated character',
+    'Change the background to a snowy mountain',
+    'Turn this into a watercolor painting',
+    'Remove the background',
+  ] : [
+    'Generate an image of a red sports car at sunset',
+    'Create a Three.js scene of a rotating globe',
+    'Write a haiku about the sea',
+    'Summarize a document I paste',
+  ];
+  const chips = list.map(t=>`<button class="schip" data-act="suggest" data-arg="${escAttr(t)}" title="${escAttr(t)}">${esch(t)}</button>`).join('');
+  return `<div class="suggests" aria-label="Suggested prompts">${chips}</div>`;
+}
 function renderComposer(){
   const c=el('div',{cls:'composer'});
   const si=statusInfo();
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
-  c.innerHTML=`${renderMiniPlayer()}<div class="cbox">
+  c.innerHTML=`${renderMiniPlayer()}${renderSuggests()}<div class="cbox">
      ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
      ${(cur()&&cur().queue&&cur().queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}

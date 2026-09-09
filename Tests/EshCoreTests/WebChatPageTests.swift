@@ -451,8 +451,20 @@ struct WebChatPageTests {
         #expect(html.contains("data-act=\"speakStop\""))
         #expect(html.contains("id=\"mpfill\""))
         #expect(html.contains("function updateMiniProgress("))
-        // It's rendered as part of the composer.
-        #expect(html.contains("${renderMiniPlayer()}<div class=\"cbox\">"))
+        // It's rendered as part of the composer (suggestion chips sit between it and the input box).
+        #expect(html.contains("${renderMiniPlayer()}${renderSuggests()}<div class=\"cbox\">"))
+    }
+
+    @Test
+    func composerHasCapabilityAwareSuggestedPrompts() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function renderSuggests()"))
+        #expect(html.contains("class=\"suggests\""))
+        #expect(html.contains("data-act=\"suggest\""))
+        #expect(html.contains("suggest:(t)=>"))                              // fills the composer (no auto-send)
+        #expect(html.contains("Generate an image of a red sports car"))     // generate/general starter (no image)
+        #expect(html.contains("Make this a polished 3D animated character")) // edit starter (image attached)
+        #expect(html.contains("x.kind==='image'"))                          // capability-aware: image → edit prompts
     }
 
     // Soak: assistant replies stored before the runaway fix (or from a gated/mismatched model) can
