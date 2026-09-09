@@ -495,7 +495,7 @@ struct WebChatPageTests {
         #expect(html.contains("capability:'image.generate'"))
         #expect(html.contains("if(!queued && S.mode==='imagine'){ return sendImagine(); }"))
         // A selected style pins its own base model, and an uninstalled style installs-and-resumes.
-        #expect(html.contains("if(v!=='None')S.imgModel='Auto'"))
+        #expect(html.contains("if(v!=='None'){ S.imgModel='Auto'"))
         #expect(html.contains("kind:'adapter'"))
         // Neutral-naming guarantee carries into the style picker footer.
         #expect(html.contains("Names are neutral by design"))
@@ -565,7 +565,44 @@ struct WebChatPageTests {
         #expect(html.contains("'/v1/execute'"))
         // Wired into the assistant message renderer.
         #expect(html.contains("m.artifacts && m.artifacts.length"))
-        #expect(html.contains("class=\"astimg\""))
+        #expect(html.contains("class=\"astimg zoomable\""))
+    }
+
+    // Imagine polish: live elapsed clock on generations, tap-to-zoom lightbox (pan/pinch), drag-drop + paste
+    // attach, queue image requests while one runs, and a single watermarked before/after export.
+    @Test
+    func imagineStudioPolish() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Elapsed clock (ticks while running, freezes when done).
+        #expect(html.contains("function genClockHTML("))
+        #expect(html.contains("function tickGenClocks("))
+        #expect(html.contains("class=\"gpclock mono\""))
+        #expect(html.contains("genStart:Date.now()"))
+        #expect(html.contains("msg.genEnd=Date.now()"))
+        // Lightbox with zoom + pan.
+        #expect(html.contains("function openLightbox("))
+        #expect(html.contains("function wireZoomable("))
+        #expect(html.contains("ov.className='lbx'"))
+        #expect(html.contains("class=\"lbx-stage\""))
+        #expect(html.contains("img.zoomable"))
+        #expect(html.contains("Scroll or pinch to zoom"))
+        // Drag-and-drop + paste to attach.
+        #expect(html.contains("function wireGlobalDrop("))
+        #expect(html.contains("addFilesList(e.dataTransfer.files)"))
+        #expect(html.contains("body.dropping::after"))
+        #expect(html.contains("'paste'"))
+        // Queue image requests while one is generating (carries the picked model/style).
+        #expect(html.contains("async function sendImagine(queued)"))
+        #expect(html.contains("c.queue.push({img:true, text, atts, imgModel, imgStyle})"))
+        #expect(html.contains("if(item.img){ sendImagine("))
+        // Single watermarked before/after export.
+        #expect(html.contains("function exportBeforeAfter("))
+        #expect(html.contains("data-act=\"exportBeforeAfter\""))
+        #expect(html.contains("esh-before-after.png"))
+        #expect(html.contains("edited on-device"))
+        // Mode persists across reload.
+        #expect(html.contains("S.prefs.mode='imagine'"))
+        #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))
     }
 
     // UCMR Stage 3: a plain image-generation request routes to image.generate (no manual runtime pick),

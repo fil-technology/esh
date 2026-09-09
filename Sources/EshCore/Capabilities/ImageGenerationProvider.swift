@@ -83,6 +83,13 @@ public struct ImageGenerationProvider: CapabilityProvider {
                     let outPath = context.root.tempURL.appendingPathComponent("gen-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
 
+                    // Free RAM held by warm chat/LLM runtimes before spawning the ~8 GB diffusion model, so
+                    // the Python RAM guard doesn't refuse the run for low memory on a 32 GB Mac. The image
+                    // model isn't in this pool (it's a subprocess CLI), so this only drops idle LLM/speech.
+                    if let lifecycle = context.lifecycle {
+                        let evicted = await lifecycle.reclaimForHeavyTask()
+                        if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
+                    }
                     cont.yield(.status("generating image"))
                     let size = try generate(prompt, outPath, steps, seed, width, height, quantize, minFreeMemMB, hfCache)
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))

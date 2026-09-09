@@ -56,6 +56,22 @@ struct RuntimeLifecycleManagerTests {
     }
 
     @Test
+    func reclaimForHeavyTaskEvictsWarmButKeepsActive() async throws {
+        // Before a heavy image run, warm (idle) chat models are evicted to free RAM; a model still serving
+        // an active request is kept. This is what lets FLUX/Z-Image fit on a 32 GB Mac beside a warm LLM.
+        let mgr = RuntimeLifecycleManager(loader: { MockRuntime(modelID: $0.id) })
+        _ = try await mgr.acquire(install: install("warm"))
+        await mgr.release(modelID: "warm")                     // now warm/idle
+        _ = try await mgr.acquire(install: install("active"))  // held (not released) → active
+        let evicted = await mgr.reclaimForHeavyTask()
+        #expect(evicted.contains("warm"))
+        #expect(!evicted.contains("active"))
+        #expect(await mgr.residentModelIDs().contains("active"))
+        #expect(!(await mgr.residentModelIDs().contains("warm")))
+        await mgr.release(modelID: "active")
+    }
+
+    @Test
     func idleEvictionKeepsFreshModels() async throws {
         let mgr = RuntimeLifecycleManager(config: .init(idleTimeoutSeconds: 60), loader: { MockRuntime(modelID: $0.id) },
                                           clock: { Date(timeIntervalSince1970: 1_000_000) })

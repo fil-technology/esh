@@ -206,6 +206,14 @@ public struct ImageEditProvider: CapabilityProvider {
                     let outPath = context.root.tempURL.appendingPathComponent("edit-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
 
+                    // Free RAM held by warm chat/LLM runtimes before spawning the diffusion editor (FLUX.2
+                    // Klein ~8.6 GB peak), so the Python RAM guard doesn't refuse the run for low memory on a
+                    // 32 GB Mac. The image model isn't in this pool (subprocess CLI) — this only drops idle
+                    // LLM/speech, which the edit doesn't need.
+                    if let lifecycle = context.lifecycle {
+                        let evicted = await lifecycle.reclaimForHeavyTask()
+                        if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
+                    }
                     cont.yield(.status("editing image (\(backend.rawValue)\(adapterID.map { " + " + $0 } ?? ""))"))
                     let r = try edit(inPath, outPath, instruction, options)
                     if Task.isCancelled { throw CancellationError() }
