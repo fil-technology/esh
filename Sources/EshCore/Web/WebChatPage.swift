@@ -582,7 +582,10 @@ const ACT={
   apply3d:()=>{ apply3DAnimation(); },   // apply the 3d-animation style adapter to the attached image directly
   // Imagine mode: Chat ↔ Imagine switch + the image Model/Style pickers.
   modeChat:()=>switchMode('chat'), modeImagine:()=>switchMode('imagine'), modeSound:()=>switchMode('sound'),
-  soundPick:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); } S.focusInput=true; render(); },
+  soundPick:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); }
+    // Transcribe needs an audio file → open the picker; the others just focus the composer to type.
+    if(k==='transcribe'){ render(); const fp=document.getElementById('filepick'); if(fp)fp.click(); return; }
+    S.focusInput=true; render(); },
   toggleSoundKind:()=>{ const was=S.soundKindOpen; closeAll(); S.soundKindOpen=!was; if(!S.soundKindOpen)S.focusInput=true; render(); },
   pickSoundKind:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); } closeAll(); S.focusInput=true; render(); },
   toggleSoundVoice:()=>{ const was=S.soundVoiceOpen; closeAll(); S.soundVoiceOpen=!was; if(!S.soundVoiceOpen)S.focusInput=true; render(); },
