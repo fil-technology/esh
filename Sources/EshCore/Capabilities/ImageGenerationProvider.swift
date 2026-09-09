@@ -92,6 +92,11 @@ public struct ImageGenerationProvider: CapabilityProvider {
                         let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
                         if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                     }
+                    // Preflight: refuse BEFORE loading the ~8 GB model if there still isn't enough RAM, with an
+                    // actionable message (what's short + what to close) instead of a mid-run kill.
+                    if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: 9.5, label: "image generation") {
+                        throw CapabilityError.failed(reason)
+                    }
                     cont.yield(.status("generating image"))
                     let size = try generate(prompt, outPath, steps, seed, width, height, quantize, minFreeMemMB, hfCache)
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))

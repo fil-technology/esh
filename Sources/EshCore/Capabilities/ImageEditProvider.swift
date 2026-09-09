@@ -216,6 +216,12 @@ public struct ImageEditProvider: CapabilityProvider {
                         let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
                         if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                     }
+                    // Preflight: refuse BEFORE loading the diffusion editor if there still isn't enough RAM.
+                    // Needed headroom tracks the backend's rough peak (FLUX.2 Klein ~8.6, Kontext ~12.6, Qwen ~29).
+                    let neededGB: Double = { switch backend { case .flux2Klein: return 10; case .kontext: return 14; case .qwenEdit: return 30 } }()
+                    if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: neededGB, label: "image editing") {
+                        throw CapabilityError.failed(reason)
+                    }
                     cont.yield(.status("editing image (\(backend.rawValue)\(adapterID.map { " + " + $0 } ?? ""))"))
                     let r = try edit(inPath, outPath, instruction, options)
                     if Task.isCancelled { throw CancellationError() }

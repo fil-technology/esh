@@ -1095,7 +1095,9 @@ async function runCapabilityRequest(c, request, label){
   }catch(e){
     msg.generating=false; msg.genEnd=Date.now();
     if(e&&e.name==='AbortError'){ msg.content='⏹ Stopped. (The local model may still be finishing on the server.)'; }
-    else { msg.isError=true; msg.title='That didn’t work'; msg.detail=(e&&e.message)||String(e); }
+    else { msg.isError=true; const d=(e&&e.message)||String(e); msg.detail=d;
+      // A memory preflight refusal (nothing was loaded) gets a calmer, accurate title.
+      msg.title=/not enough free memory/i.test(d)?'Needs more memory to start':'That didn’t work'; }
   }
   S.capBusy=false; S.capController=null; saveChats(); render();
 }
