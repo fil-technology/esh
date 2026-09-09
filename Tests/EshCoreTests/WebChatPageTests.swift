@@ -451,8 +451,55 @@ struct WebChatPageTests {
         #expect(html.contains("data-act=\"speakStop\""))
         #expect(html.contains("id=\"mpfill\""))
         #expect(html.contains("function updateMiniProgress("))
-        // It's rendered as part of the composer (suggestion chips sit between it and the input box).
-        #expect(html.contains("${renderMiniPlayer()}${renderSuggests()}<div class=\"cbox\">"))
+        // It's rendered as part of the composer (suggestion chips + any Imagine preflight sit between it and
+        // the input box; Chat mode falls back to renderSuggests with no preflight).
+        #expect(html.contains("${renderMiniPlayer()}${imagine?renderImagineSuggests():renderSuggests()}${imagine?imgPreflight():''}<div class=\"cbox\">"))
+    }
+
+    // Chat/Imagine mode switcher: a top-bar pill flips the same view between the chat composer and a
+    // local image studio that maps onto the REAL runtime — create via image.generate, edit via image.edit
+    // with an optional neutral style adapter, model/style fed by the discovery endpoint.
+    @Test
+    func chatImagineModeSwitcher() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Top-bar toggle.
+        #expect(html.contains("function renderModeToggle("))
+        #expect(html.contains("data-act=\"modeChat\""))
+        #expect(html.contains("data-act=\"modeImagine\""))
+        #expect(html.contains("class=\"modepill\""))
+        #expect(html.contains("mode:'chat'"))                                  // default mode
+        // Imagine empty state + entry actions + honest active-model line.
+        #expect(html.contains("function renderImagineEmpty("))
+        #expect(html.contains("What should we make?"))
+        #expect(html.contains("Create from a description"))
+        #expect(html.contains("Drop an image to edit it"))
+        #expect(html.contains("function imgActiveLine("))
+        // Discovery-fed pickers (no hard-coded model metadata).
+        #expect(html.contains("/v1/capability/image-edit/options"))
+        #expect(html.contains("function renderImgModelPicker("))
+        #expect(html.contains("function renderImgStylePicker("))
+        #expect(html.contains("function ensureImgOpts("))
+        #expect(html.contains("data-act=\"toggleImgModel\""))
+        #expect(html.contains("data-act=\"toggleImgStyle\""))
+        #expect(html.contains("data-act=\"pickImgModel\""))
+        #expect(html.contains("data-act=\"pickImgStyle\""))
+        // Capability split the user asked to be reflected: create-from-text vs edit-a-photo, with a
+        // preflight notice when an edit-only model/style is picked but no photo is attached.
+        #expect(html.contains("Create from text"))
+        #expect(html.contains("Edit a photo"))
+        #expect(html.contains("function imgPreflight("))
+        #expect(html.contains("function imgNeedsImage("))
+        #expect(html.contains("Attach an image to edit"))
+        // Send routing: text-only → image.generate; photo → image.edit with chosen backend/adapter.
+        #expect(html.contains("function sendImagine("))
+        #expect(html.contains("capability:'image.generate'"))
+        #expect(html.contains("if(!queued && S.mode==='imagine'){ return sendImagine(); }"))
+        // A selected style pins its own base model, and an uninstalled style installs-and-resumes.
+        #expect(html.contains("if(v!=='None')S.imgModel='Auto'"))
+        #expect(html.contains("kind:'adapter'"))
+        // Neutral-naming guarantee carries into the style picker footer.
+        #expect(html.contains("Names are neutral by design"))
+        #expect(!html.lowercased().contains("pixar"))
     }
 
     @Test
