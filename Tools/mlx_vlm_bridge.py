@@ -1540,7 +1540,10 @@ def image_edit_bake() -> None:
     request = _load_json()
     model = request["model"]
     out_dir = request["outputPath"]
-    quantize = int(request.get("quantize") or 4)
+    # Quantize is OPTIONAL: omit it to MERGE a LoRA into an already-quantized snapshot without re-quantizing
+    # (re-quantizing a pre-quantized DiT bloats it). Pass a value only to (re)quantize from a higher-precision
+    # source (ideally the fp original, on a machine with enough RAM to load it).
+    quantize = request.get("quantize")
     _route_hf_cache(request.get("hfCache"))
     min_free = float(request.get("minFreeMemMB") or 3000)
 
@@ -1548,7 +1551,9 @@ def image_edit_bake() -> None:
     if not os.path.exists(cli):
         _fail("mflux-save not available (install with: pip install mflux)")
     os.makedirs(out_dir, exist_ok=True)
-    cmd = [cli, "--model", str(model), "--path", out_dir, "--quantize", str(quantize)]
+    cmd = [cli, "--model", str(model), "--path", out_dir]
+    if quantize is not None:
+        cmd += ["--quantize", str(int(quantize))]
     base_model = request.get("baseModel")
     if base_model:
         cmd += ["--base-model", str(base_model)]
