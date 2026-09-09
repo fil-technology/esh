@@ -53,6 +53,24 @@ struct WebChatPageTests {
         #expect(html.contains("localStorage"))    // history + presentation prefs are browser-local
     }
 
+    // Settings → Models is grouped by studio mode (Chat / Imagine / Sound); Sound links to the Voice pane
+    // rather than duplicating TTS/STT. Groups come from the server payload's `group` field.
+    @Test
+    func taskModelsGroupedByMode() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function renderTaskModels("))
+        #expect(html.contains("const inGroup=g=>all.filter(a=>(a.group||'chat')===g)"))
+        #expect(html.contains("sectionHead('Chat'"))
+        #expect(html.contains("sectionHead('Imagine'"))
+        #expect(html.contains("sectionHead('Sound'"))
+        #expect(html.contains("inGroup('chat')"))
+        #expect(html.contains("inGroup('imagine')"))
+        #expect(html.contains("inGroup('sound')"))
+        // Sound section links to Voice settings instead of listing audio models.
+        #expect(html.contains("data-act=\"pickPane\" data-arg=\"Voice\""))
+        #expect(html.contains("Open Voice →"))
+    }
+
     @Test
     func picker2UsesOneConsistentRowPatternNoRadios() {
         let html = WebChatPage.html(toolVersion: nil)

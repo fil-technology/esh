@@ -2179,30 +2179,39 @@ function renderPane(){
 // "Task models" — which installed model performs each capability. Driven by /v1/capability-models (the
 // REAL installed models' declared capabilities), so choices are never fabricated. Auto = esh resolves the
 // best local model for that task; fixed rows name the single built-in backend so there's no false choice.
+// Task models grouped by studio mode (Chat / Imagine / Sound). Selectable areas keep the Auto/pick control;
+// fixed areas name the single built-in backend. Sound links to the Voice pane rather than duplicating TTS/STT.
 function renderTaskModels(){
   const cm=S.capModels; if(!cm) return '<div style="font-size:12px;color:var(--muted);margin-top:18px">Loading task models…</div>';
-  let sel='';
-  (cm.selectable||[]).forEach(a=>{
+  const all=[...(cm.selectable||[]),...(cm.fixed||[])];
+  const inGroup=g=>all.filter(a=>(a.group||'chat')===g);
+  function selRow(a){
     const cur=a.current||'auto';
     const curName=cur==='auto'?'Auto':((a.options.find(o=>o.id===cur)||{}).name||shortModel(cur));
-    const open=S.capDrop===a.key;
-    let menu='';
+    const open=S.capDrop===a.key; let menu='';
     if(open){ let rr='';
       (a.options||[]).forEach(o=>{ const on=o.id===cur; rr+=`<div class="pickrow ${on?'sel':''}" data-act="pickCapModel" data-arg="${esch(a.key+'|'+o.id)}"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esch(o.name)}</span><span class="sp" style="flex:1"></span>${on?'<span class="ck">✓</span>':''}</div>`; });
       menu=`<div class="pop capmenu" style="right:0;top:calc(100% + 4px);width:320px;padding:6px 0;max-height:280px;overflow-y:auto">${rr}</div>`;
     }
     const only=(a.options||[]).length<=1;
-    sel+=`<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
+    return `<div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
       <span style="display:flex;flex-direction:column;min-width:0;padding-right:12px"><span style="font-size:13.5px">${esch(a.label)}</span>${a.note?`<span style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4">${esch(a.note)}</span>`:''}</span>
       <button class="cchip" ${only?'disabled style="opacity:.6;cursor:default"':`data-act="toggleCapDrop" data-arg="${esch(a.key)}" style="background:${open?'rgba(32,30,27,.09)':'rgba(32,30,27,.05)'}"`}><span class="lbl">${esch(curName)}</span>${only?'':'<span class="chev">▾</span>'}</button>
       ${menu}</div>`;
-  });
-  let fx='';
-  (cm.fixed||[]).forEach(a=>{ fx+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;font-size:12.5px;color:var(--muted)"><span>${esch(a.label)}</span><span>${esch(a.current)}</span></div>`; });
-  return `<div class="menuhead" style="padding:18px 0 2px">Task models</div>
-    <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:4px">Choose which model performs each task, or leave it on Auto.</div>
-    ${sel}
-    ${fx?`<div class="menuhead" style="padding:16px 0 2px">Built-in backends</div><div style="font-size:11.5px;color:var(--muted);margin-bottom:2px">Single on-device backend — no choice yet.</div>${fx}`:''}`;
+  }
+  const fixRow=a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px"><span>${esch(a.label)}</span><span class="mono" style="font-size:11.5px;color:var(--muted)">${esch(a.current)}</span></div>`;
+  const row=a=>a.fixed?fixRow(a):selRow(a);
+  const sectionHead=(t,sub)=>`<div class="menuhead" style="padding:20px 0 2px">${t}</div>${sub?`<div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:2px">${sub}</div>`:''}`;
+  const soundLink=`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0">
+      <span style="display:flex;flex-direction:column;min-width:0;padding-right:12px"><span style="font-size:13.5px">Speech, transcription, sound effects &amp; music</span><span style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4">Pick the TTS voice and speech-to-text model in Voice settings.</span></span>
+      <button class="cchip" data-act="pickPane" data-arg="Voice"><span class="lbl">Open Voice →</span></button></div>`;
+  return sectionHead('Chat','The model behind chat replies and describing attached images.')
+    + inGroup('chat').map(row).join('')
+    + sectionHead('Imagine','Models and backends for creating and editing images.')
+    + inGroup('imagine').map(row).join('')
+    + sectionHead('Sound','Audio generation and speech — configured under Voice.')
+    + soundLink
+    + inGroup('sound').map(row).join('');
 }
 // A settings dropdown row (label + current-value chip that opens a checkmark menu). Options come from
 // real esh capabilities — never a fabricated list.
