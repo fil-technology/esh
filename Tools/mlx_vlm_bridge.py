@@ -1400,6 +1400,28 @@ IMAGE_EDIT_BACKENDS = {
 }
 
 
+def _capped_edit_size(in_path: str, max_side: int) -> "tuple[int, int] | None":
+    """Return (width, height) for editing: the input downscaled so its long side is <= max_side, each rounded
+    to a multiple of 64 (FLUX latent requirement). None if the image can't be read (let mflux decide)."""
+    try:
+        from PIL import Image
+        with Image.open(in_path) as im:
+            w, h = im.size
+    except Exception:  # noqa: BLE001
+        return None
+    if w <= 0 or h <= 0:
+        return None
+
+    def r64(x: float) -> int:
+        return max(64, int(round(x / 64.0)) * 64)
+
+    longest = max(w, h)
+    if longest <= max_side:
+        return (r64(w), r64(h))
+    scale = max_side / float(longest)
+    return (r64(w * scale), r64(h * scale))
+
+
 def image_edit() -> None:
     """Instruction-based image editing (UCMR 2.1) — image + natural-language instruction -> edited image.
     Reads {imagePath, outputPath, instruction, backend?(qwen-edit|kontext), model?, steps?, seed?, quantize?,
@@ -1439,6 +1461,15 @@ def image_edit() -> None:
     seed = int(request.get("seed") or 0)
     cmd = [cli, "--model", str(model), spec["image_arg"], in_path, "--prompt", instruction,
            "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
+    # Default working-resolution cap: a phone photo is ~3000x4000 (~12 MP); editing at native resolution is
+    # what pushes FLUX.2 Klein to a ~28 GB peak and multi-minute runs on a 32 GB Mac. Unless the caller pins
+    # width/height, downscale the LONG side to `maxEditSide` (default 1024, multiples of 64 as FLUX requires),
+    # preserving aspect ratio. This cuts peak memory and time dramatically with little visible quality loss.
+    if request.get("width") is None and request.get("height") is None:
+        max_side = int(request.get("maxEditSide") or 1024)
+        capped = _capped_edit_size(in_path, max_side)
+        if capped is not None:
+            request["width"], request["height"] = capped
     # Quantization: request override, else the backend's default (e.g. flux2-klein loads full weights and
     # quantizes to 4-bit at load so it fits a 32GB Mac).
     quant = request.get("quantize", spec.get("quantize"))

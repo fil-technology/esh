@@ -324,6 +324,7 @@ public enum WebChatPage {
   .astarts{ display:flex; flex-direction:column; gap:10px; margin:8px 0 2px; }
   .astart{ max-width:min(420px,100%); }
   .astimg{ max-width:100%; border-radius:12px; border:1px solid var(--line2); background:#fff; display:block; }
+  .astarts.bare .astimg{ border:none; background:transparent; }   /* image-only reply: no card chrome */
   .astartbar{ display:flex; align-items:center; gap:12px; margin-top:5px; font-size:11px; color:var(--muted); }
   .astart.filepill{ display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:var(--paper); font-size:12px; }
   .alink{ color:var(--muted); text-decoration:underline; cursor:pointer; }
@@ -1193,7 +1194,7 @@ function renderMsg(m){
   if(m.artifacts && m.artifacts.length){
     const editArt=m.sourceImage ? m.artifacts.find(a=>a&&a.kind==='image'&&a.generatedBy&&a.generatedBy.capability==='image.edit') : null;
     if(editArt){ h+=beforeAfterHTML(m.sourceImage, editArt)+m.artifacts.filter(a=>a!==editArt).map(artifactHTML).join(''); }
-    else { h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
+    else { const bare=ans?'':' bare'; h+=`<div class="astarts${bare}">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }   // no border when the image stands alone (no text)
   }
   // UCMR Stage 3: "Why this execution plan?" — the composed pipeline for a typed result.
   if(m.plan){ h+=planInspectorHTML(m.plan); }
@@ -1361,7 +1362,9 @@ function renderImagineEmpty(){
 // 3D-animation apply chip; otherwise create-from-text starters.
 function renderImagineSuggests(){
   if(S.streaming||S.capBusy) return '';
-  const c=cur(); if(c&&c.messages&&c.messages.length) return '';
+  // Imagine starters stay available whenever the composer is empty (even after prior results) — they're the
+  // quickest way to kick off the next image; they hide only once you start typing.
+  if(S.draft && S.draft.trim()) return '';
   const hasImg=imgHasImage();
   const list = hasImg ? [
     'Turn this into a polished 3D animated character',

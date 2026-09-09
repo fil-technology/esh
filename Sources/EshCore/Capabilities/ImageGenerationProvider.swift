@@ -16,7 +16,7 @@ public struct ImageGenerationService: Sendable {
     @discardableResult
     public func generate(prompt: String, outputPath: String, steps: Int, seed: Int,
                          width: Int?, height: Int?, quantize: Int?, minFreeMemMB: Int?, hfCache: String?) throws -> (width: Int, height: Int) {
-        let response: Response = try bridge.run(
+        let response: Response = try bridge.runCancellable(   // Stop must terminate the diffusion subprocess, not orphan it
             command: "image-generate",
             request: Request(prompt: prompt, outputPath: outputPath, steps: steps, seed: seed,
                              width: width, height: height, quantize: quantize, minFreeMemMB: minFreeMemMB, hfCache: hfCache),

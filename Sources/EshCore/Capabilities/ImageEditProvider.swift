@@ -217,8 +217,9 @@ public struct ImageEditProvider: CapabilityProvider {
                         if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
                     }
                     // Preflight: refuse BEFORE loading the diffusion editor if there still isn't enough RAM.
-                    // Needed headroom tracks the backend's rough peak (FLUX.2 Klein ~8.6, Kontext ~12.6, Qwen ~29).
-                    let neededGB: Double = { switch backend { case .flux2Klein: return 10; case .kontext: return 14; case .qwenEdit: return 30 } }()
+                    // Headroom = measured capped-resolution peak + the bridge's 4 GB run-time guard floor, so a
+                    // run that starts won't get killed mid-way (FLUX.2 Klein capped ≈ 12 GB peak → ~16 GB).
+                    let neededGB: Double = { switch backend { case .flux2Klein: return 16; case .kontext: return 18; case .qwenEdit: return 30 } }()
                     if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: neededGB, label: "image editing") {
                         throw CapabilityError.failed(reason)
                     }
