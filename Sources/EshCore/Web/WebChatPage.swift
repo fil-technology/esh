@@ -218,7 +218,7 @@ public enum WebChatPage {
   /* In-composer controls: model chip + effort chip + divider before mic/send (progressive disclosure lives here) */
   .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(32,30,27,.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(32,30,27,.05); }
   /* Suggested-prompt starter chips above the composer (new/empty chat; capability-aware) */
-  .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; }
+  .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; max-width:640px; margin:0 auto; }
   .schip{ font-size:12px; color:rgba(32,30,27,.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(32,30,27,.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
   .schip:hover{ background:rgba(32,30,27,.06); color:var(--ink); }
   /* Direct style-apply action chip (distinct from the fill-the-composer suggestions) */
