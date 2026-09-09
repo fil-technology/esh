@@ -37,8 +37,13 @@ public struct ImageGenerationProvider: CapabilityProvider {
 
     public let descriptor: CapabilityProviderDescriptor
     private let generate: GenerateFn
+    /// Reclaim warm models + run the real-machine RAM preflight before executing. True only for the production
+    /// bridge-backed registration; false by default so injected-closure unit tests (and CI's low-RAM runner)
+    /// aren't refused for "low memory" when no real model actually loads.
+    private let enforcesMemoryLimits: Bool
 
-    public init(id: String = "image-generation", generate: @escaping GenerateFn) {
+    public init(id: String = "image-generation", enforcesMemoryLimits: Bool = false, generate: @escaping GenerateFn) {
+        self.enforcesMemoryLimits = enforcesMemoryLimits
         self.descriptor = CapabilityProviderDescriptor(
             id: id,
             capabilities: [.imageGenerate],
@@ -86,16 +91,18 @@ public struct ImageGenerationProvider: CapabilityProvider {
                     // Free RAM held by warm chat/LLM runtimes before spawning the ~8 GB diffusion model, so
                     // the Python RAM guard doesn't refuse the run for low memory on a 32 GB Mac. The image
                     // model isn't in this pool (it's a subprocess CLI), so this only drops idle LLM/speech.
-                    if let lifecycle = context.lifecycle {
-                        // Only reclaim when RAM is actually tight for a ~8 GB diffusion run; on a roomy machine
-                        // the warm chat model is left alone (no needless reload).
-                        let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
-                        if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
-                    }
-                    // Preflight: refuse BEFORE loading the ~8 GB model if there still isn't enough RAM, with an
-                    // actionable message (what's short + what to close) instead of a mid-run kill.
-                    if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: 9.5, label: "image generation") {
-                        throw CapabilityError.failed(reason)
+                    if enforcesMemoryLimits {
+                        if let lifecycle = context.lifecycle {
+                            // Only reclaim when RAM is actually tight for a ~8 GB diffusion run; on a roomy machine
+                            // the warm chat model is left alone (no needless reload).
+                            let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
+                            if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
+                        }
+                        // Preflight: refuse BEFORE loading the ~8 GB model if there still isn't enough RAM, with an
+                        // actionable message (what's short + what to close) instead of a mid-run kill.
+                        if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: 9.5, label: "image generation") {
+                            throw CapabilityError.failed(reason)
+                        }
                     }
                     cont.yield(.status("generating image"))
                     let size = try generate(prompt, outPath, steps, seed, width, height, quantize, minFreeMemMB, hfCache)

@@ -112,6 +112,10 @@ public struct ImageEditProvider: CapabilityProvider {
 
     public let descriptor: CapabilityProviderDescriptor
     private let edit: EditFn
+    /// Reclaim warm models + run the real-machine RAM preflight before executing. True only for the production
+    /// bridge-backed registration; false by default so unit tests with injected closures (and CI's low-RAM
+    /// runner) aren't refused for "low memory" when no real model actually loads.
+    private let enforcesMemoryLimits: Bool
 
     static func doubleOption(_ req: ExecutionRequest, _ key: String) -> Double? {
         switch req.options.values[key] {
@@ -122,7 +126,8 @@ public struct ImageEditProvider: CapabilityProvider {
         }
     }
 
-    public init(id: String = "image-edit", edit: @escaping EditFn) {
+    public init(id: String = "image-edit", enforcesMemoryLimits: Bool = false, edit: @escaping EditFn) {
+        self.enforcesMemoryLimits = enforcesMemoryLimits
         self.descriptor = CapabilityProviderDescriptor(
             id: id,
             capabilities: [.imageEdit],
@@ -210,18 +215,20 @@ public struct ImageEditProvider: CapabilityProvider {
                     // Klein ~8.6 GB peak), so the Python RAM guard doesn't refuse the run for low memory on a
                     // 32 GB Mac. The image model isn't in this pool (subprocess CLI) — this only drops idle
                     // LLM/speech, which the edit doesn't need.
-                    if let lifecycle = context.lifecycle {
-                        // Only reclaim when RAM is actually tight for the diffusion editor (FLUX.2 Klein
-                        // ~8.6 GB peak); on a roomy machine the warm chat model is left alone.
-                        let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
-                        if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
-                    }
-                    // Preflight: refuse BEFORE loading the diffusion editor if there still isn't enough RAM.
-                    // Headroom = measured capped-resolution peak + the bridge's 4 GB run-time guard floor, so a
-                    // run that starts won't get killed mid-way (FLUX.2 Klein capped ≈ 12 GB peak → ~16 GB).
-                    let neededGB: Double = { switch backend { case .flux2Klein: return 16; case .kontext: return 18; case .qwenEdit: return 30 } }()
-                    if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: neededGB, label: "image editing") {
-                        throw CapabilityError.failed(reason)
+                    if enforcesMemoryLimits {
+                        if let lifecycle = context.lifecycle {
+                            // Only reclaim when RAM is actually tight for the diffusion editor (FLUX.2 Klein
+                            // ~8.6 GB peak); on a roomy machine the warm chat model is left alone.
+                            let evicted = await lifecycle.reclaimForHeavyTask(ifAvailableBelowGB: 14)
+                            if !evicted.isEmpty { cont.yield(.status("freed memory for the image model (evicted \(evicted.count) warm model\(evicted.count == 1 ? "" : "s"))")) }
+                        }
+                        // Preflight: refuse BEFORE loading the diffusion editor if there still isn't enough RAM.
+                        // Headroom = measured capped-resolution peak + the bridge's 4 GB run-time guard floor, so a
+                        // run that starts won't get killed mid-way (FLUX.2 Klein capped ≈ 12 GB peak → ~16 GB).
+                        let neededGB: Double = { switch backend { case .flux2Klein: return 16; case .kontext: return 18; case .qwenEdit: return 30 } }()
+                        if let reason = HeavyTaskMemory.insufficientMemoryMessage(neededGB: neededGB, label: "image editing") {
+                            throw CapabilityError.failed(reason)
+                        }
                     }
                     cont.yield(.status("editing image (\(backend.rawValue)\(adapterID.map { " + " + $0 } ?? ""))"))
                     let r = try edit(inPath, outPath, instruction, options)

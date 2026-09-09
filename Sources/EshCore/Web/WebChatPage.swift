@@ -1275,6 +1275,8 @@ async function apply3DAnimation(){
     inputs:[{payload:{attachment:{_0:att}}},{payload:{text:{_0:'Turn this into a polished 3D animated character'}}}],
     output:{modality:'image'},
     options:{values:{adapter:'3d-animation'}}};
+  // Show the user's turn (the photo they sent + what we're doing) above the generation, like a typed edit.
+  c.messages.push({id:uid(), role:'user', content:'Apply 3D animation', attachments:[imgAtt]});
   S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
   // Install-and-resume: if the adapter isn't installed, show an install card that downloads it, then resumes
   // this exact edit (the image is already baked into `request`, so the user never re-attaches or re-types).

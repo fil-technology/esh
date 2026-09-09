@@ -1114,14 +1114,14 @@ public struct OpenAICompatibleService: Sendable {
             }))
             // Text -> image generation via mflux Z-Image Turbo (optional dependency).
             let imageGenService = ImageGenerationService()
-            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q, minFree, hfCache in
+            registryUCMR.register(ImageGenerationProvider(enforcesMemoryLimits: true, generate: { prompt, outPath, steps, seed, w, h, q, minFree, hfCache in
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree, hfCache: hfCache)
             }))
             // Instruction-based image editing (image + instruction → image). Default backend: Qwen-Image-Edit
             // (Apache-2.0, commercial-safe); FLUX.1 Kontext selectable but experimental/non-commercial.
             let imageEditService = ImageEditService()
-            registryUCMR.register(ImageEditProvider(edit: { inPath, outPath, instruction, options in
+            registryUCMR.register(ImageEditProvider(enforcesMemoryLimits: true, edit: { inPath, outPath, instruction, options in
                 try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction, options: options)
             }))
             // audio.generate (SFX/ambience) + music.generate. Deterministic DSP (noise/tones/sweeps) needs no
