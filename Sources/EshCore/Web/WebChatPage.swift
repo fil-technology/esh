@@ -260,6 +260,10 @@ public enum WebChatPage {
   .lbx-btn{ width:34px; height:34px; border-radius:9px; border:1px solid rgba(255,255,255,.16); background:rgba(40,38,34,.72); color:#f4f2ee; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px; line-height:1; text-decoration:none; }
   .lbx-btn:hover{ background:rgba(64,60,54,.9); }
   .lbx-hint{ position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font:400 11px var(--mono); color:rgba(255,255,255,.62); z-index:2; pointer-events:none; text-align:center; padding:0 12px; }
+  .lbx-nav{ position:absolute; top:50%; transform:translateY(-50%); width:44px; height:64px; border:none; background:rgba(40,38,34,.5); color:#f4f2ee; font-size:30px; line-height:1; cursor:pointer; border-radius:12px; display:flex; align-items:center; justify-content:center; z-index:2; }
+  .lbx-nav:hover{ background:rgba(64,60,54,.85); }
+  .lbx-nav.prev{ left:16px; } .lbx-nav.next{ right:16px; }
+  .lbx-count{ position:absolute; top:18px; left:50%; transform:translateX(-50%); font-size:12px; color:rgba(255,255,255,.8); z-index:2; pointer-events:none; }
   /* Drag-and-drop affordance while a file is over the window. */
   body.dropping::after{ content:'Drop image to attach'; position:fixed; inset:10px; z-index:190; border:2px dashed rgba(154,100,16,.6); border-radius:16px; background:rgba(154,100,16,.06); display:flex; align-items:center; justify-content:center; font:600 15px -apple-system,system-ui,sans-serif; color:#8a5a13; pointer-events:none; }
   .cchip .lbl{ max-width:150px; overflow:hidden; text-overflow:ellipsis; }
@@ -890,27 +894,39 @@ function beforeAfterHTML(sourceDataURL, art){
 }
 /* ---------- image lightbox (tap to enlarge · zoom · pan) ---------- */
 let _lbx=null;
-function openLightbox(src, dl){
-  if(!src) return; closeLightbox();
+// Lightbox is a GALLERY: `items` is [{src,dl}]; open at `startIndex` and flip with ‹ › / arrow keys (so the
+// viewer can switch between Before, After and any other results without closing). A bare string still works.
+function openLightbox(items, startIndex){
+  if(typeof items==='string') items=[{src:items, dl:(arguments[1]||'')}];
+  items=(items||[]).filter(x=>x&&x.src); if(!items.length) return;
+  closeLightbox();
+  let idx=Math.max(0,Math.min(items.length-1, startIndex||0)); const multi=items.length>1;
   const ov=document.createElement('div'); ov.className='lbx';
-  ov.innerHTML=`<div class="lbx-stage"><img class="lbx-img" src="${escAttr(src)}" alt="preview" draggable="false"></div>
+  ov.innerHTML=`<div class="lbx-stage"><img class="lbx-img" alt="preview" draggable="false"></div>
+    ${multi?`<button class="lbx-nav prev" data-lbx="prev" title="Previous (←)">‹</button><button class="lbx-nav next" data-lbx="next" title="Next (→)">›</button>`:''}
+    ${multi?`<div class="lbx-count mono" data-lbx-count></div>`:''}
     <div class="lbx-bar">
       <button class="lbx-btn" data-lbx="out" title="Zoom out">−</button>
       <button class="lbx-btn" data-lbx="reset" title="Fit">⤢</button>
       <button class="lbx-btn" data-lbx="in" title="Zoom in">+</button>
-      ${dl?`<a class="lbx-btn" href="${escAttr(dl)}" download title="Download">↓</a>`:''}
+      <a class="lbx-btn" data-lbx="dl" download title="Download">↓</a>
       <button class="lbx-btn" data-lbx="close" title="Close (Esc)">✕</button>
     </div>
-    <div class="lbx-hint">Scroll or pinch to zoom · drag to pan · double-click to reset · Esc to close</div>`;
+    <div class="lbx-hint">Scroll or pinch to zoom · drag to pan${multi?' · ← → to switch':''} · Esc to close</div>`;
   document.body.appendChild(ov);
   const stage=ov.querySelector('.lbx-stage'), img=ov.querySelector('.lbx-img');
+  const dlBtn=ov.querySelector('[data-lbx="dl"]'), countEl=ov.querySelector('[data-lbx-count]');
   let scale=1, tx=0, ty=0; const min=1, max=8;
   const pts=new Map(); let pinchBase=null, drag=false, lx=0, ly=0, moved=false;
   const apply=()=>{ img.style.transform=`translate(-50%,-50%) translate(${tx}px,${ty}px) scale(${scale})`; };
   const clamp=s=>Math.max(min,Math.min(max,s));
   const zoomAt=(cx,cy,factor)=>{ const r=stage.getBoundingClientRect(); const ox=cx-r.left-r.width/2, oy=cy-r.top-r.height/2;
     const ns=clamp(scale*factor), k=ns/scale; tx=ox-(ox-tx)*k; ty=oy-(oy-ty)*k; scale=ns; if(scale<=min){tx=0;ty=0;} apply(); };
-  apply();
+  const show=()=>{ const it=items[idx]; img.src=it.src;
+    if(dlBtn){ if(it.dl){ dlBtn.style.display=''; dlBtn.href=it.dl; } else dlBtn.style.display='none'; }
+    if(countEl) countEl.textContent=(idx+1)+' / '+items.length; scale=min; tx=0; ty=0; apply(); };
+  const go=d=>{ idx=(idx+d+items.length)%items.length; show(); };
+  show();
   stage.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(e.clientX,e.clientY, e.deltaY<0?1.12:1/1.12); },{passive:false});
   stage.addEventListener('pointerdown',e=>{ pts.set(e.pointerId,{x:e.clientX,y:e.clientY}); drag=true; moved=false; lx=e.clientX; ly=e.clientY; stage.classList.add('grabbing'); try{stage.setPointerCapture(e.pointerId)}catch(_){} });
   stage.addEventListener('pointermove',e=>{ if(pts.has(e.pointerId))pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -926,14 +942,23 @@ function openLightbox(src, dl){
       if(k==='in')zoomAt(r.left+r.width/2,r.top+r.height/2,1.4);
       else if(k==='out')zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.4);
       else if(k==='reset'){ scale=min; tx=0; ty=0; apply(); }
-      else if(k==='close')closeLightbox(); return; }
+      else if(k==='prev')go(-1);
+      else if(k==='next')go(1);
+      else if(k==='close')closeLightbox();
+      else if(k==='dl')return;   // let the download anchor work
+      return; }
     if((e.target===ov||e.target===stage)&&!moved)closeLightbox(); });
-  _lbx={ov, key:e=>{ if(e.key==='Escape')closeLightbox(); }};
+  _lbx={ov, key:e=>{ if(e.key==='Escape')closeLightbox(); else if(multi&&e.key==='ArrowLeft')go(-1); else if(multi&&e.key==='ArrowRight')go(1); }};
   document.addEventListener('keydown',_lbx.key);
 }
 function closeLightbox(){ if(!_lbx)return; try{document.removeEventListener('keydown',_lbx.key);}catch(_){} try{_lbx.ov.remove();}catch(_){} _lbx=null; }
-function wireZoomable(){ document.querySelectorAll('img.zoomable').forEach(im=>{ if(im._z)return; im._z=true; im.style.cursor='zoom-in';
-  im.addEventListener('click',()=>openLightbox(im.currentSrc||im.src, im.getAttribute('data-dl')||'')); }); }
+// Clicking any result image opens the lightbox as a gallery over ALL result images currently shown (so
+// Before/After and multiple outputs can be flipped through), starting at the clicked one.
+function wireZoomable(){ const all=[...document.querySelectorAll('img.zoomable')];
+  all.forEach(im=>{ if(im._z)return; im._z=true; im.style.cursor='zoom-in';
+    im.addEventListener('click',()=>{ const imgs=[...document.querySelectorAll('img.zoomable')];
+      const items=imgs.map(x=>({src:x.currentSrc||x.src, dl:x.getAttribute('data-dl')||''}));
+      openLightbox(items, imgs.indexOf(im)); }); }); }
 // Compose the before + after into ONE image (side by side) with an esh watermark, and save it. Everything is
 // drawn client-side on a canvas — same-origin artifact + the in-page source data URL, so the canvas isn't tainted.
 async function exportBeforeAfter(id){
@@ -943,23 +968,29 @@ async function exportBeforeAfter(id){
   const load=src=>new Promise((res,rej)=>{ const im=new Image(); im.crossOrigin='anonymous'; im.onload=()=>res(im); im.onerror=()=>rej(new Error('load failed')); im.src=src; });
   try{
     const [b,a]=await Promise.all([load(msg.sourceImage), load('/v1/artifacts/'+encodeURIComponent(id))]);
+    // Both panels share one height; each keeps its own aspect ratio, side by side, on a rounded paper card.
     const H=Math.max(b.naturalHeight,a.naturalHeight)||512;
     const bw=Math.round(b.naturalWidth*H/(b.naturalHeight||H)), aw=Math.round(a.naturalWidth*H/(a.naturalHeight||H));
-    const gap=Math.round(H*0.02), pad=Math.round(H*0.03), foot=Math.round(H*0.10);
-    const cv=document.createElement('canvas'); cv.width=bw+aw+gap+pad*2; cv.height=H+pad*2+foot; const g=cv.getContext('2d');
-    g.fillStyle='#fbfaf8'; g.fillRect(0,0,cv.width,cv.height);
-    g.drawImage(b,pad,pad,bw,H); g.drawImage(a,pad+bw+gap,pad,aw,H);
-    const lbl=Math.round(H*0.035);
-    g.font=`600 ${lbl}px ui-monospace,Menlo,monospace`; g.textBaseline='alphabetic';
-    const tag=(t,x)=>{ const w=g.measureText(t).width+lbl*0.8, hh=lbl*1.6, xx=x+lbl*0.5, yy=pad+lbl*0.5;
-      g.fillStyle='rgba(20,19,17,.55)'; g.fillRect(xx,yy,w,hh); g.fillStyle='#fbfaf8'; g.fillText(t,xx+lbl*0.4,yy+lbl*1.15); };
+    const gap=Math.round(H*0.022), pad=Math.round(H*0.035), rout=Math.round(H*0.045), rin=Math.round(H*0.03);
+    const cv=document.createElement('canvas'); cv.width=bw+aw+gap+pad*2; cv.height=H+pad*2; const g=cv.getContext('2d');
+    const rr=(x,y,w,h,r)=>{ r=Math.min(r,w/2,h/2); g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); };
+    // Transparent outside → rounded card corners; paper fill inside.
+    g.clearRect(0,0,cv.width,cv.height);
+    rr(0,0,cv.width,cv.height,rout); g.save(); g.clip(); g.fillStyle='#fbfaf8'; g.fillRect(0,0,cv.width,cv.height); g.restore();
+    const panel=(img,x,w)=>{ rr(x,pad,w,H,rin); g.save(); g.clip(); g.drawImage(img,x,pad,w,H); g.restore(); };
+    panel(b,pad,bw); panel(a,pad+bw+gap,aw);
+    // BEFORE / AFTER pills overlaid at each panel's top-left.
+    const lbl=Math.round(H*0.032); g.font=`600 ${lbl}px ui-monospace,Menlo,monospace`; g.textBaseline='middle';
+    const tag=(t,x)=>{ const tw=g.measureText(t).width, pw=tw+lbl*0.9, ph=lbl*1.7, xx=x+lbl*0.55, yy=pad+lbl*0.55;
+      rr(xx,yy,pw,ph,ph*0.32); g.fillStyle='rgba(20,19,17,.55)'; g.fill(); g.fillStyle='#fbfaf8'; g.fillText(t,xx+lbl*0.45,yy+ph/2); };
     tag('BEFORE',pad); tag('AFTER',pad+bw+gap);
-    // esh watermark footer
-    g.textBaseline='middle'; const fy=H+pad*2+foot/2;
-    g.fillStyle='#201e1b'; g.font=`600 ${Math.round(foot*0.42)}px -apple-system,system-ui,Segoe UI,sans-serif`;
-    g.fillText('esh',pad,fy); const ew=g.measureText('esh').width;
-    g.fillStyle='rgba(32,30,27,.5)'; g.font=`400 ${Math.round(foot*0.3)}px -apple-system,system-ui,Segoe UI,sans-serif`;
-    g.fillText('· edited on-device · private',pad+ew+Math.round(foot*0.3),fy);
+    // esh watermark as an overlaid pill, bottom-right over the After panel (not a separate footer line).
+    const wm='esh · edited on-device'; const wf=Math.round(H*0.028);
+    g.font=`600 ${wf}px -apple-system,system-ui,Segoe UI,sans-serif`;
+    const wtw=g.measureText(wm).width, wpw=wtw+wf*1.4, wph=wf*2.0;
+    const wx=pad+bw+gap+aw-wpw-lbl*0.55, wy=pad+H-wph-lbl*0.55;
+    rr(wx,wy,wpw,wph,wph*0.5); g.fillStyle='rgba(20,19,17,.5)'; g.fill();
+    g.fillStyle='rgba(255,255,255,.95)'; g.textBaseline='middle'; g.fillText(wm,wx+wf*0.7,wy+wph/2);
     await new Promise(res=>cv.toBlob(bl=>{ if(!bl){res();return;} const u=URL.createObjectURL(bl); const el=document.createElement('a'); el.href=u; el.download='esh-before-after.png'; document.body.appendChild(el); el.click(); el.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); res(); },'image/png'));
   }catch(e){ /* export is best-effort; leave the individual downloads available */ }
 }

@@ -1400,26 +1400,48 @@ IMAGE_EDIT_BACKENDS = {
 }
 
 
-def _capped_edit_size(in_path: str, max_side: int) -> "tuple[int, int] | None":
-    """Return (width, height) for editing: the input downscaled so its long side is <= max_side, each rounded
-    to a multiple of 64 (FLUX latent requirement). None if the image can't be read (let mflux decide)."""
+def _normalize_edit_input(in_path: str, max_side: int, temp_dir: str) -> "tuple[str, bool]":
+    """Prepare an input photo for mflux editing: decode it (including HEIC/HEIF via pillow-heif when present),
+    apply EXIF orientation, convert to RGB, and downscale so the long side is <= max_side (multiple of 64 for
+    FLUX latents). Writes a normalized temp PNG and returns (png_path, True). If the image can't be read (e.g.
+    HEIC without pillow-heif), returns (in_path, False) so mflux can try / fail with its own error.
+
+    This is the fix for two real failures: (1) HEIC phone photos crashed mflux's PIL.Image.open; (2) editing at
+    a 12 MP native resolution pushed FLUX.2 Klein to a ~28 GB peak and multi-minute runs."""
+    import os
+    import uuid
     try:
-        from PIL import Image
+        try:
+            import pillow_heif  # optional; enables HEIC/HEIF
+            pillow_heif.register_heif_opener()
+        except Exception:  # noqa: BLE001
+            pass
+        from PIL import Image, ImageOps
         with Image.open(in_path) as im:
+            im = ImageOps.exif_transpose(im)          # bake in rotation so the edit isn't sideways
+            if im.mode != "RGB":
+                im = im.convert("RGB")
             w, h = im.size
+            if w <= 0 or h <= 0:
+                return (in_path, False)
+
+            def r64(x: float) -> int:
+                return max(64, int(round(x / 64.0)) * 64)
+
+            longest = max(w, h)
+            if longest > max_side:
+                s = max_side / float(longest)
+                tw, th = r64(w * s), r64(h * s)
+            else:
+                tw, th = r64(w), r64(h)
+            if (tw, th) != (w, h):
+                im = im.resize((tw, th), Image.LANCZOS)
+            os.makedirs(temp_dir, exist_ok=True)
+            png = os.path.join(temp_dir, f"editin-{uuid.uuid4().hex}.png")
+            im.save(png, "PNG")
+            return (png, True)
     except Exception:  # noqa: BLE001
-        return None
-    if w <= 0 or h <= 0:
-        return None
-
-    def r64(x: float) -> int:
-        return max(64, int(round(x / 64.0)) * 64)
-
-    longest = max(w, h)
-    if longest <= max_side:
-        return (r64(w), r64(h))
-    scale = max_side / float(longest)
-    return (r64(w * scale), r64(h * scale))
+        return (in_path, False)
 
 
 def image_edit() -> None:
@@ -1459,17 +1481,13 @@ def image_edit() -> None:
     model = request.get("model") or spec["model"]
     steps = int(request.get("steps") or spec["steps"])
     seed = int(request.get("seed") or 0)
-    cmd = [cli, "--model", str(model), spec["image_arg"], in_path, "--prompt", instruction,
+    # Normalize the input (HEIC->PNG, EXIF orientation, RGB) and, unless width/height are pinned, downscale the
+    # long side to `maxEditSide` (default 1024). A phone photo is ~12 MP; editing at native resolution is what
+    # pushed FLUX.2 Klein to a ~28 GB peak + multi-minute runs, and HEIC crashed mflux's PIL.open outright.
+    max_side = int(request.get("maxEditSide") or 1024) if (request.get("width") is None and request.get("height") is None) else 10 ** 9
+    edit_in, edit_in_is_temp = _normalize_edit_input(in_path, max_side, os.path.dirname(out_path) or ".")
+    cmd = [cli, "--model", str(model), spec["image_arg"], edit_in, "--prompt", instruction,
            "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
-    # Default working-resolution cap: a phone photo is ~3000x4000 (~12 MP); editing at native resolution is
-    # what pushes FLUX.2 Klein to a ~28 GB peak and multi-minute runs on a 32 GB Mac. Unless the caller pins
-    # width/height, downscale the LONG side to `maxEditSide` (default 1024, multiples of 64 as FLUX requires),
-    # preserving aspect ratio. This cuts peak memory and time dramatically with little visible quality loss.
-    if request.get("width") is None and request.get("height") is None:
-        max_side = int(request.get("maxEditSide") or 1024)
-        capped = _capped_edit_size(in_path, max_side)
-        if capped is not None:
-            request["width"], request["height"] = capped
     # Quantization: request override, else the backend's default (e.g. flux2-klein loads full weights and
     # quantizes to 4-bit at load so it fits a 32GB Mac).
     quant = request.get("quantize", spec.get("quantize"))
@@ -1510,7 +1528,14 @@ def image_edit() -> None:
 
     # mflux runs as a separate child process group, so peak memory is sampled externally by the benchmark
     # (bridge RSS here would not reflect the child's footprint).
-    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
+    try:
+        out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
+    finally:
+        if edit_in_is_temp:
+            try:
+                os.remove(edit_in)
+            except OSError:
+                pass
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "backend": backend,
                 "model": model, "license": spec["license"], "commercial": spec["commercial"],
                 "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
