@@ -370,7 +370,7 @@ const ICON={
   folderPlus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>',
   chevr:'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
 };
-let S={ view:'chat', mode:'chat', imgModel:'Auto', imgStyle:'None', imgQuality:'balanced', imgOpts:null, imgPickerOpen:false, imgStyleOpen:false, imgQualityOpen:false, chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
+let S={ view:'chat', mode:'chat', imgModel:'Auto', imgStyle:'None', imgQuality:'balanced', imgOpts:null, imgPickerOpen:false, imgStyleOpen:false, imgQualityOpen:false, soundKind:'sfx', soundKindOpen:false, soundVoiceOpen:false, chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
@@ -391,9 +391,10 @@ function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
 function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
   // Restore the last mode (Chat/Imagine) + Imagine model/style so reopening lands where the user left off.
-  if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode;
+  if(S.prefs.mode==='imagine'||S.prefs.mode==='chat'||S.prefs.mode==='sound')S.mode=S.prefs.mode;
   if(S.prefs.imgModel)S.imgModel=S.prefs.imgModel; if(S.prefs.imgStyle)S.imgStyle=S.prefs.imgStyle;
-  if(S.prefs.imgQuality)S.imgQuality=S.prefs.imgQuality; }
+  if(S.prefs.imgQuality)S.imgQuality=S.prefs.imgQuality;
+  if(S.prefs.soundKind)S.soundKind=S.prefs.soundKind; }
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function cur(){ return S.chats[S.current]; }
@@ -580,8 +581,14 @@ const ACT={
   suggest:(t)=>{ if(!t)return; S.draft=t; S.focusInput=true; render(); },   // fill the composer (user tweaks then sends)
   apply3d:()=>{ apply3DAnimation(); },   // apply the 3d-animation style adapter to the attached image directly
   // Imagine mode: Chat ↔ Imagine switch + the image Model/Style pickers.
-  modeChat:()=>{ S.mode='chat'; S.prefs.mode='chat'; savePrefs(); closeAll(); S.focusInput=true; render(); },
-  modeImagine:()=>{ S.mode='imagine'; S.prefs.mode='imagine'; savePrefs(); closeAll(); ensureImgOpts(); S.focusInput=true; render(); },
+  modeChat:()=>switchMode('chat'), modeImagine:()=>switchMode('imagine'), modeSound:()=>switchMode('sound'),
+  soundPick:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); }
+    // Transcribe needs an audio file → open the picker; the others just focus the composer to type.
+    if(k==='transcribe'){ render(); const fp=document.getElementById('filepick'); if(fp)fp.click(); return; }
+    S.focusInput=true; render(); },
+  toggleSoundKind:()=>{ const was=S.soundKindOpen; closeAll(); S.soundKindOpen=!was; if(!S.soundKindOpen)S.focusInput=true; render(); },
+  pickSoundKind:(k)=>{ if(SOUND_KINDS[k]){ S.soundKind=k; S.prefs.soundKind=k; savePrefs(); } closeAll(); S.focusInput=true; render(); },
+  toggleSoundVoice:()=>{ const was=S.soundVoiceOpen; closeAll(); S.soundVoiceOpen=!was; if(!S.soundVoiceOpen)S.focusInput=true; render(); },
   imagineCreate:()=>{ S.focusInput=true; render(); },
   toggleImgModel:()=>{ const was=S.imgPickerOpen; closeAll(); S.imgPickerOpen=!was; if(!S.imgPickerOpen)S.focusInput=true; render(); },
   toggleImgStyle:()=>{ const was=S.imgStyleOpen; closeAll(); S.imgStyleOpen=!was; if(!S.imgStyleOpen)S.focusInput=true; render(); },
@@ -619,7 +626,7 @@ const ACT={
   pickCapModel:(arg)=>{ const i=arg.indexOf('|'); const key=arg.slice(0,i), id=arg.slice(i+1); S.capDrop=null; const patch={}; patch[key]=id; postConfig({capabilityModels:patch}).then(()=>refreshCapModels()); render(); },
   toggleVoiceDrop:(w)=>{ S.voiceDrop=(S.voiceDrop===w)?null:w; render(); },
   pickTtsModel:(id)=>{ S.voiceDrop=null; postConfig({ttsModel:id}).then(()=>render()); render(); },
-  pickTtsVoice:(id)=>{ S.prefs.ttsVoice=id; savePrefs(); S.voiceDrop=null; render(); },
+  pickTtsVoice:(id)=>{ S.prefs.ttsVoice=id; savePrefs(); S.voiceDrop=null; S.soundVoiceOpen=false; S.focusInput=true; render(); },
   pickTtsLang:(id)=>{ S.prefs.ttsLanguage=id; savePrefs(); S.voiceDrop=null; render(); },
   pickSttModel:(id)=>{ S.voiceDrop=null; if(id==='__custom__'){ const v=prompt('Speech-to-text model (Hugging Face repo, mlx_audio-compatible):', (S.config&&S.config.defaults&&S.config.defaults.sttModel)||'mlx-community/parakeet-tdt-0.6b-v2'); if(v&&v.trim()){ postConfig({sttModel:v.trim()}).then(()=>render()); } render(); return; } postConfig({sttModel:id}).then(()=>render()); render(); },
   pickFilter:(f)=>{ S.modelsFilter=f; refreshCatalog(); render(); },
@@ -657,12 +664,12 @@ const ACT={
     runCapabilityRequest(c, request, 'Editing web page…'); },
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
-function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; S.imgPickerOpen=false; S.imgStyleOpen=false; S.imgQualityOpen=false; if(open)S[open]=true; }
+function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; S.imgPickerOpen=false; S.imgStyleOpen=false; S.imgQualityOpen=false; S.soundKindOpen=false; S.soundVoiceOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); const a=t&&t.getAttribute('data-act');
   // Outside-click closes any open popover, unless the click is inside a popover or on the chip/button
   // that owns it (those toggles handle their own open/close).
-  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen||S.imgPickerOpen||S.imgStyleOpen||S.imgQualityOpen;
-  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach|ImgModel|ImgStyle|ImgQuality)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
+  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen||S.imgPickerOpen||S.imgStyleOpen||S.imgQualityOpen||S.soundKindOpen||S.soundVoiceOpen;
+  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach|ImgModel|ImgStyle|ImgQuality|SoundKind|SoundVoice)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
   if(S.capDrop && !e.target.closest('.pop') && a!=='toggleCapDrop'){ S.capDrop=null; render(); if(!t)return; }
   if(S.chatMenu && !e.target.closest('.pop')){ S.chatMenu=null; render(); if(!t)return; }
@@ -707,6 +714,7 @@ function renderChat(){
   const c=cur(); const has=c&&(c.messages.length||(S.streaming&&S.genChatId===S.current));
   if(!has){
     if(S.mode==='imagine'){ main.appendChild(renderImagineEmpty()); }
+    else if(S.mode==='sound'){ main.appendChild(renderSoundEmpty()); }
     else { main.appendChild(el('div',{cls:'empty'},'What can I help with?')); }
     S._logNode=null; S._logSig='';
   }
@@ -1234,6 +1242,8 @@ function renderMsg(m){
     h+=`<details class="reason"><summary>${label}</summary><div class="rc">${esch(s.reason)}</div></details>`; }
   const ans=s.answer||(s.thinking?'':m.content);
   if(ans) h+=`<div class="asttext">${md(ans)}</div>`;
+  // Sound mode: a synthesized speech clip plays inline with the on-brand audio player.
+  if(m.soundClip&&m.soundClip.dataURL){ h+=`<div style="margin:6px 0 2px;max-width:min(420px,100%)">${audioPlayer(m.soundClip.dataURL,'sc-'+m.id)}<div class="astartbar" style="margin-top:5px"><span class="mono">speech · audio</span><a class="alink" href="${m.soundClip.dataURL}" download="esh-speech.wav">Download</a></div></div>`; }
   // UCMR Stage 3: generation progress for typed capabilities — an expandable/collapsible live panel that
   // streams status milestones (and any text stream), so any generation can be expanded to watch or inspect.
   h+=genPanelHTML(m);
@@ -1289,6 +1299,10 @@ function statusInfo(){
     const im = S.imgStyle!=='None' ? ((imgStyleById(S.imgStyle)||{}).label||'style')
              : (S.imgModel==='Auto' ? 'Auto' : ((imgBackendById(S.imgModel)||{}).label||'edit'));
     return {label:'Local · Image · '+im+' · Ready',amber:false};
+  }
+  if(S.mode==='sound'){
+    if(S.capBusy) return {label:'Local · Sound studio · generating',amber:false};
+    return {label:'Local · Sound · '+((SOUND_KINDS[S.soundKind]||{}).label||'Audio')+' · Ready',amber:false};
   }
   const name=S.modelSel==='Auto' ? (S.schedule&&S.schedule.selectedModelID?shortModel(S.schedule.selectedModelID):'Auto')
                                  : (S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
@@ -1372,11 +1386,19 @@ function renderSuggests(){
 const ICON_INFO='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>';
 const ICON_SPARK='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z"/></svg>';
 const ICON_IMG='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>';
+// Switch the top-bar mode. Each mode's work stays in its own thread: leaving a chat that already has content
+// starts a fresh one (empty chats are reused, so rapid toggling doesn't pile up "New chat" entries).
+function switchMode(m){
+  const same=S.mode===m; S.mode=m; S.prefs.mode=m; savePrefs(); closeAll();
+  if(m==='imagine')ensureImgOpts(); if(m==='sound'&&!S.audioModels)refreshAudioModels();
+  const c=cur();
+  if(!same && c && c.messages && c.messages.length){ newChat(); }   // newChat() renders + focuses
+  else { S.focusInput=true; render(); }
+}
 function renderModeToggle(){
-  const im=S.mode==='imagine';
+  const opt=(m,label,act)=>`<button class="modeopt ${S.mode===m?'on':''}" data-act="${act}" role="tab" aria-selected="${S.mode===m?'true':'false'}">${label}</button>`;
   return `<div class="modepill" role="tablist" aria-label="Mode">
-    <button class="modeopt ${im?'':'on'}" data-act="modeChat" role="tab" aria-selected="${im?'false':'true'}">Chat</button>
-    <button class="modeopt ${im?'on':''}" data-act="modeImagine" role="tab" aria-selected="${im?'true':'false'}">Imagine</button>
+    ${opt('chat','Chat','modeChat')}${opt('imagine','Imagine','modeImagine')}${opt('sound','Sound','modeSound')}
   </div>`;
 }
 // Fetch the edit-model / style-adapter catalogue once and cache it, then re-render so badges fill in.
@@ -1557,21 +1579,152 @@ async function sendImagine(queued){
   }
   saveChats(); await runCapabilityRequest(c, request, 'Editing image…'); maybeSendQueue(c.id);
 }
+
+/* ===================== Sound mode ===================== */
+// A local audio studio beside Chat/Imagine. Four kinds, each mapped to a real esh runtime: Sound FX
+// (audio.generate), Music (music.generate), Speech (TTS via /v1/audio/speech) and Transcribe (STT via
+// /v1/audio/transcriptions). Results play inline with the existing on-brand audio player.
+const ICON_WAVE='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 12h1M8 8v8M12 4v16M16 8v8M20 12h0"/></svg>';
+const ICON_MIC2='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const SOUND_KINDS={
+  sfx:{label:'Sound FX', cap:'audio.generate', ph:'Describe a sound — “rain on a tin roof, distant thunder”…', run:'Generating sound…'},
+  music:{label:'Music', cap:'music.generate', ph:'Describe music — “warm lo-fi hip-hop loop, 90 BPM”…', run:'Composing music…'},
+  speech:{label:'Speech', cap:'tts', ph:'Type what to say aloud…', run:'Synthesizing speech…'},
+  transcribe:{label:'Transcribe', cap:'audio.transcribe', ph:'Drop an audio file, or record with the mic, to transcribe…', run:'Transcribing…'},
+};
+function soundKind(){ return SOUND_KINDS[S.soundKind]||SOUND_KINDS.sfx; }
+function soundHasAudio(){ return (S.pendingAtts||[]).some(x=>x&&x.kind==='audio'); }
+function soundActiveLine(){
+  const k=soundKind();
+  const model=S.config&&S.config.defaults&&((S.soundKind==='transcribe')?S.config.defaults.sttModel:S.config.defaults.ttsModel);
+  if(S.soundKind==='speech') return 'Speech · '+soundVoiceLabel()+' · on-device';
+  if(S.soundKind==='transcribe') return 'Transcribe · '+((model||'on-device speech'));
+  return k.label+' · on-device';
+}
+function renderSoundEmpty(){
+  if(!S.audioModels)refreshAudioModels();
+  const d=el('div',{cls:'imagine-empty'});
+  const entry=(k,label,icon)=>`<button class="entry" data-act="soundPick" data-arg="${k}">${icon} ${label}</button>`;
+  d.innerHTML=`<h2>What should we hear?</h2>
+    <div class="sub">Generate a sound or a piece of music, speak text aloud, or transcribe an audio clip. Everything runs on this Mac.</div>
+    <div class="entries">
+      ${entry('sfx','Describe a sound',ICON_WAVE)}
+      ${entry('music','Compose music','<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\"><path d=\"M9 18V5l10-2v13\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"16\" cy=\"16\" r=\"3\"/></svg>')}
+      ${entry('speech','Say something','<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"M15.5 8.5a5 5 0 0 1 0 7\"/></svg>')}
+      ${entry('transcribe','Transcribe audio',ICON_MIC2)}
+    </div>
+    <div class="amline">${esch(soundActiveLine())}</div>`;
+  return d;
+}
+function soundPreflight(){
+  if(S.capBusy||S.streaming) return '';
+  if(S.draft && S.draft.trim()) return '';
+  if(S.soundKind==='transcribe' && !soundHasAudio()){
+    return `<div class="imnote">${ICON_INFO}<span>Attach an audio file (or hold the mic to record) — Transcribe turns speech into text.</span></div>`;
+  }
+  return '';
+}
+function renderSoundKindPicker(){
+  let h='<div class="menuhead">Make</div>';
+  ['sfx','music','speech','transcribe'].forEach(k=>{ const q=SOUND_KINDS[k], sel=S.soundKind===k;
+    const note={sfx:'A sound effect or ambience from a description',music:'A musical loop or short score from a description',speech:'Read your text aloud in a chosen voice',transcribe:'Turn an audio clip into text'}[k];
+    h+=`<div class="pickrow ${sel?'sel':''}" style="flex-direction:column;align-items:stretch;gap:2px" data-act="pickSoundKind" data-arg="${k}">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:13px">${esch(q.label)}</span><span class="sp" style="flex:1"></span>${sel?'<span class="ck">✓</span>':''}</div>
+      <div class="pdesc">${esch(note)}</div></div>`;
+  });
+  return imgPopWrap(h,'300px');
+}
+function soundActiveTtsModel(){ const models=S.audioModels||[]; const cfg=(S.config&&S.config.defaults)||{};
+  return models.find(m=>m.id===cfg.ttsModel)||models.find(m=>/soprano/i.test(m.id))||models[0]||null; }
+function soundVoiceLabel(){ const cur=S.prefs.ttsVoice||''; if(!cur)return 'Auto voice';
+  const sel=soundActiveTtsModel(); const v=((sel&&sel.voices)||[]).find(x=>x.id===cur); return (v&&(v.display_name||v.id))||cur; }
+function renderSoundVoicePicker(){
+  if(!S.audioModels)refreshAudioModels();
+  const sel=soundActiveTtsModel(); const voices=(sel&&sel.voices)||[]; const cur=S.prefs.ttsVoice||'';
+  let h='<div class="menuhead">Voice</div>'+pickRow('Auto', !cur, 'pickTtsVoice', '');
+  if(!voices.length){ h+='<div style="padding:8px 16px 6px;font-size:11px;color:var(--faint)">Model default voice. Install a speech model in Settings → Voice for more.</div>'; return imgPopWrap(h,'260px'); }
+  voices.forEach(v=>{ h+=pickRow(v.display_name||v.id, cur===v.id, 'pickTtsVoice', v.id); });
+  return imgPopWrap(h,'260px');
+}
+function renderSoundSuggests(){
+  if(S.streaming||S.capBusy) return '';
+  if(S.draft && S.draft.trim()) return '';
+  const lists={
+    sfx:['Rain on a tin roof with distant thunder','Crackling campfire at night','Busy café ambience','Ocean waves on a rocky shore'],
+    music:['Warm lo-fi hip-hop loop, 90 BPM','Uplifting cinematic strings','8-bit chiptune adventure theme','Mellow jazz piano'],
+    speech:['Welcome to esh — your private, on-device AI.','The quick brown fox jumps over the lazy dog.','Today’s forecast: sunny with a gentle breeze.'],
+    transcribe:[],
+  };
+  const list=lists[S.soundKind]||[];
+  if(!list.length) return '';
+  const chips=list.map(t=>`<button class="schip" data-act="suggest" data-arg="${escAttr(t)}" title="${escAttr(t)}">${esch(t)}</button>`).join('');
+  return `<div class="suggests" aria-label="Sound prompts">${chips}</div>`;
+}
+// Send in Sound mode: route by kind. SFX/Music go through the capability runtime (audio artifact, install-and-
+// resume for the neural model); Speech synthesizes via TTS; Transcribe runs STT on the attached/recorded clip.
+async function sendSound(){
+  stopSpeak();
+  const ta=$('#input'); const text=(ta?ta.value.trim():(S.draft||'').trim());
+  const atts=S.pendingAtts.slice(); const audio=atts.find(a=>a&&a.kind==='audio');
+  const k=S.soundKind, spec=soundKind();
+  if(S.controller||S.capBusy) return;   // sound runs one at a time (no queue in v1)
+  if(k==='transcribe'){
+    if(!audio){ return; }
+  } else if(!text){ return; }
+  const c=cur()||(newChat(),cur());
+
+  if(k==='transcribe'){
+    c.messages.push({id:uid(),role:'user',content:text||'Transcribe',attachments:atts});
+    if(c.title==='New chat') c.title='Transcription';
+    S.pendingAtts=[]; S.draft=''; if(ta)ta.value=''; S.focusInput=true;
+    const msg={id:uid(),role:'assistant',generating:true,genLabel:spec.run,statusLog:[],genStart:Date.now()};
+    c.messages.push(msg); S.capBusy=true; saveChats(); render();
+    try{ const tr=await transcribeAtts(atts); msg.generating=false; msg.genEnd=Date.now(); msg.content=(tr&&tr.trim())?tr:'(no speech detected)'; }
+    catch(e){ msg.generating=false; msg.genEnd=Date.now(); msg.isError=true; msg.title='Couldn’t transcribe'; msg.detail=(e&&e.message)||String(e); }
+    S.capBusy=false; saveChats(); render(); return;
+  }
+
+  c.messages.push({id:uid(),role:'user',content:text});
+  if(c.title==='New chat') c.title=text.slice(0,40);
+  S.draft=''; if(ta)ta.value=''; S.focusInput=true;
+
+  if(k==='speech'){
+    const msg={id:uid(),role:'assistant',generating:true,genLabel:spec.run,statusLog:[],genStart:Date.now()};
+    c.messages.push(msg); S.capBusy=true; S.genChatId=c.id; saveChats(); render();
+    try{ const blob=await speakBlob(text);
+      if(!blob) throw new Error('speech synthesis returned nothing (is a TTS model installed?)');
+      const dataURL=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(blob); });
+      msg.generating=false; msg.genEnd=Date.now(); msg.soundClip={dataURL, name:'Speech'};
+    }catch(e){ msg.generating=false; msg.genEnd=Date.now(); msg.isError=true; msg.title='Couldn’t synthesize speech'; msg.detail=(e&&e.message)||String(e); }
+    S.capBusy=false; saveChats(); render(); return;
+  }
+
+  // SFX / Music → the capability runtime (typed audio artifact + install-and-resume via the router).
+  const request={schemaVersion:'esh.execute.request.v1', capability:spec.cap,
+    inputs:[{payload:{text:{_0:text}}}], output:{modality:'audio'},
+    options:{values:{seconds: (k==='music'?10:6)}}};
+  saveChats(); await runCapabilityRequest(c, request, spec.run);
+}
 function renderComposer(){
   const c=el('div',{cls:'composer'});
   const si=statusInfo();
-  const imagine=S.mode==='imagine';
+  const imagine=S.mode==='imagine', sound=S.mode==='sound';
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
-  // In Imagine mode the two chips become Style + Model (fed by the discovery endpoint); in Chat they stay
-  // Model + Effort. The attach / textarea / mic / send shell is shared.
-  const chips = imagine
+  // Each mode swaps the two chips (Imagine: Style/Model/Quality; Sound: Kind [+Voice]; Chat: Model/Effort).
+  // The attach / textarea / mic / send shell is shared.
+  const chips = sound
+    ? `<button class="cchip" data-act="toggleSoundKind" title="What to make"><span class="lbl">${esch(soundKind().label)}</span><span class="chev">▾</span></button>`
+      + (S.soundKind==='speech' ? `<button class="cchip ghost" data-act="toggleSoundVoice" title="Voice"><span class="lbl">${esch(soundVoiceLabel())}</span><span class="chev">▾</span></button>` : '')
+    : imagine
     ? `<button class="cchip" data-act="toggleImgStyle" title="Style"><span class="lbl">${esch(imgStyleLabel())}</span><span class="chev">▾</span></button>
        <button class="cchip" data-act="toggleImgModel" title="Model"><span class="lbl">${esch(imgModelLabel())}</span><span class="chev">▾</span></button>
        <button class="cchip ghost" data-act="toggleImgQuality" title="Edit quality (working resolution)"><span class="lbl">${esch(imgQualityLabel())}</span><span class="chev">▾</span></button>`
     : `<button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
        <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>`;
-  const placeholder = imagine ? 'Describe an image to create, or attach one to edit…' : 'Ask anything…';
-  c.innerHTML=`${renderMiniPlayer()}${imagine?renderImagineSuggests():renderSuggests()}${imagine?imgPreflight():''}<div class="cbox">
+  const placeholder = sound ? soundKind().ph : imagine ? 'Describe an image to create, or attach one to edit…' : 'Ask anything…';
+  const suggestsHTML = sound ? renderSoundSuggests() : imagine ? renderImagineSuggests() : renderSuggests();
+  const preflightHTML = sound ? soundPreflight() : imagine ? imgPreflight() : '';
+  c.innerHTML=`${renderMiniPlayer()}${suggestsHTML}${preflightHTML}<div class="cbox">
      ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
      ${(cur()&&cur().queue&&cur().queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
@@ -1594,6 +1747,8 @@ function renderComposer(){
      ${(imagine&&S.imgStyleOpen)?renderImgStylePicker():''}
      ${(imagine&&S.imgPickerOpen)?renderImgModelPicker():''}
      ${(imagine&&S.imgQualityOpen)?renderImgQualityPicker():''}
+     ${(sound&&S.soundKindOpen)?renderSoundKindPicker():''}
+     ${(sound&&S.soundVoiceOpen)?renderSoundVoicePicker():''}
      <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
@@ -2167,8 +2322,9 @@ async function transcribeAtts(atts){ const out=[];
 // queued message never executes in whatever chat happens to be open now.
 async function send(queued){
   stopSpeak();
-  // Imagine mode routes to the image studio (create/edit); the message queue stays a Chat-only feature.
+  // Imagine/Sound modes route to their studios; the message queue stays a Chat-only feature.
   if(!queued && S.mode==='imagine'){ return sendImagine(); }
+  if(!queued && S.mode==='sound'){ return sendSound(); }
   let text, atts, c, ta=null;
   if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller||S.capBusy)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
   else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller||S.capBusy) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
