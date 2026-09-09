@@ -217,9 +217,55 @@ public enum WebChatPage {
   .send{ width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; flex-shrink:0; border:none; }
   /* In-composer controls: model chip + effort chip + divider before mic/send (progressive disclosure lives here) */
   .cchip{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:rgba(32,30,27,.75); padding:5px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0; border:none; background:rgba(32,30,27,.05); }
+  /* Suggested-prompt starter chips above the composer (new/empty chat; capability-aware) */
+  .suggests{ display:flex; flex-wrap:wrap; gap:7px; padding:0 2px 9px; max-width:640px; margin:0 auto; }
+  .schip{ font-size:12px; color:rgba(32,30,27,.72); padding:6px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line2); background:rgba(32,30,27,.02); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+  .schip:hover{ background:rgba(32,30,27,.06); color:var(--ink); }
+  /* Direct style-apply action chip (distinct from the fill-the-composer suggestions) */
+  .schip.style3d{ color:var(--paper); background:var(--ink); border-color:var(--ink); font-weight:500; }
+  .schip.style3d:hover{ background:#000; color:var(--paper); }
   .cchip:hover{ background:rgba(32,30,27,.09); }
   .cchip .chev{ font-size:8px; color:var(--faint); }
   .cchip.ghost{ background:none; } .cchip.ghost:hover{ background:rgba(32,30,27,.05); }
+  /* Chat | Imagine mode toggle (top bar) — a segmented pill matching the prototype. */
+  .modepill{ display:inline-flex; background:rgba(32,30,27,.05); border:1px solid var(--line); border-radius:999px; padding:2px; gap:2px; }
+  .modeopt{ font-size:12.5px; font-weight:500; color:var(--muted); padding:4px 14px; border-radius:999px; cursor:pointer; border:none; background:none; line-height:1.45; }
+  .modeopt.on{ background:var(--paper); color:var(--ink); box-shadow:0 1px 3px rgba(32,30,27,.12); }
+  /* Imagine empty state — "What should we make?" with the two entry actions + active-model line. */
+  .imagine-empty{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding-bottom:60px; gap:11px; text-align:center; animation:eshfade .3s ease-out; }
+  .imagine-empty h2{ font-size:26px; font-weight:500; letter-spacing:-.02em; margin:0; }
+  .imagine-empty .sub{ font-size:13.5px; color:var(--muted); max-width:380px; line-height:1.5; }
+  .imagine-empty .entries{ display:flex; gap:10px; margin-top:4px; flex-wrap:wrap; justify-content:center; }
+  .imagine-empty .entry{ display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); background:#fff; border:1px solid var(--line2); border-radius:11px; padding:9px 14px; cursor:pointer; }
+  .imagine-empty .entry:hover{ background:rgba(32,30,27,.03); }
+  .imagine-empty .amline{ font:400 11px var(--mono); color:var(--faint); margin-top:8px; }
+  /* Imagine preflight notice (composer): editing model/style selected but no photo attached. */
+  .imnote{ display:flex; align-items:flex-start; gap:8px; font-size:12px; color:#8a5a13; background:rgba(154,100,16,.06); border:1px solid rgba(154,100,16,.18); border-radius:9px; padding:8px 11px; line-height:1.45; max-width:640px; margin:0 auto 9px; box-sizing:border-box; width:100%; }
+  .imnote svg{ flex-shrink:0; margin-top:1px; color:var(--amber); }
+  /* Fit dot + license badge shared by the Imagine model/style pickers. */
+  .fitdot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .fitdot.comfortable,.fitdot.fits{ background:#3f7d4e; } .fitdot.tight{ background:var(--amber); }
+  .fitdot.unlikely,.fitdot.unsupported{ background:#c0392b; } .fitdot.unknown{ background:var(--faint); }
+  .lic{ font:500 9.5px var(--mono); letter-spacing:.04em; text-transform:uppercase; padding:2px 6px; border-radius:5px; background:rgba(32,30,27,.06); color:var(--muted); white-space:nowrap; }
+  .lic.nc{ background:rgba(192,57,49,.09); color:#a5342c; }
+  .pdesc{ font-size:11px; color:var(--muted); }
+  /* Live elapsed clock on a generation panel. */
+  .gpclock{ font-size:11px; color:var(--muted); } .gpdot{ color:var(--faint); }
+  /* Tap-to-enlarge lightbox: fullscreen, zoom + pan. */
+  .lbx{ position:fixed; inset:0; z-index:200; background:rgba(20,19,17,.86); backdrop-filter:blur(3px); animation:eshfade .15s ease-out; touch-action:none; overscroll-behavior:contain; }
+  .lbx-stage{ position:absolute; inset:0; overflow:hidden; cursor:grab; }
+  .lbx-stage.grabbing{ cursor:grabbing; }
+  .lbx-img{ position:absolute; top:50%; left:50%; transform-origin:center center; will-change:transform; user-select:none; -webkit-user-drag:none; max-width:88vw; max-height:88vh; box-shadow:0 24px 70px rgba(0,0,0,.55); border-radius:6px; }
+  .lbx-bar{ position:absolute; top:14px; right:16px; display:flex; gap:8px; z-index:2; }
+  .lbx-btn{ width:34px; height:34px; border-radius:9px; border:1px solid rgba(255,255,255,.16); background:rgba(40,38,34,.72); color:#f4f2ee; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px; line-height:1; text-decoration:none; }
+  .lbx-btn:hover{ background:rgba(64,60,54,.9); }
+  .lbx-hint{ position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font:400 11px var(--mono); color:rgba(255,255,255,.62); z-index:2; pointer-events:none; text-align:center; padding:0 12px; }
+  .lbx-nav{ position:absolute; top:50%; transform:translateY(-50%); width:44px; height:64px; border:none; background:rgba(40,38,34,.5); color:#f4f2ee; font-size:30px; line-height:1; cursor:pointer; border-radius:12px; display:flex; align-items:center; justify-content:center; z-index:2; }
+  .lbx-nav:hover{ background:rgba(64,60,54,.85); }
+  .lbx-nav.prev{ left:16px; } .lbx-nav.next{ right:16px; }
+  .lbx-count{ position:absolute; top:18px; left:50%; transform:translateX(-50%); font-size:12px; color:rgba(255,255,255,.8); z-index:2; pointer-events:none; }
+  /* Drag-and-drop affordance while a file is over the window. */
+  body.dropping::after{ content:'Drop image to attach'; position:fixed; inset:10px; z-index:190; border:2px dashed rgba(154,100,16,.6); border-radius:16px; background:rgba(154,100,16,.06); display:flex; align-items:center; justify-content:center; font:600 15px -apple-system,system-ui,sans-serif; color:#8a5a13; pointer-events:none; }
   .cchip .lbl{ max-width:150px; overflow:hidden; text-overflow:ellipsis; }
   .cdiv{ width:1px; height:16px; background:var(--line2); flex-shrink:0; }
   .statusrow{ display:flex; justify-content:center; margin-top:8px; }
@@ -282,6 +328,7 @@ public enum WebChatPage {
   .astarts{ display:flex; flex-direction:column; gap:10px; margin:8px 0 2px; }
   .astart{ max-width:min(420px,100%); }
   .astimg{ max-width:100%; border-radius:12px; border:1px solid var(--line2); background:#fff; display:block; }
+  .astarts.bare .astimg{ border:none; background:transparent; }   /* image-only reply: no card chrome */
   .astartbar{ display:flex; align-items:center; gap:12px; margin-top:5px; font-size:11px; color:var(--muted); }
   .astart.filepill{ display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:var(--paper); font-size:12px; }
   .alink{ color:var(--muted); text-decoration:underline; cursor:pointer; }
@@ -323,7 +370,7 @@ const ICON={
   folderPlus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>',
   chevr:'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
 };
-let S={ view:'chat', chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
+let S={ view:'chat', mode:'chat', imgModel:'Auto', imgStyle:'None', imgOpts:null, imgPickerOpen:false, imgStyleOpen:false, chats:{}, current:null, controller:null, streaming:false, streamText:'', streamThinkMs:undefined,
         models:[], modelSel:'Auto', optimize:'Balanced', pickerOpen:false, engineOpen:false, execOpen:false, attachOpen:false,
         engine:null, schedule:null, catalog:null, config:null, lastExec:null, execMsgId:null,
         modelsFilter:'Recommended', detail:null, settingsPane:'Privacy', pendingAtts:[], sidebarOpen:true,
@@ -342,7 +389,10 @@ function loadChats(){ try{S.chats=JSON.parse(localStorage.getItem(LS)||"{}")}cat
 function saveChats(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(LS,JSON.stringify(S.chats))}catch(e){} }
 function loadFolders(){ try{S.folders=JSON.parse(localStorage.getItem(FOLD)||"{}")}catch(e){S.folders={}} }
 function saveFolders(){ if(S.prefs&&S.prefs.saveHistory===false)return; try{localStorage.setItem(FOLD,JSON.stringify(S.folders))}catch(e){} }
-function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen; }
+function loadPrefs(){ try{S.prefs=JSON.parse(localStorage.getItem(PREF)||"{}")}catch(e){S.prefs={}} if(S.prefs.sidebarOpen!==undefined)S.sidebarOpen=S.prefs.sidebarOpen;
+  // Restore the last mode (Chat/Imagine) + Imagine model/style so reopening lands where the user left off.
+  if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode;
+  if(S.prefs.imgModel)S.imgModel=S.prefs.imgModel; if(S.prefs.imgStyle)S.imgStyle=S.prefs.imgStyle; }
 function savePrefs(){ try{localStorage.setItem(PREF,JSON.stringify(S.prefs))}catch(e){} }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function cur(){ return S.chats[S.current]; }
@@ -461,7 +511,7 @@ function fitColor(f){ return (f==='tight'||f==='unlikely')?'var(--amber)':'rgba(
 function fitLabel(f){ return {comfortable:'Comfortable',fits:'Fits',tight:'Tight',unlikely:'Unlikely',unsupported:'Unsupported',unknown:'Unknown'}[f]||f; }
 
 /* ---------- render ---------- */
-function render(){ renderView(); popAnimPass(); capMenuFlipPass(); wireSidebar(); a11yPass(); wireAudioPlayers(); }
+function render(){ renderView(); popAnimPass(); capMenuFlipPass(); wireSidebar(); a11yPass(); wireAudioPlayers(); wireZoomable(); wireGlobalDrop(); }
 // The Task-models dropdowns open downward by default; a row near the bottom of a short settings pane would
 // be clipped. Measure the open menu and flip it above its chip when it would overflow the viewport bottom.
 function capMenuFlipPass(){
@@ -514,7 +564,7 @@ const ACT={
   togglePicker:()=>{ const was=S.pickerOpen; closeAll(); S.pickerOpen=!was; if(!S.pickerOpen)S.focusInput=true; render(); },
   toggleEffort:()=>{ const was=S.effortOpen; closeAll(); S.effortOpen=!was; if(!S.effortOpen)S.focusInput=true; render(); },
   pickEffort:(v)=>{ if(v==='Off'){ S.prefs.reasoning='Off'; } else { S.prefs.reasoning='Auto'; S.prefs.effort=v; } savePrefs(); S.focusInput=true; render(); },
-  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen)refreshEngine(); else S.focusInput=true; render(); },
+  toggleEngine:()=>{ const was=S.engineOpen; closeAll(); S.engineOpen=!was; if(S.engineOpen){ refreshEngine(); startResourcePolling(); } else { stopResourcePolling(); S.focusInput=true; } render(); },
   toggleAttach:()=>{ const was=S.attachOpen; closeAll(); S.attachOpen=!was; render(); },
   pickModel:(v)=>{ S.modelSel=v; closeAll(); S.focusInput=true; if(v==='Auto')refreshSchedule(); render(); },
   pickOptimize:(v)=>{ S.optimize=v; S.focusInput=true; postConfig({performanceMode:v.toLowerCase()}); refreshSchedule(); render(); },
@@ -526,6 +576,18 @@ const ACT={
   removeQueued:(i)=>{ const c=cur(); if(c&&c.queue)c.queue.splice(+i,1); S.focusInput=true; render(); },
   queueDraft:()=>enqueueDraft(),
   retryLast:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); sendText(t); },
+  suggest:(t)=>{ if(!t)return; S.draft=t; S.focusInput=true; render(); },   // fill the composer (user tweaks then sends)
+  apply3d:()=>{ apply3DAnimation(); },   // apply the 3d-animation style adapter to the attached image directly
+  // Imagine mode: Chat ↔ Imagine switch + the image Model/Style pickers.
+  modeChat:()=>{ S.mode='chat'; S.prefs.mode='chat'; savePrefs(); closeAll(); S.focusInput=true; render(); },
+  modeImagine:()=>{ S.mode='imagine'; S.prefs.mode='imagine'; savePrefs(); closeAll(); ensureImgOpts(); S.focusInput=true; render(); },
+  imagineCreate:()=>{ S.focusInput=true; render(); },
+  toggleImgModel:()=>{ const was=S.imgPickerOpen; closeAll(); S.imgPickerOpen=!was; if(!S.imgPickerOpen)S.focusInput=true; render(); },
+  toggleImgStyle:()=>{ const was=S.imgStyleOpen; closeAll(); S.imgStyleOpen=!was; if(!S.imgStyleOpen)S.focusInput=true; render(); },
+  pickImgModel:(v)=>{ S.imgModel=v; S.prefs.imgModel=v; savePrefs(); closeAll(); S.focusInput=true; render(); },
+  pickImgStyle:(v)=>{ S.imgStyle=v; S.prefs.imgStyle=v; if(v!=='None'){ S.imgModel='Auto'; S.prefs.imgModel='Auto'; } savePrefs(); closeAll(); S.focusInput=true; render(); },   // a style pins its own base model
+  lightbox:(a)=>{ if(a) openLightbox(a); },
+  exportBeforeAfter:(id)=>{ exportBeforeAfter(id); },
   continueAuto:(t)=>{ const c=cur(); if(c&&c.messages.length&&c.messages[c.messages.length-1].isError)c.messages.pop(); S.modelSel='Auto'; refreshSchedule(); sendText(t); },
   switchChat:(id)=>{ if(S.renaming)return; S.current=id; render(); },
   renameChat:(id)=>{ S.chatMenu=null; startRename('chat',id); },
@@ -592,12 +654,12 @@ const ACT={
     runCapabilityRequest(c, request, 'Editing web page…'); },
   editSysInstr:()=>{ const t=$('#sysinstr'); if(t){ S.prefs.systemInstr=t.value; savePrefs(); } }
 };
-function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; if(open)S[open]=true; }
+function closeAll(open){ S.pickerOpen=false; S.engineOpen=false; S.attachOpen=false; S.effortOpen=false; S.imgPickerOpen=false; S.imgStyleOpen=false; if(open)S[open]=true; }
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-act]'); const a=t&&t.getAttribute('data-act');
   // Outside-click closes any open popover, unless the click is inside a popover or on the chip/button
   // that owns it (those toggles handle their own open/close).
-  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen;
-  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
+  const anyPop=S.pickerOpen||S.effortOpen||S.engineOpen||S.attachOpen||S.imgPickerOpen||S.imgStyleOpen;
+  if(anyPop && !e.target.closest('.pop') && !/^toggle(Picker|Effort|Engine|Attach|ImgModel|ImgStyle)$/.test(a||'')){ closeAll(); if(S.view==='chat')S.focusInput=true; render(); if(!t)return; }
   if(S.voiceDrop && !e.target.closest('.pop') && a!=='toggleVoiceDrop'){ S.voiceDrop=null; render(); if(!t)return; }
   if(S.capDrop && !e.target.closest('.pop') && a!=='toggleCapDrop'){ S.capDrop=null; render(); if(!t)return; }
   if(S.chatMenu && !e.target.closest('.pop')){ S.chatMenu=null; render(); if(!t)return; }
@@ -630,7 +692,9 @@ function renderChat(){
   // Header stays minimal: sidebar + brand + settings. The model picker and effort control live in the
   // composer (progressive disclosure at the point of use), matching the approved design.
   tb.innerHTML=`<button class="iconbtn" data-act="toggleSidebar" title="Sidebar">${ICON.sidebar}</button>
-    <span class="brand">esh</span><span class="sp"></span>
+    <span class="brand">esh</span>
+    ${renderModeToggle()}
+    <span class="sp"></span>
     ${installIndicator()}
     <button class="iconbtn" data-act="openSettings" title="Settings">${ICON.settings}</button>`;
   wrap.appendChild(tb);
@@ -638,7 +702,11 @@ function renderChat(){
   if(S.sidebarOpen){ body.appendChild(renderSidebar()); body.appendChild(el('div',{cls:'sbackdrop','data-act':'toggleSidebar'})); }
   const main=el('div',{cls:'main'});
   const c=cur(); const has=c&&(c.messages.length||(S.streaming&&S.genChatId===S.current));
-  if(!has){ main.appendChild(el('div',{cls:'empty'},'What can I help with?')); S._logNode=null; S._logSig=''; }
+  if(!has){
+    if(S.mode==='imagine'){ main.appendChild(renderImagineEmpty()); }
+    else { main.appendChild(el('div',{cls:'empty'},'What can I help with?')); }
+    S._logNode=null; S._logSig='';
+  }
   else {
     // Reuse the existing log DOM when the conversation hasn't changed, so opening/closing a popover (or
     // changing model/effort) doesn't rebuild + re-parse the whole thread (which flashed/scroll-jumped).
@@ -785,7 +853,7 @@ function renderLog(){
 function artifactHTML(a){
   const url='/v1/artifacts/'+encodeURIComponent(a.id);
   if(a.kind==='image'||a.kind==='svg'){
-    return `<div class="astart"><img class="astimg" src="${url}" alt="${esch(a.kind)} result" loading="lazy">`
+    return `<div class="astart"><img class="astimg zoomable" data-dl="${url}" src="${url}" alt="${esch(a.kind)} result" loading="lazy">`
       +`<div class="astartbar"><span class="mono">${esch(a.mimeType||a.kind)}</span><a class="alink" href="${url}" download>Download</a></div></div>`;
   }
   if(a.kind==='audio'){
@@ -813,14 +881,131 @@ function artifactHTML(a){
   return `<div class="astart filepill"><span class="mono">${esch(a.kind)}${a.mimeType?(' · '+esch(a.mimeType)):''}</span><a class="alink" href="${url}" download>Download</a></div>`;
 }
 // image.edit before/after: source (left) and edited result (right), each labelled, with download on the result.
+// Both images open a zoom/pan lightbox on click; a footer offers a single combined export (watermarked).
 function beforeAfterHTML(sourceDataURL, art){
   const url='/v1/artifacts/'+encodeURIComponent(art.id);
   const cell=(label,src,dl)=>`<figure style="margin:0;flex:1;min-width:0">`
-    +`<img class="astimg" src="${src}" alt="${esch(label)}" loading="lazy" style="width:100%">`
+    +`<img class="astimg zoomable" data-dl="${dl||''}" src="${src}" alt="${esch(label)}" loading="lazy" style="width:100%">`
     +`<figcaption class="mono" style="font-size:11px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;margin-top:4px">`
     +`<span>${esch(label)}</span>${dl?`<a class="alink" href="${dl}" download>Download</a>`:''}</figcaption></figure>`;
   return `<div class="astart" style="padding:0;background:none;border:none"><div style="display:flex;gap:10px;align-items:flex-start">`
-    +cell('Before', sourceDataURL, null)+cell('After', url, url)+`</div></div>`;
+    +cell('Before', sourceDataURL, null)+cell('After', url, url)+`</div>`
+    +`<div class="mono" style="font-size:11px;color:var(--muted);margin-top:6px;text-align:right"><a class="alink" data-act="exportBeforeAfter" data-arg="${esch(art.id)}">Export before/after ↓</a></div></div>`;
+}
+/* ---------- image lightbox (tap to enlarge · zoom · pan) ---------- */
+let _lbx=null;
+// Lightbox is a GALLERY: `items` is [{src,dl}]; open at `startIndex` and flip with ‹ › / arrow keys (so the
+// viewer can switch between Before, After and any other results without closing). A bare string still works.
+function openLightbox(items, startIndex){
+  if(typeof items==='string') items=[{src:items, dl:(arguments[1]||'')}];
+  items=(items||[]).filter(x=>x&&x.src); if(!items.length) return;
+  closeLightbox();
+  let idx=Math.max(0,Math.min(items.length-1, startIndex||0)); const multi=items.length>1;
+  const ov=document.createElement('div'); ov.className='lbx';
+  ov.innerHTML=`<div class="lbx-stage"><img class="lbx-img" alt="preview" draggable="false"></div>
+    ${multi?`<button class="lbx-nav prev" data-lbx="prev" title="Previous (←)">‹</button><button class="lbx-nav next" data-lbx="next" title="Next (→)">›</button>`:''}
+    ${multi?`<div class="lbx-count mono" data-lbx-count></div>`:''}
+    <div class="lbx-bar">
+      <button class="lbx-btn" data-lbx="out" title="Zoom out">−</button>
+      <button class="lbx-btn" data-lbx="reset" title="Fit">⤢</button>
+      <button class="lbx-btn" data-lbx="in" title="Zoom in">+</button>
+      <a class="lbx-btn" data-lbx="dl" download title="Download">↓</a>
+      <button class="lbx-btn" data-lbx="close" title="Close (Esc)">✕</button>
+    </div>
+    <div class="lbx-hint">Scroll or pinch to zoom · drag to pan${multi?' · ← → to switch':''} · Esc to close</div>`;
+  document.body.appendChild(ov);
+  const stage=ov.querySelector('.lbx-stage'), img=ov.querySelector('.lbx-img');
+  const dlBtn=ov.querySelector('[data-lbx="dl"]'), countEl=ov.querySelector('[data-lbx-count]');
+  let scale=1, tx=0, ty=0; const min=1, max=8;
+  const pts=new Map(); let pinchBase=null, drag=false, lx=0, ly=0, moved=false;
+  const apply=()=>{ img.style.transform=`translate(-50%,-50%) translate(${tx}px,${ty}px) scale(${scale})`; };
+  const clamp=s=>Math.max(min,Math.min(max,s));
+  const zoomAt=(cx,cy,factor)=>{ const r=stage.getBoundingClientRect(); const ox=cx-r.left-r.width/2, oy=cy-r.top-r.height/2;
+    const ns=clamp(scale*factor), k=ns/scale; tx=ox-(ox-tx)*k; ty=oy-(oy-ty)*k; scale=ns; if(scale<=min){tx=0;ty=0;} apply(); };
+  const show=()=>{ const it=items[idx]; img.src=it.src;
+    if(dlBtn){ if(it.dl){ dlBtn.style.display=''; dlBtn.href=it.dl; } else dlBtn.style.display='none'; }
+    if(countEl) countEl.textContent=(idx+1)+' / '+items.length; scale=min; tx=0; ty=0; apply(); };
+  const go=d=>{ idx=(idx+d+items.length)%items.length; show(); };
+  show();
+  stage.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(e.clientX,e.clientY, e.deltaY<0?1.12:1/1.12); },{passive:false});
+  stage.addEventListener('pointerdown',e=>{ pts.set(e.pointerId,{x:e.clientX,y:e.clientY}); drag=true; moved=false; lx=e.clientX; ly=e.clientY; stage.classList.add('grabbing'); try{stage.setPointerCapture(e.pointerId)}catch(_){} });
+  stage.addEventListener('pointermove',e=>{ if(pts.has(e.pointerId))pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size>=2){ const a=[...pts.values()]; const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y), cx=(a[0].x+a[1].x)/2, cy=(a[0].y+a[1].y)/2;
+      if(!pinchBase){ pinchBase=d; } else { zoomAt(cx,cy, d/pinchBase); pinchBase=d; } moved=true; return; }
+    if(!drag)return; const dx=e.clientX-lx, dy=e.clientY-ly; if(Math.abs(dx)+Math.abs(dy)>3)moved=true; lx=e.clientX; ly=e.clientY;
+    if(scale>min){ tx+=dx; ty+=dy; apply(); } });
+  const endp=e=>{ drag=false; stage.classList.remove('grabbing'); pts.delete(e.pointerId); if(pts.size<2)pinchBase=null; };
+  stage.addEventListener('pointerup',endp); stage.addEventListener('pointercancel',endp);
+  stage.addEventListener('dblclick',e=>{ if(scale>min){ scale=min; tx=0; ty=0; apply(); } else zoomAt(e.clientX,e.clientY,2.4); });
+  ov.addEventListener('click',e=>{ const b=e.target.closest('[data-lbx]');
+    if(b){ const k=b.getAttribute('data-lbx'); const r=stage.getBoundingClientRect();
+      if(k==='in')zoomAt(r.left+r.width/2,r.top+r.height/2,1.4);
+      else if(k==='out')zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.4);
+      else if(k==='reset'){ scale=min; tx=0; ty=0; apply(); }
+      else if(k==='prev')go(-1);
+      else if(k==='next')go(1);
+      else if(k==='close')closeLightbox();
+      else if(k==='dl')return;   // let the download anchor work
+      return; }
+    if((e.target===ov||e.target===stage)&&!moved)closeLightbox(); });
+  _lbx={ov, key:e=>{ if(e.key==='Escape')closeLightbox(); else if(multi&&e.key==='ArrowLeft')go(-1); else if(multi&&e.key==='ArrowRight')go(1); }};
+  document.addEventListener('keydown',_lbx.key);
+}
+function closeLightbox(){ if(!_lbx)return; try{document.removeEventListener('keydown',_lbx.key);}catch(_){} try{_lbx.ov.remove();}catch(_){} _lbx=null; }
+// Clicking any result image opens the lightbox as a gallery over ALL result images currently shown (so
+// Before/After and multiple outputs can be flipped through), starting at the clicked one.
+function wireZoomable(){ const all=[...document.querySelectorAll('img.zoomable')];
+  all.forEach(im=>{ if(im._z)return; im._z=true; im.style.cursor='zoom-in';
+    im.addEventListener('click',()=>{ const imgs=[...document.querySelectorAll('img.zoomable')];
+      const items=imgs.map(x=>({src:x.currentSrc||x.src, dl:x.getAttribute('data-dl')||''}));
+      openLightbox(items, imgs.indexOf(im)); }); }); }
+// Compose the before + after into ONE image (side by side) with an esh watermark, and save it. Everything is
+// drawn client-side on a canvas — same-origin artifact + the in-page source data URL, so the canvas isn't tainted.
+async function exportBeforeAfter(id){
+  const c=cur(); if(!c)return; let msg=null;
+  for(const m of c.messages){ if((m.artifacts||[]).some(a=>a&&a.id===id)&&m.sourceImage){ msg=m; break; } }
+  if(!msg){ return; }
+  const load=src=>new Promise((res,rej)=>{ const im=new Image(); im.crossOrigin='anonymous'; im.onload=()=>res(im); im.onerror=()=>rej(new Error('load failed')); im.src=src; });
+  try{
+    const [b,a]=await Promise.all([load(msg.sourceImage), load('/v1/artifacts/'+encodeURIComponent(id))]);
+    // Both panels share one height; each keeps its own aspect ratio, side by side, on a rounded paper card.
+    const H=Math.max(b.naturalHeight,a.naturalHeight)||512;
+    const bw=Math.round(b.naturalWidth*H/(b.naturalHeight||H)), aw=Math.round(a.naturalWidth*H/(a.naturalHeight||H));
+    const gap=Math.round(H*0.022), pad=Math.round(H*0.035), rout=Math.round(H*0.045), rin=Math.round(H*0.03);
+    const cv=document.createElement('canvas'); cv.width=bw+aw+gap+pad*2; cv.height=H+pad*2; const g=cv.getContext('2d');
+    const rr=(x,y,w,h,r)=>{ r=Math.min(r,w/2,h/2); g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); };
+    // Transparent outside → rounded card corners; paper fill inside.
+    g.clearRect(0,0,cv.width,cv.height);
+    rr(0,0,cv.width,cv.height,rout); g.save(); g.clip(); g.fillStyle='#fbfaf8'; g.fillRect(0,0,cv.width,cv.height); g.restore();
+    const panel=(img,x,w)=>{ rr(x,pad,w,H,rin); g.save(); g.clip(); g.drawImage(img,x,pad,w,H); g.restore(); };
+    panel(b,pad,bw); panel(a,pad+bw+gap,aw);
+    // BEFORE / AFTER pills overlaid at each panel's top-left.
+    const lbl=Math.round(H*0.032); g.font=`600 ${lbl}px ui-monospace,Menlo,monospace`; g.textBaseline='middle';
+    const tag=(t,x)=>{ const tw=g.measureText(t).width, pw=tw+lbl*0.9, ph=lbl*1.7, xx=x+lbl*0.55, yy=pad+lbl*0.55;
+      rr(xx,yy,pw,ph,ph*0.32); g.fillStyle='rgba(20,19,17,.55)'; g.fill(); g.fillStyle='#fbfaf8'; g.fillText(t,xx+lbl*0.45,yy+ph/2); };
+    tag('BEFORE',pad); tag('AFTER',pad+bw+gap);
+    // esh watermark as an overlaid pill, bottom-right over the After panel (not a separate footer line).
+    const wm='esh · edited on-device'; const wf=Math.round(H*0.028);
+    g.font=`600 ${wf}px -apple-system,system-ui,Segoe UI,sans-serif`;
+    const wtw=g.measureText(wm).width, wpw=wtw+wf*1.4, wph=wf*2.0;
+    const wx=pad+bw+gap+aw-wpw-lbl*0.55, wy=pad+H-wph-lbl*0.55;
+    rr(wx,wy,wpw,wph,wph*0.5); g.fillStyle='rgba(20,19,17,.5)'; g.fill();
+    g.fillStyle='rgba(255,255,255,.95)'; g.textBaseline='middle'; g.fillText(wm,wx+wf*0.7,wy+wph/2);
+    await new Promise(res=>cv.toBlob(bl=>{ if(!bl){res();return;} const u=URL.createObjectURL(bl); const el=document.createElement('a'); el.href=u; el.download='esh-before-after.png'; document.body.appendChild(el); el.click(); el.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); res(); },'image/png'));
+  }catch(e){ /* export is best-effort; leave the individual downloads available */ }
+}
+/* ---------- attachments: file input + drag-drop + paste ---------- */
+function addFilesList(files){ const arr=[...(files||[])].filter(Boolean); let pending=arr.length; if(!pending)return;
+  arr.forEach(f=>{ const kind=(f.type||'').startsWith('image/')?'image':(f.type||'').startsWith('audio/')?'audio':'document';
+    const r=new FileReader(); r.onload=()=>{ S.pendingAtts.push({kind,name:f.name,size:fmtSize(f.size),mime:f.type,dataURL:r.result}); if(--pending===0){ S.focusInput=true; render(); } }; r.readAsDataURL(f); }); }
+let _dndWired=false;
+function wireGlobalDrop(){ if(_dndWired)return; _dndWired=true;
+  const hasFiles=e=>{ const t=e.dataTransfer&&e.dataTransfer.types; return t && [].slice.call(t).indexOf('Files')>=0; };
+  window.addEventListener('dragover',e=>{ if(!hasFiles(e))return; e.preventDefault(); e.dataTransfer.dropEffect='copy'; document.body.classList.add('dropping'); });
+  window.addEventListener('dragleave',e=>{ if(e.relatedTarget===null||e.clientX<=0||e.clientY<=0)document.body.classList.remove('dropping'); });
+  window.addEventListener('drop',e=>{ document.body.classList.remove('dropping'); if(!(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length))return; e.preventDefault();
+    if(S.view!=='chat'){ S.view='chat'; } addFilesList(e.dataTransfer.files); });
+  window.addEventListener('paste',e=>{ const items=(e.clipboardData&&e.clipboardData.items)||[]; const files=[]; for(let i=0;i<items.length;i++){ if(items[i].kind==='file'){ const f=items[i].getAsFile(); if(f)files.push(f); } } if(files.length){ e.preventDefault(); addFilesList(files); } });
 }
 // UCMR: thin client for the capability endpoint. inputs use the typed payload encoding; returns
 // {text, outputs:[{id,kind,mimeType}]}. Media is referenced by id, not embedded.
@@ -878,20 +1063,44 @@ function planInspectorHTML(plan){
 }
 // Expandable/collapsible live generation panel — streamed status milestones (+ any text stream). Open while
 // generating; collapsed but re-openable afterwards, so any generation can be watched live or inspected later.
+// Live elapsed clock for a generation: ticks every second while running (data-genstart, no data-genend),
+// and freezes at the final duration once done. A single interval patches every clock so there are no
+// full re-renders just to advance the seconds.
+function fmtElapsed(ms){ const s=Math.max(0,Math.floor(ms/1000)); if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+String(s%60).padStart(2,'0')+'s'; }
+function genClockHTML(m){
+  if(!m.genStart) return '';
+  const end=m.genEnd||Date.now();
+  return `<span class="gpclock mono" data-genstart="${m.genStart}"${m.genEnd?(' data-genend="'+m.genEnd+'"'):''}>${esch(fmtElapsed(end-m.genStart))}</span>`;
+}
+function tickGenClocks(){
+  document.querySelectorAll('.gpclock[data-genstart]').forEach(el=>{
+    const st=+el.getAttribute('data-genstart'); if(!st)return;
+    const fin=el.getAttribute('data-genend'); el.textContent=fmtElapsed((fin?+fin:Date.now())-st);
+  });
+}
+let _genClockTimer=null;
+function ensureGenClock(){ if(_genClockTimer)return;
+  _genClockTimer=setInterval(()=>{ tickGenClocks();
+    // Stop once nothing is still running (every clock has frozen with a data-genend).
+    if(!document.querySelector('.gpclock[data-genstart]:not([data-genend])')){ clearInterval(_genClockTimer); _genClockTimer=null; }
+  }, 1000);
+}
 function genPanelHTML(m){
   const log=(m.statusLog||[]);
   if(!m.generating && !log.length && !(m.streamText&&m.streamText.trim())) return '';
+  if(m.generating) setTimeout(ensureGenClock,0);   // start the ticking clock while this generation runs
+  const clock=genClockHTML(m);
   // Native <details> so expand/collapse works without app state — open while generating, collapsed after.
   const head = m.generating
-    ? `<span class="typing"><i></i><i></i><i></i></span><span>${esch(m.genLabel||'Working…')}</span>`
-    : `<span>Generation details${log.length?(' · '+log.length+' step'+(log.length>1?'s':'')):''}</span>`;
+    ? `<span class="typing"><i></i><i></i><i></i></span><span>${esch(m.genLabel||'Working…')}</span>${clock?(' '+clock):''}`
+    : `<span>Generation details${log.length?(' · '+log.length+' step'+(log.length>1?'s':'')):''}</span>${clock?(' <span class="gpdot">·</span> '+clock):''}`;
   const body = log.map(s=>`<div class="gpstep">${esch(s)}</div>`).join('')
     + ((m.streamText&&m.streamText.trim())?`<pre class="gpstream">${esch(m.streamText)}</pre>`:'');
   return `<details class="genpanel${m.generating?' gen':''}" ${m.generating?'open':''}><summary class="gpsum">${head}</summary><div class="gpbody">${body}</div></details>`;
 }
 // Run a validated ExecutionRequest and land the typed result in an assistant message.
 async function runCapabilityRequest(c, request, label){
-  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…',statusLog:[],streamOpen:true};
+  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…',statusLog:[],streamOpen:true,genStart:Date.now()};
   // For image.edit, keep the SOURCE image so the result can be shown as a before/after compare.
   if(request&&request.capability==='image.edit'){
     try{ const img=(request.inputs||[]).map(i=>i&&i.payload&&i.payload.attachment&&i.payload.attachment._0).find(a=>a&&a.kind==='image');
@@ -912,13 +1121,15 @@ async function runCapabilityRequest(c, request, label){
       else if(ev.type==='error'){ streamErr=ev.message||'generation failed'; }
     });
     if(streamErr) throw new Error(streamErr);
-    msg.generating=false; msg.artifacts=outputs; msg.streamOpen=false;   // collapse the live panel once done
+    msg.generating=false; msg.genEnd=Date.now(); msg.artifacts=outputs; msg.streamOpen=false;   // freeze elapsed + collapse the live panel once done
     if(msg.streamText) msg.content=msg.streamText;
     if(!(msg.artifacts&&msg.artifacts.length) && !msg.content) msg.content='Done.';
   }catch(e){
-    msg.generating=false;
+    msg.generating=false; msg.genEnd=Date.now();
     if(e&&e.name==='AbortError'){ msg.content='⏹ Stopped. (The local model may still be finishing on the server.)'; }
-    else { msg.isError=true; msg.title='That didn’t work'; msg.detail=(e&&e.message)||String(e); }
+    else { msg.isError=true; const d=(e&&e.message)||String(e); msg.detail=d;
+      // A memory preflight refusal (nothing was loaded) gets a calmer, accurate title.
+      msg.title=/not enough free memory/i.test(d)?'Needs more memory to start':'That didn’t work'; }
   }
   S.capBusy=false; S.capController=null; saveChats(); render();
 }
@@ -946,7 +1157,12 @@ async function handleRoute(c, text, atts){
 async function installAndResume(card, msg){
   msg.installCard.installing=true; saveChats(); render();
   try{
-    if((card.kind||'model')==='asset'){
+    if(card.kind==='adapter'){
+      // Download the small style-adapter LoRA, then resume the stored edit (image + adapter baked into it).
+      const r=await fetch('/v1/capability/image-edit/adapters/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:card.adapterId})});
+      if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error((e.error&&e.error.message)||('install failed ('+r.status+')')); }
+      await runCapabilityRequest(cur(), card.request, card.label||'Applying style…');
+    } else if((card.kind||'model')==='asset'){
       // The provider's bridge fetches the component on first execution (explicit here, not silent).
       await runCapabilityRequest(cur(), card.request, (friendlyCap(card.cap)+'…'));
     } else {
@@ -1009,7 +1225,7 @@ function renderMsg(m){
   if(m.artifacts && m.artifacts.length){
     const editArt=m.sourceImage ? m.artifacts.find(a=>a&&a.kind==='image'&&a.generatedBy&&a.generatedBy.capability==='image.edit') : null;
     if(editArt){ h+=beforeAfterHTML(m.sourceImage, editArt)+m.artifacts.filter(a=>a!==editArt).map(artifactHTML).join(''); }
-    else { h+=`<div class="astarts">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }
+    else { const bare=ans?'':' bare'; h+=`<div class="astarts${bare}">`+m.artifacts.map(artifactHTML).join('')+`</div>`; }   // no border when the image stands alone (no text)
   }
   // UCMR Stage 3: "Why this execution plan?" — the composed pipeline for a typed result.
   if(m.plan){ h+=planInspectorHTML(m.plan); }
@@ -1049,6 +1265,14 @@ function statusInfo(){
   const extDown=!!(st.external && st.status && st.status!=='available');
   const engDown=!!(e&&e.status&&e.status!=='ok'&&e.status!=='ready');
   if(extDown) return {label:'External storage disconnected',amber:true};
+  // Imagine mode uses the image pipeline (Z-Image Turbo / FLUX), never the chat LLM — so the status line
+  // reflects the image studio, not whatever chat model happens to be warm.
+  if(S.mode==='imagine'){
+    if(S.capBusy) return {label:'Local · Image studio · generating',amber:false};
+    const im = S.imgStyle!=='None' ? ((imgStyleById(S.imgStyle)||{}).label||'style')
+             : (S.imgModel==='Auto' ? 'Auto' : ((imgBackendById(S.imgModel)||{}).label||'edit'));
+    return {label:'Local · Image · '+im+' · Ready',amber:false};
+  }
   const name=S.modelSel==='Auto' ? (S.schedule&&S.schedule.selectedModelID?shortModel(S.schedule.selectedModelID):'Auto')
                                  : (S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
   if(!e) return {label:'Local · …',amber:false};
@@ -1070,26 +1294,264 @@ function renderMiniPlayer(){
      <span class="mptime mono" id="mptime">0:00</span>
      <button class="mpbtn" data-act="speakStop" title="Stop">${ICON.xmark}</button></div>`;
 }
+// Directly apply the installed "3d-animation" style adapter to the attached image (interim shortcut before
+// the full adapter-picker UI). Builds an image.edit request with options.adapter and runs it. If the adapter
+// isn't installed, the typed provider error surfaces in the message.
+async function apply3DAnimation(){
+  const imgAtt=(S.pendingAtts||[]).find(x=>x && x.kind==='image');
+  if(!imgAtt) return;
+  const c=cur()||(newChat(),cur());
+  const att=attToEsh([imgAtt])[0];
+  const request={schemaVersion:'esh.execute.request.v1', capability:'image.edit',
+    inputs:[{payload:{attachment:{_0:att}}},{payload:{text:{_0:'Turn this into a polished 3D animated character'}}}],
+    output:{modality:'image'},
+    options:{values:{adapter:'3d-animation'}}};
+  // Show the user's turn (the photo they sent + what we're doing) above the generation, like a typed edit.
+  c.messages.push({id:uid(), role:'user', content:'Apply 3D animation', attachments:[imgAtt]});
+  S.pendingAtts=[];   // consumed into the request (kept as the before/after source image)
+  // Install-and-resume: if the adapter isn't installed, show an install card that downloads it, then resumes
+  // this exact edit (the image is already baked into `request`, so the user never re-attaches or re-types).
+  let adapter=null;
+  try{ const r=await fetch('/v1/capability/image-edit/options'); if(r.ok){ const o=await r.json(); adapter=(o.adapters||[]).find(a=>a.id==='3d-animation'); } }catch(e){}
+  if(adapter && adapter.installed===false){
+    c.messages.push({id:uid(), role:'assistant', installCard:{
+      kind:'adapter', adapterId:'3d-animation', cap:'image.edit',
+      name:(adapter.label||'3D animation style'), sizeMB:adapter.approxSizeMB, request, label:'Applying 3D animation…'}});
+    saveChats(); render(); return;
+  }
+  runCapabilityRequest(c, request, 'Applying 3D animation…');
+}
+// Suggested-prompt starters above the composer. Shown only on a fresh/empty chat, and CAPABILITY-AWARE:
+// with an image attached we offer a direct "3D animation" style action + EDIT starters (an image is required
+// to edit); otherwise generation + general starters. Text starters FILL the composer (no auto-send); the
+// "3D animation" chip APPLIES the adapter directly.
+function renderSuggests(){
+  const c=cur();
+  if(c && c.messages && c.messages.length) return '';         // only on an empty chat
+  if(S.streaming || S.capBusy) return '';
+  const hasImg = (S.pendingAtts||[]).some(x=>x && x.kind==='image');
+  const styleChip = hasImg ? `<button class="schip style3d" data-act="apply3d" title="Apply the 3D-animation style to the attached image">3D animation</button>` : '';
+  const list = hasImg ? [
+    'Make this a polished 3D animated character',
+    'Change the background to a snowy mountain',
+    'Turn this into a watercolor painting',
+    'Remove the background',
+  ] : [
+    'Generate an image of a red sports car at sunset',
+    'Create a Three.js scene of a rotating globe',
+    'Write a haiku about the sea',
+    'Summarize a document I paste',
+  ];
+  const chips = list.map(t=>`<button class="schip" data-act="suggest" data-arg="${escAttr(t)}" title="${escAttr(t)}">${esch(t)}</button>`).join('');
+  return `<div class="suggests" aria-label="Suggested prompts">${styleChip}${chips}</div>`;
+}
+
+/* ===================== Imagine mode ===================== */
+// A local-first image studio that sits beside Chat. It maps 1:1 onto the REAL runtime: text-only prompts
+// create via image.generate (Z-Image Turbo); an attached photo edits via image.edit (FLUX.2 Klein / Kontext /
+// Qwen), optionally with a neutral style adapter. Model/style choices come from /v1/capability/image-edit/
+// options so fit + license badges are honest per-Mac, never hard-coded.
+const ICON_INFO='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>';
+const ICON_SPARK='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z"/></svg>';
+const ICON_IMG='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>';
+function renderModeToggle(){
+  const im=S.mode==='imagine';
+  return `<div class="modepill" role="tablist" aria-label="Mode">
+    <button class="modeopt ${im?'':'on'}" data-act="modeChat" role="tab" aria-selected="${im?'false':'true'}">Chat</button>
+    <button class="modeopt ${im?'on':''}" data-act="modeImagine" role="tab" aria-selected="${im?'true':'false'}">Imagine</button>
+  </div>`;
+}
+// Fetch the edit-model / style-adapter catalogue once and cache it, then re-render so badges fill in.
+function ensureImgOpts(){ if(S.imgOpts||S._imgOptsLoading)return; S._imgOptsLoading=true;
+  fetch('/v1/capability/image-edit/options').then(r=>r.ok?r.json():null).then(o=>{ S._imgOptsLoading=false; if(o){ S.imgOpts=o; render(); } }).catch(()=>{ S._imgOptsLoading=false; }); }
+function imgBackendById(id){ const o=S.imgOpts; return (o&&(o.backends||[]).find(b=>b.id===id))||null; }
+function imgStyleById(id){ const o=S.imgOpts; return (o&&(o.adapters||[]).find(a=>a.id===id))||null; }
+function imgModelLabel(){ if(S.imgModel==='Auto')return 'Auto'; const b=imgBackendById(S.imgModel); return b?b.label:S.imgModel; }
+function imgStyleLabel(){ if(S.imgStyle==='None')return 'Style'; const a=imgStyleById(S.imgStyle); return a?a.label.replace(/\s*style$/i,''):'Style'; }
+function licenseText(l){ return (l==='apache-2.0')?'Apache-2.0 · commercial-ok':(l&&l.indexOf('non-commercial')>=0?'non-commercial':(l||'')); }
+function fitWord(f){ return ({comfortable:'Comfortable fit',fits:'Fits this Mac',tight:'Tight on this Mac',unlikely:'May not fit',unsupported:'Not supported here',unknown:'Fit unknown'})[f]||f; }
+function imgHasImage(){ return (S.pendingAtts||[]).some(x=>x&&x.kind==='image'); }
+// A specific edit backend OR a style adapter forces the EDIT path (needs a photo). Auto + no style can create.
+function imgSelEditOnly(){ return S.imgModel!=='Auto' || S.imgStyle!=='None'; }
+function imgNeedsImage(){ return imgSelEditOnly() && !imgHasImage(); }
+function imgActiveLine(){
+  if(S.imgModel==='Auto' && S.imgStyle==='None') return 'Auto · creates from text, edits with a photo · on-device';
+  if(S.imgStyle!=='None'){ const a=imgStyleById(S.imgStyle); return (a?a.label:'Style')+' · applies when you attach a photo'; }
+  const b=imgBackendById(S.imgModel); return b?(b.label+' · edits a photo · '+licenseText(b.license)):'On-device';
+}
+function renderImagineEmpty(){
+  ensureImgOpts();
+  const d=el('div',{cls:'imagine-empty'});
+  d.innerHTML=`<h2>What should we make?</h2>
+    <div class="sub">Create an image from a description, or attach a photo and describe how to change it. Everything runs on this Mac.</div>
+    <div class="entries">
+      <button class="entry" data-act="imagineCreate">${ICON_SPARK} Create from a description</button>
+      <button class="entry" data-act="attach">${ICON_IMG} Drop an image to edit it</button>
+    </div>
+    <div class="amline">${esch(imgActiveLine())}</div>`;
+  return d;
+}
+// Prompt starters above the composer (empty chat only). Image-attached → edit starters + the direct
+// 3D-animation apply chip; otherwise create-from-text starters.
+function renderImagineSuggests(){
+  if(S.streaming||S.capBusy) return '';
+  // Imagine starters stay available whenever the composer is empty (even after prior results) — they're the
+  // quickest way to kick off the next image; they hide only once you start typing.
+  if(S.draft && S.draft.trim()) return '';
+  const hasImg=imgHasImage();
+  const list = hasImg ? [
+    'Turn this into a polished 3D animated character',
+    'Change the background to a snowy mountain at dusk',
+    'Make it a watercolor painting',
+    'Remove the background',
+  ] : [
+    'A red sports car on a coastal road at sunset',
+    'A cozy reading nook, warm lamplight, plants',
+    'An astronaut planting a flag on a candy planet',
+    'A minimalist mountain logo, two colors',
+  ];
+  const styleChip = hasImg ? `<button class="schip style3d" data-act="apply3d" title="Apply the 3D-animation style to the attached image">3D animation</button>` : '';
+  const chips=list.map(t=>`<button class="schip" data-act="suggest" data-arg="${escAttr(t)}" title="${escAttr(t)}">${esch(t)}</button>`).join('');
+  return `<div class="suggests" aria-label="Image prompts">${styleChip}${chips}</div>`;
+}
+function imgPreflight(){
+  if(S.capBusy||S.streaming) return '';          // never nag while a generation is already running
+  if(!imgNeedsImage()) return '';
+  const why = S.imgStyle!=='None'
+    ? 'Styles apply when you edit a photo.'
+    : ((imgBackendById(S.imgModel)||{}).label||'This model')+' edits an existing photo.';
+  return `<div class="imnote">${ICON_INFO}<span>${esch(why)} Attach an image to edit, or switch the model to <b>Auto</b> to create from a description.</span></div>`;
+}
+function imgPopWrap(h,w){ return '<div class="pop" style="right:0;bottom:calc(100% + 10px);width:'+w+';padding:8px 0;max-height:min(72vh,540px);overflow:auto">'+h+'</div>'; }
+function renderImgModelPicker(){
+  ensureImgOpts(); const o=S.imgOpts; const auto=S.imgModel==='Auto';
+  let h=`<div class="pickrow ${auto?'sel':''}" style="padding:10px 12px;flex-direction:column;align-items:stretch;gap:3px" data-act="pickImgModel" data-arg="Auto">
+     <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13.5px;font-weight:600">Auto</span><span class="sp" style="flex:1"></span><span style="font-size:10.5px;color:var(--muted);font-weight:500">Recommended</span>${auto?'<span class="ck">✓</span>':''}</div>
+     <div class="pdesc">Creates from text, edits when you attach a photo.</div></div>`;
+  if(!o){ h+='<div class="menurow" style="color:var(--muted)">Loading models…</div>'; return imgPopWrap(h,'320px'); }
+  // Create-from-text: one wired generator (informational — not a swap yet), so no fabricated fit numbers.
+  h+='<div class="menuhead">Create from text</div>';
+  h+=`<div class="pickrow" style="cursor:default;flex-direction:column;align-items:stretch;gap:3px">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:13px">Z-Image Turbo</span><span class="sp" style="flex:1"></span><span class="lic">apache-2.0</span></div>
+      <div class="pdesc">esh's on-device text-to-image model. Auto uses it when no photo is attached.</div></div>`;
+  // Edit-a-photo backends (selectable) — fit dot + license + estimated peak from the discovery endpoint.
+  h+='<div class="menuhead">Edit a photo</div>';
+  (o.backends||[]).forEach(b=>{ const sel=S.imgModel===b.id;
+    const badge=`<span class="fitdot ${esch(b.fit)}" title="${esch(fitWord(b.fit))}"></span><span class="lic ${b.commercial?'':'nc'}">${esch(b.license)}</span>`;
+    const size=b.estimatedPeakGB?('~'+Math.round(b.estimatedPeakGB)+' GB peak'):'';
+    const warn=(b.fit==='tight'||b.fit==='unlikely'||b.fit==='unsupported')?(' · '+fitWord(b.fit)):'';
+    h+=`<div class="pickrow ${sel?'sel':''}" style="flex-direction:column;align-items:stretch;gap:3px" data-act="pickImgModel" data-arg="${esch(b.id)}">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:13px">${esch(b.label)}</span><span class="sp" style="flex:1"></span>${badge}${sel?'<span class="ck">✓</span>':''}</div>
+      <div class="pdesc">Edits a photo${size?(' · '+size):''}${b.commercial?'':' · non-commercial'}${esch(warn)}</div></div>`;
+  });
+  h+='<div class="sep"></div><div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);line-height:1.5">Editing models need a photo. Fit is estimated for this Mac; non-commercial models are personal-use only.</div>';
+  return imgPopWrap(h,'340px');
+}
+function renderImgStylePicker(){
+  ensureImgOpts(); const o=S.imgOpts; const none=S.imgStyle==='None';
+  let h=pickRow('None',none,'pickImgStyle','None');
+  if(!o){ h+='<div class="menurow" style="color:var(--muted)">Loading styles…</div>'; return imgPopWrap(h,'320px'); }
+  h+='<div class="menuhead">Styles</div>';
+  (o.adapters||[]).forEach(a=>{ const sel=S.imgStyle===a.id;
+    const state=a.installed?'<span class="pdesc" style="color:#3f7d4e">installed</span>':'<span class="pdesc">downloads on first use</span>';
+    h+=`<div class="pickrow ${sel?'sel':''}" style="flex-direction:column;align-items:stretch;gap:3px" data-act="pickImgStyle" data-arg="${esch(a.id)}">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;font-size:13px">${esch(a.label)}</span><span class="sp" style="flex:1"></span>${sel?'<span class="ck">✓</span>':''}</div>
+      <div class="pdesc" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><span class="lic">${esch(a.license)}</span><span>${a.approxSizeMB} MB</span>${state}</div></div>`;
+  });
+  h+='<div class="sep"></div><div style="padding:8px 16px 6px;font-size:11px;color:var(--faint);line-height:1.5">Names are neutral by design. A style applies to a photo you attach, using the style\'s own base model.</div>';
+  return imgPopWrap(h,'340px');
+}
+// Imagine send: text-only → create (image.generate); photo attached → edit (image.edit) with the chosen
+// backend/style. A style that isn't installed installs-and-resumes the exact edit (never re-typed).
+// When a generation is already running, the new prompt (with/without a photo) is QUEUED and auto-runs when
+// the current one finishes — the style/model chosen at send time travels with the queued item.
+async function sendImagine(queued){
+  stopSpeak();
+  let text, atts, c, imgModel, imgStyle, ta=null;
+  if(queued){ c=S.chats[queued.chatId]; if(!c)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice();
+    imgModel=queued.imgModel||'Auto'; imgStyle=queued.imgStyle||'None'; }
+  else {
+    ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); atts=S.pendingAtts.slice();
+    imgModel=S.imgModel; imgStyle=S.imgStyle;
+    if(!text&&!atts.length) return;
+    c=cur()||(newChat(),cur());
+    // Busy → queue this request (keeps the picked model/style) and clear the composer, like Chat's queue.
+    if(S.controller||S.capBusy){
+      c.queue=c.queue||[]; c.queue.push({img:true, text, atts, imgModel, imgStyle});
+      S.pendingAtts=[]; S.draft=''; if(ta)ta.value=''; S.focusInput=true; saveChats(); render(); return;
+    }
+    S.pendingAtts=[]; S.draft=''; if(ta)ta.value=''; S.focusInput=true;
+  }
+  const img=atts.find(a=>a&&a.kind==='image');
+  c.messages.push({id:uid(),role:'user',content:text,attachments:atts});
+  if(c.title==='New chat'&&text) c.title=text.slice(0,40);
+  if(!img){
+    // No photo. An edit-only model/style was picked → guide instead of failing. Otherwise create from text.
+    if(imgModel!=='Auto' || imgStyle!=='None'){
+      c.messages.push({id:uid(),role:'assistant',content:'That model edits an existing photo. Attach an image to edit, or switch the model chip to **Auto** to create an image from your description.'});
+      saveChats(); render(); maybeSendQueue(c.id); return;
+    }
+    if(!text){ saveChats(); render(); maybeSendQueue(c.id); return; }
+    const request={schemaVersion:'esh.execute.request.v1',capability:'image.generate',
+      inputs:[{payload:{text:{_0:text}}}], output:{modality:'image'}};
+    saveChats(); await runCapabilityRequest(c, request, 'Creating image…'); maybeSendQueue(c.id); return;
+  }
+  // Photo attached → edit path. A selected style pins its own base model (server-side), so send the adapter
+  // alone; otherwise honour a manually pinned backend.
+  const att=attToEsh([img])[0];
+  const instruction = text || 'Apply the selected style';
+  const values={};
+  if(imgStyle!=='None'){ values.adapter=imgStyle; }
+  else if(imgModel!=='Auto'){ values.backend=imgModel; }
+  const request={schemaVersion:'esh.execute.request.v1',capability:'image.edit',
+    inputs:[{payload:{attachment:{_0:att}}},{payload:{text:{_0:instruction}}}],
+    output:{modality:'image'},
+    options: Object.keys(values).length?{values}:undefined};
+  if(imgStyle!=='None'){
+    const a=imgStyleById(imgStyle);
+    if(a && a.installed===false){
+      c.messages.push({id:uid(),role:'assistant',installCard:{kind:'adapter',adapterId:a.id,cap:'image.edit',
+        name:a.label,sizeMB:a.approxSizeMB,request,label:'Applying '+a.label+'…'}});
+      saveChats(); render(); maybeSendQueue(c.id); return;
+    }
+  }
+  saveChats(); await runCapabilityRequest(c, request, 'Editing image…'); maybeSendQueue(c.id);
+}
 function renderComposer(){
   const c=el('div',{cls:'composer'});
   const si=statusInfo();
+  const imagine=S.mode==='imagine';
   const mlabel=S.modelSel==='Auto'?'Auto':(S.modelSel==='Apple Intelligence'?'Apple Intelligence':shortModel(S.modelSel));
-  c.innerHTML=`${renderMiniPlayer()}<div class="cbox">
+  // In Imagine mode the two chips become Style + Model (fed by the discovery endpoint); in Chat they stay
+  // Model + Effort. The attach / textarea / mic / send shell is shared.
+  const chips = imagine
+    ? `<button class="cchip" data-act="toggleImgStyle" title="Style"><span class="lbl">${esch(imgStyleLabel())}</span><span class="chev">▾</span></button>
+       <button class="cchip" data-act="toggleImgModel" title="Model"><span class="lbl">${esch(imgModelLabel())}</span><span class="chev">▾</span></button>`
+    : `<button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
+       <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>`;
+  const placeholder = imagine ? 'Describe an image to create, or attach one to edit…' : 'Ask anything…';
+  c.innerHTML=`${renderMiniPlayer()}${imagine?renderImagineSuggests():renderSuggests()}${imagine?imgPreflight():''}<div class="cbox">
      ${S._recording?`<div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink);padding:2px 2px 4px"><span style="width:9px;height:9px;border-radius:50%;background:#c0392b;animation:eshpulse 1s ease-in-out infinite"></span>Recording <span class="mono" id="rectime" style="font-size:12px">0:00</span><span style="color:var(--muted)">— release to attach</span></div>`:''}
      ${(cur()&&cur().queue&&cur().queue.length)?renderQueue():''}
      ${S.pendingAtts.length?renderChips():''}
      <div style="display:flex;align-items:center;gap:10px">
        <button class="cround" data-act="attach" title="Attach">${ICON.plus}</button>
-       <textarea class="cinput" id="input" rows="1" placeholder="Ask anything…"></textarea>
-       <button class="cchip" data-act="togglePicker" title="Model"><span class="lbl">${esch(mlabel)}</span><span class="chev">▾</span></button>
-       <button class="cchip ghost" data-act="toggleEffort" title="Effort">${esch(effortWord())}</button>
+       <textarea class="cinput" id="input" rows="1" placeholder="${escAttr(placeholder)}"></textarea>
+       ${chips}
        <span class="cdiv"></span>
        <button class="cround" id="micbtn" style="border:none${S._recording?';background:#c0392b;color:#fff':''}" data-act="startVoice" title="Tap for voice · hold to record audio">${ICON.mic}</button>
-       ${(((S.streaming||S.capBusy)&&S.genChatId===S.current))?`<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button><button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`:(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
+       ${(((S.streaming||S.capBusy)&&S.genChatId===S.current))?((()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length);
+            // While a generation runs, offer a queue button (Imagine → send/queue the next image; Chat → ⌥Enter draft) plus Stop.
+            const qb = imagine
+              ? `<button class="cround" id="queuebtn" data-act="send" title="Queue this image · runs when the current one finishes" style="border:none;opacity:${on?'1':'.4'}">${ICON.queue}</button>`
+              : `<button class="cround" id="queuebtn" data-act="queueDraft" title="Queue this message · ⌥Enter" style="border:none;opacity:${(S.draft&&S.draft.trim())?'1':'.4'}">${ICON.queue}</button>`;
+            return qb+`<button class="send" data-act="stop" title="Stop" style="background:var(--ink)">${ICON.stop}</button>`; })()):(()=>{ const on=!!((S.draft&&S.draft.trim())||S.pendingAtts.length); return `<button class="send" id="sendbtn" data-act="send" title="Send" style="background:${on?'var(--ink)':'#dedbd4'};cursor:${on?'pointer':'default'}">${ICON.up}</button>`; })()}
      </div>
      ${S.attachOpen?renderAttach():''}
-     ${S.pickerOpen?renderPicker():''}
-     ${S.effortOpen?renderEffort():''}
+     ${(!imagine&&S.pickerOpen)?renderPicker():''}
+     ${(!imagine&&S.effortOpen)?renderEffort():''}
+     ${(imagine&&S.imgStyleOpen)?renderImgStylePicker():''}
+     ${(imagine&&S.imgPickerOpen)?renderImgModelPicker():''}
      <input type="file" id="filepick" accept="image/*,audio/*,.txt,.md,.json,.csv,.pdf" multiple style="display:none">
    </div>
    <div class="statusrow"><button class="statusbtn" data-act="toggleEngine" title="Engine status"><span class="dot" style="background:${si.amber?'var(--amber)':'var(--ink)'}"></span>${esch(si.label)}</button></div>`;
@@ -1272,6 +1734,7 @@ function renderEngine(){
       <div class="kv"><span class="k">Inference</span><span style="display:flex;align-items:center;gap:6px"><span class="dot"></span>On this Mac</span></div>
       <div class="kv"><span class="k">Apple Intelligence</span><span>${e.appleIntelligence&&e.appleIntelligence.available?'Available':'Unavailable'}</span></div>
     </div>
+    ${liveUsageHTML()}
     <div class="menuhead" style="padding-left:20px">Storage · ${esch(volLabel(st.assetsRoot))}${st.external?' (external)':''}</div>
     <div style="padding:2px 20px 4px">
       <div class="kv" style="margin-bottom:8px"><span class="k">Free</span><span class="mono" style="font-size:12px">${gb(free)} free</span></div>
@@ -1284,6 +1747,39 @@ function renderEngine(){
     </div>
     <div style="padding:12px 20px 16px;display:flex;gap:14px">${engines}</div>`;
   p.innerHTML=h; return p;
+}
+// Live shared-resource meters (RAM + GPU) for the Engine inspector, fed by /v1/resources. Renders with
+// whatever snapshot we have (placeholders when none yet); a poller patches the values in place while open.
+function liveUsageHTML(){
+  const r=S.resources; const GB=1073741824;
+  const usedGB = r?(r.usedMemoryBytes/GB):0, totGB = r?(r.totalMemoryBytes/GB):0;
+  const memPct = (r&&r.totalMemoryBytes)?Math.min(100,r.usedMemoryBytes/r.totalMemoryBytes*100):0;
+  const gv = (!r||r.gpuUtilizationPercent==null)?null:Math.max(0,Math.min(100,r.gpuUtilizationPercent));
+  return `<div class="menuhead" style="padding-left:20px">Live usage</div>
+   <div style="padding:2px 20px 12px;display:flex;flex-direction:column;gap:11px">
+     <div>
+       <div class="kv" style="margin-bottom:6px"><span class="k">Memory</span><span class="mono" data-res="mem" style="font-size:12px">${r?(usedGB.toFixed(1)+' / '+totGB.toFixed(0)+' GB'):'…'}</span></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="membar" style="width:${memPct.toFixed(1)}%;height:100%;background:${memPct>85?'var(--amber)':'var(--ink)'};transition:width .4s ease"></div></div>
+     </div>
+     <div>
+       <div class="kv" style="margin-bottom:6px"><span class="k">GPU</span><span class="mono" data-res="gpu" style="font-size:12px">${gv==null?'—':(gv.toFixed(0)+'%')}</span></div>
+       <div style="height:8px;border-radius:4px;overflow:hidden;background:rgba(32,30,27,.07)"><div data-res="gpubar" style="width:${gv==null?0:gv.toFixed(1)}%;height:100%;background:var(--ink);transition:width .4s ease"></div></div>
+     </div>
+   </div>`;
+}
+let _resTimer=null;
+function startResourcePolling(){ stopResourcePolling(); refreshResources(); _resTimer=setInterval(refreshResources, 1500); }
+function stopResourcePolling(){ if(_resTimer){ clearInterval(_resTimer); _resTimer=null; } }
+async function refreshResources(){ if(!S.engineOpen){ stopResourcePolling(); return; } try{ const r=await api('/v1/resources'); if(r){ S.resources=r; patchResourceMeters(); } }catch(e){} }
+function patchResourceMeters(){ const r=S.resources; if(!r)return; const GB=1073741824;
+  const mem=document.querySelector('[data-res="mem"]'), membar=document.querySelector('[data-res="membar"]');
+  const gpu=document.querySelector('[data-res="gpu"]'), gpubar=document.querySelector('[data-res="gpubar"]');
+  if(mem) mem.textContent=(r.usedMemoryBytes/GB).toFixed(1)+' / '+(r.totalMemoryBytes/GB).toFixed(0)+' GB';
+  const mp=r.totalMemoryBytes?Math.min(100,r.usedMemoryBytes/r.totalMemoryBytes*100):0;
+  if(membar){ membar.style.width=mp.toFixed(1)+'%'; membar.style.background=mp>85?'var(--amber)':'var(--ink)'; }
+  const gv=(r.gpuUtilizationPercent==null)?null:Math.max(0,Math.min(100,r.gpuUtilizationPercent));
+  if(gpu) gpu.textContent=(gv==null?'—':gv.toFixed(0)+'%');
+  if(gpubar) gpubar.style.width=(gv==null?0:gv.toFixed(1))+'%';
 }
 function renderExec(){
   const m=cur()?cur().messages.find(x=>x.id===S.execMsgId):null;
@@ -1626,6 +2122,8 @@ async function transcribeAtts(atts){ const out=[];
 // queued message never executes in whatever chat happens to be open now.
 async function send(queued){
   stopSpeak();
+  // Imagine mode routes to the image studio (create/edit); the message queue stays a Chat-only feature.
+  if(!queued && S.mode==='imagine'){ return sendImagine(); }
   let text, atts, c, ta=null;
   if(queued){ c=S.chats[queued.chatId]; if(!c||S.controller||S.capBusy)return; text=(queued.text||'').trim(); atts=(queued.atts||[]).slice(); }
   else { ta=$('#input'); text=ta?ta.value.trim():(S.draft||'').trim(); if((!text&&!S.pendingAtts.length)||S.controller||S.capBusy) return; c=cur()||(newChat(),cur()); atts=S.pendingAtts.slice(); S.pendingAtts=[]; }
@@ -1734,7 +2232,10 @@ function enqueueDraft(){ const ta=document.querySelector('#input'); const t=((ta
   const c=cur()||(newChat(),cur()); c.queue=c.queue||[]; c.queue.push({text:t, atts:S.pendingAtts.slice()});
   S.pendingAtts=[]; S.draft=''; if(ta){ ta.value=''; ta.style.height='auto'; }
   S.focusInput=true; render(); maybeSendQueue(c.id); }
-function maybeSendQueue(chatId){ if(S.streaming||S.controller||S.capBusy)return; const c=S.chats[chatId]; if(!c||!c.queue||!c.queue.length)return; const item=c.queue.shift(); render(); send({chatId:chatId, text:item.text, atts:item.atts}); }
+function maybeSendQueue(chatId){ if(S.streaming||S.controller||S.capBusy)return; const c=S.chats[chatId]; if(!c||!c.queue||!c.queue.length)return; const item=c.queue.shift(); render();
+  // Imagine-mode items carry their own model/style and run through the image studio; chat items go to send().
+  if(item.img){ sendImagine({chatId:chatId, text:item.text, atts:item.atts, imgModel:item.imgModel, imgStyle:item.imgStyle}); }
+  else { send({chatId:chatId, text:item.text, atts:item.atts}); } }
 let _rt; function throttleRender(){ if(_rt)return; _rt=setTimeout(()=>{ _rt=null;
   // Update only the streaming bubble during generation (smooth, no whole-app rebuild/flicker).
   const sw=document.querySelector('#streamwrap');
@@ -1900,7 +2401,8 @@ async function finishVoiceTurn(){
   if(!queue.length && !playing) commitOnce();
 }
 function fmtSize(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
-function onFiles(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;
+function onFiles(e){ addFilesList(e.target.files); e.target.value=''; }
+function onFilesLegacy(e){ const files=[...e.target.files]; let pending=files.length; if(!pending)return;
   files.forEach(f=>{ const r=new FileReader(); r.onload=()=>{ const kind=f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':'document';
     S.pendingAtts.push({kind,name:f.name,size:fmtSize(f.size),mime:f.type,dataURL:r.result}); if(--pending===0)render(); }; r.readAsDataURL(f); }); e.target.value=''; }
 function micUpload(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='audio/*';

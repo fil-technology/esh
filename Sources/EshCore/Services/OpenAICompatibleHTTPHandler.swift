@@ -79,6 +79,17 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):
                 return try jsonResponse(statusCode: 200, payload: service.audioModels())
+            case ("GET", "/v1/capability/image-edit/options"):
+                // Discovery for the web pickers: edit backends + installed style adapters, each with this
+                // Mac's honest fit + license/commercial badges.
+                return try jsonResponse(statusCode: 200, payload: service.imageEditOptions())
+            case ("POST", "/v1/capability/image-edit/adapters/install"):
+                // Install-and-resume for style adapters: download the LoRA, then the caller re-runs the edit.
+                struct InstallReq: Decodable { let id: String }
+                struct InstallResp: Encodable { let id: String; let installed: Bool }
+                let req = try JSONCoding.decoder.decode(InstallReq.self, from: request.body)
+                let installed = try await service.installImageAdapter(id: req.id)
+                return try jsonResponse(statusCode: 200, payload: InstallResp(id: req.id, installed: installed))
             case ("POST", "/v1/audio/speech"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIAudioSpeechRequest.self, from: request.body)
                 let response = try await service.audioSpeech(decoded)
@@ -99,6 +110,7 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
             // 2.0 Web Experience data endpoints — thin JSON over the canonical services.
             case ("GET", "/v1/engine"), ("GET", "/v1/schedule"), ("GET", "/v1/catalog"),
                  ("GET", "/v1/config"), ("GET", "/v1/doctor"), ("GET", "/v1/onboarding"),
+                 ("GET", "/v1/resources"),
                  ("GET", "/v1/capability-models"),
                  ("POST", "/v1/config"),
                  ("POST", "/v1/models/install"), ("GET", "/v1/models/install"),

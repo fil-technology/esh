@@ -266,6 +266,40 @@ public actor RuntimeLifecycleManager {
         }
     }
 
+    /// Free memory for a heavy NON-LLM task (e.g. an image diffusion run) and AWAIT the teardown so the
+    /// memory is actually released before the caller spawns the heavy work. Unlike `unloadAll` (fire-and-
+    /// forget) and `reclaimForPressure` (needs size estimates), this evicts every warm, non-active resident
+    /// and awaits each `unload()`, then drops any external (speech) reservation. Active models are left
+    /// alone — a concurrent request still needs them. Returns the ids evicted.
+    ///
+    /// This is what lets image generation/editing run on a 32 GB Mac while a chat model was left warm: the
+    /// warm LLM is holding RAM it isn't using for the image op, so we reclaim it up front rather than let
+    /// the Python RAM guard refuse the run for low memory.
+    @discardableResult
+    public func reclaimForHeavyTask(ifAvailableBelowGB threshold: Double = .greatestFiniteMagnitude) async -> [String] {
+        // Gate: when the machine already has enough free RAM for the heavy task, keep the warm chat model
+        // resident (no reason to pay a reload). Only reclaim when we're below the caller's headroom target.
+        // A probe failure errs toward reclaiming (safer than letting the run get refused). `.greatestFinite‐
+        // Magnitude` (the default) always reclaims — used by tests that assert eviction regardless of host RAM.
+        if threshold != .greatestFiniteMagnitude, let snap = SystemMemory.snapshot() {
+            let availableGB = Double(snap.availableBytes) / 1_073_741_824.0
+            if availableGB >= threshold { return [] }
+        }
+        var evicted: [String] = []
+        for resident in Array(residents.values) where resident.activeRequests == 0 {
+            let runtime = resident.runtime
+            resident.runtime = nil
+            resident.state = .unloading
+            residents[resident.install.id] = nil
+            if let runtime { await runtime.unload() }   // AWAIT so a persistent worker/server is really gone
+            evicted.append(resident.install.id)
+        }
+        if let reclaim = externalReclaim { await reclaim() }   // also drop resident speech, if any
+        // Give the OS a moment to reclaim the freed pages before the heavy task's RAM-floor check runs.
+        if !evicted.isEmpty { try? await Task.sleep(nanoseconds: 400_000_000) }
+        return evicted
+    }
+
     /// Mark warm models idle if they've been unused past the idle timeout, and evict them.
     /// Returns the ids evicted.
     @discardableResult

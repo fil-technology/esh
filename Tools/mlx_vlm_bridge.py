@@ -1400,6 +1400,50 @@ IMAGE_EDIT_BACKENDS = {
 }
 
 
+def _normalize_edit_input(in_path: str, max_side: int, temp_dir: str) -> "tuple[str, bool]":
+    """Prepare an input photo for mflux editing: decode it (including HEIC/HEIF via pillow-heif when present),
+    apply EXIF orientation, convert to RGB, and downscale so the long side is <= max_side (multiple of 64 for
+    FLUX latents). Writes a normalized temp PNG and returns (png_path, True). If the image can't be read (e.g.
+    HEIC without pillow-heif), returns (in_path, False) so mflux can try / fail with its own error.
+
+    This is the fix for two real failures: (1) HEIC phone photos crashed mflux's PIL.Image.open; (2) editing at
+    a 12 MP native resolution pushed FLUX.2 Klein to a ~28 GB peak and multi-minute runs."""
+    import os
+    import uuid
+    try:
+        try:
+            import pillow_heif  # optional; enables HEIC/HEIF
+            pillow_heif.register_heif_opener()
+        except Exception:  # noqa: BLE001
+            pass
+        from PIL import Image, ImageOps
+        with Image.open(in_path) as im:
+            im = ImageOps.exif_transpose(im)          # bake in rotation so the edit isn't sideways
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            w, h = im.size
+            if w <= 0 or h <= 0:
+                return (in_path, False)
+
+            def r64(x: float) -> int:
+                return max(64, int(round(x / 64.0)) * 64)
+
+            longest = max(w, h)
+            if longest > max_side:
+                s = max_side / float(longest)
+                tw, th = r64(w * s), r64(h * s)
+            else:
+                tw, th = r64(w), r64(h)
+            if (tw, th) != (w, h):
+                im = im.resize((tw, th), Image.LANCZOS)
+            os.makedirs(temp_dir, exist_ok=True)
+            png = os.path.join(temp_dir, f"editin-{uuid.uuid4().hex}.png")
+            im.save(png, "PNG")
+            return (png, True)
+    except Exception:  # noqa: BLE001
+        return (in_path, False)
+
+
 def image_edit() -> None:
     """Instruction-based image editing (UCMR 2.1) — image + natural-language instruction -> edited image.
     Reads {imagePath, outputPath, instruction, backend?(qwen-edit|kontext), model?, steps?, seed?, quantize?,
@@ -1437,7 +1481,12 @@ def image_edit() -> None:
     model = request.get("model") or spec["model"]
     steps = int(request.get("steps") or spec["steps"])
     seed = int(request.get("seed") or 0)
-    cmd = [cli, "--model", str(model), spec["image_arg"], in_path, "--prompt", instruction,
+    # Normalize the input (HEIC->PNG, EXIF orientation, RGB) and, unless width/height are pinned, downscale the
+    # long side to `maxEditSide` (default 1024). A phone photo is ~12 MP; editing at native resolution is what
+    # pushed FLUX.2 Klein to a ~28 GB peak + multi-minute runs, and HEIC crashed mflux's PIL.open outright.
+    max_side = int(request.get("maxEditSide") or 1024) if (request.get("width") is None and request.get("height") is None) else 10 ** 9
+    edit_in, edit_in_is_temp = _normalize_edit_input(in_path, max_side, os.path.dirname(out_path) or ".")
+    cmd = [cli, "--model", str(model), spec["image_arg"], edit_in, "--prompt", instruction,
            "--output", out_path, "--steps", str(steps), "--seed", str(seed)]
     # Quantization: request override, else the backend's default (e.g. flux2-klein loads full weights and
     # quantizes to 4-bit at load so it fits a 32GB Mac).
@@ -1462,12 +1511,141 @@ def image_edit() -> None:
         cmd += ["--vae-tiling"]
     if request.get("mlxCacheLimitGB") is not None:
         cmd += ["--mlx-cache-limit-gb", str(int(request["mlxCacheLimitGB"]))]
+    # Generic LoRA adapters (esh 2.1 — Qwen Image Edit + LoRA). `lora` is a path or list of paths to
+    # adapter .safetensors already installed under the SSD cache; `loraScale` an optional matching
+    # scale or list. mflux applies them to the base at load. This is model-agnostic — the base model
+    # (e.g. Qwen-Image-Edit) decides compatibility; esh never hard-codes a specific adapter here.
+    lora = request.get("lora")
+    if lora:
+        loras = lora if isinstance(lora, list) else [lora]
+        loras = [str(p) for p in loras if p]
+        if loras:
+            cmd += ["--lora-paths", *loras]
+            scales = request.get("loraScale")
+            if scales is not None:
+                scale_list = scales if isinstance(scales, list) else [scales]
+                cmd += ["--lora-scales", *[str(float(s)) for s in scale_list]]
 
     # mflux runs as a separate child process group, so peak memory is sampled externally by the benchmark
     # (bridge RSS here would not reflect the child's footprint).
-    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
+    try:
+        out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, f"image editing ({backend})")
+    finally:
+        if edit_in_is_temp:
+            try:
+                os.remove(edit_in)
+            except OSError:
+                pass
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h, "backend": backend,
-                "model": model, "license": spec["license"], "commercial": spec["commercial"]})
+                "model": model, "license": spec["license"], "commercial": spec["commercial"],
+                "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
+
+
+def image_adapter_install() -> None:
+    """Install (download) a single image-edit LoRA/adapter file into the image-models HF cache. Adapters are
+    small (hundreds of MB) and don't load a model, so this is a plain resumable HF download — no RAM guard.
+    Reads {sourceRepo, file, hfCache?, revision?}. Returns {installed, path, sizeMB}."""
+    import os
+    request = _load_json()
+    repo = request["sourceRepo"]
+    fname = request["file"]
+    _route_hf_cache(request.get("hfCache"))
+    try:
+        from huggingface_hub import hf_hub_download
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"huggingface_hub unavailable: {type(exc).__name__}: {exc}")
+    try:
+        path = hf_hub_download(repo, fname, revision=request.get("revision"))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"adapter download failed ({repo}/{fname}): {type(exc).__name__}: {exc}")
+    _dump_json({"installed": True, "path": path,
+                "sizeMB": round(os.path.getsize(path) / 1_000_000, 1) if os.path.exists(path) else None})
+
+
+def _run_guarded_save_cli(cmd: list, out_dir: str, min_free: float, label: str) -> None:
+    """Run a non-image mflux CLI (e.g. mflux-save) as a killable, RAM-guarded process group — same memory
+    protection as _run_guarded_image_cli, but the artifact is a directory (a saved model) rather than an
+    image. Never run these mflux CLIs unguarded (a raw heavy load once contributed to a watchdog panic)."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"{label} failed to launch: {type(exc).__name__}: {exc}")
+    _register_child_pgid(proc.pid)
+
+    def _kill() -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM); proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            try: os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception: pass  # noqa: BLE001
+
+    while proc.poll() is None:
+        time.sleep(1.0)
+        avail = _available_mem_mb()
+        low = avail is not None and avail < min_free
+        pressure_and_low = _mem_pressure_critical() and (avail is None or avail < min_free * 2)
+        if low or pressure_and_low:
+            _kill()
+            detail = f"only {avail:.0f} MB free" if avail is not None else "critical memory pressure"
+            _fail(f"{label} stopped to protect the machine: low memory ({detail})")
+
+    _unregister_child_pgid(proc.pid)
+    stderr = ""
+    try: stderr = (proc.stderr.read() if proc.stderr else "") or ""
+    except Exception: pass  # noqa: BLE001
+    if proc.returncode != 0:
+        _fail(f"{label} failed (exit {proc.returncode}): {stderr.strip()[-500:]}")
+    if not (os.path.isdir(out_dir) and os.listdir(out_dir)):
+        _fail(f"{label} produced no saved model at {out_dir}")
+
+
+def image_edit_bake() -> None:
+    """Bake a quantized (and optionally LoRA-merged) image-edit model to disk via `mflux-save`, RAM-guarded.
+
+    Produces an installable, fully-quantized snapshot so a large edit model (e.g. Qwen-Image-Edit-2511, whose
+    full-precision text encoder alone is ~15.5 GB) fits a constrained Mac at RUN time: quantizing the encoder
+    too drops the whole model to ~13 GB, and merging the adapter means no separate LoRA load at inference.
+    Reads {model, baseModel?, quantize(3..8), lora?[paths], loraScale?[scales], outputPath, hfCache?,
+    minFreeMemMB?}. Returns {outputPath, model, quantize, lora}."""
+    import os
+
+    request = _load_json()
+    model = request["model"]
+    out_dir = request["outputPath"]
+    # Quantize is OPTIONAL: omit it to MERGE a LoRA into an already-quantized snapshot without re-quantizing
+    # (re-quantizing a pre-quantized DiT bloats it). Pass a value only to (re)quantize from a higher-precision
+    # source (ideally the fp original, on a machine with enough RAM to load it).
+    quantize = request.get("quantize")
+    _route_hf_cache(request.get("hfCache"))
+    min_free = float(request.get("minFreeMemMB") or 3000)
+
+    cli = os.path.join(os.path.dirname(sys.executable), "mflux-save")
+    if not os.path.exists(cli):
+        _fail("mflux-save not available (install with: pip install mflux)")
+    os.makedirs(out_dir, exist_ok=True)
+    cmd = [cli, "--model", str(model), "--path", out_dir]
+    if quantize is not None:
+        cmd += ["--quantize", str(int(quantize))]
+    base_model = request.get("baseModel")
+    if base_model:
+        cmd += ["--base-model", str(base_model)]
+    lora = request.get("lora")
+    if lora:
+        loras = [str(p) for p in (lora if isinstance(lora, list) else [lora]) if p]
+        if loras:
+            cmd += ["--lora-paths", *loras]
+            scales = request.get("loraScale")
+            if scales is not None:
+                sc = scales if isinstance(scales, list) else [scales]
+                cmd += ["--lora-scales", *[str(float(s)) for s in sc]]
+    _run_guarded_save_cli(cmd, out_dir, min_free, f"image-edit bake ({model} q{quantize})")
+    _dump_json({"outputPath": out_dir, "model": model, "quantize": quantize,
+                "lora": (lora if isinstance(lora, list) else ([lora] if lora else []))})
 
 
 def mlx_serve() -> None:
@@ -1977,6 +2155,8 @@ def main() -> None:
             "image-segment",
             "image-generate",
             "image-edit",
+            "image-edit-bake",
+            "image-adapter-install",
             "image-upscale",
             "image-upscale-onnx",
             "audio-generate",
@@ -2013,6 +2193,10 @@ def main() -> None:
         image_generate()
     elif args.command == "image-edit":
         image_edit()
+    elif args.command == "image-edit-bake":
+        image_edit_bake()
+    elif args.command == "image-adapter-install":
+        image_adapter_install()
     elif args.command == "image-upscale":
         image_upscale()
     elif args.command == "image-upscale-onnx":

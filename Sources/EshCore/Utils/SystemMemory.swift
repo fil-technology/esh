@@ -11,6 +11,48 @@ public struct SystemMemorySnapshot: Sendable {
     }
 }
 
+/// A live snapshot of the machine's shared resources for the Engine inspector's usage meters. RAM is always
+/// present; `gpuUtilizationPercent` is nil when it can't be read (shown as "—", never faked).
+public struct SystemResourcesSnapshot: Codable, Sendable {
+    public let totalMemoryBytes: Int64
+    public let availableMemoryBytes: Int64
+    public let usedMemoryBytes: Int64
+    public let gpuUtilizationPercent: Double?
+
+    public static func current() -> SystemResourcesSnapshot {
+        let mem = SystemMemory.snapshot()
+        let total = mem?.totalBytes ?? Int64(ProcessInfo.processInfo.physicalMemory)
+        let available = mem?.availableBytes ?? 0
+        return SystemResourcesSnapshot(
+            totalMemoryBytes: total,
+            availableMemoryBytes: available,
+            usedMemoryBytes: max(0, total - available),
+            gpuUtilizationPercent: SystemGPU.utilizationPercent())
+    }
+}
+
+/// Preflight for a heavy image run: decide whether there's enough RAM to even START, so we refuse fast with
+/// an actionable message instead of loading a multi-GB model and having it killed mid-run. Called AFTER the
+/// warm-model reclaim, so it sees the true post-reclaim headroom.
+public enum HeavyTaskMemory {
+    /// nil when there's enough headroom (or memory can't be measured — never block on a probe failure);
+    /// otherwise a human-readable reason naming the shortfall and the biggest thing to close.
+    public static func insufficientMemoryMessage(neededGB: Double, label: String) -> String? {
+        guard let snap = SystemMemory.snapshot() else { return nil }
+        let availableGB = Double(snap.availableBytes) / 1_073_741_824.0
+        if availableGB >= neededGB { return nil }
+        let free = String(format: "%.1f", availableGB)
+        let need = String(format: "%.0f", neededGB)
+        var msg = "Not enough free memory to start \(label): \(free) GB available, about \(need) GB needed. "
+        if let hog = SystemProcesses.topConsumer() {
+            msg += "The biggest memory user right now is \(hog.name) (\(String(format: "%.1f", hog.gigabytes)) GB). Close apps you don't need, then try again."
+        } else {
+            msg += "Close some apps to free memory, then try again."
+        }
+        return msg
+    }
+}
+
 public enum SystemMemory {
     public static func snapshot() -> SystemMemorySnapshot? {
         let total = Int64(ProcessInfo.processInfo.physicalMemory)

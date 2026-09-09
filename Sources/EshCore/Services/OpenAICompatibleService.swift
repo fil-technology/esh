@@ -825,6 +825,12 @@ public struct OpenAICompatibleService: Sendable {
     /// image.upscale performance benchmark (POST /v1/capability/image-upscale/benchmark) — measures real
     /// cold/warm/memory on this Mac and persists unified evidence. Additive; nil when not wired.
     private let upscaleBenchmarkClosure: (@Sendable () async -> Data)?
+    /// image.edit discovery (GET /v1/capability/image-edit/options): backends + installed adapters with
+    /// per-Mac fit + license, for the web pickers/badges. Additive; nil when the capability runtime isn't wired.
+    private let imageEditOptionsClosure: (@Sendable () -> ImageEditOptionsResponse)?
+    /// Install a style adapter's LoRA (POST /v1/capability/image-edit/adapters/install). Additive; nil when
+    /// the capability runtime isn't wired.
+    private let installImageAdapterClosure: (@Sendable (String) async throws -> Bool)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -843,7 +849,9 @@ public struct OpenAICompatibleService: Sendable {
         resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
         routeBenchmark: (@Sendable (String) async -> Data)? = nil,
         routeBenchmarkDetail: (@Sendable (String) async -> Data)? = nil,
-        upscaleBenchmark: (@Sendable () async -> Data)? = nil
+        upscaleBenchmark: (@Sendable () async -> Data)? = nil,
+        imageEditOptions: (@Sendable () -> ImageEditOptionsResponse)? = nil,
+        installImageAdapter: (@Sendable (String) async throws -> Bool)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -860,6 +868,24 @@ public struct OpenAICompatibleService: Sendable {
         self.routeBenchmarkClosure = routeBenchmark
         self.routeBenchmarkDetailClosure = routeBenchmarkDetail
         self.upscaleBenchmarkClosure = upscaleBenchmark
+        self.imageEditOptionsClosure = imageEditOptions
+        self.installImageAdapterClosure = installImageAdapter
+    }
+
+    /// image.edit discovery: available backends + installed style adapters with per-Mac fit + license.
+    public func imageEditOptions() throws -> ImageEditOptionsResponse {
+        guard let imageEditOptionsClosure else {
+            throw OpenAICompatibleError.unsupported("Image-edit options are not available in this process.")
+        }
+        return imageEditOptionsClosure()
+    }
+
+    /// Install a style adapter's LoRA (idempotent). Returns whether it is now installed.
+    public func installImageAdapter(id: String) async throws -> Bool {
+        guard let installImageAdapterClosure else {
+            throw OpenAICompatibleError.unsupported("Adapter install is not available in this process.")
+        }
+        return try await installImageAdapterClosure(id)
     }
 
     /// Run the image.upscale performance benchmark and return measured evidence JSON.
@@ -1009,7 +1035,14 @@ public struct OpenAICompatibleService: Sendable {
         var routeBenchmarkClosure: (@Sendable (String) async -> Data)?
         var routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
         var upscaleBenchmarkClosure: (@Sendable () async -> Data)?
+        var imageEditOptionsClosure: (@Sendable () -> ImageEditOptionsResponse)?
+        var installImageAdapterClosure: (@Sendable (String) async throws -> Bool)?
         if let root, let artifactStore {
+            imageEditOptionsClosure = { ImageEditOptionsResponse.build(root: root, host: HostMachineProfileService().currentProfile()) }
+            installImageAdapterClosure = { id in
+                let hf = root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
+                return try ImageEditService().installAdapter(id: id, hfCache: hf)
+            }
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
             // vector.generate (text→SVG): a small resident model often fails to emit clean JSON. Give the
@@ -1081,16 +1114,15 @@ public struct OpenAICompatibleService: Sendable {
             }))
             // Text -> image generation via mflux Z-Image Turbo (optional dependency).
             let imageGenService = ImageGenerationService()
-            registryUCMR.register(ImageGenerationProvider(generate: { prompt, outPath, steps, seed, w, h, q, minFree, hfCache in
+            registryUCMR.register(ImageGenerationProvider(enforcesMemoryLimits: true, generate: { prompt, outPath, steps, seed, w, h, q, minFree, hfCache in
                 try imageGenService.generate(prompt: prompt, outputPath: outPath, steps: steps, seed: seed,
                                              width: w, height: h, quantize: q, minFreeMemMB: minFree, hfCache: hfCache)
             }))
             // Instruction-based image editing (image + instruction → image). Default backend: Qwen-Image-Edit
             // (Apache-2.0, commercial-safe); FLUX.1 Kontext selectable but experimental/non-commercial.
             let imageEditService = ImageEditService()
-            registryUCMR.register(ImageEditProvider(edit: { inPath, outPath, instruction, backend, model, quantize, minFree, hfCache in
-                try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction,
-                                          backend: backend, model: model, quantize: quantize, minFreeMemMB: minFree, hfCache: hfCache)
+            registryUCMR.register(ImageEditProvider(enforcesMemoryLimits: true, edit: { inPath, outPath, instruction, options in
+                try imageEditService.edit(imagePath: inPath, outputPath: outPath, instruction: instruction, options: options)
             }))
             // audio.generate (SFX/ambience) + music.generate. Deterministic DSP (noise/tones/sweeps) needs no
             // model; neural requests (rain, footsteps, music) go through the RAM-guarded bridge (AudioGen /
@@ -1341,7 +1373,9 @@ public struct OpenAICompatibleService: Sendable {
             resumeRoute: resumeRouteClosure,
             routeBenchmark: routeBenchmarkClosure,
             routeBenchmarkDetail: routeBenchmarkDetailClosure,
-            upscaleBenchmark: upscaleBenchmarkClosure
+            upscaleBenchmark: upscaleBenchmarkClosure,
+            imageEditOptions: imageEditOptionsClosure,
+            installImageAdapter: installImageAdapterClosure
         )
     }
 

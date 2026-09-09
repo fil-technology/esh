@@ -451,8 +451,67 @@ struct WebChatPageTests {
         #expect(html.contains("data-act=\"speakStop\""))
         #expect(html.contains("id=\"mpfill\""))
         #expect(html.contains("function updateMiniProgress("))
-        // It's rendered as part of the composer.
-        #expect(html.contains("${renderMiniPlayer()}<div class=\"cbox\">"))
+        // It's rendered as part of the composer (suggestion chips + any Imagine preflight sit between it and
+        // the input box; Chat mode falls back to renderSuggests with no preflight).
+        #expect(html.contains("${renderMiniPlayer()}${imagine?renderImagineSuggests():renderSuggests()}${imagine?imgPreflight():''}<div class=\"cbox\">"))
+    }
+
+    // Chat/Imagine mode switcher: a top-bar pill flips the same view between the chat composer and a
+    // local image studio that maps onto the REAL runtime — create via image.generate, edit via image.edit
+    // with an optional neutral style adapter, model/style fed by the discovery endpoint.
+    @Test
+    func chatImagineModeSwitcher() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Top-bar toggle.
+        #expect(html.contains("function renderModeToggle("))
+        #expect(html.contains("data-act=\"modeChat\""))
+        #expect(html.contains("data-act=\"modeImagine\""))
+        #expect(html.contains("class=\"modepill\""))
+        #expect(html.contains("mode:'chat'"))                                  // default mode
+        // Imagine empty state + entry actions + honest active-model line.
+        #expect(html.contains("function renderImagineEmpty("))
+        #expect(html.contains("What should we make?"))
+        #expect(html.contains("Create from a description"))
+        #expect(html.contains("Drop an image to edit it"))
+        #expect(html.contains("function imgActiveLine("))
+        // Discovery-fed pickers (no hard-coded model metadata).
+        #expect(html.contains("/v1/capability/image-edit/options"))
+        #expect(html.contains("function renderImgModelPicker("))
+        #expect(html.contains("function renderImgStylePicker("))
+        #expect(html.contains("function ensureImgOpts("))
+        #expect(html.contains("data-act=\"toggleImgModel\""))
+        #expect(html.contains("data-act=\"toggleImgStyle\""))
+        #expect(html.contains("data-act=\"pickImgModel\""))
+        #expect(html.contains("data-act=\"pickImgStyle\""))
+        // Capability split the user asked to be reflected: create-from-text vs edit-a-photo, with a
+        // preflight notice when an edit-only model/style is picked but no photo is attached.
+        #expect(html.contains("Create from text"))
+        #expect(html.contains("Edit a photo"))
+        #expect(html.contains("function imgPreflight("))
+        #expect(html.contains("function imgNeedsImage("))
+        #expect(html.contains("Attach an image to edit"))
+        // Send routing: text-only → image.generate; photo → image.edit with chosen backend/adapter.
+        #expect(html.contains("function sendImagine("))
+        #expect(html.contains("capability:'image.generate'"))
+        #expect(html.contains("if(!queued && S.mode==='imagine'){ return sendImagine(); }"))
+        // A selected style pins its own base model, and an uninstalled style installs-and-resumes.
+        #expect(html.contains("if(v!=='None'){ S.imgModel='Auto'"))
+        #expect(html.contains("kind:'adapter'"))
+        // Neutral-naming guarantee carries into the style picker footer.
+        #expect(html.contains("Names are neutral by design"))
+        #expect(!html.lowercased().contains("pixar"))
+    }
+
+    @Test
+    func composerHasCapabilityAwareSuggestedPrompts() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function renderSuggests()"))
+        #expect(html.contains("class=\"suggests\""))
+        #expect(html.contains("data-act=\"suggest\""))
+        #expect(html.contains("suggest:(t)=>"))                              // fills the composer (no auto-send)
+        #expect(html.contains("Generate an image of a red sports car"))     // generate/general starter (no image)
+        #expect(html.contains("Make this a polished 3D animated character")) // edit starter (image attached)
+        #expect(html.contains("x.kind==='image'"))                          // capability-aware: image → edit prompts
     }
 
     // Soak: assistant replies stored before the runaway fix (or from a gated/mismatched model) can
@@ -506,7 +565,63 @@ struct WebChatPageTests {
         #expect(html.contains("'/v1/execute'"))
         // Wired into the assistant message renderer.
         #expect(html.contains("m.artifacts && m.artifacts.length"))
-        #expect(html.contains("class=\"astimg\""))
+        #expect(html.contains("class=\"astimg zoomable\""))
+    }
+
+    // Imagine polish: live elapsed clock on generations, tap-to-zoom lightbox (pan/pinch), drag-drop + paste
+    // attach, queue image requests while one runs, and a single watermarked before/after export.
+    @Test
+    func imagineStudioPolish() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // Elapsed clock (ticks while running, freezes when done).
+        #expect(html.contains("function genClockHTML("))
+        #expect(html.contains("function tickGenClocks("))
+        #expect(html.contains("class=\"gpclock mono\""))
+        #expect(html.contains("genStart:Date.now()"))
+        #expect(html.contains("msg.genEnd=Date.now()"))
+        // Lightbox with zoom + pan.
+        #expect(html.contains("function openLightbox("))
+        #expect(html.contains("function wireZoomable("))
+        #expect(html.contains("ov.className='lbx'"))
+        #expect(html.contains("class=\"lbx-stage\""))
+        #expect(html.contains("img.zoomable"))
+        #expect(html.contains("Scroll or pinch to zoom"))
+        // Drag-and-drop + paste to attach.
+        #expect(html.contains("function wireGlobalDrop("))
+        #expect(html.contains("addFilesList(e.dataTransfer.files)"))
+        #expect(html.contains("body.dropping::after"))
+        #expect(html.contains("'paste'"))
+        // Queue image requests while one is generating (carries the picked model/style).
+        #expect(html.contains("async function sendImagine(queued)"))
+        #expect(html.contains("c.queue.push({img:true, text, atts, imgModel, imgStyle})"))
+        #expect(html.contains("if(item.img){ sendImagine("))
+        // Single watermarked before/after export.
+        #expect(html.contains("function exportBeforeAfter("))
+        #expect(html.contains("data-act=\"exportBeforeAfter\""))
+        #expect(html.contains("esh-before-after.png"))
+        #expect(html.contains("edited on-device"))
+        // Mode persists across reload.
+        #expect(html.contains("S.prefs.mode='imagine'"))
+        #expect(html.contains("if(S.prefs.mode==='imagine'||S.prefs.mode==='chat')S.mode=S.prefs.mode"))
+    }
+
+    // Engine inspector shows live shared-resource usage (RAM + GPU), fed by /v1/resources and polled while
+    // the panel is open; the Imagine status line reflects the image pipeline, never a warm chat model.
+    @Test
+    func engineShowsLiveResourceUsage() {
+        let html = WebChatPage.html(toolVersion: nil)
+        #expect(html.contains("function liveUsageHTML("))
+        #expect(html.contains("Live usage"))
+        #expect(html.contains("data-res=\"mem\""))
+        #expect(html.contains("data-res=\"membar\""))
+        #expect(html.contains("data-res=\"gpu\""))
+        #expect(html.contains("data-res=\"gpubar\""))
+        #expect(html.contains("'/v1/resources'"))
+        #expect(html.contains("function startResourcePolling("))
+        #expect(html.contains("function patchResourceMeters("))
+        // Imagine status line is image-pipeline, not the chat LLM.
+        #expect(html.contains("Local · Image studio · generating"))
+        #expect(html.contains("if(S.mode==='imagine'){"))
     }
 
     // UCMR Stage 3: a plain image-generation request routes to image.generate (no manual runtime pick),
