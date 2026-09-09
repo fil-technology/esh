@@ -5,6 +5,10 @@ safetensors>=0.4,<1
 # On-device speech: STT (parakeet) for voice transcription and TTS playback. Without this the voice
 # loop and /v1/audio/* endpoints report "speech runtime not installed" instead of transcribing.
 mlx-audio>=0.5.1
+# HEIC/HEIF photo input for image.edit — iPhone photos are HEIC, which mflux's PIL.Image.open can't decode
+# (crashes the edit). The bridge registers this opener when present, then normalizes the photo to PNG. Small
+# (pulls Pillow); kept in the base install so HEIC editing works whenever the mflux image stack is added.
+pillow-heif>=1.0
 # OPTIONAL (UCMR 2.1): background removal / segmentation (image.segment / image.edit). Without these the
 # capability returns a clear "rembg is not available" error instead of segmenting. Heavy (onnxruntime).
 # rembg
