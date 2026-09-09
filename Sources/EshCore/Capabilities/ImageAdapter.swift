@@ -96,6 +96,37 @@ public enum ImageAdapterCatalog {
     public static func isInstalled(_ adapter: ImageAdapter, hfCacheRoot: String) -> Bool {
         localWeightsPath(adapter, hfCacheRoot: hfCacheRoot) != nil
     }
+
+    /// Resolved pieces of an edit request contributed by a chosen adapter — shared by the provider and CLI so
+    /// adapter → backend/LoRA/base resolution stays in ONE place.
+    public struct Resolved: Sendable {
+        public var backend: ImageEditBackend
+        public var loraPaths: [String]
+        public var loraScales: [Double]
+        public var model: String?
+        public var baseModel: String?
+        public var adapterID: String
+    }
+
+    /// Resolve a requested adapter id (or alias) for an edit: verifies it exists, is compatible with any
+    /// explicitly-pinned backend, and is installed; returns the backend + local LoRA path + base binding.
+    /// Throws a typed CapabilityError (unknown / incompatible / not-installed) — the same messages the
+    /// provider and CLI both surface.
+    public static func resolveForEdit(id requested: String, scale: Double?, pinnedBackend: ImageEditBackend?,
+                                      hfCacheRoot: String) throws -> Resolved {
+        guard let adapter = resolve(requested) else {
+            throw CapabilityError.failed("unknown image adapter '\(requested)' (available: \(ids.joined(separator: ", ")))")
+        }
+        if let pinned = pinnedBackend, !adapter.isCompatible(backend: pinned) {
+            throw CapabilityError.failed("adapter '\(adapter.id)' is not compatible with backend '\(pinned.rawValue)' (needs '\(adapter.backend.rawValue)')")
+        }
+        guard let path = localWeightsPath(adapter, hfCacheRoot: hfCacheRoot) else {
+            throw CapabilityError.failed("adapter '\(adapter.id)' is not installed — install it from \(adapter.sourceRepo) (~\(adapter.approxSizeMB) MB) before use")
+        }
+        return Resolved(backend: adapter.backend, loraPaths: [path],
+                        loraScales: [scale ?? adapter.defaultScale],
+                        model: adapter.baseModelRepo, baseModel: adapter.baseModelArch, adapterID: adapter.id)
+    }
 }
 
 /// Model-Fit inputs for the image-edit backends, so the Scheduler/install-card can expose HONEST hardware
@@ -119,5 +150,63 @@ public enum ImageEditModelFit {
             return .init(weightsGB: 9.2, runtimeOverheadGB: 1.0, width: width, height: height,
                          diskRequiredBytes: diskRequiredBytes)
         }
+    }
+}
+
+// Per-backend product metadata for image.edit (label + license), so discovery/UX can show honest badges
+// without hard-coding strings in the client.
+public extension ImageEditBackend {
+    var displayName: String {
+        switch self {
+        case .flux2Klein: return "FLUX.2 Klein 4B"
+        case .kontext:    return "FLUX.1 Kontext [dev]"
+        case .qwenEdit:   return "Qwen-Image-Edit-2511"
+        }
+    }
+    var license: String {
+        switch self {
+        case .flux2Klein, .qwenEdit: return "apache-2.0"
+        case .kontext: return "flux-1-dev-non-commercial"
+        }
+    }
+    var commercial: Bool { self != .kontext }
+    var isDefault: Bool { self == .flux2Klein }
+}
+
+/// Discovery payload for `GET /v1/capability/image-edit/options` — the backends (edit models) and installed
+/// style adapters, each with the honest per-Mac fit + license the web UI needs for its pickers/badges.
+public struct ImageEditOptionsResponse: Codable, Sendable {
+    public var capability: String
+    public var backends: [Backend]
+    public var adapters: [Adapter]
+
+    public struct Backend: Codable, Sendable {
+        public var id: String, label: String, capability: String, license: String
+        public var commercial: Bool, fit: String
+        public var estimatedPeakGB: Double?
+        public var isDefault: Bool
+    }
+    public struct Adapter: Codable, Sendable {
+        public var id: String, label: String, backend: String, license: String
+        public var approxSizeMB: Int
+        public var installed: Bool
+    }
+
+    public static func build(root: PersistenceRoot, host: HostMachineProfile) -> ImageEditOptionsResponse {
+        let hfCache = root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
+        let fitSvc = ImageModelFitService()
+        let backends = ImageEditBackend.allCases.map { b -> Backend in
+            let fit = fitSvc.assess(input: ImageEditModelFit.input(for: b, width: 1024, height: 1024), host: host, root: root)
+            return Backend(id: b.rawValue, label: b.displayName, capability: "edit", license: b.license,
+                           commercial: b.commercial, fit: fit.fitClass.rawValue,
+                           estimatedPeakGB: fit.estimatedPeakMemoryGB, isDefault: b.isDefault)
+        }
+        let adapters = ImageAdapterCatalog.ids.compactMap { id -> Adapter? in
+            guard let a = ImageAdapterCatalog.adapters[id] else { return nil }
+            return Adapter(id: a.id, label: a.displayName, backend: a.backend.rawValue, license: a.license,
+                           approxSizeMB: a.approxSizeMB,
+                           installed: ImageAdapterCatalog.isInstalled(a, hfCacheRoot: hfCache))
+        }
+        return ImageEditOptionsResponse(capability: CapabilityID.imageEdit.rawValue, backends: backends, adapters: adapters)
     }
 }

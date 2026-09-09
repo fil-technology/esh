@@ -163,21 +163,12 @@ public struct ImageEditProvider: CapabilityProvider {
                     var adapterBaseArch: String?
                     if let requested = VideoUnderstandingProvider.stringOption(req, "adapter")
                         ?? VideoUnderstandingProvider.stringOption(req, "lora") {
-                        guard let adapter = ImageAdapterCatalog.resolve(requested) else {
-                            throw CapabilityError.failed("unknown image adapter '\(requested)' (available: \(ImageAdapterCatalog.ids.joined(separator: ", ")))")
-                        }
-                        if backendExplicit, !adapter.isCompatible(backend: backend) {
-                            throw CapabilityError.failed("adapter '\(adapter.id)' is not compatible with backend '\(backend.rawValue)' (needs '\(adapter.backend.rawValue)')")
-                        }
-                        backend = adapter.backend   // the adapter's base family wins
-                        guard let path = ImageAdapterCatalog.localWeightsPath(adapter, hfCacheRoot: hfCache) else {
-                            throw CapabilityError.failed("adapter '\(adapter.id)' is not installed — install it from \(adapter.sourceRepo) (~\(adapter.approxSizeMB) MB) before use")
-                        }
-                        loraPaths = [path]
-                        loraScales = [Self.doubleOption(req, "adapterScale") ?? adapter.defaultScale]
-                        adapterID = adapter.id
-                        adapterModelRepo = adapter.baseModelRepo
-                        adapterBaseArch = adapter.baseModelArch
+                        let r = try ImageAdapterCatalog.resolveForEdit(
+                            id: requested, scale: Self.doubleOption(req, "adapterScale"),
+                            pinnedBackend: backendExplicit ? backend : nil, hfCacheRoot: hfCache)
+                        backend = r.backend         // the adapter's base family wins
+                        loraPaths = r.loraPaths; loraScales = r.loraScales
+                        adapterID = r.adapterID; adapterModelRepo = r.model; adapterBaseArch = r.baseModel
                     }
 
                     let options = ImageEditOptions(

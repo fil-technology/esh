@@ -79,6 +79,10 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
                 return try jsonResponse(statusCode: 200, payload: service.models())
             case ("GET", "/v1/audio/models"):
                 return try jsonResponse(statusCode: 200, payload: service.audioModels())
+            case ("GET", "/v1/capability/image-edit/options"):
+                // Discovery for the web pickers: edit backends + installed style adapters, each with this
+                // Mac's honest fit + license/commercial badges.
+                return try jsonResponse(statusCode: 200, payload: service.imageEditOptions())
             case ("POST", "/v1/audio/speech"):
                 let decoded = try JSONCoding.decoder.decode(OpenAIAudioSpeechRequest.self, from: request.body)
                 let response = try await service.audioSpeech(decoded)

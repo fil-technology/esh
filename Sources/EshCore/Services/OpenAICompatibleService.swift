@@ -825,6 +825,9 @@ public struct OpenAICompatibleService: Sendable {
     /// image.upscale performance benchmark (POST /v1/capability/image-upscale/benchmark) — measures real
     /// cold/warm/memory on this Mac and persists unified evidence. Additive; nil when not wired.
     private let upscaleBenchmarkClosure: (@Sendable () async -> Data)?
+    /// image.edit discovery (GET /v1/capability/image-edit/options): backends + installed adapters with
+    /// per-Mac fit + license, for the web pickers/badges. Additive; nil when the capability runtime isn't wired.
+    private let imageEditOptionsClosure: (@Sendable () -> ImageEditOptionsResponse)?
 
     public init(
         infer: @escaping @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse,
@@ -843,7 +846,8 @@ public struct OpenAICompatibleService: Sendable {
         resumeRoute: (@Sendable (String, String?) async -> RouteDecision)? = nil,
         routeBenchmark: (@Sendable (String) async -> Data)? = nil,
         routeBenchmarkDetail: (@Sendable (String) async -> Data)? = nil,
-        upscaleBenchmark: (@Sendable () async -> Data)? = nil
+        upscaleBenchmark: (@Sendable () async -> Data)? = nil,
+        imageEditOptions: (@Sendable () -> ImageEditOptionsResponse)? = nil
     ) {
         self.inferClosure = infer
         self.streamClosure = stream
@@ -860,6 +864,15 @@ public struct OpenAICompatibleService: Sendable {
         self.routeBenchmarkClosure = routeBenchmark
         self.routeBenchmarkDetailClosure = routeBenchmarkDetail
         self.upscaleBenchmarkClosure = upscaleBenchmark
+        self.imageEditOptionsClosure = imageEditOptions
+    }
+
+    /// image.edit discovery: available backends + installed style adapters with per-Mac fit + license.
+    public func imageEditOptions() throws -> ImageEditOptionsResponse {
+        guard let imageEditOptionsClosure else {
+            throw OpenAICompatibleError.unsupported("Image-edit options are not available in this process.")
+        }
+        return imageEditOptionsClosure()
     }
 
     /// Run the image.upscale performance benchmark and return measured evidence JSON.
@@ -1009,7 +1022,9 @@ public struct OpenAICompatibleService: Sendable {
         var routeBenchmarkClosure: (@Sendable (String) async -> Data)?
         var routeBenchmarkDetailClosure: (@Sendable (String) async -> Data)?
         var upscaleBenchmarkClosure: (@Sendable () async -> Data)?
+        var imageEditOptionsClosure: (@Sendable () -> ImageEditOptionsResponse)?
         if let root, let artifactStore {
+            imageEditOptionsClosure = { ImageEditOptionsResponse.build(root: root, host: HostMachineProfileService().currentProfile()) }
             var registryUCMR = CapabilityRegistry()
             registryUCMR.register(LanguageGenerateProvider(stream: { req in inference.inferStream(request: req) }))
             // vector.generate (text→SVG): a small resident model often fails to emit clean JSON. Give the
@@ -1340,7 +1355,8 @@ public struct OpenAICompatibleService: Sendable {
             resumeRoute: resumeRouteClosure,
             routeBenchmark: routeBenchmarkClosure,
             routeBenchmarkDetail: routeBenchmarkDetailClosure,
-            upscaleBenchmark: upscaleBenchmarkClosure
+            upscaleBenchmark: upscaleBenchmarkClosure,
+            imageEditOptions: imageEditOptionsClosure
         )
     }
 
