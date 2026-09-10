@@ -78,35 +78,43 @@ public struct GenerativeEngineManager: Sendable {
         return false
     }
 
-    /// For an isolated engine, the venv root that currently exists among the spec's candidates (env var first).
+    /// The venv root to CREATE for an isolated engine: under the CONFIGURED ASSETS ROOT, so it follows the
+    /// user's storage choice (internal by default, external SSD when set) exactly like models.
+    private func installVenvRoot(_ target: EngineVenvTarget) -> URL? {
+        guard case let .isolated(_, subdir, _) = target else { return nil }
+        return root.assetsRootURL.appendingPathComponent(subdir, isDirectory: true)
+    }
+
+    /// For an isolated engine, the venv root that currently EXISTS: the exported env var, then the assets-root
+    /// location, then the pre-2.3 legacy paths (so existing installs keep working after the move).
     private func existingIsolatedVenvRoot(_ target: EngineVenvTarget) -> URL? {
-        guard case let .isolated(envVar, candidates) = target else { return nil }
-        var paths: [String] = []
+        guard case let .isolated(envVar, _, legacy) = target else { return nil }
+        var candidates: [String] = []
         if let env = ProcessInfo.processInfo.environment[envVar], !env.isEmpty {
-            // env points at the python; take its venv root.
-            paths.append(venvRoot(ofPython: URL(fileURLWithPath: env)).path)
+            candidates.append(venvRoot(ofPython: URL(fileURLWithPath: env)).path)   // env points at the python
         }
-        paths.append(contentsOf: candidates.map { ($0 as NSString).expandingTildeInPath })
-        for p in paths {
-            let root = URL(fileURLWithPath: p)
-            if FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("bin/python").path)
-                || FileManager.default.isExecutableFile(atPath: root.appendingPathComponent("bin/python3").path) {
-                return root
+        if let install = installVenvRoot(target) { candidates.append(install.path) }
+        candidates.append(contentsOf: legacy.map { ($0 as NSString).expandingTildeInPath })
+        for p in candidates {
+            let r = URL(fileURLWithPath: p)
+            if FileManager.default.isExecutableFile(atPath: r.appendingPathComponent("bin/python").path)
+                || FileManager.default.isExecutableFile(atPath: r.appendingPathComponent("bin/python3").path) {
+                return r
             }
         }
         return nil
     }
 
-    /// The venv root to CREATE for an isolated engine: prefer a candidate whose parent already exists (SSD when
-    /// mounted), else the first candidate (its parent is created on install).
-    private func targetIsolatedVenvRoot(_ target: EngineVenvTarget) -> URL? {
-        guard case let .isolated(_, candidates) = target else { return nil }
-        let expanded = candidates.map { ($0 as NSString).expandingTildeInPath }
-        for p in expanded {
-            let parent = URL(fileURLWithPath: p).deletingLastPathComponent().deletingLastPathComponent()
-            if FileManager.default.fileExists(atPath: parent.path) { return URL(fileURLWithPath: p) }
+    /// Export discovery env vars (e.g. ESH_AUDIOGEN_PYTHON) for every installed isolated engine so the Python
+    /// bridge finds them wherever the user's storage put them. Call at server startup and after an install; the
+    /// bridge subprocess inherits the parent environment (ProcessRunner doesn't wipe it).
+    public func exportInstalledEngineEnvironment() {
+        for spec in GenerativeEngineCatalog.all {
+            guard case let .isolated(envVar, _, _) = spec.venv, let venv = existingIsolatedVenvRoot(spec.venv) else { continue }
+            let py = venv.appendingPathComponent("bin/python3")
+            let python = FileManager.default.isExecutableFile(atPath: py.path) ? py : venv.appendingPathComponent("bin/python")
+            setenv(envVar, python.path, 1)
         }
-        return expanded.last.map { URL(fileURLWithPath: $0) }
     }
 
     // MARK: - Probe
@@ -153,8 +161,11 @@ public struct GenerativeEngineManager: Sendable {
         switch spec.venv {
         case .main:
             pythonForPip = mainPython()
-        case .isolated:
-            guard let venvRootURL = targetIsolatedVenvRoot(spec.venv) else {
+        case let .isolated(envVar, _, _):
+            // Installs to the configured assets root (internal or external per the user's storage choice), so
+            // require that volume to be present before writing a multi-hundred-MB venv.
+            try StorageService().ensureAssetsAvailable(root: root)
+            guard let venvRootURL = existingIsolatedVenvRoot(spec.venv) ?? installVenvRoot(spec.venv) else {
                 throw StoreError.invalidManifest("No install location for engine \(spec.id.rawValue).")
             }
             let venvPython = venvRootURL.appendingPathComponent("bin/python3")
@@ -164,6 +175,8 @@ public struct GenerativeEngineManager: Sendable {
                 try runStep(mainPython(), ["-m", "venv", "--copies", venvRootURL.path], label: "create venv")
             }
             pythonForPip = venvPython
+            // Export the discovery env var now so this process's bridge spawns find the freshly-built venv.
+            setenv(envVar, venvPython.path, 1)
         }
 
         progress(.init(.installing, detail: spec.pipPackages.joined(separator: " ")))

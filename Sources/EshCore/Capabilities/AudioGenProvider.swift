@@ -223,6 +223,10 @@ enum AudioGenRunner {
                         if case .text(let t) = i.payload { return t }; return nil
                     }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !prompt.isEmpty else { throw CapabilityError.failed("audio generation requires a text prompt") }
+                    // Point the bridge at the isolated engine venv wherever the user's storage put it (assets
+                    // root, internal or external) — the main bridge inherits this env and passes it to the
+                    // isolated SFX worker. Legacy fixed paths still resolve for pre-2.3 installs.
+                    GenerativeEngineManager(root: context.root).exportInstalledEngineEnvironment()
 
                     let sampleRate = TextToSVGProvider.intOption(req, "sampleRate") ?? 44100
                     let channels = TextToSVGProvider.intOption(req, "channels") ?? 1

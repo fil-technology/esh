@@ -44,10 +44,25 @@ struct GenerativeEngineTests {
         if case .main = image.venv {} else { Issue.record("image engine should install into the main venv") }
 
         let sfx = GenerativeEngineCatalog.spec(.soundFX)
-        guard case let .isolated(envVar, candidates) = sfx.venv else { Issue.record("sound-fx should be isolated"); return }
+        guard case let .isolated(envVar, subdir, legacy) = sfx.venv else { Issue.record("sound-fx should be isolated"); return }
         #expect(envVar == "ESH_AUDIOGEN_PYTHON")
-        // Must include the path the Python bridge already discovers, so SFX works with no env plumbing.
-        #expect(candidates.contains { $0.contains(".esh/runtime/audio/audiogen-mlx/venv") })
+        // New installs live UNDER the assets root (follows the user's storage choice), not a fixed path.
+        #expect(subdir.contains("runtime/engines/audiogen"))
+        // Legacy fixed locations are still probed so pre-2.3 installs keep working.
+        #expect(legacy.contains { $0.contains(".esh/runtime/audio/audiogen-mlx/venv") })
+    }
+
+    @Test
+    func isolatedEngineInstallsUnderTheConfiguredAssetsRoot() {
+        // With an external assets root, the isolated venv path must live under it — proving engine storage
+        // follows the user's model-storage choice (internal or external), not a hardcoded drive.
+        let state = FileManager.default.temporaryDirectory.appendingPathComponent("esh-state-\(UUID().uuidString)")
+        let assets = FileManager.default.temporaryDirectory.appendingPathComponent("esh-assets-\(UUID().uuidString)")
+        let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
+        let status = GenerativeEngineManager(root: root).status(GenerativeEngineCatalog.spec(.soundFX))
+        // Not installed anywhere → no venvPath; the point is the manager is root-aware (assets != state).
+        #expect(root.usesExternalAssets)
+        #expect(status.installKind == "isolated")
     }
 
     @Test

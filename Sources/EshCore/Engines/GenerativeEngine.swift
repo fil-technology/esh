@@ -28,11 +28,11 @@ public enum EngineVenvTarget: Sendable, Equatable {
     /// esh's main managed Python env (`$ESH_PYTHON`). For CLI-based and in-bridge engines the bridge runs via
     /// `sys.executable`; only the (small-to-medium) deps go here, so nothing needs to be re-pointed.
     case main
-    /// A dedicated venv the bridge discovers by `envVar` (falling back to `candidateAbsolutePaths`). Mirrors
-    /// the AudioGen isolated runtime so heavy, conflict-prone deps (e.g. a second torch) stay off the main env.
-    /// `candidateAbsolutePaths` are venv-root paths (the python is `<root>/bin/python`); the installer builds
-    /// the first whose parent is creatable, preferring the SSD assets root.
-    case isolated(envVar: String, candidateAbsolutePaths: [String])
+    /// A dedicated venv installed UNDER THE CONFIGURED ASSETS ROOT (`<assetsRoot>/<subdir>`), so it follows the
+    /// user's storage choice exactly like models — internal by default, external SSD when they've set one.
+    /// esh exports `envVar` (pointing at `<venv>/bin/python`) so the Python bridge discovers it wherever it
+    /// lives. `legacyAbsolutePaths` are pre-2.3 fixed locations still probed so existing installs keep working.
+    case isolated(envVar: String, subdir: String, legacyAbsolutePaths: [String])
 }
 
 /// Static description of one engine: what it installs, where, what it powers, and how to detect it.
@@ -66,11 +66,12 @@ public struct GenerativeEngineSpec: Sendable, Equatable {
 }
 
 public enum GenerativeEngineCatalog {
-    /// The isolated AudioGen venv path the Python bridge already discovers (`_isolated_audiogen_python()` /
-    /// `DoctorService.audioRuntimeStatus`). Installing here means SFX works at execution time with no env
-    /// plumbing. `~` is expanded at use.
-    static let audiogenVenvHome = "~/.esh/runtime/audio/audiogen-mlx/venv"
-    static let audiogenVenvSSD = "/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv"
+    /// Pre-2.3 fixed AudioGen venv locations still probed so existing installs keep working (new installs go
+    /// under the configured assets root instead — see the `.isolated` subdir). `~` is expanded at use.
+    static let audiogenLegacyPaths = [
+        "/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv",
+        "~/.esh/runtime/audio/audiogen-mlx/venv",
+    ]
 
     public static let all: [GenerativeEngineSpec] = [
         .init(id: .image, displayName: "Image engine (mflux)",
@@ -81,7 +82,7 @@ public enum GenerativeEngineCatalog {
         .init(id: .soundFX, displayName: "Sound FX engine (AudioGen)",
               summary: "Generate sound effects and ambiences from a description.",
               pipPackages: ["mlx-audiocraft==0.1.0"],
-              venv: .isolated(envVar: "ESH_AUDIOGEN_PYTHON", candidateAbsolutePaths: [audiogenVenvSSD, audiogenVenvHome]),
+              venv: .isolated(envVar: "ESH_AUDIOGEN_PYTHON", subdir: "runtime/engines/audiogen/venv", legacyAbsolutePaths: audiogenLegacyPaths),
               probeModule: "mlx_audiocraft",
               capabilities: [.audioGenerate], approxSizeMB: 400,
               commercialSafe: false, licenseNote: "AudioGen weights are CC-BY-NC-4.0 — non-commercial use only."),
