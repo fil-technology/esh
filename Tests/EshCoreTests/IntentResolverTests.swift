@@ -19,8 +19,9 @@ struct IntentResolverTests {
     @Test
     func upscaleWithMissingModelIsInstallRequiredThenReadyOncePresent() async throws {
         let r = root(); let resolver = IntentResolver()
+        // Engine present (override) so we test the MODEL-asset install-and-resume flow, not the engine gate.
         // No model asset yet → install required (Real-ESRGAN), original request preserved.
-        let out1 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out1 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r, engineInstalled: { _ in true })
         guard case let .installRequired(request, intent, requirement) = out1 else {
             Issue.record("expected installRequired, got \(out1)"); return
         }
@@ -35,8 +36,21 @@ struct IntentResolverTests {
         try Data([1]).write(to: asset)
         defer { try? FileManager.default.removeItem(at: r.stateRootURL); try? FileManager.default.removeItem(at: r.assetsRootURL) }
 
-        let out2 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r)
+        let out2 = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r, engineInstalled: { _ in true })
         #expect(out2.isReady)
+    }
+
+    // A heavy capability whose optional ENGINE isn't installed routes to an engine install (installKind
+    // "engine" + engineId), tracked like a model — this is what lets the client just trigger + track and never
+    // run pip. The engine gate runs BEFORE the model-asset check.
+    @Test
+    func optionalEngineMissingRoutesToEngineInstall() async {
+        let r = root(); let resolver = IntentResolver()
+        let out = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: registry(), installs: [], root: r, engineInstalled: { _ in false })
+        guard case let .installRequired(_, _, requirement) = out else { Issue.record("expected installRequired, got \(out)"); return }
+        #expect(requirement.installKind == "engine")
+        #expect(requirement.engineId == "upscale")
+        #expect(requirement.capability == .imageUpscale)
     }
 
     @Test
@@ -126,7 +140,7 @@ struct IntentResolverTests {
         let svc = InstallAndResumeService(store: store, resolver: resolver)
         let reg = registry()
 
-        let out = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: reg, installs: [], root: r)
+        let out = await resolver.resolve(message: "Upscale this 2×", attachments: [image()], registry: reg, installs: [], root: r, engineInstalled: { _ in true })
         guard case let .installRequired(_, intent, requirement) = out else { Issue.record("expected installRequired"); return }
         let pending = await svc.record(message: "Upscale this 2×", attachments: [image()], intent: intent,
                                        requirement: requirement, conversationID: "c1", nowISO8601: "2026-09-03T00:00:00Z")
@@ -138,7 +152,7 @@ struct IntentResolverTests {
         defer { try? FileManager.default.removeItem(at: r.stateRootURL); try? FileManager.default.removeItem(at: r.assetsRootURL) }
 
         // Resume: re-validate + execute the ORIGINAL request. The user never re-typed it.
-        let resumed = await svc.resume(pending.id, registry: reg, installs: [], root: r, execute: { req in
+        let resumed = await svc.resume(pending.id, registry: reg, installs: [], root: r, engineInstalled: { _ in true }, execute: { req in
             #expect(req.capability == .imageUpscale)
             #expect(req.options.values["scale"] == .int(2))
             return ExecutionResult(capability: .imageUpscale, text: "ok")

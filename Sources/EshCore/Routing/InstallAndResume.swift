@@ -62,10 +62,12 @@ public struct InstallAndResumeService: Sendable {
     /// fresh install state and, if now ready, execute it — result lands in the same conversation.
     public func resume(_ id: UUID, registry: CapabilityRegistry, installs: [ModelInstall], root: PersistenceRoot,
                        host: HostMachineProfile? = nil,
+                       engineInstalled: (@Sendable (GenerativeEngineID) -> Bool)? = nil,
                        execute: @Sendable (ExecutionRequest) async throws -> ExecutionResult) async rethrows -> ResumeResult {
         guard let p = await store.get(id) else { return .notFound }
         let outcome = await resolver.resolve(message: p.message, attachments: p.attachments,
-                                       registry: registry, installs: installs, root: root, host: host)
+                                       registry: registry, installs: installs, root: root, host: host,
+                                       engineInstalled: engineInstalled)
         switch outcome {
         case let .ready(request, _):
             let result = try await execute(request)
