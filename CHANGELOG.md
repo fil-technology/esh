@@ -26,6 +26,43 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-10
+
+**esh 2.3 — generative runtimes as on-demand "engines."** Heavy generative runtimes are no longer bundled or
+improvised: they're first-class **installable engines** the user adds on demand, so a fresh install stays
+small and large dependencies + model weights land on managed storage (internal by default, the external SSD
+when configured). esh owns install / probe / remove, so the web UI and external agents just trigger + track —
+they never run `pip` or touch a venv. No runtime/capability contract changes; no Python-bridge changes
+(engines install into the venv locations the bridge already discovers).
+
+Highlights:
+
+- **Six installable engines** — `image` (mflux), `sound-fx` (AudioGen), `music` (MusicGen), `upscale`
+  (Real-ESRGAN), `remove-bg` (rembg), `diarize` (sherpa-onnx). Each declares its deps, capabilities, size, and
+  license; non-commercial engines (AudioGen, MusicGen) are flagged.
+- **One-click "Install & continue."** When a capability needs an engine, esh installs it (tracked, with phases)
+  and resumes the original request — replacing the v2.2 "run `esh doctor`" setup card. A new **Settings →
+  Engines** manager installs/removes engines and shows size, capabilities, storage location, and license.
+- **Runtime-aware routing.** The router now probes actual runtime presence, so a request that needs a missing
+  engine returns an install step *before* execution instead of failing mid-run.
+- **Storage-honoring.** Isolated engine venvs install under the configured assets root — internal or external
+  per the user's `esh storage` choice — exactly like models. Everything can run from the internal drive.
+- **Agent integration documented.** New `docs/AGENT_INTEGRATION.md`: the capability + engine HTTP contract for
+  external clients/agents (route/execute, install-and-resume, engines, storage, guardrails).
+
+### Added
+- Generative-engine catalog + manager (on-disk probe, pip install into the main managed env or an isolated
+  assets-root venv, safe remove), `EngineInstallManager` phase tracking, and endpoints: `GET /v1/engines`,
+  `POST /v1/engines/install` (+ poll/cancel), `POST /v1/engines/remove`.
+- Web: engine "Install & continue" flow (studio + routed install-and-resume) and a Settings → Engines manager.
+- `docs/AGENT_INTEGRATION.md`.
+
+### Changed
+- `IntentResolver` gates heavy capabilities on the engine being installed (`installKind: "engine"`), with an
+  injectable probe so install-and-resume stays deterministic in tests.
+- The web "needs a one-time setup" card now offers a one-click engine install instead of pointing at
+  `esh doctor`.
+
 ## [2.2.0] - 2026-09-09
 
 **esh 2.2 — the web studio: Imagine and Sound, dark mode, and honest fresh-install behavior.** A UI-focused
