@@ -498,6 +498,30 @@ struct WebChatPageTests {
         #expect(html.contains("const hint=setupHint(raw);"))
     }
 
+    // Generative engines: the studio setup card offers a one-click "Install & continue" (esh installs the
+    // optional engine, then retries) instead of a dead-end, and Settings has an Engines manager.
+    @Test
+    func optionalEnginesInstallFromTheWebUI() {
+        let html = WebChatPage.html(toolVersion: nil)
+        // setupHint maps each runtime error to an installable engine id.
+        #expect(html.contains("engineId:'image'"))
+        #expect(html.contains("engineId:'sound-fx'"))
+        #expect(html.contains("engineId:'music'"))
+        // Shared tracked-install helper hitting the engine endpoints.
+        #expect(html.contains("function installEngineTracked("))
+        #expect(html.contains("/v1/engines/install"))
+        // The setup card now offers Install & continue (not just "run esh doctor").
+        #expect(html.contains("Install & continue"))
+        #expect(html.contains("data-act=\"installEngine\""))
+        // install-and-resume knows the engine kind (routed path).
+        #expect(html.contains("if(card.kind==='engine')"))
+        // Settings → Engines manager.
+        #expect(html.contains("function renderEnginesPane()"))
+        #expect(html.contains("data-act=\"engInstall\""))
+        #expect(html.contains("data-act=\"engRemove\""))
+        #expect(html.contains("'Engines'"))
+    }
+
     // Soak (rc.5): a sent audio clip shows a "Transcribing…" indicator, then its
     // transcription as a caption (not as text the user typed); the model still
     // receives the transcript.

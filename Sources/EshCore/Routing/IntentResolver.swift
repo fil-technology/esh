@@ -16,7 +16,8 @@ public struct IntentResolver: Sendable {
 
     public func resolve(message: String, attachments: [EshAttachment],
                         registry: CapabilityRegistry, installs: [ModelInstall],
-                        root: PersistenceRoot, host: HostMachineProfile? = nil) async -> RoutingOutcome {
+                        root: PersistenceRoot, host: HostMachineProfile? = nil,
+                        engineInstalled: (@Sendable (GenerativeEngineID) -> Bool)? = nil) async -> RoutingOutcome {
         let modalities = attachments.map(Self.modality)
         var intent = router.route(message: message, inputModalities: modalities)
 
@@ -48,9 +49,24 @@ public struct IntentResolver: Sendable {
             }
             let request = Self.buildRequest(capability: capability, intent: intent, message: message, attachments: attachments)
 
+            // Optional-engine check FIRST: heavy generative capabilities (image/imagine, SFX, music, upscale,
+            // remove-bg, diarize) run on an optional local runtime kept out of the base install. If the engine
+            // isn't installed, surface it as an installable ENGINE (tracked like a model) so install-and-resume
+            // installs it — the client never runs pip. This probes actual runtime presence, closing the gap
+            // where weights-on-disk alone made isSatisfied return true and execution then failed mid-run.
+            // Deterministic audio (noise/tones) needs no engine — never gate it.
+            let deterministicAudio = capability == .audioGenerate && DeterministicAudio.classify(message) != nil
+            let engineIsInstalled = engineInstalled ?? { id in GenerativeEngineManager(root: root).isInstalled(GenerativeEngineCatalog.spec(id)) }
+            if !deterministicAudio, let engine = GenerativeEngineCatalog.engine(forCapability: capability),
+               !engineIsInstalled(engine.id) {
+                let requirement = InstallRequirement(
+                    capability: capability, componentName: engine.displayName, recommendedRepo: engine.id.rawValue,
+                    approxSizeMB: engine.approxSizeMB, fit: nil, installKind: "engine", engineId: engine.id.rawValue)
+                return .installRequired(request, intent, requirement)
+            }
+
             // Requirement / install-state check (spec §9B, §10). audio.generate deterministic waveforms
             // (white/pink/brown noise, tones, sweeps, silence) need NO model — never gate them on an install.
-            let deterministicAudio = capability == .audioGenerate && DeterministicAudio.classify(message) != nil
             if let req = CapabilityRequirementCatalog.requirements[capability], !deterministicAudio,
                !Self.isSatisfied(req, installs: installs, root: root) {
                 let installKind: String = { if case .visionModel = req.kind { return "model" }; return "asset" }()

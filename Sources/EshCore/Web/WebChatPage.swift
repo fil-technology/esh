@@ -572,6 +572,24 @@ function el(tag,attrs,html){ const e=document.createElement(tag); if(attrs) for(
 const ACT={
   toggleSidebar:()=>{ S.sidebarOpen=!S.sidebarOpen; S.prefs.sidebarOpen=S.sidebarOpen; savePrefs(); render(); },
   installResume:(mid)=>{ const c=cur(); const msg=(c&&c.messages||[]).find(x=>x.id===mid); if(msg&&msg.installCard&&!msg.installCard.installing&&!msg.installCard.done) installAndResume(msg.installCard, msg); },
+  // From a studio-path setup card: install the optional engine (esh owns pip/venv), then retry the original
+  // request the failure came from. The card lives on an isError message that carries capRequest/capLabel.
+  installEngine:async(mid)=>{ const c=cur(); const msg=(c&&c.messages||[]).find(x=>x.id===mid); if(!msg||msg.engineInstalling)return;
+    const hint=setupHint(msg.detail||''); if(!hint||!hint.engineId||!msg.capRequest)return;
+    msg.engineInstalling=true; msg.engineError=null; saveChats(); render();
+    try{ await installEngineTracked(hint.engineId, (phase)=>{ msg.enginePhase=phase; render(); });
+      msg.engineInstalling=false; msg.engineDone=true; msg.isError=false; saveChats(); render();
+      await runCapabilityRequest(c, msg.capRequest, msg.capLabel||'Working…');
+    }catch(e){ msg.engineInstalling=false; msg.engineError=(e&&e.message)||String(e); saveChats(); render(); } },
+  // Settings → Engines: install / remove an optional engine (esh owns pip/venv), tracking phase inline.
+  engInstall:async(id)=>{ S._engineBusy=S._engineBusy||{}; if(S._engineBusy[id]&&['resolving','installing','creating-env','verifying'].includes(S._engineBusy[id].phase))return;
+    S._engineBusy[id]={phase:'installing'}; render();
+    try{ await installEngineTracked(id, (phase,detail)=>{ S._engineBusy[id]={phase,detail}; render(); }); delete S._engineBusy[id]; }
+    catch(e){ S._engineBusy[id]={phase:'failed',error:(e&&e.message)||String(e)}; }
+    await refreshEngines(); render(); },
+  engRemove:async(id)=>{ S._engineBusy=S._engineBusy||{}; S._engineBusy[id]={phase:'removing'}; render();
+    try{ await fetch('/v1/engines/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); }catch(e){}
+    delete S._engineBusy[id]; await refreshEngines(); render(); },
   newChat, openSettings:()=>{ closeAll(); S.view='settings'; refreshConfig().then(render); if(!S.audioModels)refreshAudioModels(); render(); },
   openModels:()=>{ closeAll(); S.view='models'; refreshCatalog(); render(); },
   backChat:()=>{ S.view='chat'; S.detail=null; render(); },
@@ -1138,7 +1156,7 @@ function genPanelHTML(m){
 }
 // Run a validated ExecutionRequest and land the typed result in an assistant message.
 async function runCapabilityRequest(c, request, label){
-  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…',statusLog:[],streamOpen:true,genStart:Date.now()};
+  const msg={id:uid(),role:'assistant',generating:true,genLabel:label||'Working…',statusLog:[],streamOpen:true,genStart:Date.now(),capRequest:request,capLabel:label};
   // For image.edit, keep the SOURCE image so the result can be shown as a before/after compare.
   if(request&&request.capability==='image.edit'){
     try{ const img=(request.inputs||[]).map(i=>i&&i.payload&&i.payload.attachment&&i.payload.attachment._0).find(a=>a&&a.kind==='image');
@@ -1180,18 +1198,29 @@ function friendlyCap(id){ return ({'image.upscale':'Upscale image','image.segmen
 function setupHint(raw){
   const s=String(raw||'');
   if(/\bmflux\b.*(not available|not installed)|mflux edit backend/i.test(s))
-    return {feature:'Image generation & editing', engine:'the image engine (mflux)'};
+    return {feature:'Image generation & editing', engine:'the image engine (mflux)', engineId:'image'};
   if(/AudioGen SFX runtime is not installed|setup-audio-runtime/i.test(s))
-    return {feature:'Sound effects', engine:'the sound-effects engine (AudioGen)'};
+    return {feature:'Sound effects', engine:'the sound-effects engine (AudioGen)', engineId:'sound-fx'};
   if(/backend unavailable \(transformers\/torch\)|\(transformers\/torch\)/i.test(s))
-    return {feature:'Music generation', engine:'the music engine (MusicGen)'};
+    return {feature:'Music generation', engine:'the music engine (MusicGen)', engineId:'music'};
   if(/\brembg\b.*not available/i.test(s))
-    return {feature:'Background removal', engine:'the background-removal engine (rembg)'};
+    return {feature:'Background removal', engine:'the background-removal engine (rembg)', engineId:'remove-bg'};
   if(/onnxruntime\/Pillow not available/i.test(s))
-    return {feature:'Image upscaling', engine:'the upscaling engine (Real-ESRGAN)'};
+    return {feature:'Image upscaling', engine:'the upscaling engine (Real-ESRGAN)', engineId:'upscale'};
   if(/sherpa-onnx is not available/i.test(s))
-    return {feature:'Speaker labelling', engine:'the diarization engine (sherpa-onnx)'};
+    return {feature:'Speaker labelling', engine:'the diarization engine (sherpa-onnx)', engineId:'diarize'};
   return null;
+}
+// Install a generative engine (esh owns pip/venv), polling to completion. Throws on failure/cancel.
+async function installEngineTracked(engineId, onPhase){
+  await fetch('/v1/engines/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:engineId})});
+  for(let i=0;i<1800;i++){ await new Promise(r=>setTimeout(r,2000));
+    let st; try{ st=await (await fetch('/v1/engines/install?id='+encodeURIComponent(engineId))).json(); }catch(_){}
+    if(st){ if(onPhase&&st.phase) onPhase(st.phase, st.detail);
+      if(st.phase==='installed') return; if(st.phase==='failed') throw new Error(st.error||'engine install failed');
+      if(st.phase==='cancelled') throw new Error('install cancelled'); }
+  }
+  throw new Error('engine install timed out');
 }
 // Act on a RouteDecision. Returns true if it handled the message as a capability (so chat is skipped).
 async function handleRoute(c, text, atts){
@@ -1207,7 +1236,7 @@ async function handleRoute(c, text, atts){
   if(dec.action==='installRequired'){
     const req=dec.installRequirement||{};
     c.messages.push({id:uid(),role:'assistant',installCard:{cap:dec.capability, name:req.componentName, repo:req.recommendedRepo,
-      sizeMB:req.approxSizeMB, fit:(req.fit&&req.fit.fitClass)||null, kind:req.installKind||'model', pendingId:dec.pendingId, request:dec.request}});
+      sizeMB:req.approxSizeMB, fit:(req.fit&&req.fit.fitClass)||null, kind:req.installKind||'model', engineId:req.engineId, pendingId:dec.pendingId, request:dec.request}});
     saveChats(); render(); return true;
   }
   return false;
@@ -1216,7 +1245,19 @@ async function handleRoute(c, text, atts){
 async function installAndResume(card, msg){
   msg.installCard.installing=true; saveChats(); render();
   try{
-    if(card.kind==='adapter'){
+    if(card.kind==='engine'){
+      // Install the optional generative runtime (esh owns pip/venv), then resume the original request. The
+      // model weights, if also missing, are handled by the NEXT installRequired the resume returns.
+      await installEngineTracked(card.engineId, (phase)=>{ msg.installCard.phase=phase; saveChats(); render(); });
+      if(card.pendingId){
+        const dec=await (await fetch('/v1/route/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pendingId:card.pendingId})})).json();
+        if(dec.action==='installRequired'){ const rq=dec.installRequirement||{};   // now the weights are what's missing
+          cur().messages.push({id:uid(),role:'assistant',installCard:{cap:dec.capability, name:rq.componentName, repo:rq.recommendedRepo,
+            sizeMB:rq.approxSizeMB, fit:(rq.fit&&rq.fit.fitClass)||null, kind:rq.installKind||'model', engineId:rq.engineId, pendingId:dec.pendingId, request:dec.request}}); }
+        else if(dec.action==='ready') await runCapabilityRequest(cur(), dec.request, (friendlyCap(card.cap)+'…'));
+        else { cur().messages.push({id:uid(),role:'assistant',content:(dec.reason||'The engine is installed, but the request could not resume.')}); }
+      } else if(card.request){ await runCapabilityRequest(cur(), card.request, (friendlyCap(card.cap)+'…')); }
+    } else if(card.kind==='adapter'){
       // Download the small style-adapter LoRA, then resume the stored edit (image + adapter baked into it).
       const r=await fetch('/v1/capability/image-edit/adapters/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:card.adapterId})});
       if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error((e.error&&e.error.message)||('install failed ('+r.status+')')); }
@@ -1261,9 +1302,24 @@ function renderMsg(m){
     // expected state on a fresh install for Imagine / Sound FX / Music (Chat, Speech, Transcribe work as-is).
     const hint=setupHint(raw);
     if(hint){
+      // esh owns engine installation, so this is a one-click "Install & continue" (install the optional engine,
+      // then retry the original request) — not a dead-end. While installing, show the phase; on failure, keep
+      // the honest fallback (raw detail under Show details).
+      const canInstall = hint.engineId && m.capRequest && !m.engineDone;
+      const action = m.engineInstalling
+        ? `<span class="transcap loading"><span class="typing"><i></i><i></i><i></i></span>Installing ${esch(hint.feature)}…${m.enginePhase?(' <span class="mono" style="font-size:11px">'+esch(m.enginePhase)+'</span>'):''}</span>`
+        : m.engineError
+          ? `<span style="font-size:12px;color:var(--amber)">Install failed — ${esch(m.engineError)}</span> <span class="btn" style="padding:6px 12px;font-size:12px;margin-left:8px" data-act="installEngine" data-arg="${esch(m.id)}">Try again</span>`
+          : canInstall
+            ? `<span class="btn" style="padding:7px 14px;font-size:12px" data-act="installEngine" data-arg="${esch(m.id)}">Install & continue</span>`
+            : '';
+      const tail = canInstall||m.engineInstalling||m.engineError
+        ? `<div class="d" style="margin-top:6px">esh installs ${esch(hint.engine)} on this Mac (models download on first use, stored on your managed drive). Everything runs on-device.</div>`
+        : `<div class="d" style="margin-top:6px">This runs on ${esch(hint.engine)}, an optional local engine. Run <span class="mono" style="font-size:12px">esh doctor</span> in Terminal for setup steps. Everything still runs on-device.</div>`;
       d.innerHTML=`<div class="errcard" style="border-color:var(--line2)"><div class="t">${esch(hint.feature)} needs a one-time setup</div>
-        <div class="d" style="margin-top:6px">This runs on ${esch(hint.engine)}, an optional local engine that isn’t part of this build. It takes one command-line setup to enable — run <span class="mono" style="font-size:12px">esh doctor</span> in Terminal for the exact steps for this Mac. Everything still runs on-device.</div>
+        ${tail}
         <div class="d" style="font-size:12px;color:var(--muted);margin-top:6px">Chat, Speech and Transcribe work without any setup.</div>
+        ${action?('<div style="margin-top:12px">'+action+'</div>'):''}
         <details class="reason" style="margin-top:8px"><summary>Show details</summary><div class="rc mono" style="font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto">${esch(raw)}</div></details></div>`;
       return d;
     }
@@ -2159,7 +2215,7 @@ function storageDest(){ const s=S.engine&&S.engine.storage; return s&&s.assetsRo
 /* ---------- settings ---------- */
 function renderSettings(){
   const v=el('div'); v.style.cssText='flex:1;display:flex;flex-direction:column;min-height:0';
-  const panes=['General','Intelligence','Models','Voice','Performance','Storage','Privacy','Advanced'];
+  const panes=['General','Intelligence','Models','Engines','Voice','Performance','Storage','Privacy','Advanced'];
   let side=''; panes.forEach(p=>{ side+=`<div class="paneitem ${p===S.settingsPane?'on':''}" data-act="pickPane" data-arg="${p}">${p}</div>`; });
   v.innerHTML=`<div class="viewhead" style="padding-bottom:16px"><button class="backbtn" data-act="backChat">${ICON.back}Chat</button><span style="font-size:17px;font-weight:600">Settings</span></div>
     <div class="settingsbody" style="flex:1;display:flex;border-top:1px solid var(--line);min-height:0">
@@ -2213,6 +2269,7 @@ function renderPane(){
       <div style="max-width:520px"><div class="menuhead" style="padding:0 0 4px">Installed</div>${rows}
         ${renderTaskModels()}
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;margin-top:18px"><span>Model storage</span><span data-act="goPane" data-arg="Storage" style="color:var(--muted);font-size:13px;cursor:pointer">${esch(volLabel(s.assetsRoot))}${s.freeBytes?(' · '+gb(s.freeBytes)+' free'):''} <span style="font-size:9px">▸</span></span></div></div>`; }
+  if(p==='Engines'){ if(!S.enginesList) refreshEngines(); return renderEnginesPane(); }
   if(p==='Voice') return renderVoicePane();
   if(p==='Advanced'){ const srv=(e.server&&e.server.endpoint)||'http://127.0.0.1:11435'; const th=S.prefs.theme||'auto';
     const topt=(v,label)=>`<button class="modeopt ${th===v?'on':''}" data-act="pickTheme" data-arg="${v}" aria-selected="${th===v}">${label}</button>`;
@@ -2223,6 +2280,36 @@ function renderPane(){
       <div style="padding:12px 0 0;display:flex;gap:14px;font-size:12px;color:rgba(var(--ink-rgb),.65)"><span>✓ Native esh</span><span>✓ OpenAI-compatible</span></div>
       <div style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.5">Structured output, capability resolution and the Request Inspector are surfaced per response in the Execution panel.</div></div>`; }
   return `<div style="font-size:15px;font-weight:600;margin-bottom:10px">${p}</div><div style="font-size:13px;color:var(--muted)">Designed in the canvas — more controls arrive in a later rc.</div>`;
+}
+// Optional generative engines the user installs on demand (kept out of the base install; large deps + weights
+// live on managed storage). esh owns install/probe/remove — this pane just triggers + tracks, mirroring the
+// agent's flow. Fed by GET /v1/engines.
+async function refreshEngines(){ try{ const r=await api('/v1/engines'); if(r&&r.engines){ S.enginesList=r.engines; render(); } }catch(e){} }
+function renderEnginesPane(){
+  const list=S.enginesList; const busy=S._engineBusy||{};
+  let rows='';
+  if(!list){ rows='<div style="font-size:12.5px;color:var(--muted);padding:8px 0">Loading…</div>'; }
+  else if(!list.length){ rows='<div style="font-size:12.5px;color:var(--muted);padding:8px 0">No optional engines.</div>'; }
+  else list.forEach(en=>{
+    const b=busy[en.id]; const sizeGB=en.approxSizeMB?((en.approxSizeMB>=1024)?((en.approxSizeMB/1024).toFixed(1)+' GB'):(en.approxSizeMB+' MB')):'';
+    const lic=en.commercialSafe===false?'<span style="font-size:10.5px;color:var(--amber);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;margin-left:6px">Non-commercial</span>':'';
+    const action = b&&b.phase&&b.phase!=='installed'&&b.phase!=='failed'
+      ? `<span class="transcap loading" style="font-size:12px"><span class="typing"><i></i><i></i><i></i></span>${b.phase==='removing'?'Removing':'Installing'}…${(b.detail&&b.phase!=='removing')?(' <span class="mono" style="font-size:10.5px">'+esch(b.detail)+'</span>'):''}</span>`
+      : en.installed
+        ? `<span style="font-size:11px;color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:2px 7px">Installed</span><span class="btn ghost" style="padding:6px 12px;font-size:12px;margin-left:8px" data-act="engRemove" data-arg="${en.id}">Remove</span>`
+        : `<span class="btn" style="padding:7px 14px;font-size:12px" data-act="engInstall" data-arg="${en.id}">Install</span>`;
+    const err=b&&b.phase==='failed'?`<div style="font-size:11.5px;color:var(--amber);margin-top:5px">Failed — ${esch(b.error||'')}</div>`:'';
+    rows+=`<div style="padding:13px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;font-weight:500">${esch(en.displayName)}${lic}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.45">${esch(en.summary)}</div></div>
+        <div style="display:flex;align-items:center;flex-shrink:0">${action}</div></div>
+      <div style="font-size:11px;color:var(--faint);margin-top:6px">${sizeGB?('~'+sizeGB+' engine · '):''}${esch((en.capabilities||[]).join(', '))}${en.venvPath?(' · '+esch(en.venvPath)):''}</div>
+      ${en.licenseNote?`<div style="font-size:11px;color:var(--muted);margin-top:3px">${esch(en.licenseNote)}</div>`:''}${err}</div>`;
+  });
+  return `<div style="font-size:15px;font-weight:600;margin-bottom:6px">Engines</div>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:16px;max-width:520px;line-height:1.5">Optional local runtimes for image, sound and music generation. Install what you need — the base install stays small, and large engine files download to your managed storage. Everything runs on this Mac.</div>
+    <div style="max-width:560px">${rows}</div>`;
 }
 // "Task models" — which installed model performs each capability. Driven by /v1/capability-models (the
 // REAL installed models' declared capabilities), so choices are never fabricated. Auto = esh resolves the

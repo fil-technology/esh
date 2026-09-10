@@ -13,11 +13,14 @@ public struct InstallRequirement: Codable, Sendable, Equatable {
     public var fit: ModelFitAssessment?     // Model Fit when computable (Comfortable/Fits/Tight/…)
     public var everythingLocal: Bool
     /// How to install: "model" → esh model install (POST /v1/models/install); "asset" → the provider's
-    /// bridge fetches the component on first execution (explicit via the install card, never silent).
+    /// bridge fetches the component on first execution (explicit via the install card, never silent);
+    /// "engine" → esh installs an optional generative runtime (POST /v1/engines/install), tracked like a model.
     public var installKind: String
+    /// For installKind == "engine": the GenerativeEngineID to install (e.g. "image", "sound-fx").
+    public var engineId: String?
     public init(capability: CapabilityID, componentName: String, recommendedRepo: String,
                 approxSizeMB: Int? = nil, fit: ModelFitAssessment? = nil, everythingLocal: Bool = true,
-                installKind: String = "model") {
+                installKind: String = "model", engineId: String? = nil) {
         self.capability = capability
         self.componentName = componentName
         self.recommendedRepo = recommendedRepo
@@ -25,6 +28,7 @@ public struct InstallRequirement: Codable, Sendable, Equatable {
         self.fit = fit
         self.everythingLocal = everythingLocal
         self.installKind = installKind
+        self.engineId = engineId
     }
 }
 

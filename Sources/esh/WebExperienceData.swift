@@ -7,10 +7,45 @@ import EshCore
 enum WebExperienceData {
     static func provider(root: PersistenceRoot, toolVersion: String?) -> (@Sendable (WebDataRequest) async throws -> Data) {
         let installs = InstallManager(root: root)
+        let engineInstalls = EngineInstallManager(root: root)
+        let engineManager = GenerativeEngineManager(root: root)
         return { request in
             let enc = JSONEncoder()
             enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             switch (request.method, request.path) {
+            case ("GET", "/v1/engines"):
+                // Installable generative engines + whether each runtime is actually present. Clients (web UI,
+                // agent) render this; esh owns install/probe so they never touch pip.
+                return try enc.encode(["engines": engineManager.statusAll()])
+            case ("POST", "/v1/engines/install"):
+                struct Body: Decodable { let id: String? }
+                let body = (try? JSONDecoder().decode(Body.self, from: request.body)) ?? Body(id: nil)
+                guard let id = body.id, GenerativeEngineCatalog.all.contains(where: { $0.id.rawValue == id }) else {
+                    throw OpenAICompatibleError.invalidRequest("Provide a known engine id to install.")
+                }
+                await engineInstalls.start(engineId: id)
+                return try enc.encode(["engineId": id, "status": "started"])
+            case ("GET", "/v1/engines/install"):
+                let id = request.query["id"] ?? ""
+                guard let status = await engineInstalls.status(engineId: id) else {
+                    // No in-flight install: report installed-or-idle from the on-disk probe.
+                    let installed = GenerativeEngineCatalog.all.first { $0.id.rawValue == id }.map { engineManager.isInstalled($0) } ?? false
+                    return try enc.encode(["engineId": id, "phase": installed ? "installed" : "idle"])
+                }
+                return try enc.encode(status)
+            case ("POST", "/v1/engines/install/cancel"):
+                struct Body: Decodable { let id: String? }
+                let body = (try? JSONDecoder().decode(Body.self, from: request.body)) ?? Body(id: nil)
+                if let id = body.id { await engineInstalls.cancel(engineId: id) }
+                return try enc.encode(["status": "cancelled"])
+            case ("POST", "/v1/engines/remove"):
+                struct Body: Decodable { let id: String? }
+                let body = (try? JSONDecoder().decode(Body.self, from: request.body)) ?? Body(id: nil)
+                guard let id = body.id, let spec = GenerativeEngineCatalog.all.first(where: { $0.id.rawValue == id }) else {
+                    throw OpenAICompatibleError.invalidRequest("Provide a known engine id to remove.")
+                }
+                try engineManager.remove(spec)
+                return try enc.encode(["engineId": id, "status": "removed"])
             case ("POST", "/v1/models/install"):
                 let body = (try? JSONDecoder().decode(InstallStart.self, from: request.body)) ?? InstallStart()
                 let repoID = resolveRepoID(id: body.id, repoID: body.repoID)
