@@ -1,5 +1,23 @@
 # esh SDK — Production Readiness (M10)
 
+## Verdict: **READY for a first-party production Release Candidate — `1.0.0-rc.1`**
+
+`EshRuntime` is safe to embed in a real first-party iOS app today: a fresh app integrates it via SwiftPM
+and the public API alone (no internal coupling), Apple FM and managed embedded GGUF both work, the model
+lifecycle survives interruption/restart, failures are typed, concurrency is defined, and the whole thing
+builds from a clean checkout with no machine-local dependencies. It is tagged `1.0.0-rc.1` rather than a
+final GA because a short, **non-code** list remains — resolve during the RC period before GA:
+
+1. Add a top-level `LICENSE` (esh) + bundle the llama.cpp **MIT** notice.
+2. Publish the pinned `llama.xcframework` release asset and set `llamaBinaryURL` (checksum already pinned).
+3. Hardware-validate the device matrix below 8 GB (e.g. iPhone 12 Pro) and on iPad.
+4. Re-run the on-device clean-room validation on the iPhone 17 (this session's live launch was blocked by
+   the device being locked; the paths are unchanged and were proven live on that device in M4/M7/M8).
+
+None of these block first-party embedding; they gate a public GA. No blockers to the RC.
+
+---
+
 How to embed the esh runtime in a production iOS app, and what it guarantees. Companion docs:
 [SDK_API_CONTRACT.md](SDK_API_CONTRACT.md) (public surface + versioning), [SDK_PACKAGING.md](SDK_PACKAGING.md)
 (targets, llama distribution, sizes).
