@@ -20,6 +20,10 @@ let package = Package(
             name: "EshCore",
             targets: ["EshCore"]
         ),
+        .library(
+            name: "EshRuntime",
+            targets: ["EshRuntime"]
+        ),
         .executable(
             name: "esh",
             targets: ["esh"]
@@ -42,6 +46,12 @@ let package = Package(
             ],
             swiftSettings: quietDebugSwiftSettings
         ),
+        // App-facing SDK facade (M3). Portable (iOS + macOS); depends only on EshCore, no macOS-only deps.
+        .target(
+            name: "EshRuntime",
+            dependencies: ["EshCore"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
         .executableTarget(
             name: "esh",
             dependencies: [
@@ -53,6 +63,11 @@ let package = Package(
         .testTarget(
             name: "EshCoreTests",
             dependencies: ["EshCore"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .testTarget(
+            name: "EshRuntimeTests",
+            dependencies: ["EshRuntime"],
             swiftSettings: quietDebugSwiftSettings
         ),
         .testTarget(
