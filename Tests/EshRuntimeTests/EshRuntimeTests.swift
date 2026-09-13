@@ -56,6 +56,11 @@ private struct MockBackend: InferenceBackend, @unchecked Sendable {
     func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking { MockChecker() }
 }
 
+private struct MockDeviceProfileProvider: DeviceProfileProviding {
+    let profile: DeviceProfile
+    func currentProfile() -> DeviceProfile { profile }
+}
+
 private func mlxInstall(id: String) -> ModelInstall {
     ModelInstall(id: id, spec: ModelSpec(id: id, displayName: id, backend: .mlx,
                                          source: ModelSource(kind: .localPath, reference: id)),
@@ -167,6 +172,31 @@ struct EshRuntimeTests {
         #expect(tokens == ["a", "b", "c"])
         #expect(completed?.text == "abc")
         #expect(completed?.selection.backend == .apple)
+    }
+
+    // deviceProfile() returns the injected provider's profile (DI seam).
+    @Test
+    func deviceProfileReturnsInjectedProfile() async {
+        let expected = DeviceProfile(
+            platform: .iOS, physicalMemoryBytes: 8 * 1_073_741_824, availableMemoryBytes: 3 * 1_073_741_824,
+            availableMemoryKind: .processAvailable, availableStorageBytes: 20 * 1_073_741_824,
+            thermalState: .fair, lowPowerModeEnabled: true, supportsAppleFoundationModels: true,
+            osVersion: "Version 26.6.2 (Build 23G90)", deviceModel: "iPhone18,3")
+        let runtime = EshRuntime(registry: InferenceBackendRegistry(backends: [.apple: MockBackend(kind: .apple)]),
+                                 deviceProfileProvider: MockDeviceProfileProvider(profile: expected))
+        let p = await runtime.deviceProfile()
+        #expect(p == expected)
+        #expect(p.thermalState == .fair)
+        #expect(p.lowPowerModeEnabled == true)
+        #expect(p.supportsAppleFoundationModels)
+    }
+
+    // The default runtime returns an honest profile from the system provider.
+    @Test
+    func defaultRuntimeDeviceProfileIsHonest() async {
+        let p = await EshRuntime().deviceProfile()
+        #expect(p.physicalMemoryBytes > 0)
+        #expect(!p.osVersion.isEmpty)
     }
 
     // Cancellation propagates: cancelling the consuming task stops generation.

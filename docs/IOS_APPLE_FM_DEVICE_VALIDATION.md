@@ -76,3 +76,31 @@ xcrun devicectl device process launch --console --terminate-existing \
 
 The app auto-runs the probe on launch (`ContentView.task → ProbeModel.autoProbe()`); it also has an
 interactive prompt field + Generate/Cancel.
+
+---
+
+## M5 — DeviceProfile captured on the same iPhone 17
+
+Read through the public `await runtime.deviceProfile()` API (verbatim `ESH-M5` console output):
+
+```
+ESH-M5 platform=iOS model=iPhone18,3 os=Version 26.6.2 (Build 23G90)
+       physicalBytes=8044216320  availableBytes=3525049520 availableKind=processAvailable
+       storageBytes=61177738126  thermal=nominal  lowPower=false  appleFM=true
+```
+
+| Field | Value | Notes |
+|---|---|---|
+| platform | `iOS` | |
+| deviceModel | `iPhone18,3` | `sysctl hw.machine` |
+| osVersion | Version 26.6.2 (Build 23G90) | |
+| physicalMemory | 8,044,216,320 B (**7.49 GiB**) | `ProcessInfo.physicalMemory` (always known) |
+| availableMemory | 3,525,049,520 B (**3.28 GiB**) | **`processAvailable`** — `os_proc_available_memory()`, i.e. headroom for THIS process before jetsam (NOT total free RAM) |
+| availableStorage | 61,177,738,126 B (**56.98 GiB**) | `volumeAvailableCapacityForImportantUsage` in the app sandbox |
+| thermalState | `nominal` | `ProcessInfo.thermalState` |
+| lowPowerMode | `false` | `ProcessInfo.isLowPowerModeEnabled` |
+| supportsAppleFoundationModels | `true` | from `AppleIntelligenceService` (not duplicated) |
+
+Every value is measured; nothing is inferred from the model name. On a platform where a value is not
+honestly available, esh reports `nil`/`unknown` (e.g. `availableMemoryKind` would be `.unknown`). Generation
+through `EshRuntime` continued to work in the same session (no regression).

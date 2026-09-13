@@ -163,19 +163,32 @@ public struct StaticInstallProvider: EshInstallProviding {
 public actor EshRuntime {
     private let registry: InferenceBackendRegistry
     private let installProvider: EshInstallProviding
+    private let deviceProfileProvider: DeviceProfileProviding
 
     /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
-    /// MLX + GGUF + Apple) plus the on-disk model store.
+    /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.
     public init() {
         self.registry = InferenceBackendRegistry()
         self.installProvider = FileInstallProvider()
+        self.deviceProfileProvider = SystemDeviceProfileProvider()
     }
 
-    /// Dependency-injected construction for tests and advanced hosts. Provide the backend assembly and the
-    /// installed-model source directly.
-    public init(registry: InferenceBackendRegistry, installProvider: EshInstallProviding = StaticInstallProvider([])) {
+    /// Dependency-injected construction for tests and advanced hosts. Provide the backend assembly, the
+    /// installed-model source, and (optionally) the device-profile provider directly.
+    public init(
+        registry: InferenceBackendRegistry,
+        installProvider: EshInstallProviding = StaticInstallProvider([]),
+        deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider()
+    ) {
         self.registry = registry
         self.installProvider = installProvider
+        self.deviceProfileProvider = deviceProfileProvider
+    }
+
+    /// A read-only snapshot of the device/runtime conditions esh is running under (memory, storage,
+    /// thermal/low-power state, Apple FM readiness). The app does not gather these signals itself.
+    public func deviceProfile() -> DeviceProfile {
+        deviceProfileProvider.currentProfile()
     }
 
     // MARK: Capabilities

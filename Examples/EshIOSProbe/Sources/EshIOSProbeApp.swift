@@ -21,6 +21,7 @@ final class ProbeModel: ObservableObject {
 
     @Published var prompt: String = "Reply with exactly one word: pong"
     @Published var availability: String = "—"
+    @Published var deviceProfileText: String = "—"
     @Published var output: String = ""
     @Published var selection: String = "—"
     @Published var localOnly: String = "—"
@@ -80,6 +81,19 @@ final class ProbeModel: ObservableObject {
         let ai = snap.appleIntelligence
         availability = "Apple FM: \(ai.availability.rawValue) (available=\(ai.available), onDevice=\(ai.onDevice))\n\(ai.detail)"
         print("ESH-M4 availability=\(ai.availability.rawValue) available=\(ai.available) onDevice=\(ai.onDevice) hasReadyBackend=\(snap.hasReadyBackend) detail=\(ai.detail)")
+
+        // M5: real device profile through the public SDK.
+        let dp = await runtime.deviceProfile()
+        func gb(_ b: UInt64?) -> String { b.map { String(format: "%.2f GB", Double($0) / 1_073_741_824) } ?? "unknown" }
+        deviceProfileText = """
+        platform=\(dp.platform.rawValue) model=\(dp.deviceModel ?? "?") os=\(dp.osVersion)
+        physicalMemory=\(gb(dp.physicalMemoryBytes))
+        availableMemory=\(gb(dp.availableMemoryBytes)) (\(dp.availableMemoryKind.rawValue))
+        freeStorage=\(gb(dp.availableStorageBytes))
+        thermal=\(dp.thermalState?.rawValue ?? "unknown")  lowPower=\(dp.lowPowerModeEnabled.map(String.init) ?? "unknown")
+        appleFM=\(dp.supportsAppleFoundationModels)
+        """
+        print("ESH-M5 platform=\(dp.platform.rawValue) model=\(dp.deviceModel ?? "?") os=\(dp.osVersion) physicalBytes=\(dp.physicalMemoryBytes) availableBytes=\(dp.availableMemoryBytes.map(String.init) ?? "nil") availableKind=\(dp.availableMemoryKind.rawValue) storageBytes=\(dp.availableStorageBytes.map(String.init) ?? "nil") thermal=\(dp.thermalState?.rawValue ?? "nil") lowPower=\(dp.lowPowerModeEnabled.map(String.init) ?? "nil") appleFM=\(dp.supportsAppleFoundationModels)")
         guard ai.available else {
             print("ESH-M4 RESULT=UNAVAILABLE reason=\(ai.availability.rawValue)")
             error = "Apple Intelligence unavailable: \(ai.availability.rawValue)"
@@ -123,6 +137,7 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("Runtime availability") { Text(model.availability).font(.footnote.monospaced()) }
+                Section("Device profile") { Text(model.deviceProfileText).font(.footnote.monospaced()) }
                 Section("Prompt") {
                     TextField("Prompt", text: $model.prompt, axis: .vertical)
                     HStack {
