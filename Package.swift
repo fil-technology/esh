@@ -11,7 +11,10 @@ let quietDebugSwiftSettings: [SwiftSetting] = [
 // committed — it is large and platform-built). This keeps the base package (EshCore/EshRuntime/esh)
 // building everywhere without the C/C++ binary, while enabling the in-process llama.cpp backend on
 // machines that have built it. The xcframework's own module is `llama` (import llama).
-let hasEmbeddedLlama = FileManager.default.fileExists(atPath: "Vendor/llama.xcframework/Info.plist")
+// Resolve Vendor relative to THIS manifest's location (not the CWD) — xcodebuild evaluates the manifest
+// with a CWD that is not the package root, which previously made this check flip to false.
+let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Vendor/llama.xcframework/Info.plist")
 
 let package = Package(
     name: "Esh",

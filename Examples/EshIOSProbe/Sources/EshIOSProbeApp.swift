@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import EshCore      // value types the SDK returns (BackendKind, AppleProvider ids, Message, GenerationConfig)
 import EshRuntime   // the public esh SDK — the ONLY way this probe reaches inference
 
@@ -76,6 +77,8 @@ final class ProbeModel: ObservableObject {
     /// Prints `ESH-M4 …` lines: environment, availability, two generations (first/warm latency), selection,
     /// metrics, and an honest typed status when Apple FM is unavailable.
     func autoProbe() async {
+        // Keep the screen awake so the multi-minute embedded-GGUF benchmark isn't suspended by auto-lock.
+        UIApplication.shared.isIdleTimerDisabled = true
         let os = ProcessInfo.processInfo.operatingSystemVersion
         print("ESH-M4 os=\(os.majorVersion).\(os.minorVersion).\(os.patchVersion) device=\(await Self.deviceModel())")
         let snap = await runtime.capabilities()
@@ -122,8 +125,10 @@ final class ProbeModel: ObservableObject {
         print("ESH-M4 RESULT=PASS")
 
         // M7: embedded GGUF benchmark (only runs if the model file is present in Documents).
+        print("ESH-M7 callsite-reached modelPresent=\(GGUFBenchmark.modelURL() != nil)")
         ggufText = "running…"
         ggufText = await GGUFBenchmark.run()
+        print("ESH-M7 callsite-returned")
     }
 
     private static func deviceModel() async -> String {
