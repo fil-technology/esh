@@ -3,6 +3,7 @@ import Foundation
 import Darwin
 #endif
 import EshCore
+import EshMacRuntime
 
 private enum TerminalInputAction: Sendable {
     case scrollUp
@@ -319,7 +320,7 @@ struct TUIApplication {
             store: modelStore,
             downloader: HuggingFaceModelDownloader(modelStore: modelStore)
         )
-        let backendRegistry = InferenceBackendRegistry()
+        let backendRegistry = InferenceBackendRegistry.macOS()
         let backend = backendRegistry.backend(for: install)
         var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
         let chatService = ChatService()
@@ -1384,7 +1385,7 @@ struct TUIApplication {
         let service = ExternalInferenceService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),
-            cacheStore: FileCacheStore(root: root),
+            cacheStore: FileCacheStore(root: root), registry: .macOS(),
             workspaceRootURL: workspaceRootURL
         )
         return try await service.infer(request: request)

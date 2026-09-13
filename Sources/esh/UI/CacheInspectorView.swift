@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum CacheInspectorView {
     static func render(artifact: CacheArtifact) {

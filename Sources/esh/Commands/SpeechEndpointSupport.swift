@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// Shared wiring for the server's speech-to-text (STT) endpoint. Decodes the browser's base64 audio
 /// payload to a temp file, runs on-device transcription via `SpeechToTextService`, and returns the

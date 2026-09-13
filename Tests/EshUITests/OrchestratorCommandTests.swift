@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import EshCore
+import EshMacRuntime
 @testable import esh
 
 @Suite

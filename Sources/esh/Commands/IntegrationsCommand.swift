@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 enum IntegrationsCommand {
     private static let defaultOpenAIPort: UInt16 = 11435

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// Tracks in-flight generative-engine installs for the Web Experience + agent. The client starts an install
 /// (POST /v1/engines/install), polls status (GET /v1/engines/install?id=…), and can cancel

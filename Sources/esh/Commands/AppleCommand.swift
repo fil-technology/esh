@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh apple` — use Apple Foundation Models (Apple Intelligence) on-device, with zero model
 /// downloads. Distinct from esh-managed MLX/GGUF models; never silently used in their place.

@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 /// Resolves "Address already in use" before the server tries (and fails) to bind. When the requested
 /// port is taken, esh no longer prints a raw POSIX error and hangs — instead it either offers to stop

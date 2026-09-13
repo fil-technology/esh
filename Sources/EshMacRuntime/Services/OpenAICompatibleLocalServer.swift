@@ -1,0 +1,344 @@
+import Foundation
+import EshCore
+import Network
+
+/// Thread-safe holder that ties a client connection's lifetime to its producer Task: cancellation can arrive
+/// (on the connection queue) before the Task is even created, so a cancel before `set` still cancels on set.
+private final class CancelBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    func set(_ t: Task<Void, Never>) {
+        lock.lock(); defer { lock.unlock() }
+        if cancelled { t.cancel() } else { task = t }
+    }
+    func cancel() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true; task?.cancel(); task = nil
+    }
+}
+
+public final class OpenAICompatibleLocalServer: @unchecked Sendable {
+    private enum HostMode {
+        case loopback
+        case any
+    }
+
+    private let listener: NWListener
+    private let handler: @Sendable (OpenAICompatibleHTTPRequest) async throws -> OpenAICompatibleHTTPResponse
+    private let hostMode: HostMode
+    public let host: String
+    public let port: UInt16
+    private let queue = DispatchQueue(label: "esh.openai-server")
+    /// Maximum accepted request body. Generous for chat + base64 audio (STT) payloads, but bounded so
+    /// a local client cannot grow memory with an enormous declared content-length.
+    static let maxRequestBodyBytes = 64 * 1024 * 1024
+
+    public convenience init(host: String, port: UInt16, handler: OpenAICompatibleHTTPHandler) throws {
+        try self.init(host: host, port: port, handler: handler.handle)
+    }
+
+    public init(
+        host: String,
+        port: UInt16,
+        handler: @escaping @Sendable (OpenAICompatibleHTTPRequest) async throws -> OpenAICompatibleHTTPResponse
+    ) throws {
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            throw OpenAICompatibleError.invalidRequest("Invalid port: \(port)")
+        }
+        self.host = host
+        self.port = port
+        self.hostMode = try Self.resolveHostMode(host)
+        self.listener = try NWListener(using: .tcp, on: nwPort)
+        self.listener.service = nil
+        self.handler = handler
+        self.listener.newConnectionHandler = { [weak self] connection in
+            self?.start(connection: connection)
+        }
+        self.listener.stateUpdateHandler = { state in
+            if case .failed(let error) = state {
+                fputs("error: server failed: \(error)\n", stderr)
+            }
+        }
+    }
+
+    public func start() {
+        listener.start(queue: queue)
+    }
+
+    public func stop() {
+        listener.cancel()
+    }
+
+    private func start(connection: NWConnection) {
+        connection.start(queue: queue)
+        guard isEndpointAllowed(connection.endpoint) else {
+            send(
+                response: httpResponse(for: .unauthorized, messageOverride: "Loopback host only accepts local clients."),
+                on: connection
+            )
+            return
+        }
+        receive(on: connection, buffer: Data())
+    }
+
+    private func receive(on connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let error {
+                fputs("error: connection receive failed: \(error)\n", stderr)
+                connection.cancel()
+                return
+            }
+
+            var accumulated = buffer
+            if let data {
+                accumulated.append(data)
+            }
+
+            do {
+                if let request = try self.parseRequest(from: accumulated) {
+                    Task {
+                        let response = (try? await self.handler(request)) ?? OpenAICompatibleHTTPResponse(
+                            statusCode: 500,
+                            headers: ["content-type": "application/json; charset=utf-8"],
+                            body: Data(#"{"error":{"message":"Internal server error","type":"server_error"}}"#.utf8)
+                        )
+                        if response.bodyStream != nil {
+                            self.sendStreaming(response: response, on: connection)
+                        } else {
+                            self.send(response: response, on: connection)
+                        }
+                    }
+                    return
+                }
+            } catch let error as OpenAICompatibleError {
+                let response = self.httpResponse(for: error)
+                self.send(response: response, on: connection)
+                return
+            } catch {
+                let response = self.httpResponse(for: .invalidRequest(error.localizedDescription))
+                self.send(response: response, on: connection)
+                return
+            }
+
+            if isComplete {
+                connection.cancel()
+                return
+            }
+
+            self.receive(on: connection, buffer: accumulated)
+        }
+    }
+
+    private func send(response: OpenAICompatibleHTTPResponse, on connection: NWConnection) {
+        let serialized = serialize(response: response)
+        connection.send(content: serialized, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    /// Send headers, then stream body chunks from the response's provider as they arrive, then close.
+    private func sendStreaming(response: OpenAICompatibleHTTPResponse, on connection: NWConnection) {
+        guard let provider = response.bodyStream else { send(response: response, on: connection); return }
+        // Cancel the producer when the client goes away. Otherwise the generation (and any worker subprocess)
+        // runs to completion writing into a dead socket. Cancelling the Task makes the CapabilityEvent stream's
+        // onTermination fire → the provider cancels its work → ProcessRunner SIGTERMs the bridge → the bridge's
+        // reaper kills the isolated worker group. No orphan, memory reclaimed on client disconnect.
+        let cancelBox = CancelBox()
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .failed, .cancelled: cancelBox.cancel()
+            default: break
+            }
+        }
+        // A long generation produces no output for many seconds, so nothing reads or writes the socket and
+        // NWConnection never notices a client that hung up. Post a receive that stays pending until the client
+        // closes (FIN → isComplete) or errors — that is our disconnect signal, and it cancels the producer.
+        watchForDisconnect(connection: connection, cancelBox: cancelBox)
+        connection.send(content: serializeHeadersOnly(response: response), completion: .contentProcessed { _ in })
+        let task = Task {
+            await provider { chunk in
+                connection.send(content: chunk, completion: .contentProcessed { error in
+                    if error != nil { cancelBox.cancel() }   // client vanished mid-stream
+                })
+            }
+            // Finalize once the last chunk has been handed to the connection.
+            connection.send(content: Data(), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
+        cancelBox.set(task)
+    }
+
+    /// Keep a receive pending on a streaming connection purely to detect the client hanging up. HTTP clients
+    /// send nothing more after the request, so this completes only when the peer closes (isComplete) or the
+    /// connection errors — at which point we cancel the in-flight producer (stopping generation + its worker).
+    private func watchForDisconnect(connection: NWConnection, cancelBox: CancelBox) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                cancelBox.cancel()
+                return
+            }
+            // Client sent unexpected extra bytes but is still connected — keep watching.
+            self?.watchForDisconnect(connection: connection, cancelBox: cancelBox)
+        }
+    }
+
+    private func serializeHeadersOnly(response: OpenAICompatibleHTTPResponse) -> Data {
+        let reasonPhrase = response.statusCode == 200 ? "OK" : "Error"
+        var payload = Data("HTTP/1.1 \(response.statusCode) \(reasonPhrase)\r\n".utf8)
+        for (name, value) in response.headers.sorted(by: { $0.key < $1.key }) {
+            payload.append(Data("\(name): \(value)\r\n".utf8))
+        }
+        payload.append(Data("\r\n".utf8))
+        return payload
+    }
+
+    private func parseRequest(from data: Data) throws -> OpenAICompatibleHTTPRequest? {
+        guard let headerRange = data.range(of: Data("\r\n\r\n".utf8)) else {
+            return nil
+        }
+
+        let headerData = data[..<headerRange.lowerBound]
+        guard let headerText = String(data: headerData, encoding: .utf8) else {
+            throw OpenAICompatibleError.invalidRequest("Request headers were not valid UTF-8.")
+        }
+        let lines = headerText.components(separatedBy: "\r\n")
+        guard let requestLine = lines.first else {
+            throw OpenAICompatibleError.invalidRequest("Missing HTTP request line.")
+        }
+        let requestLineParts = requestLine.split(separator: " ")
+        guard requestLineParts.count >= 2 else {
+            throw OpenAICompatibleError.invalidRequest("Malformed HTTP request line.")
+        }
+
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() where line.isEmpty == false {
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[name] = value
+        }
+
+        let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+        // Reject an implausibly large declared body before accumulating it, so a local client cannot
+        // grow server memory with a huge content-length (security review Phase O, rec #3).
+        if contentLength > Self.maxRequestBodyBytes {
+            throw OpenAICompatibleError.invalidRequest(
+                "Request body too large (\(contentLength) bytes; limit \(Self.maxRequestBodyBytes))."
+            )
+        }
+        let bodyStart = headerRange.upperBound
+        let availableBodyLength = data.count - bodyStart
+        guard availableBodyLength >= contentLength else {
+            return nil
+        }
+
+        let body = Data(data[bodyStart..<(bodyStart + contentLength)])
+        return OpenAICompatibleHTTPRequest(
+            method: String(requestLineParts[0]),
+            path: normalizedRequestPath(String(requestLineParts[1])),
+            headers: headers,
+            body: body
+        )
+    }
+
+    private func normalizedRequestPath(_ path: String) -> String {
+        guard let url = URL(string: path), url.path.isEmpty == false else {
+            return path
+        }
+        if let query = url.query, query.isEmpty == false {
+            return "\(url.path)?\(query)"
+        }
+        return url.path
+    }
+
+    private func serialize(response: OpenAICompatibleHTTPResponse) -> Data {
+        let reasonPhrase = switch response.statusCode {
+        case 200: "OK"
+        case 400: "Bad Request"
+        case 401: "Unauthorized"
+        case 404: "Not Found"
+        case 405: "Method Not Allowed"
+        default: "Internal Server Error"
+        }
+
+        var payload = Data("HTTP/1.1 \(response.statusCode) \(reasonPhrase)\r\n".utf8)
+        var headers = response.headers
+        headers["connection"] = "close"
+        if headers["content-length"] == nil {
+            headers["content-length"] = String(response.body.count)
+        }
+        for (name, value) in headers.sorted(by: { $0.key < $1.key }) {
+            payload.append(Data("\(name): \(value)\r\n".utf8))
+        }
+        payload.append(Data("\r\n".utf8))
+        payload.append(response.body)
+        return payload
+    }
+
+    private func httpResponse(for error: OpenAICompatibleError) -> OpenAICompatibleHTTPResponse {
+        httpResponse(for: error, messageOverride: nil)
+    }
+
+    private func httpResponse(for error: OpenAICompatibleError, messageOverride: String?) -> OpenAICompatibleHTTPResponse {
+        let errorType: String
+        let statusCode: Int
+        switch error {
+        case .invalidRequest:
+            errorType = "invalid_request_error"
+            statusCode = 400
+        case .unsupported:
+            errorType = "unsupported_error"
+            statusCode = 400
+        case .unauthorized:
+            errorType = "authentication_error"
+            statusCode = 401
+        case .notFound:
+            errorType = "not_found_error"
+            statusCode = 404
+        case .methodNotAllowed:
+            errorType = "method_not_allowed"
+            statusCode = 405
+        }
+
+        let payload = OpenAIErrorResponse(
+            error: .init(message: messageOverride ?? error.localizedDescription, type: errorType)
+        )
+        let body = (try? JSONCoding.encoder.encode(payload)) ?? Data()
+        return OpenAICompatibleHTTPResponse(
+            statusCode: statusCode,
+            headers: [
+                "content-type": "application/json; charset=utf-8",
+                "content-length": String(body.count)
+            ],
+            body: body
+        )
+    }
+
+    private func isEndpointAllowed(_ endpoint: NWEndpoint) -> Bool {
+        switch hostMode {
+        case .any:
+            return true
+        case .loopback:
+            guard case .hostPort(let remoteHost, _) = endpoint else {
+                return false
+            }
+            let remote = String(describing: remoteHost).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            return remote == "127.0.0.1" || remote == "::1"
+        }
+    }
+
+    private static func resolveHostMode(_ host: String) throws -> HostMode {
+        switch host.lowercased() {
+        case "127.0.0.1", "localhost", "::1":
+            return .loopback
+        case "0.0.0.0", "::":
+            return .any
+        default:
+            throw OpenAICompatibleError.unsupported("Unsupported host `\(host)`. Use 127.0.0.1, localhost, ::1, 0.0.0.0, or ::.")
+        }
+    }
+}
+

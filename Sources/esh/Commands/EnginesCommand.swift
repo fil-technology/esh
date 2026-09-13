@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum EnginesCommand {
     static func run(arguments: [String], root: PersistenceRoot) throws {

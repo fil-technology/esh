@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh storage` — inspect and control where large AI assets live.
 ///

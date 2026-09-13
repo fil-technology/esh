@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 enum ModelOpenCommand {
     static func run(

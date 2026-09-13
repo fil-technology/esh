@@ -130,39 +130,3 @@ public protocol MLXPackageDoctor: Sendable {
     func check() throws -> MLXPackageDoctorReport
 }
 
-#if os(macOS)   // esh iOS M1: MLX Python-bridge doctor is macOS-only (the `MLXPackageDoctor` protocol above stays portable).
-public struct BridgeMLXPackageDoctor: MLXPackageDoctor {
-    private let bridge: MLXBridge
-
-    public init(bridge: MLXBridge = .init()) {
-        self.bridge = bridge
-    }
-
-    public func check() throws -> MLXPackageDoctorReport {
-        let response: BridgeDoctorResponse = try bridge.run(
-            command: "doctor",
-            request: EmptyDoctorRequest(),
-            as: BridgeDoctorResponse.self
-        )
-        return MLXPackageDoctorReport(
-            pythonExecutable: response.pythonExecutable,
-            mlxVersion: response.mlxVersion,
-            mlxLMVersion: response.mlxLMVersion,
-            mlxVLMVersion: response.mlxVLMVersion,
-            numpyVersion: response.numpyVersion,
-            safetensorsVersion: response.safetensorsVersion
-        )
-    }
-}
-
-private struct EmptyDoctorRequest: Codable {}
-
-private struct BridgeDoctorResponse: Codable {
-    var pythonExecutable: String
-    var mlxVersion: String
-    var mlxLMVersion: String
-    var mlxVLMVersion: String
-    var numpyVersion: String
-    var safetensorsVersion: String
-}
-#endif

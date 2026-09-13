@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 // esh 2.1 — Voice 2.1 live-path smoke driver. Runs ONE real, server-owned conversational turn through the
 // canonical VoiceSessionOrchestrator with the REAL local backends (STT → LLM → TTS), driven by a recorded WAV
@@ -30,7 +31,7 @@ enum VoiceTurnCommand {
         let ttsModel = CommandSupport.optionalValue(flag: "--tts", in: arguments) ?? config?.defaults.ttsModel
 
         let inference = ExternalInferenceService(
-            modelStore: modelStore, sessionStore: FileSessionStore(root: root), cacheStore: FileCacheStore(root: root))
+            modelStore: modelStore, sessionStore: FileSessionStore(root: root), cacheStore: FileCacheStore(root: root), registry: .macOS())
         let transcriber = SpeechRuntimeTranscriber()
         let responder = LanguageResponder(inference: inference, resolveModel: { _ in llm })
         let speaker = BufferedTTSSpeaker(workingDirectory: FileManager.default.temporaryDirectory)

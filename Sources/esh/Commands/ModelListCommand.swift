@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum ModelListCommand {
     static func run(arguments: [String] = [], service: ModelService) throws {

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 import Metal
 import TTSMLX
 import AVFoundation

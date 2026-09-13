@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh optimize` — inspect optimization strategies, plan an ExecutionProfile, and run the
 /// evidence-driven benchmark harness. `esh performance <mode>` sets the default planning mode.

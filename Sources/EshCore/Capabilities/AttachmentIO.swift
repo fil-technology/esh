@@ -6,7 +6,7 @@ import Foundation
 public enum AttachmentIO {
     /// Resolve an image attachment to a local file path. `uri` file paths are used as-is; inline base64
     /// is written to a temp file (caller deletes temps). Returns (path, isTemporary).
-    static func materialize(_ attachment: EshAttachment, root: PersistenceRoot) throws -> (String, Bool) {
+    public static func materialize(_ attachment: EshAttachment, root: PersistenceRoot) throws -> (String, Bool) {
         if let uri = attachment.uri, !uri.isEmpty {
             let path = uri.hasPrefix("file://") ? URL(string: uri)?.path ?? uri : uri
             guard FileManager.default.fileExists(atPath: path) else {
@@ -24,7 +24,7 @@ public enum AttachmentIO {
         return (url.path, true)
     }
 
-    static func stripDataURLPrefix(_ s: String) -> String {
+    public static func stripDataURLPrefix(_ s: String) -> String {
         if s.hasPrefix("data:"), let comma = s.firstIndex(of: ",") { return String(s[s.index(after: comma)...]) }
         return s
     }

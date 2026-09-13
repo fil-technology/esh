@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh web [--host 127.0.0.1] [--port 11436] [--no-open]`
 /// Launches the local esh server and opens a browser to the Web Chat reference client (served at

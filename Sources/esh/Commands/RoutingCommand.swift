@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum RoutingCommand {
     static func run(arguments: [String], root: PersistenceRoot, currentDirectoryURL: URL) async throws {
@@ -51,7 +52,7 @@ enum RoutingCommand {
             let service = ExternalInferenceService(
                 modelStore: FileModelStore(root: root),
                 sessionStore: FileSessionStore(root: root),
-                cacheStore: FileCacheStore(root: root),
+                cacheStore: FileCacheStore(root: root), registry: .macOS(),
                 workspaceRootURL: WorkspaceContextLocator().workspaceRootURL(from: currentDirectoryURL)
             )
             let request = ExternalInferenceRequest(

@@ -1,7 +1,7 @@
 import Foundation
 
-enum ModelFilenameHeuristics {
-    static func inferFormat(identifier: String, filenames: [String]) -> ModelFormat {
+public enum ModelFilenameHeuristics {
+    public static func inferFormat(identifier: String, filenames: [String]) -> ModelFormat {
         let loweredFiles = filenames.map { $0.lowercased() }
         if loweredFiles.contains(where: { $0.hasSuffix(".gguf") }) {
             return .gguf
@@ -23,7 +23,7 @@ enum ModelFilenameHeuristics {
         return .unknown
     }
 
-    static func inferAdapter(
+    public static func inferAdapter(
         identifier: String,
         tags: [String],
         filenames: [String],
@@ -40,7 +40,7 @@ enum ModelFilenameHeuristics {
         }
     }
 
-    static func inferBaseModelID(tags: [String]) -> String? {
+    public static func inferBaseModelID(tags: [String]) -> String? {
         for tag in tags {
             let normalized = tag.trimmingCharacters(in: .whitespacesAndNewlines)
             let lowered = normalized.lowercased()
@@ -54,7 +54,7 @@ enum ModelFilenameHeuristics {
         return nil
     }
 
-    static func inferArchitecture(
+    public static func inferArchitecture(
         identifier: String,
         configModelType: String?,
         tags: [String],
@@ -81,7 +81,7 @@ enum ModelFilenameHeuristics {
         return configModelType == nil && filenames.isEmpty ? .unknown : .other
     }
 
-    static func inferParameterCountB(identifier: String, filenames: [String]) -> Double? {
+    public static func inferParameterCountB(identifier: String, filenames: [String]) -> Double? {
         for candidate in [identifier] + filenames {
             if let value = firstMatch(in: candidate, pattern: #"(?i)(?:^|[-_])(\d+(?:\.\d+)?)b(?:[-_]|$)"#) {
                 return Double(value)
@@ -94,7 +94,7 @@ enum ModelFilenameHeuristics {
         return nil
     }
 
-    static func inferQuantization(identifier: String, filenames: [String], format: ModelFormat) -> String? {
+    public static func inferQuantization(identifier: String, filenames: [String], format: ModelFormat) -> String? {
         for candidate in filenames + [identifier] {
             if let quant = extractGGUFQuant(from: candidate), format == .gguf {
                 return quant
@@ -109,7 +109,7 @@ enum ModelFilenameHeuristics {
         return nil
     }
 
-    static func inferEffectiveBits(quantization: String?, format: ModelFormat) -> Double? {
+    public static func inferEffectiveBits(quantization: String?, format: ModelFormat) -> Double? {
         guard let quantization else { return nil }
         let normalized = quantization.uppercased()
         if format == .gguf {
@@ -138,7 +138,7 @@ enum ModelFilenameHeuristics {
         return nil
     }
 
-    static func inferMultimodal(
+    public static func inferMultimodal(
         identifier: String,
         tags: [String],
         configModelType: String?
@@ -156,7 +156,7 @@ enum ModelFilenameHeuristics {
         }
     }
 
-    static func selectGGUFFiles(_ filenames: [String]) -> (selected: String?, related: [String], isSplit: Bool, warning: String?) {
+    public static func selectGGUFFiles(_ filenames: [String]) -> (selected: String?, related: [String], isSplit: Bool, warning: String?) {
         let ggufFiles = filenames.filter { $0.lowercased().hasSuffix(".gguf") }.sorted()
         guard !ggufFiles.isEmpty else {
             return (nil, [], false, nil)
@@ -191,12 +191,12 @@ enum ModelFilenameHeuristics {
         return (best.0, [best.0], false, nil)
     }
 
-    static func availableVariants(in filenames: [String], format: ModelFormat) -> [String] {
+    public static func availableVariants(in filenames: [String], format: ModelFormat) -> [String] {
         guard format == .gguf else { return [] }
         return Array(Set(filenames.compactMap(extractGGUFQuant(from:)))).sorted()
     }
 
-    static func selectGGUFFiles(
+    public static func selectGGUFFiles(
         _ filenames: [String],
         variant: String?
     ) -> (selected: String?, related: [String], isSplit: Bool, warning: String?) {

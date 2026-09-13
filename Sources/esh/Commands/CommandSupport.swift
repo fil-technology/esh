@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum CommandSupport {
     static func optionalValue(flag: String, in arguments: [String]) -> String? {

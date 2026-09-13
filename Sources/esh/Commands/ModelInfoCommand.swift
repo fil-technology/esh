@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh model info <model>` — show catalog/install metadata for a model.
 ///

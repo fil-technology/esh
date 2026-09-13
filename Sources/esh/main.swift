@@ -1,10 +1,14 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 import TTSMLX
 
 do {
     try PackagedRuntimeBootstrap.configureEnvironmentIfNeeded()
+    // esh M9: wire the macOS runtime hooks (routing engine probe, turbo cache compressor) into the
+    // portable core before any routing/inference runs. iOS never links EshMacRuntime.
+    MacRuntimeBootstrap.install()
     try await CLI().run(arguments: CommandLine.arguments)
 } catch is CLIHandledError {
     Foundation.exit(1)

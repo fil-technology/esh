@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 enum ServeCommand {
     static let defaultPort: UInt16 = 11435
@@ -65,7 +66,7 @@ enum ServeCommand {
         do {
             let vStore = FileModelStore(root: root)
             let vInference = ExternalInferenceService(modelStore: vStore, sessionStore: FileSessionStore(root: root),
-                                                      cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
+                                                      cacheStore: FileCacheStore(root: root), registry: .macOS(), lifecycleManager: pool)
             let vInstalls = (try? vStore.listInstalls()) ?? []
             // Voice Auto (spec §10): pick the smallest installed LLM whose WHOLE warm voice stack (STT+LLM+TTS
             // +KV+buffers) fits — realtime-friendly. The previous "first MLX install" could grab a 14B coder,

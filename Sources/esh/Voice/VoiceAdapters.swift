@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 // esh 2.1 — Voice 2.1 live-path adapters. These bind the canonical VoiceSession seams (VoiceTranscriber /
 // VoiceResponder / VoiceSpeaker, defined in EshCore) to the REAL local backends, without duplicating them:

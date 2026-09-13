@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 struct ReleaseUpdateNotice: Equatable {
     let currentVersion: String

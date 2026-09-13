@@ -1,0 +1,72 @@
+import Foundation
+import Testing
+@testable import EshCore
+@testable import EshMacRuntime
+
+@Suite
+struct DoctorServiceTests {
+    @Test
+    func reportIncludesStorageHostAndModels() {
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let report = DoctorService().report(root: root, version: "1.2.3")
+
+        #expect(report.version == "1.2.3")
+        #expect(!report.macOS.isEmpty)
+        #expect(report.storage.status == "internal")
+        #expect(report.models.installedCount == 0)
+        #expect(report.stateRoot == root.stateRootURL.path)
+        // Encodes to stable JSON.
+        #expect(throws: Never.self) {
+            _ = try JSONEncoder().encode(report)
+        }
+    }
+
+    @Test
+    func reportsAudioRuntimeStateForFreshRoot() {
+        // A fresh root has no audio model weights cached; the report must say so honestly (no false "cached").
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let report = DoctorService().report(root: root, version: nil)
+        #expect(report.audio.sfxModelInstalled == false)
+        #expect(report.audio.musicModelInstalled == false)
+    }
+
+    @Test
+    func reportIsDegradedWhenAssetsVolumeUnavailable() throws {
+        let state = temporaryDirectory()
+        let externalParent = temporaryDirectory()
+        let external = externalParent.appendingPathComponent("esh")
+        let service = StorageService()
+        let root = try service.setAssetsRoot(external.path, migrateExisting: false, root: PersistenceRoot(rootURL: state))
+        try FileManager.default.removeItem(at: externalParent)
+
+        let report = DoctorService().report(root: root, version: nil)
+        #expect(report.status == "degraded")
+        #expect(report.storage.status == "unavailable")
+        #expect(report.storage.reason != nil)
+    }
+
+    @Test
+    func reportsVoiceRealtimeStack() {
+        // Voice 2.1 §7 observability: the report must carry a static voice stack section derived from pure
+        // probes — endpoint, VAD provider, STT/TTS, Voice Auto, Fit — without starting a server.
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let report = DoctorService().report(root: root, version: nil)
+        #expect(report.voice.websocketPath == "/v1/voice/stream")
+        #expect(report.voice.defaultEndpoint.contains("/v1/voice/stream"))
+        #expect(!report.voice.vadProvider.isEmpty)
+        #expect(!report.voice.sttModel.isEmpty)
+        #expect(!report.voice.warmState.isEmpty)
+        // A fresh root has no installed LLM → Voice Auto finds nothing and the turn cannot run offline.
+        #expect(report.voice.autoSelectedLLM == nil)
+        #expect(report.voice.offlineReady == false)
+        // Still encodes to stable JSON with the new section.
+        #expect(throws: Never.self) { _ = try JSONEncoder().encode(report) }
+    }
+
+    private func temporaryDirectory() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}

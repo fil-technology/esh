@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 #if canImport(Darwin)
 import Darwin
 #endif

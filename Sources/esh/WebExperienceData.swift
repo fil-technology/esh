@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// Provider for the 2.0 Web Experience data endpoints. Each path composes JSON from the CANONICAL
 /// esh services — the browser and web layer contain no routing/fit/scheduler/policy logic (thin

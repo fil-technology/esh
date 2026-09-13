@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh benchmark lab [--all | <model-id> ...] [--json]`
 /// Runs the Model Benchmark Lab over installed models using esh's own inference path, stores versioned
@@ -28,7 +29,7 @@ enum BenchmarkLabCommand {
         let inference = ExternalInferenceService(
             modelStore: modelStore,
             sessionStore: FileSessionStore(root: root),
-            cacheStore: FileCacheStore(root: root)
+            cacheStore: FileCacheStore(root: root), registry: .macOS()
         )
         let host = HostMachineProfileService().currentProfile()
         let hardware = "\(host.chipDescription ?? "Apple Silicon") / \(host.totalMemoryGB.map { "\(Int($0)) GB" } ?? "unknown")"

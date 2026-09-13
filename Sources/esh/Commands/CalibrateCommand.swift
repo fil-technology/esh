@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum CalibrateCommand {
     static func run(arguments: [String]) throws {

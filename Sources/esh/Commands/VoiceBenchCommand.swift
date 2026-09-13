@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 // esh 2.1 — Voice 2.1 WARM co-residency benchmark (spec §2/§3). The cold WAV-driven turn (~38 s) was
 // architecture proof, not realtime UX. This runs N turns through ONE VoiceSessionOrchestrator with SHARED,
@@ -29,7 +30,7 @@ enum VoiceBenchCommand {
         let pool = OpenAICompatibleService.makeLifecycleManager()
         let inference = ExternalInferenceService(
             modelStore: modelStore, sessionStore: FileSessionStore(root: root),
-            cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
+            cacheStore: FileCacheStore(root: root), registry: .macOS(), lifecycleManager: pool)
         let transcriber = SpeechRuntimeTranscriber(lifecycleManager: pool)
         let responder = LanguageResponder(inference: inference, resolveModel: { _ in llm })
         let streamTTS = arguments.contains("--stream-tts")

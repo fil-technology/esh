@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 enum DownloadProgressView {
     static func render(state: DownloadState) {

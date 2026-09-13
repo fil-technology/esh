@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh model import <path> [--id <id>] [--move]` — register a local MLX directory or GGUF file as
 /// a first-class model without re-downloading.

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// `esh schedule` — the Adaptive Intelligence Scheduler (M9). Given a capability request under
 /// constraints (not a specific model), pick the best installed model + optimization plan on this

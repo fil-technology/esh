@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 // esh 2.1 — Voice 2.1 SHIPPING-PATH latency benchmark (spec Gate 2). Unlike voice-bench (which drives the
 // VoiceSessionOrchestrator in-process), this exercises the ACTUAL production transport end-to-end:
@@ -35,7 +36,7 @@ enum VoiceWsBenchCommand {
         let pool = OpenAICompatibleService.makeLifecycleManager()
         let inference = ExternalInferenceService(
             modelStore: modelStore, sessionStore: FileSessionStore(root: root),
-            cacheStore: FileCacheStore(root: root), lifecycleManager: pool)
+            cacheStore: FileCacheStore(root: root), registry: .macOS(), lifecycleManager: pool)
 
         func e(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
         e("voice-ws-bench: llm=\(llm) tts=\(ttsModel ?? "default") turns=\(turns) sr=\(sr) pcmBytes=\(pcm.count) persistentMLX=\(ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1")")

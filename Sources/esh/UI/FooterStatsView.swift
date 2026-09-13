@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum FooterStatsView {
     static func renderedLine(state: ChatScreenState, width: Int) -> String {

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum AgentCommand {
     static func run(arguments: [String], currentDirectoryURL: URL) async throws {
@@ -15,7 +16,7 @@ enum AgentCommand {
         let root = PersistenceRoot.default()
         let modelStore = FileModelStore(root: root)
         let install = try CommandSupport.resolveInstall(identifier: modelIdentifier, modelStore: modelStore)
-        let backend = InferenceBackendRegistry().backend(for: install)
+        let backend = InferenceBackendRegistry.macOS().backend(for: install)
         let runtime = try await backend.loadRuntime(for: install)
         defer { Task { await runtime.unload() } }
 

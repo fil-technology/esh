@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum BenchmarkCommand {
     static func run(arguments: [String]) async throws {

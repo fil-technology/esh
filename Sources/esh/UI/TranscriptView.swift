@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum TranscriptView {
     static func renderedLines(items: [TranscriptItem], availableWidth: Int, reasoningExpanded: Bool = false) -> [String] {

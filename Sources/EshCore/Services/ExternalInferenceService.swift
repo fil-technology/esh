@@ -721,7 +721,9 @@ public struct ExternalInferenceService: Sendable {
         if let artifact = try? cacheStore.loadArtifact(id: artifactID).0 {
             switch artifact.manifest.cacheMode {
             case .turbo:
-                return TurboQuantCompressor()
+                // esh M9: the turbo (TurboQuant) compressor is macOS-only and injected by EshMacRuntime
+                // via `CacheArtifactSupport`; falls back to passthrough when unset.
+                return CacheArtifactSupport.turboCompressorFactory?() ?? PassthroughCompressor()
             case .raw, .triattention, .automatic:
                 return PassthroughCompressor()
             }

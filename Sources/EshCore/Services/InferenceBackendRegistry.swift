@@ -4,9 +4,10 @@ import Foundation
 ///
 /// This type is **portable**: it holds *injected* backends and references no concrete backend type,
 /// so it compiles on every Apple platform. The set of backends is decided by a platform assembly, not
-/// hard-wired here — macOS wires MLX + GGUF + Apple (the `#if os(macOS)` default `init()` below); iOS
-/// wires Apple Foundation Models only. Routing already constrains a request to the backends available
-/// on the device, so a request never asks for a backend that was not injected.
+/// hard-wired here — the portable default `init()` below wires Apple Foundation Models only; the macOS
+/// assembly (MLX + spawned GGUF + Apple) lives in `EshMacRuntime.InferenceBackendRegistry.macOS()` and
+/// is injected by the macOS CLI. Routing already constrains a request to the backends available on the
+/// device, so a request never asks for a backend that was not injected.
 public struct InferenceBackendRegistry: Sendable {
     private let backends: [BackendKind: any InferenceBackend]
 
@@ -42,24 +43,16 @@ public struct InferenceBackendRegistry: Sendable {
 }
 
 public extension InferenceBackendRegistry {
-    /// Default platform assembly.
+    /// Default **portable** assembly: Apple Foundation Models only.
     ///
-    /// macOS wires MLX (also serves ONNX), llama.cpp GGUF, and Apple Foundation Models — these drive
-    /// subprocess/Python/llama-server execution and are macOS-only by design. Every other Apple
-    /// platform (iOS, visionOS, …) wires Apple Foundation Models only; no subprocess backend exists in
-    /// an iOS build. This initializer is the single place the portable registry meets platform-specific
-    /// backend construction.
+    /// EshCore carries no macOS-only execution infrastructure (M9), so the portable default wires the
+    /// Apple backend, which is available on every Apple platform. macOS execution backends (MLX, spawned
+    /// llama.cpp GGUF) live in `EshMacRuntime` and are assembled by `InferenceBackendRegistry.macOS()`
+    /// there; the macOS CLI injects that assembly. An embedded GGUF backend (`EshLlamaCpp`) is likewise
+    /// host-injected. This keeps the single portable registry free of any concrete macOS backend type.
     init() {
-        #if os(macOS)
-        self.init(backends: [
-            .mlx: MLXBackend(),
-            .gguf: LlamaCppBackend(),
-            .apple: AppleBackend()
-        ])
-        #else
         self.init(backends: [
             .apple: AppleBackend()
         ])
-        #endif
     }
 }

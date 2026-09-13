@@ -1,4 +1,5 @@
 import EshCore
+import EshMacRuntime
 import TTSMLX
 
 enum OpenAICompatibleAudioCatalog {

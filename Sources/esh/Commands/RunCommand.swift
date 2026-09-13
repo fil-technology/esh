@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum RunCommand {
     static func run(arguments: [String], currentDirectoryURL: URL) throws {

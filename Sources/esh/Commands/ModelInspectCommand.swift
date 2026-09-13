@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum ModelInspectCommand {
     static func run(modelID: String, service: ModelService) throws {

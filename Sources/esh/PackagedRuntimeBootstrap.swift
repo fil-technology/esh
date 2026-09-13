@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 enum PackagedRuntimeBootstrap {
     static func configureEnvironmentIfNeeded() throws {

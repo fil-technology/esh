@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 import TTSMLX
 
 enum AudioCommand {
@@ -70,7 +71,7 @@ enum AudioCommand {
             throw StoreError.notFound("No installed language model. Install one with `esh model install`.")
         }
         let inference = ExternalInferenceService(
-            modelStore: modelStore, sessionStore: FileSessionStore(root: root), cacheStore: FileCacheStore(root: root))
+            modelStore: modelStore, sessionStore: FileSessionStore(root: root), cacheStore: FileCacheStore(root: root), registry: .macOS())
         let response = try await inference.infer(request: ExternalInferenceRequest(
             model: llm,
             messages: [ExternalInferenceMessage(role: .user, text: heard)],

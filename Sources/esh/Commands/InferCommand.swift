@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum InferCommand {
     static func run(arguments: [String], root: PersistenceRoot) async throws {
@@ -8,7 +9,7 @@ enum InferCommand {
         let service = ExternalInferenceService(
             modelStore: FileModelStore(root: root),
             sessionStore: FileSessionStore(root: root),
-            cacheStore: FileCacheStore(root: root)
+            cacheStore: FileCacheStore(root: root), registry: .macOS()
         )
         let response = try await service.infer(request: request)
         if debugRouting, let routing = response.routing {

@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import EshCore
+import EshMacRuntime
 
 /// `esh onboard` — guided first-run setup: detect the Mac, choose where large models live
 /// (internal or external SSD), pick a hardware-matched model, install it, and finish with the

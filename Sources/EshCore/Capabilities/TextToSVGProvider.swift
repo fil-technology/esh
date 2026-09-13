@@ -161,7 +161,7 @@ public struct TextToSVGProvider: CapabilityProvider {
     /// One vector-scene generation attempt against a backend: (system, user, maxTokens) → (rawText, model).
     typealias SVGAttempt = @Sendable (_ system: String, _ user: String, _ maxTokens: Int) async throws -> (String, String)
 
-    static func intOption(_ req: ExecutionRequest, _ key: String) -> Int? {
+    public static func intOption(_ req: ExecutionRequest, _ key: String) -> Int? {
         switch req.options.values[key] {
         case .int(let v): return v
         case .double(let v): return Int(v)

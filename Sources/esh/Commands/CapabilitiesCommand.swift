@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum CapabilitiesCommand {
     static func run(arguments: [String], root: PersistenceRoot, toolVersion: String?) throws {

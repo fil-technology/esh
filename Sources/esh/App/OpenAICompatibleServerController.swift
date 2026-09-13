@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 final class OpenAICompatibleServerController: @unchecked Sendable {
     static let shared = OpenAICompatibleServerController()

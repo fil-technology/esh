@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum ModelRecommendedCommand {
     static func run(arguments: [String], service: ModelService, root: PersistenceRoot) throws {

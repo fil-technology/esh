@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 /// Tracks in-flight model installs for the Web Experience. The browser starts an install
 /// (POST /v1/models/install), then polls status (GET /v1/models/install?repo=…); cancellation is

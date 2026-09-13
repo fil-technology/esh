@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 // Thin CLI over the generic image.edit capability — a convenience surface, NOT a second image pipeline.
 // It builds an ExecutionRequest-equivalent ImageEditOptions and calls the same ImageEditService the web

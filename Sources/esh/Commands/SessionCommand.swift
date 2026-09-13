@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMacRuntime
 
 enum SessionCommand {
     static func run(arguments: [String], store: SessionStore) throws {
