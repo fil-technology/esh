@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import EshRuntime      // the public SDK facade
 import EshLlamaCpp     // optional embedded GGUF (adds EshRuntime.withEmbeddedGGUF + the .gguf backend)
 
@@ -15,44 +16,56 @@ struct EshCleanRoomApp: App {
 final class Model: ObservableObject {
     @Published var log = "idle"
 
-    // Apple Foundation Models — the zero-setup path.
-    func runAppleFM() {
-        Task {
-            let runtime = EshRuntime()
-            do {
-                let r = try await runtime.generate(prompt: "Reply with exactly one word: pong")
-                log = "AppleFM backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))"
-                print("CLEANROOM appleFM ok backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))")
-            } catch let e as EshRuntimeError {
-                log = "AppleFM typed error: \(e.errorDescription ?? "")"
-                print("CLEANROOM appleFM typedError=\(e)")
-            } catch {
-                log = "AppleFM error: \(error)"
-                print("CLEANROOM appleFM error=\(error)")
-            }
+    /// Non-interactive sequence for device validation via `devicectl … process launch --console`.
+    func autoRun() async {
+        UIApplication.shared.isIdleTimerDisabled = true
+        print("CLEANROOM begin")
+        await runAppleFM()
+        await runManagedGGUF()
+        print("CLEANROOM done")
+    }
+
+    /// Apple Foundation Models — the zero-setup path.
+    func runAppleFM() async {
+        let runtime = EshRuntime()
+        do {
+            let r = try await runtime.generate(prompt: "Reply with exactly one word: pong")
+            log = "AppleFM backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))"
+            print("CLEANROOM appleFM ok backend=\(r.selection.backend.rawValue) text=\(r.text.replacingOccurrences(of: "\n", with: " ").prefix(60))")
+        } catch let e as EshRuntimeError {
+            log = "AppleFM typed error: \(e.errorDescription ?? "")"
+            print("CLEANROOM appleFM typedError=\(e)")
+        } catch {
+            log = "AppleFM error: \(error)"
+            print("CLEANROOM appleFM error=\(error)")
         }
     }
 
-    // Managed embedded GGUF — install a curated model, then pin it. No paths, no llama.cpp knowledge.
-    func runManagedGGUF() {
-        Task {
-            let runtime = EshRuntime.withEmbeddedGGUF()
-            let model = LocalModelDescriptor.qwen05B
-            do {
-                _ = await runtime.reconcileLocalModels()                 // repair any interrupted state at launch
-                let plan = await runtime.installPlan(for: model)
-                print("CLEANROOM plan fit=\(plan.fit) suitable=\(plan.suitable) downloadMB=\(plan.downloadBytes/1_048_576)")
-                if !(await runtime.localModels().first { $0.descriptor.id == model.id }?.state == .installed) {
-                    try await runtime.install(model) { p in print("CLEANROOM download \(Int(p*100))%") }
+    /// Managed embedded GGUF — install a curated model, then pin it. No paths, no llama.cpp knowledge.
+    func runManagedGGUF() async {
+        let runtime = EshRuntime.withEmbeddedGGUF()
+        let model = LocalModelDescriptor.qwen05B
+        do {
+            let repairs = await runtime.reconcileLocalModels()   // repair interrupted state at launch
+            print("CLEANROOM reconcile consistent=\(repairs.isConsistent) recovered=\(repairs.recoveredRecords)")
+            let plan = await runtime.installPlan(for: model)
+            print("CLEANROOM plan fit=\(plan.fit) suitable=\(plan.suitable) downloadMB=\(plan.downloadBytes/1_048_576) freeMB=\(plan.availableStorageBytes.map { $0/1_048_576 } ?? -1)")
+            let already = await runtime.localModels().first { $0.descriptor.id == model.id }?.state == .installed
+            if !already {
+                try await runtime.install(model) { p in
+                    if Int(p*100) % 25 == 0 { print("CLEANROOM download \(Int(p*100))%") }
                 }
-                let r = try await runtime.generate(.init(prompt: "Reply with exactly one word: pong",
-                                                         constraints: .pinned(model.id)))
-                log = "GGUF backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))"
-                print("CLEANROOM gguf ok backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))")
-            } catch {
-                log = "GGUF error: \(error)"
-                print("CLEANROOM gguf error=\(error)")
             }
+            let r = try await runtime.generate(.init(prompt: "Reply with exactly one word: pong",
+                                                     constraints: .pinned(model.id)))
+            log = "GGUF backend=\(r.selection.backend.rawValue) text=\(r.text.prefix(40))"
+            print("CLEANROOM gguf ok backend=\(r.selection.backend.rawValue) model=\(r.selection.modelID) text=\(r.text.replacingOccurrences(of: "\n", with: " ").prefix(60))")
+        } catch let e as EshRuntimeError {
+            log = "GGUF typed error: \(e.errorDescription ?? "")"
+            print("CLEANROOM gguf typedError=\(e)")
+        } catch {
+            log = "GGUF error: \(error)"
+            print("CLEANROOM gguf error=\(error)")
         }
     }
 }
@@ -62,9 +75,9 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("esh clean-room").font(.headline)
-            Button("Run Apple FM") { model.runAppleFM() }
-            Button("Run managed GGUF") { model.runManagedGGUF() }
             Text(model.log).font(.footnote.monospaced()).padding()
-        }.padding()
+        }
+        .padding()
+        .task { await model.autoRun() }
     }
 }

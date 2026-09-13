@@ -13,3 +13,5 @@ Vendor/
 .llama-build/
 Examples/EshCleanRoom/EshCleanRoom.xcodeproj/
 Examples/EshCleanRoom/build/
+Examples/EshIOSProbe/build*/
+Examples/EshCleanRoom/build*/
