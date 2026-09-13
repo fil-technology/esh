@@ -34,7 +34,7 @@ public struct AppleVisionOCRProvider: CapabilityProvider {
                     var paths: [String] = []
                     for input in req.inputs {
                         if case .attachment(let a) = input.payload, a.kind == .image {
-                            let (path, isTemp) = try VisionUnderstandProvider.materialize(a, root: context.root)
+                            let (path, isTemp) = try AttachmentIO.materialize(a, root: context.root)
                             paths.append(path); if isTemp { tempPaths.append(path) }
                         }
                     }

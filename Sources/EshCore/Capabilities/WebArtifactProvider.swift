@@ -97,7 +97,7 @@ public struct WebArtifactProvider: CapabilityProvider {
 
                     // Iterative editing: if a prior web artifact is referenced (sourceArtifactID), load its HTML
                     // and REVISE it per the instruction — the operation rides in the instruction, with lineage.
-                    let sourceID = VideoUnderstandingProvider.stringOption(req, "sourceArtifactID").flatMap(UUID.init)
+                    let sourceID = CapabilityRequestOptions.string(req, "sourceArtifactID").flatMap(UUID.init)
                     var currentHTML: String? = nil
                     if let sourceID, let a = try? context.artifactStore.load(id: sourceID),
                        let data = try? context.artifactStore.data(id: sourceID, file: a.entrypoint ?? "index.html") {

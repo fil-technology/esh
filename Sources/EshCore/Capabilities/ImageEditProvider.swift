@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR — instruction-based image editing (image + instruction → image). A first-class capability
@@ -170,11 +171,11 @@ public struct ImageEditProvider: CapabilityProvider {
                     }
 
                     try StorageService().ensureAssetsAvailable(root: context.root)   // never fill internal disk
-                    let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
+                    let (inPath, isTemp) = try AttachmentIO.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
-                    var backend = ImageEditBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .flux2Klein
-                    let backendExplicit = VideoUnderstandingProvider.stringOption(req, "backend") != nil
-                    let modelPin = VideoUnderstandingProvider.stringOption(req, "model")
+                    var backend = ImageEditBackend(rawValue: CapabilityRequestOptions.string(req, "backend") ?? "") ?? .flux2Klein
+                    let backendExplicit = CapabilityRequestOptions.string(req, "backend") != nil
+                    let modelPin = CapabilityRequestOptions.string(req, "model")
 
                     // Route the model download to the assets root (SSD), never internal disk.
                     let hfCache = context.root.cachesURL.appendingPathComponent("image-models", isDirectory: true).path
@@ -187,8 +188,8 @@ public struct ImageEditProvider: CapabilityProvider {
                     var adapterID: String?
                     var adapterModelRepo: String?
                     var adapterBaseArch: String?
-                    if let requested = VideoUnderstandingProvider.stringOption(req, "adapter")
-                        ?? VideoUnderstandingProvider.stringOption(req, "lora") {
+                    if let requested = CapabilityRequestOptions.string(req, "adapter")
+                        ?? CapabilityRequestOptions.string(req, "lora") {
                         let r = try ImageAdapterCatalog.resolveForEdit(
                             id: requested, scale: Self.doubleOption(req, "adapterScale"),
                             pinnedBackend: backendExplicit ? backend : nil, hfCacheRoot: hfCache)
@@ -247,7 +248,7 @@ public struct ImageEditProvider: CapabilityProvider {
                     let bytes = try Data(contentsOf: URL(fileURLWithPath: outPath))
                     // Provenance chain (Phase 11): record the SOURCE artifact this result was edited from (set
                     // by the client on iterative "Edit again"/chained edits), so lineage + Ashex can trace it.
-                    let sourceID = VideoUnderstandingProvider.stringOption(req, "sourceArtifactID").flatMap(UUID.init)
+                    let sourceID = CapabilityRequestOptions.string(req, "sourceArtifactID").flatMap(UUID.init)
                     let provenance = ArtifactProvenance(providerID: providerID, modelID: r.model,
                                                         capability: .imageEdit, sourceArtifactID: sourceID)
                     var metadata: [String: JSONValue] = [
@@ -283,3 +284,5 @@ public struct ImageEditProvider: CapabilityProvider {
         }
     }
 }
+
+#endif

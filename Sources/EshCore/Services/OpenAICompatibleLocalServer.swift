@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only (subprocess/Python/llama-server/agent-context/local server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 import Network
 
@@ -340,3 +341,5 @@ public final class OpenAICompatibleLocalServer: @unchecked Sendable {
         }
     }
 }
+
+#endif

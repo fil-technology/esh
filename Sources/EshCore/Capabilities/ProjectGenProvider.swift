@@ -421,7 +421,7 @@ public struct ProjectGenProvider: CapabilityProvider {
                     // Iterative edit: when a prior project is referenced (sourceArtifactID, set by the client's
                     // "Edit" affordance), load its app.js so the model REVISES it in place instead of starting
                     // fresh — the conversational "now make it yellow" flow, with the current code as context.
-                    let sourceID = VideoUnderstandingProvider.stringOption(req, "sourceArtifactID").flatMap(UUID.init)
+                    let sourceID = CapabilityRequestOptions.string(req, "sourceArtifactID").flatMap(UUID.init)
                     var userPrompt = base
                     if let sourceID, (try? context.artifactStore.load(id: sourceID)) != nil,
                        let data = try? context.artifactStore.data(id: sourceID, file: "app.js"),

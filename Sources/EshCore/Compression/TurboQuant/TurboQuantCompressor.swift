@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only (agent/context tooling or TurboQuant quantization over the macOS runtime); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 public struct TurboQuantCompressor: CacheCompressor, Sendable {
@@ -26,3 +27,5 @@ public struct TurboQuantCompressor: CacheCompressor, Sendable {
         try bridge.decompress(data)
     }
 }
+
+#endif

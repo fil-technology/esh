@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 3 — speaker diarization (audio → structured). Labels anonymous speaker CLUSTERS
@@ -73,7 +74,7 @@ public struct AudioDiarizationProvider: CapabilityProvider {
                     }).first else {
                         throw CapabilityError.failed("diarization requires an audio input")
                     }
-                    let (audioPath, isTemp) = try VisionUnderstandProvider.materialize(audio, root: context.root)
+                    let (audioPath, isTemp) = try AttachmentIO.materialize(audio, root: context.root)
                     if isTemp { tempPaths.append(audioPath) }
                     let numSpeakers = TextToSVGProvider.intOption(req, "numSpeakers")
                     let wantTranscript = Self.boolOption(req, "withTranscript") ?? (transcribe != nil)
@@ -129,3 +130,5 @@ public struct AudioDiarizationProvider: CapabilityProvider {
         return nil
     }
 }
+
+#endif

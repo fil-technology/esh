@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 2 — background removal / segmentation (image → image). The first image-OUTPUT
@@ -58,7 +59,7 @@ public struct SegmentationProvider: CapabilityProvider {
                     }).first else {
                         throw CapabilityError.failed("background removal requires an image input")
                     }
-                    let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
+                    let (inPath, isTemp) = try AttachmentIO.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("seg-\(UUID().uuidString).png").path
@@ -85,3 +86,5 @@ public struct SegmentationProvider: CapabilityProvider {
         }
     }
 }
+
+#endif

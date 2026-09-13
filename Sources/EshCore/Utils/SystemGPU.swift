@@ -1,12 +1,19 @@
 import Foundation
+#if canImport(IOKit)
 import IOKit
+#endif
 
 // Best-effort GPU utilization for Apple Silicon (and Intel) Macs, read from the IOAccelerator registry's
 // `PerformanceStatistics` — the same source Activity Monitor uses. No elevated privileges required (unlike
 // `powermetrics`). Returns nil when the value can't be read, so callers show "—" honestly rather than a fake 0.
+//
+// iOS/other Apple platforms do not expose the IOAccelerator registry (IOKit's service-matching APIs are
+// macOS-only), so `utilizationPercent()` honestly returns nil there rather than faking a value. The public
+// API is unconditional so portable callers (e.g. `SystemMemory.SystemResourcesSnapshot`) compile everywhere.
 public enum SystemGPU {
-    /// Current GPU device utilization as a percentage (0–100), or nil if unavailable.
+    /// Current GPU device utilization as a percentage (0–100), or nil if unavailable on this platform.
     public static func utilizationPercent() -> Double? {
+        #if canImport(IOKit) && os(macOS)
         let matching = IOServiceMatching("IOAccelerator")
         var iterator: io_iterator_t = 0
         // kIOMainPortDefault (0) works on macOS 12+; passing 0 is the documented "default port" value.
@@ -36,5 +43,8 @@ public enum SystemGPU {
             }
         }
         return best
+        #else
+        return nil
+        #endif
     }
 }

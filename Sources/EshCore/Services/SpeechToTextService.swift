@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// On-device speech-to-text (M10) via mlx_audio, invoked through the MLX bridge. Symmetric with the
@@ -39,3 +40,5 @@ private struct TranscribeRequest: Codable, Sendable {
 private struct TranscribeResponse: Codable, Sendable {
     let text: String
 }
+
+#endif

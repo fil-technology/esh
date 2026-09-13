@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only diagnostics (probes Python engines/llama-server/host runtime). See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// Aggregated, machine-readable health report for esh. Produced by `esh doctor` (human + `--json`)
@@ -227,3 +228,5 @@ public struct DoctorService: Sendable {
         return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }
 }
+
+#endif

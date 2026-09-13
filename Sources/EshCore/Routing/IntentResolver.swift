@@ -56,7 +56,14 @@ public struct IntentResolver: Sendable {
             // where weights-on-disk alone made isSatisfied return true and execution then failed mid-run.
             // Deterministic audio (noise/tones) needs no engine — never gate it.
             let deterministicAudio = capability == .audioGenerate && DeterministicAudio.classify(message) != nil
+            // esh iOS M1: the optional generative-engine runtime (GenerativeEngineManager) is macOS-only
+            // (it installs/queries local Python engines). On other platforms no such engine exists, so the
+            // default install-probe reports "not installed"; callers may still inject `engineInstalled`.
+            #if os(macOS)
             let engineIsInstalled = engineInstalled ?? { id in GenerativeEngineManager(root: root).isInstalled(GenerativeEngineCatalog.spec(id)) }
+            #else
+            let engineIsInstalled = engineInstalled ?? { _ in false }
+            #endif
             if !deterministicAudio, let engine = GenerativeEngineCatalog.engine(forCapability: capability),
                !engineIsInstalled(engine.id) {
                 let requirement = InstallRequirement(

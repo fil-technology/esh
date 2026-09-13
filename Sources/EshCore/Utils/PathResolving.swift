@@ -16,7 +16,9 @@ public enum PathResolving {
         isDirectory: Bool = false
     ) -> URL {
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        // `NSHomeDirectory()` is cross-platform (macOS: the user home; iOS: the app sandbox home),
+        // unlike `FileManager.homeDirectoryForCurrentUser`, which is unavailable on iOS (esh iOS M1).
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
 
         var expanded = trimmed
         if expanded == "~" {

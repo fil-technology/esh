@@ -60,6 +60,9 @@ public struct PersistenceRoot: Sendable {
         }
 
         let fileManager = FileManager.default
+
+        #if os(macOS)
+        // macOS: state lives at ~/.esh, with a one-time ~/.llmcache → ~/.esh migration.
         let home = fileManager.homeDirectoryForCurrentUser
         let eshRoot = home.appendingPathComponent(".esh", isDirectory: true)
         let legacyRoot = home.appendingPathComponent(".llmcache", isDirectory: true)
@@ -71,6 +74,15 @@ public struct PersistenceRoot: Sendable {
         )
 
         return eshRoot
+        #else
+        // esh iOS M1: sandboxed platforms have no user home directory. State lives in the app's
+        // Application Support container ("<AppSupport>/esh"); there is no legacy root to migrate. The
+        // ESH_HOME override above still applies first. Heavy assets default here too unless relocated
+        // (external-volume relocation is a macOS-only concept — see docs/IOS_RUNTIME_SPEC.md §16).
+        let base = (try? fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base.appendingPathComponent("esh", isDirectory: true)
+        #endif
     }
 
     /// Resolve the assets root from (1) `ESH_ASSETS_HOME` env, (2) persisted `storage.json`,

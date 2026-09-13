@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// One line of the persistent speech worker's stdout protocol (see `speech-serve` in the MLX bridge).
@@ -203,3 +204,5 @@ final class SpeechWorkerProcess: @unchecked Sendable {
         String(decoding: try JSONSerialization.data(withJSONObject: dict), as: UTF8.self)
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// A `BackendRuntime` backed by a persistent `llama-server` (see `LlamaServerProcess`). The model is
@@ -121,3 +122,5 @@ public final class LlamaServerRuntime: BackendRuntime, ResidencyReporting, @unch
         server.shutdown()
     }
 }
+
+#endif

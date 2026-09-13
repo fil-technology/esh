@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// Owns a persistent STT worker (M12) so the speech-to-text model stays resident across requests
@@ -118,3 +119,5 @@ public actor SpeechRuntimeManager {
         await clearReservation()
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only (agent/context tooling or TurboQuant quantization over the macOS runtime); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 public struct LocalModelValidationService {
@@ -101,3 +102,5 @@ public struct LocalModelValidationService {
         return values.filter { seen.insert($0).inserted }
     }
 }
+
+#endif

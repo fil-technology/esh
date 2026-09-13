@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR — image super-resolution / upscale (image → image). A SEPARATE typed capability
@@ -111,11 +112,11 @@ public struct ImageUpscaleProvider: CapabilityProvider {
                         throw CapabilityError.failed("upscaling requires an image input")
                     }
                     try StorageService().ensureAssetsAvailable(root: context.root)   // item 10: no internal-disk fallback
-                    let (inPath, isTemp) = try VisionUnderstandProvider.materialize(image, root: context.root)
+                    let (inPath, isTemp) = try AttachmentIO.materialize(image, root: context.root)
                     if isTemp { tempPaths.append(inPath) }
                     let scale = TextToSVGProvider.intOption(req, "scale") ?? 4
                     let minFreeMemMB = TextToSVGProvider.intOption(req, "minFreeMemMB")
-                    let backend = UpscaleBackend(rawValue: VideoUnderstandingProvider.stringOption(req, "backend") ?? "") ?? .realesrganONNX
+                    let backend = UpscaleBackend(rawValue: CapabilityRequestOptions.string(req, "backend") ?? "") ?? .realesrganONNX
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent("upscale-\(UUID().uuidString).png").path
                     tempPaths.append(outPath)
@@ -155,3 +156,5 @@ public struct ImageUpscaleProvider: CapabilityProvider {
         }
     }
 }
+
+#endif

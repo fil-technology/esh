@@ -697,6 +697,10 @@ public struct ExternalInferenceService: Sendable {
             throw StoreError.invalidManifest("Cache artifact load is currently supported for MLX models only.")
         }
 
+        // esh iOS M1: prompt-cache artifacts are an MLX-runtime concept (MLX codec + TurboQuant
+        // compressor), both macOS-only. `.mlx` installs never exist on iOS, so this path is
+        // unreachable there; it is compiled out so the portable service carries no macOS-only refs.
+        #if os(macOS)
         let compressor = artifactCompressor(for: cacheArtifactID)
         let service = CacheService(cacheStore: cacheStore)
         _ = try await service.loadArtifactForRuntime(
@@ -707,8 +711,12 @@ public struct ExternalInferenceService: Sendable {
             compressor: compressor,
             checker: backend.makeCompatibilityChecker(for: install)
         )
+        #else
+        throw StoreError.invalidManifest("Cache artifact load requires the MLX runtime, which is unavailable on this platform.")
+        #endif
     }
 
+    #if os(macOS)
     private func artifactCompressor(for artifactID: UUID) -> CacheCompressor {
         if let artifact = try? cacheStore.loadArtifact(id: artifactID).0 {
             switch artifact.manifest.cacheMode {
@@ -720,4 +728,5 @@ public struct ExternalInferenceService: Sendable {
         }
         return PassthroughCompressor()
     }
+    #endif
 }

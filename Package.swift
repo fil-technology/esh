@@ -8,7 +8,12 @@ let quietDebugSwiftSettings: [SwiftSetting] = [
 let package = Package(
     name: "Esh",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        // iOS support for the portable EshCore contracts/runtime (M1). The Apple Foundation Models
+        // path is runtime-gated with `#available(iOS 26, …)`; the deployment floor stays lower so the
+        // portable core is usable by a wide range of iOS apps. macOS-only execution (MLX/GGUF/
+        // subprocess/servers) is excluded from iOS builds via `#if os(macOS)`.
+        .iOS(.v17)
     ],
     products: [
         .library(

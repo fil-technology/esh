@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 3 — text → image generation. Produces a typed IMAGE artifact from a text prompt
@@ -129,3 +130,5 @@ public struct ImageGenerationProvider: CapabilityProvider {
         }
     }
 }
+
+#endif

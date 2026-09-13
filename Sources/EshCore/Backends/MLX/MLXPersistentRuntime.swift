@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// Generation request sent to the persistent `mlx-serve` worker. Mirrors the one-shot
@@ -144,3 +145,5 @@ public final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, @un
         try? FileManager.default.removeItem(at: stateFileURL)
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 public struct MLXModelLocator: Sendable {
@@ -11,3 +12,5 @@ public struct MLXModelLocator: Sendable {
         return url
     }
 }
+
+#endif

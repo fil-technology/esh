@@ -57,7 +57,7 @@ public struct AppleIntelligenceService: Sendable {
     /// Throws `GenerationError` when Apple Intelligence is not available (never silently degrades).
     public func generate(prompt: String, instructions: String? = nil) async throws -> String {
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {
             let current = status()
             guard current.available else {
                 throw GenerationError.unavailable(reason: current.detail)
@@ -66,7 +66,7 @@ public struct AppleIntelligenceService: Sendable {
             let response = try await session.respond(to: prompt)
             return response.content
         } else {
-            throw GenerationError.unavailable(reason: "requires a newer macOS")
+            throw GenerationError.unavailable(reason: "requires a newer OS")
         }
         #else
         throw GenerationError.frameworkMissing
@@ -75,7 +75,7 @@ public struct AppleIntelligenceService: Sendable {
 
     public func status() -> AppleIntelligenceStatus {
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {
             let model = SystemLanguageModel.default
             switch model.availability {
             case .available:
@@ -92,8 +92,8 @@ public struct AppleIntelligenceService: Sendable {
             }
         } else {
             return AppleIntelligenceStatus(available: false, availability: .unsupportedOS,
-                detail: "Apple Intelligence requires a newer macOS.", onDevice: true,
-                suggestedFix: "Update macOS to a version that supports Apple Intelligence.")
+                detail: "Apple Intelligence requires a newer OS version.", onDevice: true,
+                suggestedFix: "Update to an OS version that supports Apple Intelligence.")
         }
         #else
         return AppleIntelligenceStatus(available: false, availability: .frameworkUnavailable,
@@ -102,17 +102,17 @@ public struct AppleIntelligenceService: Sendable {
     }
 
     #if canImport(FoundationModels)
-    @available(macOS 26.0, *)
+    @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
     private static func mapUnavailable(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> AppleIntelligenceStatus {
         switch reason {
         case .deviceNotEligible:
             return AppleIntelligenceStatus(available: false, availability: .deviceNotEligible,
-                detail: "This Mac is not eligible for Apple Intelligence.", onDevice: true,
-                suggestedFix: "Apple Intelligence requires Apple Silicon with Apple Intelligence support.")
+                detail: "This device is not eligible for Apple Intelligence.", onDevice: true,
+                suggestedFix: "Apple Intelligence requires a device with Apple Intelligence support.")
         case .appleIntelligenceNotEnabled:
             return AppleIntelligenceStatus(available: false, availability: .appleIntelligenceNotEnabled,
-                detail: "Apple Intelligence is not enabled on this Mac.", onDevice: true,
-                suggestedFix: "Enable Apple Intelligence in System Settings › Apple Intelligence & Siri.")
+                detail: "Apple Intelligence is not enabled on this device.", onDevice: true,
+                suggestedFix: "Enable Apple Intelligence in Settings › Apple Intelligence & Siri.")
         case .modelNotReady:
             return AppleIntelligenceStatus(available: false, availability: .modelNotReady,
                 detail: "The Apple Intelligence model is downloading or not ready yet.", onDevice: true,

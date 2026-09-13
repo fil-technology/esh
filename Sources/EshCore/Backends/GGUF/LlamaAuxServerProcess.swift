@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 1b — a llama-server run in an auxiliary mode (embeddings or reranking). Reuses the
@@ -162,3 +163,5 @@ final class LlamaAuxServerProcess: @unchecked Sendable {
         return Int(UInt16(bigEndian: addr.sin_port))
     }
 }
+
+#endif

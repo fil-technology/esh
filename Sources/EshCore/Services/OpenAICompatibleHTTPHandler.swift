@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only OpenAI/Anthropic-compatible local server layer; excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// One Server-Sent Event line for streaming capability execution (POST /v1/execute?stream=1).
@@ -405,3 +406,5 @@ public struct OpenAICompatibleHTTPHandler: Sendable {
         )
     }
 }
+
+#endif

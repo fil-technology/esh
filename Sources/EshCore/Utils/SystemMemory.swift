@@ -44,11 +44,17 @@ public enum HeavyTaskMemory {
         let free = String(format: "%.1f", availableGB)
         let need = String(format: "%.0f", neededGB)
         var msg = "Not enough free memory to start \(label): \(free) GB available, about \(need) GB needed. "
+        // esh iOS M1: `SystemProcesses.topConsumer()` shells out to `/bin/ps` (macOS-only). On other
+        // platforms we cannot enumerate other apps' memory, so we give the generic advice.
+        #if os(macOS)
         if let hog = SystemProcesses.topConsumer() {
             msg += "The biggest memory user right now is \(hog.name) (\(String(format: "%.1f", hog.gigabytes)) GB). Close apps you don't need, then try again."
         } else {
             msg += "Close some apps to free memory, then try again."
         }
+        #else
+        msg += "Close some apps to free memory, then try again."
+        #endif
         return msg
     }
 }

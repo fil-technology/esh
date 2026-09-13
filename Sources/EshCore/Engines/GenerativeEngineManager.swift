@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only (subprocess/Python/llama-server/agent-context/local server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// Runtime status of one generative engine — whether its Python runtime is actually present (not just whether
@@ -250,3 +251,5 @@ public struct GenerativeEngineManager: Sendable {
         return requirement
     }
 }
+
+#endif

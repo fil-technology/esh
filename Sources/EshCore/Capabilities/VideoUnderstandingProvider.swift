@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media provider (video understanding); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 3 — video.understand: a MULTI-PROVIDER pipeline, not a single model. It composes
@@ -6,46 +7,6 @@ import Foundation
 // pipeline is exposed as a canonical ExecutionPlan (§9). Honest scope: this is SAMPLED-FRAME + AUDIO
 // FUSION, not deep temporal modeling — the result and rationale say so.
 
-public struct VideoMetadata: Sendable, Equatable {
-    public var durationSeconds: Double
-    public var width: Int
-    public var height: Int
-    public var nominalFrameRate: Double
-    public var codec: String?
-    public var hasAudio: Bool
-    public init(durationSeconds: Double, width: Int, height: Int, nominalFrameRate: Double, codec: String?, hasAudio: Bool) {
-        self.durationSeconds = durationSeconds
-        self.width = width
-        self.height = height
-        self.nominalFrameRate = nominalFrameRate
-        self.codec = codec
-        self.hasAudio = hasAudio
-    }
-}
-
-/// Media operations behind a protocol so the pipeline is testable without real decode, and so the codec
-/// backend (AVFoundation) can be swapped without touching the pipeline. Implementations must throw a
-/// CapabilityError for corrupt/unsupported inputs.
-public protocol VideoMediaExtractor: Sendable {
-    func metadata(path: String) async throws -> VideoMetadata
-    /// Extract one frame per timestamp (seconds); returns the written PNG file paths (temp; caller deletes).
-    func extractKeyframes(path: String, timestampsSeconds: [Double], into dir: URL) async throws -> [String]
-    /// Extract the audio track to a WAV file; returns its path, or nil when there is no audio track.
-    func extractAudio(path: String, into dir: URL) async throws -> String?
-}
-
-/// Duration-aware adaptive frame sampling: more frames for longer clips up to a cap, evenly spread and
-/// centered in their segment. Pure + deterministic → unit-testable. (Scene-change detection can refine
-/// this later; today it is honest uniform sampling.)
-public enum VideoFrameSampler {
-    public static func sampleTimestamps(durationSeconds: Double, maxFrames: Int = 8, minSecondsPerFrame: Double = 2.0) -> [Double] {
-        guard durationSeconds.isFinite, durationSeconds > 0 else { return [0] }
-        let byDuration = Int((durationSeconds / max(0.5, minSecondsPerFrame)).rounded(.up))
-        let count = max(1, min(maxFrames, byDuration))
-        let segment = durationSeconds / Double(count)
-        return (0..<count).map { (Double($0) + 0.5) * segment }
-    }
-}
 
 public struct VideoUnderstandingProvider: CapabilityProvider {
     public typealias DescribeFrameFn = @Sendable (_ imagePath: String, _ prompt: String, _ visionModel: String?) async throws -> String
@@ -126,7 +87,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
                     try Task.checkCancellation()
 
                     // Step 2: adaptive keyframe extraction.
-                    let visionModel = Self.stringOption(req, "visionModel")
+                    let visionModel = CapabilityRequestOptions.string(req, "visionModel")
                     let maxFrames = TextToSVGProvider.intOption(req, "maxFrames") ?? 8
                     let timestamps = VideoFrameSampler.sampleTimestamps(durationSeconds: meta.durationSeconds, maxFrames: maxFrames)
                     cont.yield(.status("extracting \(timestamps.count) keyframes"))
@@ -265,10 +226,8 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
             evidenceBacked: false)
     }
 
-    static func stringOption(_ req: ExecutionRequest, _ key: String) -> String? {
-        if case .string(let s)? = req.options.values[key] { return s }
-        return nil
-    }
+    // `stringOption` moved to Capabilities/CapabilityRequestOptions.swift (esh iOS M1) so portable
+    // providers can use it without this macOS-only file. Call `CapabilityRequestOptions.string(_:_:)`.
 
     /// Strip reasoning tags + special/control tokens that small models leak (e.g. "<start_function_call>",
     /// "<|im_end|>", "<end_of_turn>", "<eos>"), collapse whitespace. Never lets a control-token artifact reach
@@ -305,7 +264,7 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
             return path
         }
         guard let b64 = attachment.base64,
-              let data = Data(base64Encoded: VisionUnderstandProvider.stripDataURLPrefix(b64)) else {
+              let data = Data(base64Encoded: AttachmentIO.stripDataURLPrefix(b64)) else {
             throw CapabilityError.failed("video attachment has no readable content")
         }
         let ext: String = {
@@ -320,3 +279,5 @@ public struct VideoUnderstandingProvider: CapabilityProvider {
         return url.path
     }
 }
+
+#endif

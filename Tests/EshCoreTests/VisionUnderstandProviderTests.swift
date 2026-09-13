@@ -56,13 +56,13 @@ struct VisionUnderstandProviderTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let root = PersistenceRoot(rootURL: dir)
         // base64 → temp file created.
-        let (tempPath, isTemp) = try VisionUnderstandProvider.materialize(
+        let (tempPath, isTemp) = try AttachmentIO.materialize(
             EshAttachment(kind: .image, mimeType: "image/png", base64: Data([1, 2, 3]).base64EncodedString()), root: root)
         #expect(isTemp)
         #expect(FileManager.default.fileExists(atPath: tempPath))
         #expect(tempPath.hasSuffix(".png"))
         // Existing uri → passed through, not temp.
-        let (uriPath, isTemp2) = try VisionUnderstandProvider.materialize(
+        let (uriPath, isTemp2) = try AttachmentIO.materialize(
             EshAttachment(kind: .image, uri: tempPath), root: root)
         #expect(!isTemp2)
         #expect(uriPath == tempPath)

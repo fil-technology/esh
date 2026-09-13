@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only Anthropic-compatible local server; excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 public struct AnthropicMessagesRequest: Codable, Hashable, Sendable {
@@ -386,3 +387,5 @@ private extension Data {
         append(Data("data: \(text)\n\n".utf8))
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only (subprocess/Python/llama-server/agent-context/local server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 — generic LoRA / adapter support for image-edit models. An adapter is representable INDEPENDENTLY
@@ -210,3 +211,5 @@ public struct ImageEditOptionsResponse: Codable, Sendable {
         return ImageEditOptionsResponse(capability: CapabilityID.imageEdit.rawValue, backends: backends, adapters: adapters)
     }
 }
+
+#endif

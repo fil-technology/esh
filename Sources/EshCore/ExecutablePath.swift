@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(Darwin)
+#if os(macOS)   // esh iOS M1: `_NSGetExecutablePath` (bundled-runtime discovery) is macOS-only; iOS falls back to argv[0].
 import Darwin
 #endif
 
@@ -15,7 +15,7 @@ public enum ExecutablePath {
     /// Absolute, symlink-resolved URL of the running executable. Falls back to `argv[0]` only if the
     /// OS call is unavailable or fails.
     public static func resolvedURL() -> URL {
-        #if canImport(Darwin)
+        #if os(macOS)   // esh iOS M1: `_NSGetExecutablePath` (bundled-runtime discovery) is macOS-only; iOS falls back to argv[0].
         var size: UInt32 = 0
         _ = _NSGetExecutablePath(nil, &size)
         if size > 0 {

@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only execution layer (subprocess/Python/llama-server); excluded from iOS builds. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 public struct MLXBridgeConfiguration: Codable, Hashable, Sendable {
@@ -80,3 +81,5 @@ public struct MLXBridge: Sendable {
         )
     }
 }
+
+#endif

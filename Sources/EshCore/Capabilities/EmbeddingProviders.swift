@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: Python-bridge media/speech provider (MLXBridge/llama aux); macOS-only. See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 // esh 2.1 UCMR, Stage 1b — embeddings + reranking CapabilityProviders. These ride the already-bundled
@@ -149,3 +150,5 @@ public struct RerankProvider: CapabilityProvider {
         }
     }
 }
+
+#endif

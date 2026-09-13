@@ -1,3 +1,4 @@
+#if os(macOS)   // esh iOS M1: macOS-only onboarding/setup (probes Python engine runtimes via EngineOrchestratorService). See docs/IOS_PORTABILITY_AUDIT.md.
 import Foundation
 
 /// Persisted onboarding state, so esh knows whether first-run setup has completed and future
@@ -153,3 +154,5 @@ public struct OnboardingService: Sendable {
         OnboardingStateStore(root: root).load().completed
     }
 }
+
+#endif
