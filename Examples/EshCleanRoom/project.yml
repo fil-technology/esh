@@ -1,0 +1,33 @@
+# Clean-room consumer of the esh SDK — a fresh iOS app OUTSIDE the esh package tree (M10 #1).
+# It depends on esh ONLY as a SwiftPM package (local path, the standard way to consume an unpublished
+# package) and uses ONLY the public EshRuntime / EshLlamaCpp API. No internal repo paths, build products,
+# symlinks, or environment assumptions.
+name: EshCleanRoom
+options:
+  bundleIdPrefix: technology.fil
+  deploymentTarget: { iOS: "26.0" }
+  createIntermediateGroups: true
+packages:
+  Esh:
+    path: "../.."
+targets:
+  EshCleanRoom:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: Esh
+        product: EshRuntime
+      - package: Esh
+        product: EshLlamaCpp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: technology.fil.EshCleanRoom
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "6.0"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "L7T5538V86"

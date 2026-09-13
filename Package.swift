@@ -34,7 +34,7 @@ let llamaTargets: [Target] = {
     let cllama: Target = hasEmbeddedLlama
         ? .binaryTarget(name: "CLlama", path: "Vendor/llama.xcframework")
         : .binaryTarget(name: "CLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
-    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "CLlama"],
+    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "CLlama"],
                             swiftSettings: quietDebugSwiftSettings)]
 }()
 

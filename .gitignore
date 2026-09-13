@@ -11,3 +11,5 @@ Examples/EshIOSProbe/EshIOSProbe.xcodeproj/
 # esh M7: locally-built llama.cpp xcframework (see scripts/build-llama-xcframework.sh). Not committed.
 Vendor/
 .llama-build/
+Examples/EshCleanRoom/EshCleanRoom.xcodeproj/
+Examples/EshCleanRoom/build/
