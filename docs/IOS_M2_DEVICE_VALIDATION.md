@@ -42,23 +42,41 @@ Then read the measured results:
 xcrun devicectl device console --device <DEVICE_UDID> | grep ESH-M2
 ```
 
-## Why it is BLOCKED here
+## Why it is BLOCKED here — CONFIRMED ROOT CAUSE
 
 Target device present and capable: **iPhone 17 (iPhone18,3), iOS 26.6.2 (23G90), Developer Mode: Enabled,
-paired over localNetwork, booted.** The pipeline succeeds through package resolution, device `arm64` build of
-`EshCore`, and code signing (`-allowProvisioningUpdates`, team `46JTU2GRTD`). It then fails only at the final
-install/run step:
+booted, and `connected` (online).** With the device unlocked and connected, the pipeline succeeds through
+package resolution, device `arm64` build of `EshCore`, and code signing — and then hits a **structural
+SwiftPM limitation**, not a device/environment flake:
 
 ```
-error: Timed out waiting for all destinations matching the provided destination specifier to become available
+error: Cannot test target "EshCoreTests" on "Sviatophone": Tool-hosted testing is unavailable on
+device destinations. Select a host application for the test target, or use a simulator destination instead.
 (xcodebuild exit 70)
-# earlier: "The developer disk image could not be mounted on this device."
 ```
 
-i.e. the device is reachable only over a network tunnel and is not in a deployable state (locked / not
-front-most / dev disk image unmountable). Unlocking the device and connecting it via USB (or keeping it
-unlocked and trusted on the same network) resolves this. This is an environment/availability limitation, not
-a defect in the esh Apple backend.
+A SwiftPM **unit-test target runs "tool-hosted"** (a CLI test runner). That works on macOS and the iOS
+**Simulator**, but a **physical device requires the test bundle to be hosted inside an application**. So the
+test-based harness — running `AppleBackendTests` via `xcodebuild test` — **cannot execute on a physical
+device at all**, regardless of connectivity. (Earlier `exit 70` "timed out … destinations to become
+available" runs were the separate issue of the WiFi device not yet being `connected`; that is now resolved —
+the device shows `connected`/online. Transport is localNetwork/WiFi; no USB.)
+
+This is not a defect in the esh Apple backend, and per the milestone constraint esh code was **not** changed
+to work around it.
+
+## Path to close it: a minimal app host
+
+On-device inference requires an **app host** (the other harness form the M2 brief allows: "a minimal iOS
+sample app, or a dedicated Xcode integration target"). The smallest option is an `Examples/EshIOSProbe`
+SwiftUI app that links `EshCore` and, on launch/button, runs the SAME esh path the test drives
+(`InferenceBackendRegistry → AppleBackend → AppleBackendRuntime → AppleIntelligenceService →
+FoundationModels`) and prints the `ESH-M2 …` lines to the device console. Because SwiftPM cannot emit an iOS
+`.app`, this needs a small `.xcodeproj` (one app target + the local package). That is a new (non-production)
+harness artifact, held for approval rather than scaffolded unilaterally.
+
+Everything else in M2 is complete and green (below); only the live on-device generation numbers remain, and
+they are unobtainable through the SwiftPM test harness on a device.
 
 ## What IS validated (deterministic, no device)
 
