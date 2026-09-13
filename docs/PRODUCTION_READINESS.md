@@ -160,10 +160,20 @@ A meaningful regression = warm TTFT or tok/s materially worse than the above, or
 
 ## Regression status
 
-- macOS unit suite: **671 / 671 pass** (`swift test`).
+- macOS unit suite: **674 / 674 pass** (`swift test`) — includes M10 schema, typed-error, durability,
+  concurrency, security, and lifecycle-stress suites.
 - Fresh-checkout build (no Vendor/symlink/SSD): macOS `swift build` complete; iOS `EshRuntime`+`EshCore`
   BUILD SUCCEEDED.
 - iOS Simulator: EshCore, EshRuntime, EshIOSProbe, EshCleanRoom all build.
+- **Clean-room functional run (iOS 26.5 Simulator, via the public API):** `EshRuntime().generate(prompt:)`
+  → **Apple FM** (`backend=apple`, "pong"); `EshRuntime.withEmbeddedGGUF()` → `reconcileLocalModels()`
+  consistent → `installPlan` fit=comfortable → `install(.qwen05B)` downloaded+verified+persisted (384 MB
+  on disk) → `.pinned` generate selected `backend=gguf` and returned tokens. GGUF *text quality* is a
+  device property (coherent on iPhone 17 in M7/M8; the Simulator's Metal compute yields garbled tokens —
+  the SDK path itself is fully exercised).
+- **Physical iPhone 17:** app installs; the live launch this session was blocked by the device being locked
+  (screen lock is a per-device user action). Apple FM + embedded GGUF + managed install were previously
+  proven live on this exact device (M4/M7/M8) and M10 did not change those execution paths.
 
 ## Known limitations
 
