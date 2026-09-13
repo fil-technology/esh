@@ -1,0 +1,32 @@
+# xcodegen spec for the esh iOS integration probe (M4).
+# Intentionally tiny — exists to verify the public EshRuntime SDK end-to-end on a device, not as a product.
+# Regenerate the project with:  cd Examples/EshIOSProbe && xcodegen generate
+name: EshIOSProbe
+options:
+  bundleIdPrefix: technology.fil
+  deploymentTarget:
+    iOS: "26.0"          # Apple Foundation Models requires iOS 26; the probe exercises that path.
+  createIntermediateGroups: true
+packages:
+  Esh:
+    path: ../..          # the local esh SwiftPM package (EshRuntime product)
+targets:
+  EshIOSProbe:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: Esh
+        product: EshRuntime
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: technology.fil.EshIOSProbe
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "6.0"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # Signing (physical device). Override at build time with -allowProvisioningUpdates if needed.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "L7T5538V86"

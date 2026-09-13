@@ -1,7 +1,11 @@
 # esh — M2 Apple Foundation Models: physical-device validation
 
 **Milestone:** M2 — Apple Foundation Models on iOS (ClickUp `86eywc26e`).
-**Status of live on-device inference:** ⛔ **BLOCKED on device availability** (not on code). Everything else is done and green.
+**Status of live on-device inference:** ✅ **RESOLVED in M4** via an app host — see
+[`IOS_APPLE_FM_DEVICE_VALIDATION.md`](IOS_APPLE_FM_DEVICE_VALIDATION.md) for the measured iPhone 17 results
+(Apple FM available; first call 2.017 s, warm 0.226 s, output "pong", through `EshRuntime → AppleBackend →
+FoundationModels`). The note below records why the *test-based* harness could not run on device (SwiftPM
+tool-hosted testing), which is why M4 used an `EshRuntime`-backed app instead.
 
 ## What the on-device harness is
 
