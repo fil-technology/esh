@@ -4,10 +4,11 @@ import Foundation
 // fast — not byte-by-byte) behind async/await, reports progress via a callback, persists resume data on
 // cancellation/failure, and hands back the downloaded temp file for verification before finalize.
 
-public struct DownloadOutcome: Sendable {
-    public let tempURL: URL          // caller must move/consume this
-    public let httpStatus: Int
-    public let expectedBytes: Int64
+// M10 API review: internal — an implementation detail of the downloader, not part of the public SDK.
+struct DownloadOutcome: Sendable {
+    let tempURL: URL          // caller must move/consume this
+    let httpStatus: Int
+    let expectedBytes: Int64
 }
 
 final class ResumableDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {

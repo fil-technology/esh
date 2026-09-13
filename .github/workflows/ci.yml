@@ -41,8 +41,8 @@ jobs:
       - name: Show CLI help
         run: ./esh --help
 
-  ios-build:
-    name: iOS Simulator Build Gate
+  ios-sdk-build:
+    name: iOS SDK Build Gate (clean checkout, no binary)
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -54,36 +54,69 @@ jobs:
         with:
           xcode-version: "latest-stable"
 
-      # iOS regression gate for the portable runtime. Deterministic: no model downloads, no Python, no
-      # Apple Foundation Models live inference (Simulator/CI cannot provide it — that is a manual/device
-      # validation, see docs/IOS_M2_DEVICE_VALIDATION.md). Proves the portable core + SDK facade compile
-      # for iOS. The macOS build + test suite runs in the `test-and-verify` job above.
+      # M10 #15 — proves a FRESH checkout builds the portable iOS SDK with NO machine-local dependency:
+      # no Vendor/llama.xcframework, no external SSD, no symlink, no developer path, no downloaded model.
+      # Deterministic: no model downloads, no Python, no Apple Foundation Models live inference (Simulator/CI
+      # cannot provide FM — that is device validation, see docs/PRODUCTION_READINESS.md). EshLlamaCpp is
+      # correctly absent here (no binary) and the base SDK still builds.
       - name: Build EshCore for iOS Simulator
         run: >-
-          xcodebuild build
-          -scheme EshCore
-          -destination 'generic/platform=iOS Simulator'
-          -skipPackagePluginValidation
+          xcodebuild build -scheme EshCore
+          -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation
 
       - name: Build EshRuntime (SDK facade) for iOS Simulator
         run: >-
-          xcodebuild build
-          -scheme EshRuntime
-          -destination 'generic/platform=iOS Simulator'
-          -skipPackagePluginValidation
+          xcodebuild build -scheme EshRuntime
+          -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation
 
-      - name: Install xcodegen (for the integration probe project)
+  ios-embedded-integration:
+    name: iOS Embedded GGUF + Clean-Room Integration
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "latest-stable"
+
+      # Reproducible embedded llama.cpp: build the pinned xcframework from source (the build script pins the
+      # upstream commit + build flags). Cached on the script's contents so it only rebuilds when the pin
+      # changes. Once a release binary is published, this job can instead set ESH_LLAMA_XCFRAMEWORK_URL and
+      # skip the source build (binaryTarget(url:checksum:)); either way EshLlamaCpp becomes available.
+      - name: Cache pinned llama.xcframework
+        id: cache-xcframework
+        uses: actions/cache@v4
+        with:
+          path: Vendor/llama.xcframework
+          key: llama-xcframework-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+
+      - name: Build pinned llama.xcframework (macOS + iOS device + sim, Metal embedded)
+        if: steps.cache-xcframework.outputs.cache-hit != 'true'
+        run: ./scripts/build-llama-xcframework.sh
+
+      - name: Install xcodegen
         run: brew install xcodegen
 
+      # Proves the embedded GGUF backend links into an iOS app from a clean checkout.
       - name: Build EshIOSProbe integration app for iOS Simulator
         run: |
           cd Examples/EshIOSProbe
           xcodegen generate
-          xcodebuild build \
-            -project EshIOSProbe.xcodeproj \
-            -scheme EshIOSProbe \
-            -destination 'generic/platform=iOS Simulator' \
-            -skipPackagePluginValidation \
+          xcodebuild build -project EshIOSProbe.xcodeproj -scheme EshIOSProbe \
+            -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      # M10 #1 — clean-room consumer: a separate app that depends on esh only via its public SwiftPM
+      # products and public API. Building it in CI proves the SDK integrates with no internal coupling.
+      - name: Build EshCleanRoom consumer app for iOS Simulator
+        run: |
+          cd Examples/EshCleanRoom
+          xcodegen generate
+          xcodebuild build -project EshCleanRoom.xcodeproj -scheme EshCleanRoom \
+            -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
   package-smoke:
