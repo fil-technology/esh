@@ -164,6 +164,7 @@ public actor EshRuntime {
     private let registry: InferenceBackendRegistry
     private let installProvider: EshInstallProviding
     private let deviceProfileProvider: DeviceProfileProviding
+    private let localModelManager: LocalModelManager
 
     /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
     /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.
@@ -171,6 +172,7 @@ public actor EshRuntime {
         self.registry = InferenceBackendRegistry()
         self.installProvider = FileInstallProvider()
         self.deviceProfileProvider = SystemDeviceProfileProvider()
+        self.localModelManager = LocalModelManager()
     }
 
     /// Dependency-injected construction for tests and advanced hosts. Provide the backend assembly, the
@@ -178,17 +180,43 @@ public actor EshRuntime {
     public init(
         registry: InferenceBackendRegistry,
         installProvider: EshInstallProviding = StaticInstallProvider([]),
-        deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider()
+        deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
+        localModelManager: LocalModelManager = LocalModelManager()
     ) {
         self.registry = registry
         self.installProvider = installProvider
         self.deviceProfileProvider = deviceProfileProvider
+        self.localModelManager = localModelManager
     }
 
     /// A read-only snapshot of the device/runtime conditions esh is running under (memory, storage,
     /// thermal/low-power state, Apple FM readiness). The app does not gather these signals itself.
     public func deviceProfile() -> DeviceProfile {
         deviceProfileProvider.currentProfile()
+    }
+
+    // MARK: - Local model management (M8)
+
+    /// The curated local models and their current install state. The app never touches filesystem paths.
+    public func localModels() async -> [LocalModelStatus] {
+        await localModelManager.statuses()
+    }
+
+    /// Preflight: storage + Model Fit (via the device profile) for a curated model, before downloading.
+    public func installPlan(for descriptor: LocalModelDescriptor) async -> LocalModelInstallPlan {
+        await localModelManager.installPlan(for: descriptor)
+    }
+
+    /// Download → verify (size + SHA-256) → record a curated model as an installed GGUF. Cancelling the
+    /// task leaves resumable state and does NOT create an install record.
+    @discardableResult
+    public func install(_ descriptor: LocalModelDescriptor, onProgress: (@Sendable (Double) -> Void)? = nil) async throws -> ModelInstall {
+        try await localModelManager.install(descriptor, onProgress: onProgress)
+    }
+
+    /// Remove an installed model and all its files.
+    public func remove(_ descriptor: LocalModelDescriptor) async throws {
+        try await localModelManager.remove(descriptor.id)
     }
 
     // MARK: Capabilities

@@ -44,11 +44,31 @@ public struct LlamaCppEmbeddedBackend: InferenceBackend, @unchecked Sendable {
     private let config: LlamaCppConfig
     private let resolveModelPath: @Sendable (ModelInstall) -> String?
 
-    /// `resolveModelPath` maps an install to a local GGUF file path; defaults to `install.installPath`.
+    /// `resolveModelPath` maps an install to a local GGUF file path. The default resolves the actual file:
+    /// it prefers `spec.localPath` (set by the local model manager), and if `installPath` is a directory
+    /// (as the model store reports it), it appends the managed `model.gguf` filename.
     public init(config: LlamaCppConfig = .init(),
-                resolveModelPath: @escaping @Sendable (ModelInstall) -> String? = { $0.installPath.isEmpty ? nil : $0.installPath }) {
+                resolveModelPath: @escaping @Sendable (ModelInstall) -> String? = Self.defaultResolveModelPath) {
         self.config = config
         self.resolveModelPath = resolveModelPath
+    }
+
+    public static let defaultResolveModelPath: @Sendable (ModelInstall) -> String? = { install in
+        let fm = FileManager.default
+        // The model store may report either the model file or the install directory (and may rewrite
+        // spec.localPath to the directory on relocation). Resolve to the actual .gguf file for each
+        // candidate: a file → use it; a directory → the managed `model.gguf` inside it.
+        for candidate in [install.spec.localPath, install.installPath].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: candidate, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                let file = candidate + "/model.gguf"
+                if fm.fileExists(atPath: file) { return file }
+            } else {
+                return candidate
+            }
+        }
+        return nil
     }
 
     public func capabilityReport(for install: ModelInstall) -> BackendCapabilityReport {

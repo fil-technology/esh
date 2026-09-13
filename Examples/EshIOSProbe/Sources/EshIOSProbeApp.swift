@@ -125,10 +125,9 @@ final class ProbeModel: ObservableObject {
         print("ESH-M4 RESULT=PASS")
 
         // M7: embedded GGUF benchmark (only runs if the model file is present in Documents).
-        print("ESH-M7 callsite-reached modelPresent=\(GGUFBenchmark.modelURL() != nil)")
+        // M8: app-managed model lifecycle (download → verify → install → generate → persistence → remove).
         ggufText = "running…"
-        ggufText = await GGUFBenchmark.run()
-        print("ESH-M7 callsite-returned")
+        ggufText = await GGUFBenchmark.runManaged()
     }
 
     private static func deviceModel() async -> String {

@@ -51,6 +51,69 @@ enum GGUFBenchmark {
                     messages: [Message(role: .user, text: prompt)])
     }
 
+    /// M8 — app-managed model lifecycle: preflight → download → verify → install → generate → (relaunch)
+    /// persistence → remove. Uses the 0.5B model for a faster on-device download. Logs `ESH-M8`.
+    static func runManaged() async -> String {
+        if let logURL { try? Data().write(to: logURL) }
+        log("ESH-M8 begin")
+        let d = LocalModelCatalog.descriptor(id: "qwen2.5-0.5b-instruct-q4km")!
+        let registry = InferenceBackendRegistry(backends: [
+            .apple: AppleBackend(),
+            .gguf: LlamaCppEmbeddedBackend(config: LlamaCppConfig(contextTokens: 2048)),
+        ])
+        let runtime = EshRuntime(registry: registry, installProvider: FileInstallProvider(),
+                                 localModelManager: LocalModelManager())
+        func storageMB() async -> String {
+            (await runtime.deviceProfile().availableStorageBytes).map { String(format: "%.0f", Double($0) / 1_048_576) } ?? "?"
+        }
+        func genPinned(_ label: String) async {
+            do {
+                let r = try await runtime.generate(EshGenerationRequest(prompt: "Reply with exactly one word: pong",
+                                                                        constraints: .pinned(d.id),
+                                                                        config: GenerationConfig(maxTokens: 16, temperature: 0)))
+                log("ESH-M8 \(label) backend=\(r.selection.backend.rawValue) model=\(r.selection.modelID) text=\"\(r.text.replacingOccurrences(of: "\n", with: " ").prefix(60))\"")
+            } catch { log("ESH-M8 \(label) ERROR=\(error)") }
+        }
+
+        let wasInstalled = (await runtime.localModels()).first { $0.descriptor.id == d.id }.map {
+            if case .installed = $0.state { return true } else { return false }
+        } ?? false
+        log("ESH-M8 model=\(d.id) sizeBytes=\(d.expectedBytes) wasInstalledAtLaunch=\(wasInstalled) storageFreeMB=\(await storageMB())")
+
+        if wasInstalled {
+            // Second launch: the install survived an app restart. Generate, then remove.
+            log("ESH-M8 persistence=confirmed install-survived-restart")
+            await genPinned("generateAfterRestart")
+            let before = await storageMB()
+            do {
+                try await runtime.remove(d)
+                let stillInstalled = (await runtime.localModels()).first { $0.descriptor.id == d.id }.map { $0.state == .installed } ?? false
+                log("ESH-M8 removed storageBeforeMB=\(before) storageAfterMB=\(await storageMB()) stillInstalled=\(stillInstalled)")
+            } catch { log("ESH-M8 remove ERROR=\(error)") }
+            log("ESH-M8 RESULT=PASS phase=restart+remove")
+            return "M8 restart+remove complete."
+        }
+
+        // First launch: preflight → download → verify → install → generate.
+        let plan = await runtime.installPlan(for: d)
+        log("ESH-M8 plan downloadMB=\(d.expectedBytes / 1_048_576) storageFreeMB=\(plan.availableStorageBytes.map { String($0 / 1_048_576) } ?? "?") fit=\(plan.fit.rawValue) suitable=\(plan.suitable)")
+        let sBefore = await storageMB()
+        let t0 = ContinuousClock.now
+        let lastPct = LockedDouble()
+        do {
+            _ = try await runtime.install(d) { p in
+                if p - lastPct.get() >= 0.25 || p >= 1.0 { lastPct.set(p); log("ESH-M8 download progress=\(String(format: "%.0f%%", p * 100))") }
+            }
+        } catch {
+            log("ESH-M8 install ERROR=\(error)")
+            return "M8 install failed: \(error)"
+        }
+        log("ESH-M8 installed downloadTime=\(t0.duration(to: .now)) storageBeforeMB=\(sBefore) storageAfterMB=\(await storageMB())")
+        await genPinned("generateAfterInstall")
+        log("ESH-M8 RESULT=PASS phase=install+generate (relaunch app to verify persistence+remove)")
+        return "M8 install+generate complete. Relaunch to verify persistence + removal."
+    }
+
     /// Runs the full benchmark; returns a short human summary for the UI. Detailed data is in `ESH-M7` logs.
     static func run() async -> String {
         if let logURL { try? Data().write(to: logURL) }   // fresh log per launch
@@ -161,4 +224,12 @@ enum GGUFBenchmark {
         Self.log("ESH-M7 RESULT=PASS availMBend=\(String(format: "%.0f", availMB()))")
         return summary
     }
+}
+
+/// Tiny thread-safe Double for progress throttling from the @Sendable download callback.
+final class LockedDouble: @unchecked Sendable {
+    private var value: Double = -1
+    private let lock = NSLock()
+    func get() -> Double { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ v: Double) { lock.lock(); value = v; lock.unlock() }
 }
