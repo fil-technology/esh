@@ -94,6 +94,10 @@ public actor LocalModelManager {
 
     @discardableResult
     public func install(_ d: LocalModelDescriptor, onProgress: (@Sendable (Double) -> Void)? = nil) async throws -> ModelInstall {
+        // Security (M10): reject a descriptor that could escape the sandbox or download over plaintext,
+        // before any path is built or any byte is fetched.
+        guard LocalModelDescriptor.isValidID(d.id) else { throw LocalModelError.invalidModelID(d.id) }
+        guard LocalModelDescriptor.isSecureSource(d.sourceURL) else { throw LocalModelError.insecureSource(d.sourceURL.absoluteString) }
         if isInstalled(d.id) { throw LocalModelError.alreadyInstalled(d.id) }
         // Concurrency guard: only one install per model id at a time. The check+insert is synchronous actor
         // code (atomic); the release runs on every exit path (return / throw / cancellation).
@@ -238,6 +242,8 @@ public actor LocalModelManager {
     // MARK: Remove (delete all model-owned files + the install record)
 
     public func remove(_ id: String) throws {
+        // Security (M10): never let an unsafe id drive a filesystem delete outside the installs root.
+        guard LocalModelDescriptor.isValidID(id) else { throw LocalModelError.invalidModelID(id) }
         let installs = (try? store.listInstalls()) ?? []
         let hasRecord = installs.contains { $0.id == id }
         let dir = installsRoot.appendingPathComponent(id, isDirectory: true)

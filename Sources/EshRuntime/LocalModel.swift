@@ -125,6 +125,12 @@ public enum LocalModelError: Error, Sendable, Equatable, LocalizedError {
     /// A concurrent install of the same model is already running (M10). The second caller fails fast
     /// rather than starting a duplicate download.
     case installInProgress(String)
+    /// The descriptor's `id` is not a safe filesystem identifier (M10 security): it would be used to build
+    /// a path under the app sandbox, so `/`, `..`, control characters, etc. are rejected to prevent traversal.
+    case invalidModelID(String)
+    /// The descriptor's `sourceURL` is not an allowed download source (M10 security): only HTTPS (or a
+    /// loopback host, for local testing) is permitted — never http to a remote host, file://, or other schemes.
+    case insecureSource(String)
 
     public var errorDescription: String? {
         switch self {
@@ -137,6 +143,29 @@ public enum LocalModelError: Error, Sendable, Equatable, LocalizedError {
         case let .downloadFailed(m): return "Download failed: \(m)"
         case let .installFileMissing(id): return "Install record for '\(id)' exists but the model file is missing."
         case let .installInProgress(id): return "Model '\(id)' is already being installed."
+        case let .invalidModelID(id): return "Invalid model id '\(id)': ids must be filesystem-safe (letters, digits, '.', '_', '-')."
+        case let .insecureSource(u): return "Insecure model source '\(u)': only HTTPS downloads are allowed."
         }
+    }
+}
+
+extension LocalModelDescriptor {
+    /// A filesystem-safe model id: non-empty, ≤128 chars, only `[A-Za-z0-9._-]`, and never a `.`/`..`
+    /// component. The id is used to build a path under the app sandbox, so this prevents path traversal
+    /// from an untrusted/host-supplied descriptor (M10 security).
+    static func isValidID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128, id != ".", id != ".." else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        return id.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    /// Only HTTPS is allowed for a remote source; a loopback host (127.0.0.1/localhost/::1) may use HTTP so
+    /// deterministic local tests work. No file://, ftp://, or plaintext HTTP to a remote host.
+    static func isSecureSource(_ url: URL) -> Bool {
+        let scheme = url.scheme?.lowercased()
+        if scheme == "https" { return true }
+        if scheme == "http", let host = url.host?.lowercased(),
+           host == "127.0.0.1" || host == "localhost" || host == "::1" { return true }
+        return false
     }
 }
