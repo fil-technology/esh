@@ -64,6 +64,15 @@ public enum LocalModelCatalog {
     public static func descriptor(id: String) -> LocalModelDescriptor? { models.first { $0.id == id } }
 }
 
+// Ergonomic named descriptors so a host can write `runtime.install(.qwen05B)` without knowing catalog ids.
+// These are the curated catalog entries; `LocalModelCatalog.models` remains the source of truth.
+public extension LocalModelDescriptor {
+    /// Qwen2.5 0.5B Instruct (Q4_K_M) — ~380 MB, comfortable on any 4GB+ iPhone.
+    static var qwen05B: LocalModelDescriptor { LocalModelCatalog.descriptor(id: "qwen2.5-0.5b-instruct-q4km")! }
+    /// Qwen2.5 1.5B Instruct (Q4_K_M) — ~940 MB, recommended for 8GB+ iPhones.
+    static var qwen15B: LocalModelDescriptor { LocalModelCatalog.descriptor(id: "qwen2.5-1.5b-instruct-q4km")! }
+}
+
 /// Install lifecycle state for a model.
 public enum LocalModelState: Sendable, Equatable {
     case notInstalled
@@ -113,6 +122,9 @@ public enum LocalModelError: Error, Sendable, Equatable, LocalizedError {
     case checksumMismatch(expected: String, got: String)
     case downloadFailed(String)
     case installFileMissing(String)
+    /// A concurrent install of the same model is already running (M10). The second caller fails fast
+    /// rather than starting a duplicate download.
+    case installInProgress(String)
 
     public var errorDescription: String? {
         switch self {
@@ -124,6 +136,7 @@ public enum LocalModelError: Error, Sendable, Equatable, LocalizedError {
         case let .checksumMismatch(e, g): return "Checksum mismatch: expected \(e), got \(g)."
         case let .downloadFailed(m): return "Download failed: \(m)"
         case let .installFileMissing(id): return "Install record for '\(id)' exists but the model file is missing."
+        case let .installInProgress(id): return "Model '\(id)' is already being installed."
         }
     }
 }

@@ -117,12 +117,26 @@ public struct EshCapabilitySnapshot: Sendable {
     public var hasReadyBackend: Bool { backends.contains { $0.report.ready } }
 }
 
-/// Typed errors from the facade.
+/// Typed errors from the facade. A production host can switch over these exhaustively and never has to
+/// parse a human string to decide what to do; the associated `reason`/`errorDescription` is display text.
 public enum EshRuntimeError: Error, Sendable, Equatable, LocalizedError {
+    /// Auto selection found no backend that can serve the request on this device.
     case noAvailableBackend(reason: String)
+    /// A pinned model was requested but is not installed / not ready. esh NEVER substitutes another
+    /// provider for a pin, so this surfaces instead of a silent fallback.
     case pinnedModelUnavailable(modelID: String, reason: String)
+    /// The backend a model needs is not wired on this platform (e.g. an MLX model on iOS).
     case backendUnavailable(BackendKind, reason: String)
+    /// The `localOnly` constraint cannot be satisfied (no local backend can serve it).
     case localOnlyViolation(reason: String)
+    /// This device/OS cannot run the selected backend at all (e.g. Apple Intelligence unsupported hardware,
+    /// or OS below the Foundation Models floor). Distinct from a transient "not ready".
+    case unsupportedDevice(reason: String)
+    /// The selected backend's runtime failed to load the model (e.g. llama.cpp could not open the GGUF,
+    /// or the weights are missing/corrupt). Carries the model id and an honest reason.
+    case modelLoadFailed(modelID: String, reason: String)
+    /// Generation started but failed mid-stream (backend error, decode failure, or resource exhaustion).
+    case generationFailed(reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -130,6 +144,9 @@ public enum EshRuntimeError: Error, Sendable, Equatable, LocalizedError {
         case let .pinnedModelUnavailable(id, reason): return "Pinned model '\(id)' is unavailable: \(reason)"
         case let .backendUnavailable(kind, reason): return "Backend '\(kind.rawValue)' is unavailable: \(reason)"
         case let .localOnlyViolation(reason): return "localOnly constraint cannot be satisfied: \(reason)"
+        case let .unsupportedDevice(reason): return "This device cannot run the selected backend: \(reason)"
+        case let .modelLoadFailed(id, reason): return "Failed to load model '\(id)': \(reason)"
+        case let .generationFailed(reason): return "Generation failed: \(reason)"
         }
     }
 }
@@ -219,6 +236,15 @@ public actor EshRuntime {
         try await localModelManager.remove(descriptor.id)
     }
 
+    /// Repair the local model store after an interrupted lifecycle (app killed mid download/verify/finalize/
+    /// remove). Safe — and recommended — to call once at launch. A model is never reported usable unless its
+    /// file verifies (size + SHA-256); interrupted finalizes are recovered, broken records/dirs are removed,
+    /// and legitimate paused downloads are preserved. Returns the concrete repairs applied.
+    @discardableResult
+    public func reconcileLocalModels() async -> LocalModelManager.ReconcileReport {
+        await localModelManager.reconcile()
+    }
+
     // MARK: Capabilities
 
     /// A snapshot of the backends wired on this device and their live availability.
@@ -239,16 +265,31 @@ public actor EshRuntime {
     /// through the existing backend runtime, and returns the assembled text plus selection + metrics.
     public func generate(_ request: EshGenerationRequest) async throws -> EshGenerationResult {
         let plan = try plan(for: request)
-        let runtime = try await plan.backend.loadRuntime(for: plan.install)
+        let runtime: any BackendRuntime
+        do {
+            runtime = try await plan.backend.loadRuntime(for: plan.install)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: Self.reason(from: error))
+        }
         let session = Self.session(from: request, install: plan.install)
         var text = ""
-        for try await chunk in runtime.generate(session: session, config: request.config) {
+        do {
+            for try await chunk in runtime.generate(session: session, config: request.config) {
+                try Task.checkCancellation()
+                text += chunk
+            }
+            // An AsyncThrowingStream finishes (returns nil) when the consuming task is cancelled, so the loop
+            // can exit without the body running — re-check so a cancelled generation surfaces, not partial text.
             try Task.checkCancellation()
-            text += chunk
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let e as EshRuntimeError {
+            throw e
+        } catch {
+            throw EshRuntimeError.generationFailed(reason: Self.reason(from: error))
         }
-        // An AsyncThrowingStream finishes (returns nil) when the consuming task is cancelled, so the loop
-        // can exit without the body running — re-check so a cancelled generation surfaces, not partial text.
-        try Task.checkCancellation()
         let metrics = await runtime.metrics
         return EshGenerationResult(text: text, selection: plan.selection, metrics: metrics)
     }
@@ -266,15 +307,30 @@ public actor EshRuntime {
             let task = Task {
                 do {
                     let plan = try await self.plan(for: request)
-                    let runtime = try await plan.backend.loadRuntime(for: plan.install)
+                    let runtime: any BackendRuntime
+                    do {
+                        runtime = try await plan.backend.loadRuntime(for: plan.install)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: EshRuntime.reason(from: error))
+                    }
                     let session = EshRuntime.session(from: request, install: plan.install)
                     var text = ""
-                    for try await chunk in runtime.generate(session: session, config: request.config) {
+                    do {
+                        for try await chunk in runtime.generate(session: session, config: request.config) {
+                            try Task.checkCancellation()
+                            text += chunk
+                            continuation.yield(.token(chunk))
+                        }
                         try Task.checkCancellation()
-                        text += chunk
-                        continuation.yield(.token(chunk))
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch let e as EshRuntimeError {
+                        throw e
+                    } catch {
+                        throw EshRuntimeError.generationFailed(reason: EshRuntime.reason(from: error))
                     }
-                    try Task.checkCancellation()
                     let metrics = await runtime.metrics
                     continuation.yield(.completed(EshGenerationResult(text: text, selection: plan.selection, metrics: metrics)))
                     continuation.finish()
@@ -392,5 +448,11 @@ public actor EshRuntime {
 
     static func session(from request: EshGenerationRequest, install: ModelInstall) -> ChatSession {
         ChatSession(name: "esh-runtime", modelID: install.id, backend: install.spec.backend, messages: request.messages)
+    }
+
+    /// Human-readable reason for a non-typed backend error, kept as display text on a typed case so the
+    /// host never has to parse it to branch. Prefers `LocalizedError.errorDescription`.
+    static func reason(from error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? "\(error)"
     }
 }

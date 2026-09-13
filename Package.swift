@@ -6,15 +6,37 @@ let quietDebugSwiftSettings: [SwiftSetting] = [
     .unsafeFlags(["-gnone"], .when(configuration: .debug))
 ]
 
-// esh M7 — the embedded GGUF backend (EshLlamaCpp) is included ONLY when a locally-built
-// `Vendor/llama.xcframework` is present (see scripts/build-llama-xcframework.sh; the binary is NOT
-// committed — it is large and platform-built). This keeps the base package (EshCore/EshRuntime/esh)
-// building everywhere without the C/C++ binary, while enabling the in-process llama.cpp backend on
-// machines that have built it. The xcframework's own module is `llama` (import llama).
+// esh M7/M10 — the embedded GGUF backend (EshLlamaCpp) links a prebuilt `llama.xcframework`
+// (pinned llama.cpp; see scripts/build-llama-xcframework.sh + docs/SDK_PACKAGING.md §llama distribution).
+// The binary is never committed (large, platform-built). It is sourced two ways, checked in order:
+//   1. Local dev: `Vendor/llama.xcframework` present → link it by path (what the build script produces).
+//   2. Production: a pinned release archive via `binaryTarget(url:checksum:)` — set `llamaBinaryURL`
+//      to the published zip so a consumer gets `EshLlamaCpp` with no manual build.
+// If neither is available, EshLlamaCpp is omitted and the base package (EshCore/EshRuntime/esh) still
+// builds everywhere (so a clean checkout / core CI never needs the binary). Module is `llama`.
 // Resolve Vendor relative to THIS manifest's location (not the CWD) — xcodebuild evaluates the manifest
 // with a CWD that is not the package root, which previously made this check flip to false.
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Vendor/llama.xcframework/Info.plist")
+
+// Pinned release archive of Vendor/llama.xcframework (llama.cpp @ 4a89937354190cef5a97baf8eeb17336105eb72d,
+// zipped with `ditto -c -k --keepParent`). `llamaBinaryChecksum` is the SwiftPM checksum of that exact zip
+// (`swift package compute-checksum llama-xcframework-<commit>.zip`). Leave `llamaBinaryURL` empty until the
+// release asset is published; publishing + setting this URL turns on the no-build production path (see
+// docs/SDK_PACKAGING.md). An env override (`ESH_LLAMA_XCFRAMEWORK_URL`) allows staging without editing this.
+let llamaBinaryChecksum = "49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289"
+let llamaBinaryURL = ProcessInfo.processInfo.environment["ESH_LLAMA_XCFRAMEWORK_URL"] ?? ""
+let useRemoteLlama = !hasEmbeddedLlama && !llamaBinaryURL.isEmpty
+
+// EshLlamaCpp + its binary target, sourced from a local build (dev) or a pinned release archive (prod).
+let llamaTargets: [Target] = {
+    guard hasEmbeddedLlama || useRemoteLlama else { return [] }
+    let cllama: Target = hasEmbeddedLlama
+        ? .binaryTarget(name: "CLlama", path: "Vendor/llama.xcframework")
+        : .binaryTarget(name: "CLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
+    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "CLlama"],
+                            swiftSettings: quietDebugSwiftSettings)]
+}()
 
 let package = Package(
     name: "Esh",
@@ -105,16 +127,9 @@ let package = Package(
             dependencies: ["esh"],
             swiftSettings: quietDebugSwiftSettings
         )
-    ] + (hasEmbeddedLlama ? [
-        .binaryTarget(name: "CLlama", path: "Vendor/llama.xcframework"),
-        .target(
-            name: "EshLlamaCpp",
-            dependencies: ["EshCore", "CLlama"],
-            swiftSettings: quietDebugSwiftSettings
-        )
-    ] : [])
+    ] + llamaTargets
 )
 
-if hasEmbeddedLlama {
+if hasEmbeddedLlama || useRemoteLlama {
     package.products.append(.library(name: "EshLlamaCpp", targets: ["EshLlamaCpp"]))
 }

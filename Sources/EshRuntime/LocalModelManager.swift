@@ -12,6 +12,9 @@ public actor LocalModelManager {
     private let deviceProfileProvider: DeviceProfileProviding
     /// Free-space margin to keep beyond the model file (app, OS, runtime buffers).
     private let storageSafetyReserveBytes: Int64
+    /// Model ids with an install currently running. `install()` releases the actor at its first `await`, so
+    /// this guards against two concurrent installs of the same model both starting a download (M10 #9).
+    private var installsInFlight: Set<String> = []
 
     public init(root: PersistenceRoot = .default(),
                 store: ModelStore? = nil,
@@ -92,6 +95,11 @@ public actor LocalModelManager {
     @discardableResult
     public func install(_ d: LocalModelDescriptor, onProgress: (@Sendable (Double) -> Void)? = nil) async throws -> ModelInstall {
         if isInstalled(d.id) { throw LocalModelError.alreadyInstalled(d.id) }
+        // Concurrency guard: only one install per model id at a time. The check+insert is synchronous actor
+        // code (atomic); the release runs on every exit path (return / throw / cancellation).
+        guard !installsInFlight.contains(d.id) else { throw LocalModelError.installInProgress(d.id) }
+        installsInFlight.insert(d.id)
+        defer { installsInFlight.remove(d.id) }
         // Storage preflight (hard fail early).
         let plan = installPlan(for: d)
         if !plan.storageSufficient, let free = plan.availableStorageBytes {
@@ -142,6 +150,89 @@ public actor LocalModelManager {
         } catch {
             throw LocalModelError.downloadFailed(error.localizedDescription)
         }
+    }
+
+    // MARK: Reconcile / repair (M10 durability)
+
+    /// Outcome of a store reconciliation — the concrete repairs applied to reach a consistent state.
+    public struct ReconcileReport: Sendable, Equatable {
+        /// Orphan model files (interrupted finalize: file present, record missing) that verified by
+        /// size + SHA-256 and were re-recorded as installed.
+        public var recoveredRecords: [String] = []
+        /// Records whose model file was missing → removed (a lone record is never usable).
+        public var removedBrokenRecords: [String] = []
+        /// Install directories with unusable/unverifiable contents (and no valid resume) → removed.
+        public var removedOrphanDirs: [String] = []
+        /// Leftover resume tokens for models that are fully installed → removed.
+        public var clearedStaleResume: [String] = []
+        public var isConsistent: Bool {
+            recoveredRecords.isEmpty && removedBrokenRecords.isEmpty
+                && removedOrphanDirs.isEmpty && clearedStaleResume.isEmpty
+        }
+    }
+
+    /// Bring the on-disk model store to a consistent state after an interrupted lifecycle (app killed mid
+    /// download/verify/finalize/remove). Safe to call at launch. It never reports a half-installed model as
+    /// usable: an orphan file is re-recorded ONLY if it verifies (size + SHA-256) against the curated
+    /// descriptor; otherwise the record or directory is removed. A legitimate paused download (resume token,
+    /// no model file) is preserved.
+    @discardableResult
+    public func reconcile() -> ReconcileReport { reconcile(catalog: LocalModelCatalog.models) }
+
+    /// Testable core of `reconcile()` — the curated catalog used to verify/recover orphan files is injected.
+    @discardableResult
+    func reconcile(catalog: [LocalModelDescriptor]) -> ReconcileReport {
+        let fm = FileManager.default
+        var report = ReconcileReport()
+        let installs = (try? store.listInstalls()) ?? []
+        let recordIDs = Set(installs.map { $0.id })
+
+        // 1. Records whose model file is missing → not usable → drop the record + dir.
+        for install in installs where !fm.fileExists(atPath: modelFileURL(install.id).path) {
+            try? store.removeInstall(id: install.id)
+            try? fm.removeItem(at: installsRoot.appendingPathComponent(install.id, isDirectory: true))
+            report.removedBrokenRecords.append(install.id)
+        }
+
+        // 2. Installed records with leftover resume tokens → clear the stale token.
+        for install in installs where fm.fileExists(atPath: modelFileURL(install.id).path) {
+            let resume = resumeDataURL(install.id)
+            if fm.fileExists(atPath: resume.path) {
+                try? fm.removeItem(at: resume)
+                report.clearedStaleResume.append(install.id)
+            }
+        }
+
+        // 3. Orphan install directories (no record). Recover a verified model file; otherwise remove a dir
+        //    that has neither a valid model nor a resume token.
+        let dirs = (try? fm.contentsOfDirectory(at: installsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        for dir in dirs {
+            let id = dir.lastPathComponent
+            guard !recordIDs.contains(id) else { continue }
+            let modelPath = modelFileURL(id).path
+            let hasModel = fm.fileExists(atPath: modelPath)
+            let hasResume = fm.fileExists(atPath: resumeDataURL(id).path)
+            if hasModel, let desc = catalog.first(where: { $0.id == id }),
+               ResumeSupport.existingSize(at: modelFileURL(id)) == desc.expectedBytes,
+               let digest = try? Self.sha256Hex(of: modelFileURL(id)), digest == desc.sha256 {
+                // Interrupted finalize: the file is complete and verified → re-record it as installed.
+                let install = ModelInstall(id: id, spec: desc.makeSpec(localPath: modelPath),
+                                           installPath: modelPath, sizeBytes: desc.expectedBytes,
+                                           backendFormat: "gguf", runtimeVersion: "llama.cpp-embedded")
+                if (try? store.save(manifest: ModelManifest(install: install, files: ["model.gguf"]))) != nil {
+                    try? fm.removeItem(at: resumeDataURL(id))
+                    report.recoveredRecords.append(id)
+                    continue
+                }
+            }
+            if hasModel && !hasResume {
+                // A model file that cannot be verified (unknown id, wrong size/hash) and no resume → remove.
+                try? fm.removeItem(at: dir)
+                report.removedOrphanDirs.append(id)
+            }
+            // else: only a resume token (or empty) → a legitimate paused download; leave it.
+        }
+        return report
     }
 
     // MARK: Remove (delete all model-owned files + the install record)
