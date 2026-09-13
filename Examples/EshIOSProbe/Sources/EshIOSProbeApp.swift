@@ -22,6 +22,7 @@ final class ProbeModel: ObservableObject {
     @Published var prompt: String = "Reply with exactly one word: pong"
     @Published var availability: String = "—"
     @Published var deviceProfileText: String = "—"
+    @Published var ggufText: String = "—"
     @Published var output: String = ""
     @Published var selection: String = "—"
     @Published var localOnly: String = "—"
@@ -119,6 +120,10 @@ final class ProbeModel: ObservableObject {
         await once("firstCall")
         await once("secondCall")
         print("ESH-M4 RESULT=PASS")
+
+        // M7: embedded GGUF benchmark (only runs if the model file is present in Documents).
+        ggufText = "running…"
+        ggufText = await GGUFBenchmark.run()
     }
 
     private static func deviceModel() async -> String {
@@ -138,6 +143,7 @@ struct ContentView: View {
             Form {
                 Section("Runtime availability") { Text(model.availability).font(.footnote.monospaced()) }
                 Section("Device profile") { Text(model.deviceProfileText).font(.footnote.monospaced()) }
+                Section("Embedded GGUF (M7)") { Text(model.ggufText).font(.footnote.monospaced()) }
                 Section("Prompt") {
                     TextField("Prompt", text: $model.prompt, axis: .vertical)
                     HStack {

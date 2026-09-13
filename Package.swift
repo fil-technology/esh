@@ -1,9 +1,17 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
 
 let quietDebugSwiftSettings: [SwiftSetting] = [
     .unsafeFlags(["-gnone"], .when(configuration: .debug))
 ]
+
+// esh M7 — the embedded GGUF backend (EshLlamaCpp) is included ONLY when a locally-built
+// `Vendor/llama.xcframework` is present (see scripts/build-llama-xcframework.sh; the binary is NOT
+// committed — it is large and platform-built). This keeps the base package (EshCore/EshRuntime/esh)
+// building everywhere without the C/C++ binary, while enabling the in-process llama.cpp backend on
+// machines that have built it. The xcframework's own module is `llama` (import llama).
+let hasEmbeddedLlama = FileManager.default.fileExists(atPath: "Vendor/llama.xcframework/Info.plist")
 
 let package = Package(
     name: "Esh",
@@ -75,5 +83,16 @@ let package = Package(
             dependencies: ["esh"],
             swiftSettings: quietDebugSwiftSettings
         )
-    ]
+    ] + (hasEmbeddedLlama ? [
+        .binaryTarget(name: "CLlama", path: "Vendor/llama.xcframework"),
+        .target(
+            name: "EshLlamaCpp",
+            dependencies: ["EshCore", "CLlama"],
+            swiftSettings: quietDebugSwiftSettings
+        )
+    ] : [])
 )
+
+if hasEmbeddedLlama {
+    package.products.append(.library(name: "EshLlamaCpp", targets: ["EshLlamaCpp"]))
+}

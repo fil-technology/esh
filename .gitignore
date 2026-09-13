@@ -8,3 +8,6 @@ Tools/__pycache__/
 Examples/EshIOSProbe/EshIOSProbe.xcodeproj/
 *.xcodeproj/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
+# esh M7: locally-built llama.cpp xcframework (see scripts/build-llama-xcframework.sh). Not committed.
+Vendor/
+.llama-build/
