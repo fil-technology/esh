@@ -171,6 +171,40 @@ benchmark noted the without-GGUF app was "inflated by swift-syntax, which EshCor
   (M4/M5/M7/M8) all run through the same `EshRuntime` facade and `EshLlamaCpp` backend, which M9 did not
   modify.
 
+## llama distribution (M10) — reproducible binary target
+
+`EshLlamaCpp` links a prebuilt `llama.xcframework`. It is sourced two ways (Package.swift picks in order):
+
+1. **Local dev** — `Vendor/llama.xcframework` present (from `scripts/build-llama-xcframework.sh`) → linked
+   by `path:`.
+2. **Production** — a pinned release archive via `binaryTarget(url:checksum:)`, so a consumer gets
+   `EshLlamaCpp` with **no manual build**. Activated when `Vendor/` is absent and a URL is set (constant in
+   the manifest, or the `ESH_LLAMA_XCFRAMEWORK_URL` env override).
+
+If neither is available, `EshLlamaCpp` is omitted and the base package still builds (clean-checkout CI needs
+no binary).
+
+**Provenance & integrity**
+- Upstream: `github.com/ggml-org/llama.cpp` @ **`4a89937354190cef5a97baf8eeb17336105eb72d`** (pinned in the
+  build script; evaluated M6, built M7).
+- Build: `build-xcframework.sh macos ios-device ios-sim`, `GGML_METAL_EMBED_LIBRARY=ON`,
+  `COPYFILE_DISABLE=1`; module restricted to `llama.h`.
+- Archive: `ditto -c -k --keepParent Vendor/llama.xcframework llama-xcframework-<commit>.zip`.
+- **SwiftPM checksum:** `49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289` (verified with
+  `swift package compute-checksum`), baked into `Package.swift` as `llamaBinaryChecksum`.
+- License: llama.cpp is **MIT** — ship its notice with the app.
+
+**Release / versioning procedure**
+1. `scripts/build-llama-xcframework.sh` (produces `Vendor/llama.xcframework` from the pinned commit).
+2. `ditto -c -k --keepParent Vendor/llama.xcframework llama-xcframework-<commit>.zip`.
+3. `swift package compute-checksum llama-xcframework-<commit>.zip` → must equal `llamaBinaryChecksum`
+   (bump the constant when the pin changes).
+4. Publish the zip as a release asset; set `llamaBinaryURL` (or `ESH_LLAMA_XCFRAMEWORK_URL`) to its URL.
+   Reproducibility comes from the pinned commit + build flags; the checksum pins that exact published zip.
+
+Publishing the release asset is an outward-facing maintainer step (deferred to the repo owner); the
+mechanism, checksum, and manifest wiring are complete and verified.
+
 ## Non-goals (unchanged)
 
 No model-management UI, no App Store packaging design, no ChatGPT integration, no Auto GGUF preference, no
