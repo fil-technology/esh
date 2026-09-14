@@ -32,8 +32,11 @@ jobs:
       - name: Bootstrap runtime
         run: ./scripts/bootstrap.sh
 
-      - name: Run Swift tests
+      - name: Run portable Swift tests (root package — EshCore/EshRuntime)
         run: swift test
+
+      - name: Run macOS Swift tests (CLI + runtime package)
+        run: swift test --package-path macos
 
       - name: Verify environment
         run: ./esh doctor

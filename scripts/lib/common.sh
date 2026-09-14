@@ -40,6 +40,13 @@ esh::repo_root() {
   echo "$ESH_APP_ROOT"
 }
 
+# The CLI + macOS runtime live in a nested SwiftPM package under macos/ (rc.3 packaging split), so the
+# portable root package stays dependency-free/remote-consumable. Everything that builds/runs the `esh`
+# executable or the MLX runtime targets this subpackage's manifest and .build directory.
+esh::cli_package_dir() {
+  echo "$(esh::repo_root)/macos"
+}
+
 esh::payload_root() {
   echo "$ESH_PAYLOAD_ROOT"
 }
@@ -165,7 +172,7 @@ esh::swift_binary() {
   if [[ "$ESH_LAYOUT_MODE" == "package" ]]; then
     echo "$(esh::app_root)/bin/esh"
   else
-    echo "$(esh::repo_root)/.build/$configuration/esh"
+    echo "$(esh::cli_package_dir)/.build/$configuration/esh"
   fi
 }
 
@@ -226,14 +233,15 @@ esh::ensure_external_package_runtime() {
 esh::build_swift() {
   [[ "$ESH_LAYOUT_MODE" == "repo" ]] || return 0
   local configuration="${1:-debug}"
-  swift build -c "$configuration" --product esh --package-path "$(esh::repo_root)"
+  swift build -c "$configuration" --product esh --package-path "$(esh::cli_package_dir)"
 }
 
 esh::find_mlx_shader_root() {
   [[ "$ESH_LAYOUT_MODE" == "repo" ]] || esh::die "MLX shader sources are only available from a source checkout."
 
   local repo_root candidate
-  repo_root="$(esh::repo_root)"
+  # mlx-swift is a dependency of the macos/ CLI package, so its checkout lives under macos/.build.
+  repo_root="$(esh::cli_package_dir)"
   for candidate in \
     "$repo_root/.build/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal" \
     "$repo_root/.build/checkouts/mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels"
@@ -255,7 +263,7 @@ esh::build_mlx_metallib() {
 
   local shader_root module_cache xcrun_path
   shader_root="$(esh::find_mlx_shader_root)" || esh::die "mlx-swift shader sources were not found under .build/checkouts. Run swift package resolve first."
-  module_cache="$(esh::repo_root)/.build/clang-module-cache"
+  module_cache="$(esh::cli_package_dir)/.build/clang-module-cache"
   mkdir -p "$(dirname "$output_path")" "$module_cache"
 
   xcrun_path="$(command -v xcrun)" || esh::die "xcrun is required to build the MLX Metal runtime library."

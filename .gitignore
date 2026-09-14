@@ -15,3 +15,5 @@ Examples/EshCleanRoom/EshCleanRoom.xcodeproj/
 Examples/EshCleanRoom/build/
 Examples/EshIOSProbe/build*/
 Examples/EshCleanRoom/build*/
+.worktrees/
+.esh-serve.log

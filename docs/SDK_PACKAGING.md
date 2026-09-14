@@ -4,6 +4,31 @@ Cleanly separates the **portable SDK/runtime** from **macOS-only execution infra
 links a small, dependency-light SDK and the macOS CLI keeps its full backend assembly. No product UI, no
 Auto-policy change (both out of M9 scope).
 
+> ## v2.4.0-rc.3 — package split (supersedes the single-manifest layout below)
+>
+> M9 removed swift-syntax from the portable **target** (`EshCore`), but swift-syntax / TTSMLX / mlx-audio
+> were still declared at the **package level** of the one root manifest. SwiftPM resolves the package-level
+> dependency graph regardless of which products a consumer selects, so every portable consumer still had to
+> resolve **swift-syntax 603.x**. A consumer that also depends on **LLM.swift** (which needs swift-syntax
+> **602.x** for its macros) then hit an unsatisfiable version conflict — an RC packaging blocker, not a
+> consumer bug.
+>
+> rc.3 splits the repo into **two packages**:
+>
+> - **Root `Package.swift` (portable, remote-consumable):** products `EshCore`, `EshRuntime`, and
+>   `EshLlamaCpp` (+ its `CLlama` binaryTarget). **Zero external package dependencies** — the portable
+>   consumer graph is `EshRuntime → EshCore → Apple frameworks` (and one binaryTarget for GGUF). This is the
+>   package a remote app adds via `https://github.com/fil-technology/esh.git`.
+> - **`macos/Package.swift` (macOS CLI / dev tooling, not published as a product URL):** targets
+>   `EshMacRuntime` and the `esh` CLI, and the only place that declares **swift-syntax 603.x**, TTSMLX, and
+>   mlx-audio. It depends back on the portable package by path (identity `esh`) for `EshCore`. Build/test it
+>   with `swift build --package-path macos` / `swift test --package-path macos` (the CLI helper scripts do
+>   this automatically).
+>
+> Result: swift-syntax is entirely absent from the portable consumer graph, so `esh` + `LLM.swift` resolves
+> normally. The M9 material below still describes the target boundaries, which are unchanged; only the
+> *package* boundary moved.
+
 ## Target graph (after M9)
 
 ```

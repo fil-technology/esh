@@ -26,6 +26,22 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### Packaging — v2.4.0-rc.3 (portable SDK dependency fix)
+
+- **Split the repo into two SwiftPM packages** so the portable SDK is remotely consumable alongside
+  packages that pin a different swift-syntax major (e.g. LLM.swift → swift-syntax 602.x). The root
+  `Package.swift` now declares **zero external dependencies** and exposes only `EshCore`, `EshRuntime`, and
+  `EshLlamaCpp`; the macOS CLI + runtime (`EshMacRuntime`, `esh`) and their heavy/constrained dependencies
+  (**swift-syntax 603.x**, TTSMLX, mlx-audio) moved to a nested `macos/Package.swift` that depends back on
+  the portable package by path.
+- **Root cause:** SwiftPM resolves the *package-level* dependency graph regardless of which products a
+  consumer selects, so declaring swift-syntax 603.x at the root forced it onto every portable consumer and
+  made `esh` + `LLM.swift` unresolvable. Removing it from the portable manifest (not just the portable
+  target) is the fix. No source/API changes; the macOS CLI and runtime are unchanged.
+- Build/test the macOS side with `--package-path macos`; the CLI helper scripts and CI were updated
+  accordingly. The `llama.xcframework` binaryTarget now points at the `v2.4.0-rc.3` release asset (identical
+  bytes/checksum to rc.2 — the llama.cpp pin is unchanged).
+
 ## [2.3.0] - 2026-09-10
 
 **esh 2.3 — generative runtimes as on-demand "engines."** Heavy generative runtimes are no longer bundled or
