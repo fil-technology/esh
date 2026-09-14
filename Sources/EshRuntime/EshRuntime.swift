@@ -238,11 +238,21 @@ public actor EshRuntime {
 
     /// Repair the local model store after an interrupted lifecycle (app killed mid download/verify/finalize/
     /// remove). Safe — and recommended — to call once at launch. A model is never reported usable unless its
-    /// file verifies (size + SHA-256); interrupted finalizes are recovered, broken records/dirs are removed,
-    /// and legitimate paused downloads are preserved. Returns the concrete repairs applied.
+    /// file verifies (size + SHA-256); interrupted finalizes are recovered, background transfers that
+    /// completed while suspended are verified + installed, broken records/dirs are removed, and legitimate
+    /// paused/in-flight downloads are preserved. Returns the concrete repairs applied.
     @discardableResult
     public func reconcileLocalModels() async -> LocalModelManager.ReconcileReport {
         await localModelManager.reconcile()
+    }
+
+    /// iOS background-download host hook. Forward the app-delegate event
+    /// `application(_:handleEventsForBackgroundURLSession:completionHandler:)` here so esh can finish
+    /// delivering background-transfer completions and then call the OS-supplied handler. This is the ONLY
+    /// lifecycle integration a host needs for background model downloads; everything else (task↔model
+    /// mapping, resume data, staging, checksum verification, install finalization) is internal.
+    public func handleBackgroundSessionEvents(identifier: String, completionHandler: @escaping @Sendable () -> Void) async {
+        await localModelManager.handleBackgroundSessionEvents(identifier: identifier, completionHandler: completionHandler)
     }
 
     // MARK: Capabilities

@@ -15,15 +15,45 @@ public actor LocalModelManager {
     /// Model ids with an install currently running. `install()` releases the actor at its first `await`, so
     /// this guards against two concurrent installs of the same model both starting a download (M10 #9).
     private var installsInFlight: Set<String> = []
+    /// The single, background-capable download layer (RC follow-up). Owns the URLSession; the verify →
+    /// atomic-install pipeline stays here in the manager.
+    private let coordinator: ModelDownloadCoordinator
 
     public init(root: PersistenceRoot = .default(),
                 store: ModelStore? = nil,
                 deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
-                storageSafetyReserveBytes: Int64 = 512 * 1024 * 1024) {
+                storageSafetyReserveBytes: Int64 = 512 * 1024 * 1024,
+                downloadConfiguration: (@Sendable () -> URLSessionConfiguration)? = nil) {
         self.root = root
         self.store = store ?? FileModelStore(root: root)
         self.deviceProfileProvider = deviceProfileProvider
         self.storageSafetyReserveBytes = storageSafetyReserveBytes
+        let installsRoot = root.modelsURL.appendingPathComponent("installs", isDirectory: true)
+        self.coordinator = ModelDownloadCoordinator(installsRoot: installsRoot,
+                                                    makeConfiguration: downloadConfiguration ?? Self.defaultDownloadConfiguration)
+    }
+
+    /// Production download session: a true background `URLSession` on iOS (OS-managed, continues while the
+    /// app is suspended, relaunches the app to deliver completion); a foreground/ephemeral session elsewhere
+    /// (macOS CLI, tests) where the OS-relaunch semantics do not apply.
+    static let defaultDownloadConfiguration: @Sendable () -> URLSessionConfiguration = {
+        #if os(iOS)
+        let c = URLSessionConfiguration.background(withIdentifier: ModelDownloadCoordinator.backgroundIdentifier)
+        c.sessionSendsLaunchEvents = true
+        c.isDiscretionary = false
+        c.allowsCellularAccess = true
+        c.waitsForConnectivity = true
+        return c
+        #else
+        return URLSessionConfiguration.ephemeral
+        #endif
+    }
+
+    /// Forward the iOS `application(_:handleEventsForBackgroundURLSession:completionHandler:)` event so the
+    /// coordinator can finish delivering background-transfer completions, then call the OS handler.
+    public func handleBackgroundSessionEvents(identifier: String, completionHandler: @escaping @Sendable () -> Void) {
+        guard identifier == ModelDownloadCoordinator.backgroundIdentifier else { completionHandler(); return }
+        coordinator.setBackgroundCompletion(completionHandler)
     }
 
     // MARK: Paths (deterministic, sandbox-appropriate; reuses FileModelStore's install dir layout)
@@ -47,6 +77,14 @@ public actor LocalModelManager {
 
     public func state(for d: LocalModelDescriptor) -> LocalModelState {
         if isInstalled(d.id) { return .installed }
+        // A persisted download record survives relaunch, so the state stays coherent across backgrounding.
+        if let r = coordinator.loadRecord(d.id) {
+            switch r.phase {
+            case .downloading: return .downloading(progress: r.lastProgress)   // progress may reset to 0 after relaunch
+            case .downloaded:  return .verifying                                // transfer done, pending verification
+            case .failed:      return .failed(reason: r.reason ?? "download failed")
+            }
+        }
         if FileManager.default.fileExists(atPath: resumeDataURL(d.id).path) {
             return .paused(bytesDownloaded: 0)   // resume data present (URLSession resume token; byte count opaque)
         }
@@ -110,50 +148,58 @@ public actor LocalModelManager {
             throw LocalModelError.insufficientStorage(needBytes: d.expectedBytes + storageSafetyReserveBytes, freeBytes: free)
         }
         _ = try installDir(d.id)   // ensure dir exists
-        let fm = FileManager.default
-        let resumeURL = resumeDataURL(d.id)
-        let resumeData = try? Data(contentsOf: resumeURL)
 
-        do {
-            let downloader = ResumableDownloader(resumeDataURL: resumeURL)
-            let outcome = try await downloader.run(request: URLRequest(url: d.sourceURL), resumeData: resumeData,
-                                                   onProgress: { p in onProgress?(p) })
-            if !(200...299).contains(outcome.httpStatus) {
-                try? fm.removeItem(at: outcome.tempURL)
-                throw LocalModelError.downloadFailed("HTTP \(outcome.httpStatus)")
-            }
-            // Verify byte size
-            let finalSize = ResumeSupport.existingSize(at: outcome.tempURL)
-            guard finalSize == d.expectedBytes else {
-                try? fm.removeItem(at: outcome.tempURL)
-                throw LocalModelError.contentLengthMismatch(expected: d.expectedBytes, got: finalSize)
-            }
-            // Verify SHA-256 before it can become an install
-            onProgress?(1.0)
-            let digest = try Self.sha256Hex(of: outcome.tempURL)
-            guard digest == d.sha256 else {
-                try? fm.removeItem(at: outcome.tempURL)   // corrupt → discard
-                throw LocalModelError.checksumMismatch(expected: d.sha256, got: digest)
-            }
-            // Atomic finalize into the install dir
-            let finalURL = modelFileURL(d.id)
-            if fm.fileExists(atPath: finalURL.path) { try? fm.removeItem(at: finalURL) }
-            do { try fm.moveItem(at: outcome.tempURL, to: finalURL) }
-            catch { try fm.copyItem(at: outcome.tempURL, to: finalURL); try? fm.removeItem(at: outcome.tempURL) }
-            try? fm.removeItem(at: resumeURL)   // fully installed → no resume state
-
-            let install = ModelInstall(id: d.id, spec: d.makeSpec(localPath: finalURL.path),
-                                       installPath: finalURL.path, sizeBytes: d.expectedBytes,
-                                       backendFormat: "gguf", runtimeVersion: "llama.cpp-embedded")
-            try store.save(manifest: ModelManifest(install: install, files: ["model.gguf"]))
-            return install
-        } catch is CancellationError {
-            throw CancellationError()   // resume data persisted by the downloader; not installed
-        } catch let e as LocalModelError {
-            throw e
-        } catch {
-            throw LocalModelError.downloadFailed(error.localizedDescription)
+        // OS-managed transfer (background on iOS): starts/resumes the download and suspends until this
+        // process observes a terminal event. If the app is suspended, iOS keeps transferring; if the process
+        // is terminated, the persisted record + staged file let a later runtime finalize via reconcile().
+        // Cancelling the surrounding Task cancels the transfer (resume data persisted).
+        let terminal = await withTaskCancellationHandler {
+            await coordinator.download(modelID: d.id, url: d.sourceURL, expectedBytes: d.expectedBytes,
+                                       sha256: d.sha256, onProgress: { p in onProgress?(p) })
+        } onCancel: {
+            coordinator.cancel(modelID: d.id)
         }
+
+        switch terminal {
+        case .cancelled:
+            throw CancellationError()                                   // resume data persisted; not installed
+        case let .failed(reason):
+            throw LocalModelError.downloadFailed(reason)
+        case let .staged(url):
+            onProgress?(1.0)
+            return try finalizeStagedDownload(id: d.id, staged: url, spec: d.makeSpec(localPath: modelFileURL(d.id).path),
+                                              expectedBytes: d.expectedBytes, sha256: d.sha256)
+        }
+    }
+
+    /// Verify (size + SHA-256) a staged download, then atomically finalize it as an install. Shared by the
+    /// in-process `install()` path and by `reconcile()` (a transfer that completed while the app was
+    /// suspended). Never leaves a corrupt/unverified file resolving as installed: a mismatch discards the
+    /// staged file and record and throws a typed error.
+    @discardableResult
+    private func finalizeStagedDownload(id: String, staged: URL, spec: ModelSpec,
+                                        expectedBytes: Int64, sha256: String) throws -> ModelInstall {
+        let fm = FileManager.default
+        let size = ResumeSupport.existingSize(at: staged)
+        guard size == expectedBytes else {
+            try? fm.removeItem(at: staged); coordinator.clearRecord(id); try? fm.removeItem(at: resumeDataURL(id))
+            throw LocalModelError.contentLengthMismatch(expected: expectedBytes, got: size)
+        }
+        let digest = try Self.sha256Hex(of: staged)
+        guard digest == sha256 else {
+            try? fm.removeItem(at: staged); coordinator.clearRecord(id); try? fm.removeItem(at: resumeDataURL(id))
+            throw LocalModelError.checksumMismatch(expected: sha256, got: digest)
+        }
+        let finalURL = modelFileURL(id)
+        if fm.fileExists(atPath: finalURL.path) { try? fm.removeItem(at: finalURL) }
+        do { try fm.moveItem(at: staged, to: finalURL) }
+        catch { try fm.copyItem(at: staged, to: finalURL); try? fm.removeItem(at: staged) }
+        try? fm.removeItem(at: resumeDataURL(id))   // fully installed → no resume/staging/record state
+        coordinator.clearRecord(id)
+        let install = ModelInstall(id: id, spec: spec, installPath: finalURL.path, sizeBytes: expectedBytes,
+                                   backendFormat: "gguf", runtimeVersion: "llama.cpp-embedded")
+        try store.save(manifest: ModelManifest(install: install, files: ["model.gguf"]))
+        return install
     }
 
     // MARK: Reconcile / repair (M10 durability)
@@ -169,9 +215,12 @@ public actor LocalModelManager {
         public var removedOrphanDirs: [String] = []
         /// Leftover resume tokens for models that are fully installed → removed.
         public var clearedStaleResume: [String] = []
+        /// Background downloads that completed while the app was suspended → verified + installed on relaunch.
+        public var finalizedPendingDownloads: [String] = []
         public var isConsistent: Bool {
             recoveredRecords.isEmpty && removedBrokenRecords.isEmpty
                 && removedOrphanDirs.isEmpty && clearedStaleResume.isEmpty
+                && finalizedPendingDownloads.isEmpty
         }
     }
 
@@ -188,6 +237,28 @@ public actor LocalModelManager {
     func reconcile(catalog: [LocalModelDescriptor]) -> ReconcileReport {
         let fm = FileManager.default
         var report = ReconcileReport()
+        // Recreate the (background) download session so iOS re-delivers events for outstanding transfers.
+        coordinator.reconnect()
+
+        // Background transfers that completed while the app was suspended: a persisted record in the
+        // `downloaded` phase with a staged file → verify + atomically install now. Verification failure
+        // discards the corrupt file/record (never installs). This is the completion-while-suspended path.
+        let dirsForPending = (try? fm.contentsOfDirectory(at: installsRoot, includingPropertiesForKeys: nil)) ?? []
+        for d in dirsForPending {
+            let id = d.lastPathComponent
+            guard let rec = coordinator.loadRecord(id), rec.phase == .downloaded,
+                  let stagedPath = rec.stagedPath, fm.fileExists(atPath: stagedPath),
+                  !fm.fileExists(atPath: modelFileURL(id).path) else { continue }
+            let staged = URL(fileURLWithPath: stagedPath)
+            let spec = catalog.first(where: { $0.id == id })?.makeSpec(localPath: modelFileURL(id).path)
+                ?? ModelSpec(id: id, displayName: id, backend: .gguf, source: ModelSource(kind: .huggingFace, reference: id))
+            if (try? finalizeStagedDownload(id: id, staged: staged, spec: spec,
+                                            expectedBytes: rec.expectedBytes, sha256: rec.sha256)) != nil {
+                report.finalizedPendingDownloads.append(id)
+            }
+        }
+
+        // Compute the record set AFTER finalizing pending downloads so later passes see them as installed.
         let installs = (try? store.listInstalls()) ?? []
         let recordIDs = Set(installs.map { $0.id })
 
@@ -213,6 +284,8 @@ public actor LocalModelManager {
         for dir in dirs {
             let id = dir.lastPathComponent
             guard !recordIDs.contains(id) else { continue }
+            // A live download record (in-flight, or a failed one kept for retry) is not an orphan — leave it.
+            if coordinator.loadRecord(id) != nil { continue }
             let modelPath = modelFileURL(id).path
             let hasModel = fm.fileExists(atPath: modelPath)
             let hasResume = fm.fileExists(atPath: resumeDataURL(id).path)
