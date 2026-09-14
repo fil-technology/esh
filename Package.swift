@@ -20,12 +20,14 @@ let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().pat
 let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Vendor/llama.xcframework/Info.plist")
 
 // Pinned release archive of Vendor/llama.xcframework (llama.cpp @ 4a89937354190cef5a97baf8eeb17336105eb72d,
-// zipped with `ditto -c -k --keepParent`). `llamaBinaryChecksum` is the SwiftPM checksum of that exact zip
-// (`swift package compute-checksum llama-xcframework-<commit>.zip`). Leave `llamaBinaryURL` empty until the
-// release asset is published; publishing + setting this URL turns on the no-build production path (see
-// docs/SDK_PACKAGING.md). An env override (`ESH_LLAMA_XCFRAMEWORK_URL`) allows staging without editing this.
+// zipped with `COPYFILE_DISABLE=1 ditto -c -k --keepParent`). `llamaBinaryChecksum` is the SwiftPM checksum
+// of that exact published zip (`swift package compute-checksum …`). `llamaBinaryURL` points at the GitHub
+// Release asset for tag v2.4.0-rc.1, so a fresh remote consumer that adds `EshLlamaCpp` gets the binary with
+// no local build, no Vendor/, and no machine-specific paths. A local `Vendor/llama.xcframework` (dev) takes
+// precedence over the URL; `ESH_LLAMA_XCFRAMEWORK_URL` can override the URL for staging.
 let llamaBinaryChecksum = "49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289"
-let llamaBinaryURL = ProcessInfo.processInfo.environment["ESH_LLAMA_XCFRAMEWORK_URL"] ?? ""
+let llamaBinaryDefaultURL = "https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.1/llama-xcframework-4a8993735419.zip"
+let llamaBinaryURL = ProcessInfo.processInfo.environment["ESH_LLAMA_XCFRAMEWORK_URL"] ?? llamaBinaryDefaultURL
 let useRemoteLlama = !hasEmbeddedLlama && !llamaBinaryURL.isEmpty
 
 // EshLlamaCpp + its binary target, sourced from a local build (dev) or a pinned release archive (prod).

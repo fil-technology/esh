@@ -194,16 +194,27 @@ no binary).
   `swift package compute-checksum`), baked into `Package.swift` as `llamaBinaryChecksum`.
 - License: llama.cpp is **MIT** — ship its notice with the app.
 
+**Released artifact (v2.4.0-rc.1)**
+- Asset: `llama-xcframework-4a8993735419.zip` on GitHub Release `v2.4.0-rc.1`.
+- URL: `https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.1/llama-xcframework-4a8993735419.zip`
+- Checksum: `49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289` (baked into `Package.swift`).
+
+**Consuming the SDK remotely** (any external iOS app, no local build / no Vendor):
+```swift
+.package(url: "https://github.com/fil-technology/esh.git", exact: "2.4.0-rc.1")
+// products: "EshRuntime" (Apple FM) and optionally "EshLlamaCpp" (embedded GGUF; pulls the binary above)
+```
+The SDK shares the repository's SemVer line (the esh product is at v2.x); "SDK 1.0 RC" denotes API maturity,
+not a separate version stream. Consume the prerelease with `exact:`.
+
 **Release / versioning procedure**
 1. `scripts/build-llama-xcframework.sh` (produces `Vendor/llama.xcframework` from the pinned commit).
-2. `ditto -c -k --keepParent Vendor/llama.xcframework llama-xcframework-<commit>.zip`.
+2. `COPYFILE_DISABLE=1 ditto -c -k --keepParent Vendor/llama.xcframework llama-xcframework-<commit>.zip`.
 3. `swift package compute-checksum llama-xcframework-<commit>.zip` → must equal `llamaBinaryChecksum`
    (bump the constant when the pin changes).
-4. Publish the zip as a release asset; set `llamaBinaryURL` (or `ESH_LLAMA_XCFRAMEWORK_URL`) to its URL.
-   Reproducibility comes from the pinned commit + build flags; the checksum pins that exact published zip.
-
-Publishing the release asset is an outward-facing maintainer step (deferred to the repo owner); the
-mechanism, checksum, and manifest wiring are complete and verified.
+4. Publish the zip as the release asset and point `llamaBinaryURL` at it (or `ESH_LLAMA_XCFRAMEWORK_URL` for
+   staging). Reproducibility comes from the pinned commit + build flags; the checksum pins the exact zip.
+   Once published and consumed, the tag is immutable — any fix ships as the next RC (v2.4.0-rc.2).
 
 ## Non-goals (unchanged)
 
