@@ -2,9 +2,11 @@
 import PackageDescription
 import Foundation
 
-let quietDebugSwiftSettings: [SwiftSetting] = [
-    .unsafeFlags(["-gnone"], .when(configuration: .debug))
-]
+// RC v2.4.0-rc.2: no `.unsafeFlags`. SwiftPM forbids depending on a *versioned remote* product that uses
+// unsafe flags, so the previous `-gnone` (debug-info-off) optimization made the whole package non-consumable
+// as a SwiftPM dependency. Dropping it is required for remote consumption; the only cost is default debug
+// info in local debug builds. Kept as an (empty) shared setting so target definitions stay uniform.
+let quietDebugSwiftSettings: [SwiftSetting] = []
 
 // esh M7/M10 — the embedded GGUF backend (EshLlamaCpp) links a prebuilt `llama.xcframework`
 // (pinned llama.cpp; see scripts/build-llama-xcframework.sh + docs/SDK_PACKAGING.md §llama distribution).
@@ -26,7 +28,7 @@ let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Ven
 // no local build, no Vendor/, and no machine-specific paths. A local `Vendor/llama.xcframework` (dev) takes
 // precedence over the URL; `ESH_LLAMA_XCFRAMEWORK_URL` can override the URL for staging.
 let llamaBinaryChecksum = "49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289"
-let llamaBinaryDefaultURL = "https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.1/llama-xcframework-4a8993735419.zip"
+let llamaBinaryDefaultURL = "https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.2/llama-xcframework-4a8993735419.zip"
 let llamaBinaryURL = ProcessInfo.processInfo.environment["ESH_LLAMA_XCFRAMEWORK_URL"] ?? llamaBinaryDefaultURL
 let useRemoteLlama = !hasEmbeddedLlama && !llamaBinaryURL.isEmpty
 
