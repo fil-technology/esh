@@ -135,6 +135,15 @@ there).
 - **Kill + relaunch:** installs survive; `reconcileLocalModels()` (call at launch) reconnects outstanding
   transfers, finalizes completed ones, and clears any state left by a kill mid-lifecycle.
 
+**Physical-device evidence (iPhone 17, iOS 26.x).** A fresh 940 MB managed download (Qwen2.5-1.5B) was
+started, the app **backgrounded at ~0% within seconds and the phone locked ~20 minutes**, then reopened.
+On the next foreground launch `reconcileLocalModels()` reported
+`finalizedPending=["qwen2.5-1.5b-instruct-q4km"]` — i.e. the full 940 MB had transferred **while the app was
+suspended** (only a few MB were fetched in the foreground before backgrounding), was verified (size +
+SHA-256), and atomically installed by the new runtime; a pinned generate then returned coherent output
+(`gguf ok backend=gguf text=Ball`). Resumable-only behavior would instead have left a partial download and
+`finalizedPending=[]`. This confirms OS-managed background continuation, not merely resumability.
+
 **Required host hook (the only one).** Forward the app-delegate background-session event:
 
 ```swift
