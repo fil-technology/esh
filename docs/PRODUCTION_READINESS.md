@@ -117,16 +117,48 @@ before downloading; insufficient storage fails early. `remove` deletes the model
 
 ## Background / foreground lifecycle (#8)
 
-iOS does not guarantee background execution, and esh does not promise it. Documented behavior:
-- **Download** uses `URLSessionDownloadTask`; if the app is backgrounded/suspended mid-download the task may
-  be paused/interrupted — resume data is persisted and `install` resumes on next foreground call. An
-  interrupted download never produces an install record.
+**Model downloads are OS-managed and background-capable on iOS.** `LocalModelManager` drives a true
+`URLSessionConfiguration.background(withIdentifier:)` session, so iOS owns the transfer and continues it
+while the app is backgrounded/suspended, then relaunches the app to deliver completion. esh persists a
+per-model download record (phase + staged file + expected size/SHA) next to the install dir and tags each
+task with its model id, so a fresh runtime after relaunch reconnects and finishes without the host retaining
+the original object. Off iOS (CLI/tests) a foreground session is used (the OS-relaunch semantics don't apply
+there).
+
+- **Transfer completes while suspended:** iOS relaunches the app in the background and calls the host hook;
+  esh verifies (size + SHA-256) and atomically installs. If final verification cannot run in the background
+  window, the model stays in a pending-verification state and `reconcileLocalModels()` finalizes it on the
+  next run. A model is **never** reported installed before verification succeeds.
 - **Inference** in progress when the app is suspended may be cancelled by the OS; callers get
-  `CancellationError` or a typed failure, and the runtime is reusable on return to foreground.
-- **Kill + relaunch**: installs survive (verified). Call `reconcileLocalModels()` at launch to clear any
-  state left by a kill mid-lifecycle.
-Hosts that need long downloads to continue in background should adopt a background `URLSession` at the app
-layer; that is not part of the SDK’s promise today (see Known limitations).
+  `CancellationError` or a typed failure, and the runtime is reusable on return to foreground. (Inference is
+  foreground work — unlike downloads, it does not continue while suspended.)
+- **Kill + relaunch:** installs survive; `reconcileLocalModels()` (call at launch) reconnects outstanding
+  transfers, finalizes completed ones, and clears any state left by a kill mid-lifecycle.
+
+**Required host hook (the only one).** Forward the app-delegate background-session event:
+
+```swift
+func application(_ app: UIApplication, handleEventsForBackgroundURLSession id: String,
+                 completionHandler: @escaping () -> Void) {
+    Task { await runtime.handleBackgroundSessionEvents(identifier: id, completionHandler: completionHandler) }
+}
+```
+
+Use a single shared `EshRuntime` so the hook and the download share one session. Everything else
+(task↔model mapping, resume data, staging, checksum verification, install finalization) is internal.
+
+| Scenario | Behavior |
+|---|---|
+| App remains foreground | Download continues normally; progress via `onProgress`/`localModels()`. |
+| App backgrounds | OS-managed transfer continues when iOS permits. |
+| Screen locks | OS-managed transfer continues when iOS permits. |
+| App suspended | Transfer does not depend on the host process running. |
+| App returns to foreground | esh reconnects/reconstructs state (`reconcileLocalModels()` at launch). |
+| Download completes in background | iOS relaunches app → host hook → verify + atomic install; else pending-verification finalized next run. |
+| System terminates app | Background session persists; on next launch esh reconnects/finalizes. |
+| User force-quits app | iOS cancels background sessions on explicit force-quit (Apple policy); resume data is persisted, so the next `install()` continues rather than restarts. esh does not (cannot) override this. |
+| Network drops | Transfer is recoverable/resumable (`waitsForConnectivity`; resume data on failure). |
+| Verification fails | Corrupt staged file + record discarded; typed error; never installed. |
 
 ## Privacy & security (#11)
 
@@ -199,8 +231,9 @@ A meaningful regression = warm TTFT or tok/s materially worse than the above, or
 
 ## Known limitations
 
-- **Background downloads/inference** are not guaranteed by the SDK (iOS constraint); adopt a background
-  `URLSession` at the app layer if needed.
+- **Background *downloads* are OS-managed** (background `URLSession`) and continue while suspended, subject
+  to iOS policy (and cancelled by an explicit user force-quit). **Background *inference* is not** — a
+  generation in progress does not continue while the app is suspended.
 - **Streaming** is real for GGUF; Apple FM emits a single token event today (non-incremental).
 - **Curated catalog** is intentionally tiny (two Qwen2.5 sizes). Adding models is a data change.
 - **Device matrix** below 8 GB and iPad are not yet hardware-validated.

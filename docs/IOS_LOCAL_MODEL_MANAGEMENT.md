@@ -119,6 +119,28 @@ insufficient storage (plan + fast-fail), checksum mismatch, content-length misma
 install record without file (not installed), remove-non-installed, and (via `EshRuntimeTests`) explicit
 generation against a non-installed / unwired-backend pin failing typed with **no Apple substitution**.
 
+## Background downloads (RC follow-up)
+
+Downloads are **OS-managed and background-capable** on iOS. `LocalModelManager` drives one
+`ModelDownloadCoordinator` whose `URLSession` is `URLSessionConfiguration.background(withIdentifier:
+"technology.fil.esh.model-downloads")` on iOS (`sessionSendsLaunchEvents`, non-discretionary,
+`waitsForConnectivity`) and ephemeral/foreground off-device (CLI/tests). This replaces the old foreground
+`ResumableDownloader` — one download layer, not two.
+
+- **Cross-relaunch:** each task is tagged with its model id (`taskDescription`), and a `PendingDownload`
+  record (`download.json`: phase + staged path + expected size/SHA) is persisted next to the install dir. A
+  fresh runtime recreates the session (same identifier), iOS re-delivers outstanding events, and
+  `reconcile()` finalizes any transfer that completed while suspended. The host need not retain the runtime.
+- **Completion while suspended:** the transfer stages `model.download` and the record moves to `downloaded`
+  (state `.verifying` / pending verification). Verification (size + SHA-256) + atomic install run in the
+  background window if granted, otherwise on the next `reconcileLocalModels()`. A model is never `installed`
+  before verification succeeds; a corrupt completed transfer is discarded and never installs.
+- **Cancellation:** cancelling the `install` Task cancels the transfer and persists resume data, so a later
+  `install` continues rather than restarts. Duplicate concurrent installs remain serialized per model id.
+- **Host hook (the only one):** forward `application(_:handleEventsForBackgroundURLSession:completionHandler:)`
+  to `EshRuntime.handleBackgroundSessionEvents(identifier:completionHandler:)`. See docs/PRODUCTION_READINESS.md
+  for the full scenario table (background / lock / suspend / terminate / force-quit / network drop).
+
 ## Not in M8 (per scope)
 
 No Hugging Face browser/search, no marketplace, no large catalog, no Auto changes, no background
