@@ -11,10 +11,11 @@ final GA because a short, **non-code** list remains — resolve during the RC pe
 1. Add a top-level `LICENSE` (esh) + bundle the llama.cpp **MIT** notice.
 2. Publish the pinned `llama.xcframework` release asset and set `llamaBinaryURL` (checksum already pinned).
 3. Hardware-validate the device matrix below 8 GB (e.g. iPhone 12 Pro) and on iPad.
-4. Re-run the on-device clean-room validation on the iPhone 17 (this session's live launch was blocked by
-   the device being locked; the paths are unchanged and were proven live on that device in M4/M7/M8).
 
 None of these block first-party embedding; they gate a public GA. No blockers to the RC.
+
+The on-device clean-room validation on the iPhone 17 is **DONE** — both paths passed live through the
+public SDK API (see Regression status).
 
 ---
 
@@ -153,7 +154,7 @@ no top-level `LICENSE` file yet — add the esh license + a llama.cpp MIT notice
 
 | Device class | Status |
 |---|---|
-| iPhone 17 (iPhone18,3, ~8 GB) | **Validated** — Apple FM + embedded GGUF + managed install proven on device (M4/M7/M8). Primary target. |
+| iPhone 17 (iPhone18,3, ~8 GB) | **Validated** — Apple FM + embedded GGUF + managed install proven on device (M4/M7/M8), and the M10 clean-room public-API run passed live (Apple FM + managed GGUF, coherent output, persistence across relaunch). Primary target. |
 | Lower-memory iPhone (e.g. iPhone 12 Pro, 6 GB) | **BLOCKED / not tested** — device is paired but currently unavailable. Recommended minimum for the 0.5B GGUF; 1.5B is `tight` below 8 GB. |
 | iPad / higher-memory Apple device | **Not tested** — no device available. Expected to work (same code path, more headroom). |
 
@@ -189,9 +190,12 @@ A meaningful regression = warm TTFT or tok/s materially worse than the above, or
   on disk) → `.pinned` generate selected `backend=gguf` and returned tokens. GGUF *text quality* is a
   device property (coherent on iPhone 17 in M7/M8; the Simulator's Metal compute yields garbled tokens —
   the SDK path itself is fully exercised).
-- **Physical iPhone 17:** app installs; the live launch this session was blocked by the device being locked
-  (screen lock is a per-device user action). Apple FM + embedded GGUF + managed install were previously
-  proven live on this exact device (M4/M7/M8) and M10 did not change those execution paths.
+- **Clean-room functional run (physical iPhone 17, iOS 26.x, via the public API) — PASSED:**
+  `EshRuntime().generate(prompt:)` → **Apple FM** (`backend=apple`, "pong"); `EshRuntime.withEmbeddedGGUF()`
+  → reconcile consistent → installPlan fit=comfortable (379 MB, 59 GB free) → `install(.qwen05B)` downloaded,
+  verified, and **persisted across relaunch** → `.pinned` generate selected `backend=gguf` and returned
+  **coherent** text ("Fun"). No new issues. This confirms the M10 additions (`withEmbeddedGGUF`, reconcile,
+  typed errors, security guards) on real hardware, consistent with the M4/M7/M8 live device runs.
 
 ## Known limitations
 
