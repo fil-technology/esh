@@ -29,6 +29,42 @@ Auto-policy change (both out of M9 scope).
 > normally. The M9 material below still describes the target boundaries, which are unchanged; only the
 > *package* boundary moved.
 
+> ## v2.4.0-rc.4 — llama.cpp coexistence (esh_llama namespace)
+>
+> rc.3 made `esh` *resolve* alongside `LLM.swift`. But both ship llama.cpp built by the same upstream
+> `build-xcframework.sh`, producing an identically-named artifact: framework `llama.framework`, Clang module
+> `llama`, Mach-O install name `@rpath/llama.framework/Versions/Current/llama`, bundle id `org.ggml.llama`.
+> Linking both into one app fails with **"Multiple commands produce llama.framework"** (and, separately,
+> "Multiple commands produce llama.dSYM"); under `swift build` the two `llama.framework` bundles even collapse
+> to one path and `LLM.swift` compiles against esh's `llama.h` (a different llama.cpp version).
+>
+> **Isolation strategy — rename, not symbol-prefix.** esh's artifact is a *self-contained dynamic framework*
+> (one dylib bundling llama + ggml + gguf, Metal embedded, depending only on system frameworks). On Apple,
+> dynamic frameworks use a **two-level namespace**: an app that links two *distinctly named* dynamic
+> frameworks binds each caller to its own framework's symbols, so duplicate `llama_*`/`ggml_*` symbol NAMES
+> across the two frameworks do not produce duplicate-symbol errors, and each dylib keeps its own ggml globals
+> (backend registry, Metal device) at runtime. Static libraries would need symbol prefixing; this dynamic
+> framework does not. So the fix is to make esh's copy esh-private on every identity axis:
+>
+> | Axis | LLM.swift (unchanged) | esh (rc.4) |
+> |---|---|---|
+> | Framework bundle | `llama.framework` | `esh_llama.framework` |
+> | Clang module | `llama` | `esh_llama` |
+> | Mach-O install name | `@rpath/llama.framework/…/llama` | `@rpath/esh_llama.framework/…/esh_llama` |
+> | Bundle identifier | `org.ggml.llama` | `technology.fil.esh.esh-llama` |
+> | SwiftPM binaryTarget | `llama` | `EshCLlama` |
+>
+> `scripts/namespace-llama-xcframework.sh` performs this as a deterministic post-build transform on the same
+> pinned bits (`install_name_tool` + modulemap rewrite + `PlistBuddy` ids + ad-hoc `codesign`), and
+> `build-llama-xcframework.sh` runs it so a from-source rebuild produces `Vendor/esh_llama.xcframework`
+> directly. The bundled dSYMs (named `llama.dSYM`) are dropped — they were a second collision and ~72% of the
+> artifact; Xcode regenerates `esh_llama.dSYM` from the embedded binary at app-build time, and dSYMs never
+> ship inside the `.app`, so app size is unaffected.
+>
+> **Consumer-transparent:** `import EshRuntime` / `import EshLlamaCpp` / `EshRuntime.withEmbeddedGGUF()` are
+> unchanged. The only internal change is `EshLlamaCpp`'s `import llama` → `import esh_llama`; the `llama_*` C
+> function names it calls are unchanged (renaming the *module* does not rename the C symbols).
+
 ## Target graph (after M9)
 
 ```

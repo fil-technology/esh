@@ -8,11 +8,16 @@ Their licenses and copyright notices are reproduced below and must be included i
 redistributions that contain these components.
 
 --------------------------------------------------------------------------------
-llama.cpp  (product: EshLlamaCpp / CLlama — the prebuilt `llama.xcframework`)
+llama.cpp  (product: EshLlamaCpp / EshCLlama — the prebuilt `esh_llama.xcframework`)
 --------------------------------------------------------------------------------
 Source:   https://github.com/ggml-org/llama.cpp
 Pinned:   4a89937354190cef5a97baf8eeb17336105eb72d
 License:  MIT
+Note:     rc.4 renames the built framework/module from llama → esh_llama (bundle name, Mach-O install
+          name, Clang module, bundle identifiers) via scripts/namespace-llama-xcframework.sh so it can
+          coexist in one app with another llama.cpp consumer. This is a post-build rename using only Apple
+          tools (install_name_tool, codesign); no upstream source is modified and no new dependency is
+          introduced. The upstream llama.cpp MIT terms below are unchanged and continue to apply.
 
 MIT License
 

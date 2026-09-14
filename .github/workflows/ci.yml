@@ -89,14 +89,15 @@ jobs:
       # upstream commit + build flags). Cached on the script's contents so it only rebuilds when the pin
       # changes. Once a release binary is published, this job can instead set ESH_LLAMA_XCFRAMEWORK_URL and
       # skip the source build (binaryTarget(url:checksum:)); either way EshLlamaCpp becomes available.
-      - name: Cache pinned llama.xcframework
+      - name: Cache pinned esh_llama.xcframework
         id: cache-xcframework
         uses: actions/cache@v4
         with:
-          path: Vendor/llama.xcframework
-          key: llama-xcframework-${{ hashFiles('scripts/build-llama-xcframework.sh') }}
+          # rc.4: the coexistence-safe, namespaced artifact (framework/module esh_llama).
+          path: Vendor/esh_llama.xcframework
+          key: esh-llama-xcframework-${{ hashFiles('scripts/build-llama-xcframework.sh', 'scripts/namespace-llama-xcframework.sh') }}
 
-      - name: Build pinned llama.xcframework (macOS + iOS device + sim, Metal embedded)
+      - name: Build pinned esh_llama.xcframework (macOS + iOS device + sim, Metal embedded, namespaced)
         if: steps.cache-xcframework.outputs.cache-hit != 'true'
         run: ./scripts/build-llama-xcframework.sh
 

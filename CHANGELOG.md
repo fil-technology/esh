@@ -26,6 +26,26 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### Packaging — v2.4.0-rc.4 (llama.cpp coexistence)
+
+- **`EshLlamaCpp` can now be linked into an app that already embeds another llama.cpp build** (e.g.
+  `LLM.swift`). Both shipped the upstream `llama.framework` / Clang module `llama` / install name
+  `@rpath/llama.framework/…`, so linking both produced *"Multiple commands produce llama.framework"* (and, in
+  SwiftPM, silent `llama.h` cross-contamination).
+- **Fix:** esh's artifact is renamed to an esh-private namespace — framework `esh_llama.framework`, Mach-O
+  install name `@rpath/esh_llama.framework/…`, Clang module `esh_llama`, bundle id `technology.fil.esh.esh_llama`
+  — by `scripts/namespace-llama-xcframework.sh` (a deterministic post-build transform: `install_name_tool` +
+  modulemap + Info.plist ids + ad-hoc re-sign; same pinned llama.cpp bits). **No native symbol prefixing is
+  needed**: the artifact is a self-contained *dynamic* framework, and Apple's two-level namespace binds each
+  consumer to its own framework's `llama_*`/`ggml_*` symbols, so two distinctly-named llama frameworks link
+  and run with isolated state. The bundled dSYMs (also named `llama`) are dropped to remove a second
+  collision and shrink the artifact (~96 MB → ~14 MB); Xcode still generates `esh_llama.dSYM` at app build.
+- **Consumer-transparent:** public API is unchanged (`import EshRuntime` / `import EshLlamaCpp` /
+  `EshRuntime.withEmbeddedGGUF()`); the only internal change is `EshLlamaCpp`'s `import llama` → `import
+  esh_llama`. SwiftPM binaryTarget renamed `CLlama` → `EshCLlama`; the artifact is `esh_llama.xcframework`
+  and the `binaryTarget(url:checksum:)` points at the `v2.4.0-rc.4` release asset.
+- `EshRuntime`-only (Apple-only) consumers are unaffected and still link no llama.cpp.
+
 ### Packaging — v2.4.0-rc.3 (portable SDK dependency fix)
 
 - **Split the repo into two SwiftPM packages** so the portable SDK is remotely consumable alongside

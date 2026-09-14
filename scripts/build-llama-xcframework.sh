@@ -48,7 +48,15 @@ framework module llama {
 MODMAP
 done
 
-rm -rf "$REPO_ROOT/Vendor/llama.xcframework"
+rm -rf "$REPO_ROOT/Vendor/llama.xcframework" "$REPO_ROOT/Vendor/esh_llama.xcframework"
 mkdir -p "$REPO_ROOT/Vendor"
 cp -R "$XCF_SRC" "$REPO_ROOT/Vendor/llama.xcframework"
-echo "Built Vendor/llama.xcframework from llama.cpp @ $LLAMA_COMMIT (module restricted to llama.h)"
+
+# rc.4 — coexistence: rename the upstream `llama.framework`/module `llama` to esh-private
+# `esh_llama.framework`/module `esh_llama` (+ install name + bundle ids, ad-hoc re-sign) so EshLlamaCpp can
+# be linked into the same app as another llama.cpp consumer (e.g. LLM.swift). This is a deterministic
+# post-build transform on the same pinned bits; see scripts/namespace-llama-xcframework.sh.
+"$REPO_ROOT/scripts/namespace-llama-xcframework.sh" \
+  "$REPO_ROOT/Vendor/llama.xcframework" "$REPO_ROOT/Vendor/esh_llama.xcframework"
+rm -rf "$REPO_ROOT/Vendor/llama.xcframework"
+echo "Built Vendor/esh_llama.xcframework from llama.cpp @ $LLAMA_COMMIT (namespaced esh_llama; module restricted to llama.h)"

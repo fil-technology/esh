@@ -1,6 +1,6 @@
 import Foundation
 import EshCore
-import llama
+import esh_llama
 
 // esh M7 — embedded GGUF backend. Runs GGUF models FULLY IN-PROCESS via the llama.cpp C API (Metal on
 // device). No Process, no localhost server, no Python. Implements the existing EshCore contracts so

@@ -22,29 +22,35 @@ import Foundation
 // stay uniform.
 let quietDebugSwiftSettings: [SwiftSetting] = []
 
-// esh M7/M10 — the embedded GGUF backend (EshLlamaCpp) links a prebuilt `llama.xcframework`
+// esh M7/M10 — the embedded GGUF backend (EshLlamaCpp) links a prebuilt `esh_llama.xcframework`
 // (pinned llama.cpp; see scripts/build-llama-xcframework.sh + docs/SDK_PACKAGING.md §llama distribution).
 // The binary is never committed (large, platform-built). It is sourced two ways, checked in order:
-//   1. Local dev: `Vendor/llama.xcframework` present → link it by path (what the build script produces).
+//   1. Local dev: `Vendor/esh_llama.xcframework` present → link it by path (what the build script produces).
 //   2. Production: a pinned release archive via `binaryTarget(url:checksum:)` — set `llamaBinaryURL`
 //      to the published zip so a consumer gets `EshLlamaCpp` with no manual build.
 // If neither is available, EshLlamaCpp is omitted and the base package (EshCore/EshRuntime) still builds
-// everywhere (so a clean checkout / core CI never needs the binary). Module is `llama`.
+// everywhere (so a clean checkout / core CI never needs the binary). Module is `esh_llama` (rc.4).
 // Resolve Vendor relative to THIS manifest's location (not the CWD) — xcodebuild evaluates the manifest
 // with a CWD that is not the package root, which previously made this check flip to false.
+// rc.4: the embedded artifact is the coexistence-safe, esh-private `esh_llama.xcframework` (framework
+// `esh_llama.framework`, Clang module `esh_llama`, install name `@rpath/esh_llama.framework/…`). Renamed from
+// the upstream `llama.framework`/`llama` so EshLlamaCpp can be linked into the same app as another llama.cpp
+// consumer (e.g. LLM.swift) without framework/module/install-name collisions. See
+// scripts/namespace-llama-xcframework.sh + docs/SDK_PACKAGING.md §coexistence.
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Vendor/llama.xcframework/Info.plist")
+let hasEmbeddedLlama = FileManager.default.fileExists(atPath: packageDir + "/Vendor/esh_llama.xcframework/Info.plist")
 
-// Pinned release archive of Vendor/llama.xcframework (llama.cpp @ 4a89937354190cef5a97baf8eeb17336105eb72d,
-// zipped with `COPYFILE_DISABLE=1 ditto -c -k --keepParent`). `llamaBinaryChecksum` is the SwiftPM checksum
-// of that exact published zip (`swift package compute-checksum …`). `llamaBinaryURL` points at the GitHub
-// Release asset for tag v2.4.0-rc.3, so a fresh remote consumer that adds `EshLlamaCpp` gets the binary with
-// no local build, no Vendor/, and no machine-specific paths. The llama.cpp pin is unchanged since rc.1/rc.2,
-// so the archive bytes (and therefore the checksum) are identical to the rc.2 asset. A local
-// `Vendor/llama.xcframework` (dev) takes precedence over the URL; `ESH_LLAMA_XCFRAMEWORK_URL` can override
-// the URL for staging.
-let llamaBinaryChecksum = "49592e2fa0aff14af87252dfd99384c414a851c83c64d7749aca4569e0dd2289"
-let llamaBinaryDefaultURL = "https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.3/llama-xcframework-4a8993735419.zip"
+// Pinned release archive of Vendor/esh_llama.xcframework (llama.cpp @ 4a89937354190cef5a97baf8eeb17336105eb72d,
+// namespaced to esh_llama by scripts/namespace-llama-xcframework.sh, zipped with
+// `COPYFILE_DISABLE=1 ditto -c -k --keepParent`). `llamaBinaryChecksum` is the SwiftPM checksum of that exact
+// published zip (`swift package compute-checksum …`). `llamaBinaryURL` points at the GitHub Release asset for
+// tag v2.4.0-rc.4, so a fresh remote consumer that adds `EshLlamaCpp` gets the coexistence-safe binary with
+// no local build, no Vendor/, and no machine-specific paths. The llama.cpp pin is unchanged since rc.1; only
+// the framework/module/install-name were renamed (rc.4), so the checksum differs from the rc.1–rc.3 asset.
+// A local `Vendor/esh_llama.xcframework` (dev) takes precedence over the URL; `ESH_LLAMA_XCFRAMEWORK_URL`
+// can override the URL for staging.
+let llamaBinaryChecksum = "4366e678d655672b6f9e990c1b2a6a23df6982cd063beabced97126d4454717e"
+let llamaBinaryDefaultURL = "https://github.com/fil-technology/esh/releases/download/v2.4.0-rc.4/esh-llama-xcframework-4a8993735419.zip"
 let llamaBinaryURL = ProcessInfo.processInfo.environment["ESH_LLAMA_XCFRAMEWORK_URL"] ?? llamaBinaryDefaultURL
 let useRemoteLlama = !hasEmbeddedLlama && !llamaBinaryURL.isEmpty
 
@@ -52,9 +58,9 @@ let useRemoteLlama = !hasEmbeddedLlama && !llamaBinaryURL.isEmpty
 let llamaTargets: [Target] = {
     guard hasEmbeddedLlama || useRemoteLlama else { return [] }
     let cllama: Target = hasEmbeddedLlama
-        ? .binaryTarget(name: "CLlama", path: "Vendor/llama.xcframework")
-        : .binaryTarget(name: "CLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
-    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "CLlama"],
+        ? .binaryTarget(name: "EshCLlama", path: "Vendor/esh_llama.xcframework")
+        : .binaryTarget(name: "EshCLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
+    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "EshCLlama"],
                             swiftSettings: quietDebugSwiftSettings)]
 }()
 
