@@ -15,8 +15,9 @@ EshRuntime → LocalModelManager → curated descriptor → preflight → downlo
 `StorageService`, `ResumeSupport`, `ModelFitService` + `HostMachineProfile`, `DeviceProfile` (M5),
 `InferenceBackendRegistry`/`EshRuntime` (M3), `LlamaCppEmbeddedBackend` (M7).
 **New (EshRuntime target, portable):** `LocalModelDescriptor` + `LocalModelCatalog`, `LocalModelState`,
-`LocalModelInstallPlan`, `LocalModelError`, `LocalModelManager` (actor), `ResumableDownloader`. No new iOS
-model database — installs are ordinary esh `ModelInstall` records.
+`LocalModelInstallPlan`, `LocalModelError`, `LocalModelManager` (actor), `ModelDownloadCoordinator` (the
+background-capable download layer — see below; it replaced the earlier foreground `ResumableDownloader`). No
+new iOS model database — installs are ordinary esh `ModelInstall` records.
 
 ## Storage layout (sandbox)
 
@@ -47,10 +48,13 @@ Current curated set (both **Apache-2.0**, exact upstream LFS size + SHA-256; 1.5
 ## Download lifecycle
 
 `LocalModelState`: `notInstalled → downloading(progress) → (paused) → verifying → installed / failed(reason)`.
-Download uses `URLSessionDownloadTask` (native, efficient — not byte-by-byte) via `ResumableDownloader`:
-progress from `didWriteData`; **cancellation** cancels the task and persists resume data (`model.resume`) so a
-later `install` resumes; a cancelled or failed download **never** produces an install record. Finalize is
-atomic (verify in a temp/staging file, then move into the install dir).
+Download uses `URLSessionDownloadTask` (native, efficient — not byte-by-byte) via `ModelDownloadCoordinator`,
+the single background-capable download layer (on iOS a `URLSessionConfiguration.background(withIdentifier:)`
+session; ephemeral off-device — see "Background downloads" below). Progress comes from `didWriteData`;
+**cancellation** cancels the task and persists resume data (`model.resume`) so a later `install` resumes; a
+cancelled or failed download **never** produces an install record. Finalize is atomic: the transfer is staged
+(`model.download`), verified (size + SHA-256), then moved into the install dir — so `verifying` maps to a
+completed-but-not-yet-verified transfer, and a model is never `installed` before verification succeeds.
 
 ## Verification
 
