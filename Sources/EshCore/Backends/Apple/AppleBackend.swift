@@ -70,8 +70,9 @@ private struct AppleCompatibilityChecker: CompatibilityChecking, Sendable {
     }
 }
 
-/// A `BackendRuntime` over the Apple on-device system model. Non-streamed (Apple's response is
-/// returned whole here); emitted as a single chunk, honestly reflected in capability resolution.
+/// A `BackendRuntime` over the Apple on-device system model. Streams **incrementally** via Apple's
+/// `streamResponse` (G1): consumers receive token-level deltas as generation proceeds, matching the
+/// GGUF backend's chunk contract. Cancellation stops generation; execution stays strictly on-device.
 public final class AppleBackendRuntime: BackendRuntime, @unchecked Sendable {
     public let backend: BackendKind = .apple
     public let modelID: String
@@ -91,7 +92,7 @@ public final class AppleBackendRuntime: BackendRuntime, @unchecked Sendable {
         config: GenerationConfig
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     let normalized = PromptSessionNormalizer().normalized(session: session)
                     let instructions = normalized.messages
@@ -102,20 +103,29 @@ public final class AppleBackendRuntime: BackendRuntime, @unchecked Sendable {
                         .map { "\($0.role == .user ? "User" : "Assistant"): \($0.text)" }
                         .joined(separator: "\n")
                     let start = ContinuousClock.now
-                    let text = try await AppleIntelligenceService().generate(
+                    var firstChunk: ContinuousClock.Instant?
+                    for try await delta in AppleIntelligenceService().stream(
                         prompt: conversation.isEmpty ? " " : conversation,
                         instructions: instructions.isEmpty ? nil : instructions
-                    )
-                    let elapsed = start.duration(to: .now)
-                    let ms = Double(elapsed.components.seconds) * 1000
-                        + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+                    ) {
+                        try Task.checkCancellation()
+                        if firstChunk == nil { firstChunk = .now }
+                        continuation.yield(delta)
+                    }
+                    try Task.checkCancellation()
+                    // TTFT = time to the first streamed chunk (falls back to total on empty output).
+                    let ttft = firstChunk.map { start.duration(to: $0) } ?? start.duration(to: .now)
+                    let ms = Double(ttft.components.seconds) * 1000
+                        + Double(ttft.components.attoseconds) / 1_000_000_000_000_000
                     self.currentMetrics = Metrics(ttftMilliseconds: ms, finishReason: "stop")
-                    if !text.isEmpty { continuation.yield(text) }
                     continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish(throwing: CancellationError())
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

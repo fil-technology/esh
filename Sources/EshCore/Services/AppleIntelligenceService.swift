@@ -73,6 +73,57 @@ public struct AppleIntelligenceService: Sendable {
         #endif
     }
 
+    /// Stream text on-device through Apple Foundation Models, emitting **incremental deltas**.
+    ///
+    /// Apple's `streamResponse(to:)` yields *cumulative* snapshots (each `snapshot.content` is the
+    /// full text so far); this diffs each snapshot against the previous one so consumers receive
+    /// only the newly-generated piece — matching the incremental chunk contract used by the GGUF
+    /// backend. Cancelling the consuming task cancels generation. Execution stays strictly
+    /// on-device; the same typed `GenerationError` is surfaced when Apple Intelligence is
+    /// unavailable (never a silent degrade). (G1)
+    public func stream(prompt: String, instructions: String? = nil) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                #if canImport(FoundationModels)
+                if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {
+                    let current = status()
+                    guard current.available else {
+                        continuation.finish(throwing: GenerationError.unavailable(reason: current.detail))
+                        return
+                    }
+                    do {
+                        let session = instructions.map { LanguageModelSession(instructions: $0) } ?? LanguageModelSession()
+                        var previous = ""
+                        for try await snapshot in session.streamResponse(to: prompt) {
+                            try Task.checkCancellation()
+                            let text = snapshot.content
+                            if text.hasPrefix(previous) {
+                                let delta = String(text.dropFirst(previous.count))
+                                if !delta.isEmpty { continuation.yield(delta) }
+                            } else if text != previous {
+                                // Non-monotonic revision (rare): resend the corrected text.
+                                continuation.yield(text)
+                            }
+                            previous = text
+                        }
+                        try Task.checkCancellation()
+                        continuation.finish()
+                    } catch is CancellationError {
+                        continuation.finish(throwing: CancellationError())
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                } else {
+                    continuation.finish(throwing: GenerationError.unavailable(reason: "requires a newer OS"))
+                }
+                #else
+                continuation.finish(throwing: GenerationError.frameworkMissing)
+                #endif
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     public func status() -> AppleIntelligenceStatus {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {

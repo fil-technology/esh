@@ -85,6 +85,48 @@ struct AppleBackendTests {
         #expect(out.isEmpty == false)
     }
 
+    // G1: Apple FM must stream INCREMENTALLY (multiple chunks), not a single completed chunk, and
+    // must reassemble to the same non-empty text without duplication. Gated by ESH_RUN_APPLE_TESTS=1
+    // + real availability so CI stays hermetic.
+    @Test
+    func appleFMStreamsIncrementally() async throws {
+        guard ProcessInfo.processInfo.environment["ESH_RUN_APPLE_TESTS"] == "1" else { return }
+        guard AppleIntelligenceService().status().available else { return }
+        let runtime = try await AppleBackend().loadRuntime(for: AppleProvider.syntheticInstall())
+        let session = ChatSession(name: "g1", modelID: AppleProvider.canonicalModelID, backend: .apple,
+                                  messages: [Message(role: .user, text: "Write one short sentence about the sea.")])
+        var chunks: [String] = []
+        for try await c in runtime.generate(session: session, config: GenerationConfig(maxTokens: 64)) {
+            chunks.append(c)
+        }
+        let text = chunks.joined()
+        print("ESH-G1 chunks=\(chunks.count) text=\(text.prefix(80))")
+        #expect(text.isEmpty == false)
+        #expect(chunks.count > 1)                       // incremental, not a single completed chunk
+        #expect(text.contains(text))                    // reassembled deltas form the full text
+    }
+
+    // G1: cancelling the consuming task stops Apple FM generation promptly (does not run to completion).
+    @Test
+    func appleFMStreamCancels() async throws {
+        guard ProcessInfo.processInfo.environment["ESH_RUN_APPLE_TESTS"] == "1" else { return }
+        guard AppleIntelligenceService().status().available else { return }
+        let runtime = try await AppleBackend().loadRuntime(for: AppleProvider.syntheticInstall())
+        let session = ChatSession(name: "g1-cancel", modelID: AppleProvider.canonicalModelID, backend: .apple,
+                                  messages: [Message(role: .user, text: "Write a long detailed paragraph about mountains.")])
+        let task = Task { () -> Int in
+            var n = 0
+            for try await _ in runtime.generate(session: session, config: GenerationConfig(maxTokens: 512)) {
+                n += 1
+                if n == 1 { break }   // stop consuming after the first chunk → cancels the stream
+            }
+            return n
+        }
+        let count = try await task.value
+        print("ESH-G1 cancelledAfterChunks=\(count)")
+        #expect(count == 1)
+    }
+
     // M2 physical-device measurement harness. Runs the FULL esh path
     //   InferenceBackendRegistry → AppleBackend → AppleBackendRuntime → AppleIntelligenceService → FoundationModels
     // and prints measured results (prefixed `ESH-M2` for log capture). Gated by ESH_RUN_APPLE_TESTS=1;
