@@ -654,6 +654,15 @@ public extension EshRuntime {
         }
     }
 
+    /// Refresh runtime-stateful providers' cached availability from a live preflight, so the next
+    /// `capabilityAvailability()` reflects real engine states (installed / repairRequired / ready). Safe to
+    /// call at launch and after installs; cheap for native providers (no-op).
+    func refreshCapabilityAvailability() async {
+        for provider in capabilityRegistry?.all ?? [] {
+            if let refreshing = provider as? CapabilityAvailabilityRefreshing { await refreshing.refreshAvailability() }
+        }
+    }
+
     /// Honest per-capability availability for this device/platform (§6). Registry-driven: a capability is
     /// `.ready` only when a provider is wired and anything it needs (a text model) is ready; unwired
     /// capabilities report `.unsupportedOnPlatform` (families that cannot run here) or `.comingLater`.

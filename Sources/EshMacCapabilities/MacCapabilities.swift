@@ -22,12 +22,20 @@ public enum MacCapabilities {
     /// engines here — the regression that produced `ModuleNotFoundError: No module named 'soundfile'` is now
     /// caught by preflight as `.repairRequired`, not a raw traceback (§3/§6).
     public static func manifests() -> [CompatibilityEngineManifest] {
-        [
+        // Every engine runs through the shared bridge (mlx_vlm_bridge.py), which imports these at load time —
+        // so they're required for ANY engine and preflight must catch them (validated: a fresh venv missing
+        // mlx_lm reported repairRequired before this was declared).
+        let base: [CompatibilityModule] = [
+            .init(module: "numpy", pipPackage: "numpy"),
+            .init(module: "mlx", pipPackage: "mlx"),
+            .init(module: "mlx_lm", pipPackage: "mlx-lm"),
+        ]
+        return [
             CompatibilityEngineManifest(
                 id: .music, version: "1", capabilities: [.musicGenerate],
                 acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: [
+                requiredModules: base + [
                     .init(module: "torch", pipPackage: "torch"),
                     .init(module: "transformers", pipPackage: "transformers"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
@@ -38,7 +46,7 @@ public enum MacCapabilities {
                 id: .soundFX, version: "1", capabilities: [.audioGenerate],
                 acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: [
+                requiredModules: base + [
                     .init(module: "audiocraft", pipPackage: "mlx-audiocraft==0.1.0"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
                 ],
@@ -48,14 +56,14 @@ public enum MacCapabilities {
                 id: .advancedImageEdit, version: "1", capabilities: [.imageEdit],
                 acceptedInputs: [.image, .text], producedOutputs: [.image], producedArtifactKind: .image,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: [.init(module: "mflux", pipPackage: "mflux")],
+                requiredModules: base + [.init(module: "mflux", pipPackage: "mflux")],
                 modelAssets: [.init(id: "flux2-klein", displayName: "FLUX.2 Klein", approxBytes: 8_600_000_000)]),
 
             CompatibilityEngineManifest(
                 id: .diarization, version: "1", capabilities: [.audioDiarize],
                 acceptedInputs: [.audio], producedOutputs: [.json], producedArtifactKind: .json,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: [
+                requiredModules: base + [
                     .init(module: "sherpa_onnx", pipPackage: "sherpa-onnx"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
                 ],

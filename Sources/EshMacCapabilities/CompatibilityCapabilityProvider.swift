@@ -6,7 +6,7 @@ import EshRuntime
 /// preflight → install/repair → execute state machine, forwards the host's events, maps failures to typed
 /// `CompatibilityError`s (never a raw traceback), and reports honest availability into discovery. The same
 /// public `execute`/`stream` contract as every native provider — the consumer sees no difference.
-public final class CompatibilityCapabilityProvider: CapabilityProvider, CapabilityAvailabilityReporting, @unchecked Sendable {
+public final class CompatibilityCapabilityProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let manifest: CompatibilityEngineManifest
     private let host: CompatibilityEngineHost
@@ -33,6 +33,9 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
         guard supported else { return }
         stateBox.set(await host.inspect(manifest))
     }
+
+    // CapabilityAvailabilityRefreshing
+    public func refreshAvailability() async { await refresh() }
 
     // MARK: CapabilityAvailabilityReporting
     public func reportedAvailability(for capability: CapabilityID) -> CapabilityAvailability? {

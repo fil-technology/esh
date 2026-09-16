@@ -58,3 +58,10 @@ public protocol CapabilityAvailabilityReporting: Sendable {
     /// The provider's current availability for one of its capabilities, or `nil` to defer to the default.
     func reportedAvailability(for capability: CapabilityID) -> CapabilityAvailability?
 }
+
+/// A reporting provider that can refresh its cached state from a live preflight. Call
+/// `EshRuntime.refreshCapabilityAvailability()` before reading discovery to get accurate live states
+/// (e.g. after installing an engine, or at app launch).
+public protocol CapabilityAvailabilityRefreshing: CapabilityAvailabilityReporting {
+    func refreshAvailability() async
+}
