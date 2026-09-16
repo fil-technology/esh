@@ -50,8 +50,8 @@ reuse, and relaunch (freshly recreated runtime).
 | audio.diarize | compat sherpa-onnx | ALL CHECKS PASSED — JSON artifact on SSD |
 | music.generate | compat MusicGen | ALL CHECKS PASSED — 252 KB WAV on SSD (reused musicgen-small) |
 | image.generate (macOS) | compat mflux Z-Image-Turbo | ALL CHECKS PASSED — 324 KB PNG on SSD (reused Z-Image-Turbo; Apache-2.0) |
-| image.edit | compat mflux qwen-image-edit | (in progress) |
-| audio.generate (SFX) | compat mlx-audiocraft AudioGen | (pending isolated venv) |
+| image.edit | compat mflux qwen-image-edit | Experimental — wired + discoverable; end-to-end real-validation still in progress |
+| audio.generate (SFX) | compat mlx-audiocraft AudioGen | Experimental — resource-gated on this device's current state (swap headroom); reported honestly as insufficient-resources, not a defect. See SDK_CAPABILITY_MATRIX.md "SFX resource classification" |
 
 ## External-storage robustness
 
