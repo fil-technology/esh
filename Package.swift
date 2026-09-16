@@ -97,6 +97,14 @@ let package = Package(
         .library(
             name: "EshVision",
             targets: ["EshVision"]
+        ),
+        // Opt-in native image GENERATION (text->image) via MLX-Swift's StableDiffusion (SD 2.1 base,
+        // OpenRAIL-M). macOS (Apple silicon). Consumers link this only when they want on-device image
+        // generation; it pulls the same mlx-swift graph as EshVision (no new external packages, no
+        // swift-syntax). The model downloads from Hugging Face on first use.
+        .library(
+            name: "EshImageGen",
+            targets: ["EshImageGen"]
         )
     ],
     // Opt-in heavy multimodal: the ONLY external dependency of the portable package, and only the opt-in
@@ -113,6 +121,10 @@ let package = Package(
         // otherwise fails with a spurious "Offline mode error" on a consumer's first launch. Same version spec
         // as mlx-swift-examples (upToNextMinor 1.0.0) so SwiftPM keeps a single consistent version.
         .package(url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.0.0")),
+        // mlx-swift's `MLX` product (already in the resolved graph transitively via mlx-swift-examples).
+        // Named directly so the opt-in EshImageGen product can `eval()`/decode latents during diffusion.
+        // Same version spec as mlx-swift-examples (upToNextMinor 0.29.1).
+        .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.29.1")),
     ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,
@@ -161,6 +173,21 @@ let package = Package(
         .testTarget(
             name: "EshVisionTests",
             dependencies: ["EshVision"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .target(
+            name: "EshImageGen",
+            dependencies: [
+                "EshCore", "EshRuntime",
+                .product(name: "StableDiffusion", package: "mlx-swift-examples"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "Hub", package: "swift-transformers"),
+            ],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .testTarget(
+            name: "EshImageGenTests",
+            dependencies: ["EshImageGen"],
             swiftSettings: quietDebugSwiftSettings
         )
     ] + llamaTargets
