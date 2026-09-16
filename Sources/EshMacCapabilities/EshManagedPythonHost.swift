@@ -141,7 +141,12 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         let inputs = request.request.inputs
         func firstText() -> String { inputs.compactMap { if case .text(let t) = $0.payload { return t }; return nil }.joined(separator: " ") }
         func firstFile(_ kind: EshAttachment.Kind) -> String? {
-            inputs.compactMap { if case .attachment(let a) = $0.payload, a.kind == kind { return a.uri }; return nil }.first ?? nil
+            let uri = inputs.compactMap { if case .attachment(let a) = $0.payload, a.kind == kind { return a.uri }; return nil }.first ?? nil
+            guard let uri else { return nil }
+            // The bridge needs a filesystem path, not a URI. Resolve file:// URIs (which may be
+            // percent-encoded, e.g. spaces in an external-volume path) to a real path.
+            if uri.hasPrefix("file://"), let url = URL(string: uri), url.isFileURL { return url.path }
+            return uri
         }
         func intOpt(_ k: String) -> Int? { if case .int(let v)? = request.request.options.values[k] { return v }; return nil }
         func dblOpt(_ k: String) -> Double? { switch request.request.options.values[k] { case .double(let d): return d; case .int(let i): return Double(i); default: return nil } }

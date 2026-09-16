@@ -1116,7 +1116,17 @@ def audio_diarize() -> None:
     except Exception as exc:  # noqa: BLE001
         _fail(f"diarization failed: {type(exc).__name__}: {exc}")
     speakers = len({s["speaker"] for s in segments})
-    _dump_json({"segments": segments, "speakers": speakers})
+    payload = {"segments": segments, "speakers": speakers}
+    # Write the JSON artifact to outputPath so hosts that read the artifact from a file (like the esh
+    # managed host) get it uniformly; also echo to stdout for CLI callers.
+    out_path = request.get("outputPath")
+    if out_path:
+        try:
+            with open(out_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+        except Exception as exc:  # noqa: BLE001
+            _fail(f"diarization could not write output: {exc}")
+    _dump_json(payload)
 
 
 def _run_guarded_image_cli(cmd: list, out_path: str, min_free: float, label: str):
