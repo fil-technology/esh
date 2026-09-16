@@ -58,6 +58,16 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
                     continuation.finish(); return
                 }
                 do {
+                    // Resource preflight (defense-in-depth with scripts/compat-preflight.sh): refuse to run
+                    // when the internal volume lacks the swap headroom this model needs. Honest, typed, and
+                    // non-crashing — the 2026-09-16 watchdog panic came from letting a heavy run proceed into
+                    // swap exhaustion on a near-full disk. Freeing disk restores availability.
+                    let internalFree = SystemStorage.snapshot(at: context.root.stateRootURL)?.availableBytes
+                    if let reason = Self.insufficientResourceReason(internalFreeBytes: internalFree, manifest: manifest) {
+                        stateBox.set(.insufficientResources(reason: reason))
+                        continuation.yield(.failed(message: CompatibilityError.insufficientResources(reason: reason).errorDescription ?? "insufficient resources"))
+                        continuation.finish(); return
+                    }
                     continuation.yield(.status("checking \(manifest.id.rawValue) engine"))
                     // Preflight → install/repair as needed, updating cached state honestly.
                     var state = await host.inspect(manifest); stateBox.set(state)
@@ -76,6 +86,8 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
                             throw CompatibilityError.unsupportedOnPlatform
                         case .failed(let r):
                             throw CompatibilityError.executionFailed(reason: r)
+                        case .insufficientResources(let r):
+                            throw CompatibilityError.insufficientResources(reason: r)
                         case .installing, .ready:
                             break
                         }
@@ -105,6 +117,23 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
     }
 
     public func unload() async {}
+
+    /// Baseline free-disk floor for any generative compat engine (swap headroom). Heavier models require
+    /// more via the size-scaled term in `insufficientResourceReason`.
+    static let baseSwapHeadroomBytes: Int64 = 8 * 1024 * 1024 * 1024  // 8 GiB
+
+    /// Pure resource-preflight decision (unit-testable): the honest reason a run must be refused right now,
+    /// or nil to proceed. Required internal headroom = max(base floor, 2× declared model footprint). Never
+    /// blocks when free space is unknown (nil) — honesty over false negatives.
+    static func insufficientResourceReason(internalFreeBytes: Int64?, manifest: CompatibilityEngineManifest) -> String? {
+        guard let free = internalFreeBytes else { return nil }
+        let modelBytes = manifest.approxDownloadBytes ?? 0
+        let required = max(baseSwapHeadroomBytes, modelBytes * 2)
+        guard free < required else { return nil }
+        let gib: (Int64) -> Double = { Double($0) / 1_073_741_824 }
+        return String(format: "only %.1f GiB free on the internal volume; ~%.0f GiB needed as swap headroom for %@ (free disk and retry)",
+                      gib(free), gib(required), manifest.id.rawValue)
+    }
 
     private static func notReadyError(_ id: CompatibilityEngineID, _ state: CompatibilityEngineState) -> CompatibilityError {
         switch state {

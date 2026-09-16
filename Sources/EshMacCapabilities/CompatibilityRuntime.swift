@@ -80,6 +80,10 @@ public enum CompatibilityEngineState: Sendable, Equatable {
     case ready
     case unsupportedOnPlatform
     case failed(reason: String)
+    /// Installed/installable, but this device's current state (free disk for swap, memory) can't run the
+    /// model safely right now. Transient by nature — freeing resources restores it — so it maps to
+    /// `.temporarilyUnavailable`, not a hard `.unsupportedOnDevice`.
+    case insufficientResources(reason: String)
 
     /// Map an engine state to the public capability-availability the SDK reports (§8).
     public var availability: CapabilityAvailability {
@@ -91,6 +95,7 @@ public enum CompatibilityEngineState: Sendable, Equatable {
         case .ready:                        return .ready
         case .unsupportedOnPlatform:        return .unsupportedOnPlatform
         case .failed(let r):                return .failed(reason: r)
+        case .insufficientResources(let r): return .temporarilyUnavailable(reason: r)
         }
     }
 }
@@ -107,6 +112,9 @@ public enum CompatibilityError: Error, LocalizedError, Equatable, Sendable {
     case executionFailed(reason: String)
     case cancelled
     case unsupportedOnPlatform
+    /// This device's current resource state can't run the model safely (e.g. too little free disk for swap).
+    /// Honest, non-crashing alternative to letting the run drive the machine into swap exhaustion.
+    case insufficientResources(reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -119,6 +127,7 @@ public enum CompatibilityError: Error, LocalizedError, Equatable, Sendable {
         case .executionFailed(let r): return "Generation failed: \(r)"
         case .cancelled: return "The operation was cancelled."
         case .unsupportedOnPlatform: return "This capability is not supported on this platform."
+        case .insufficientResources(let r): return "Insufficient resources to run safely: \(r)"
         }
     }
 }

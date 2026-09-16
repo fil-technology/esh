@@ -16,6 +16,7 @@ private final class MockHost: CompatibilityEngineHost, @unchecked Sendable {
     private(set) var installCount = 0
     private(set) var repairCount = 0
     private(set) var runCancelled = false
+    private(set) var runStarted = false
 
     init(state: CompatibilityEngineState, run: Run = .artifact) { _state = state; _run = run }
     func state() -> CompatibilityEngineState { lock.lock(); defer { lock.unlock() }; return _state }
@@ -23,6 +24,7 @@ private final class MockHost: CompatibilityEngineHost, @unchecked Sendable {
     func setRun(_ r: Run) { lock.lock(); _run = r; lock.unlock() }
     private func run() -> Run { lock.lock(); defer { lock.unlock() }; return _run }
     private func markCancelled() { lock.lock(); runCancelled = true; lock.unlock() }
+    private func markStarted() { lock.lock(); runStarted = true; lock.unlock() }
     private func bump(install: Bool) { lock.lock(); if install { installCount += 1 } else { repairCount += 1 }; lock.unlock() }
 
     func inspect(_ manifest: CompatibilityEngineManifest) async -> CompatibilityEngineState { state() }
@@ -35,6 +37,7 @@ private final class MockHost: CompatibilityEngineHost, @unchecked Sendable {
         let behavior = run()
         return AsyncThrowingStream { continuation in
             let task = Task {
+                self.markStarted()
                 switch behavior {
                 case .artifact:
                     continuation.yield(.status("generating"))
@@ -73,6 +76,11 @@ private func musicRequest() -> ResolvedExecutionRequest {
 private func tmpRoot() -> URL {
     let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true); return u
+}
+/// Poll a condition until true or the timeout elapses (deterministic replacement for fixed test sleeps).
+private func pollUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() && Date() < deadline { try? await Task.sleep(nanoseconds: 5_000_000) }
 }
 private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) async -> (artifacts: [Artifact], failed: String?) {
     var arts: [Artifact] = []; var failed: String?
@@ -127,9 +135,12 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
         let stream = provider.execute(musicRequest(), context: ctx(tmp))
         let consumer = Task { for try await _ in stream {} }
-        try? await Task.sleep(nanoseconds: 60_000_000)
+        // Deterministic instead of a fixed sleep: wait until the host run has actually started, cancel, then
+        // wait until cancellation has propagated — poll with a timeout so build-machine load can't race it.
+        await pollUntil(timeout: 3) { host.runStarted }
+        #expect(host.runStarted)
         consumer.cancel()
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        await pollUntil(timeout: 3) { host.runCancelled }
         #expect(host.runCancelled)   // cancellation propagated to the host run; no orphan left running
     }
 
@@ -231,6 +242,39 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(!FileManager.default.fileExists(atPath: site.appendingPathComponent("._" + "__init__.py").path))
         // Idempotent: a second pass removes nothing and does not throw.
         #expect(EshManagedPythonHost.stripAppleDoubleFiles(inVenvFor: venv.appendingPathComponent("bin/python").path) == 0)
+    }
+
+    @Test func insufficientResourcesPreflightIsHonestAndSizeScaled() {
+        let audiogen = CompatibilityEngineManifest(
+            id: .soundFX, version: "1", capabilities: [.audioGenerate],
+            acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
+            runtimeVersion: "esh-compat-1", minimumOS: "macOS 14", requiredModules: [],
+            modelAssets: [.init(id: "audiogen", displayName: "AudioGen", approxBytes: 1_600_000_000)])
+        let flux = CompatibilityEngineManifest(
+            id: .advancedImageEdit, version: "1", capabilities: [.imageEdit],
+            acceptedInputs: [.image, .text], producedOutputs: [.image], producedArtifactKind: .image,
+            runtimeVersion: "esh-compat-1", minimumOS: "macOS 14", requiredModules: [],
+            modelAssets: [.init(id: "flux", displayName: "FLUX", approxBytes: 8_600_000_000)])
+        let gib: Int64 = 1_073_741_824
+        // Unknown free space never blocks (honesty over false negatives).
+        #expect(CompatibilityCapabilityProvider.insufficientResourceReason(internalFreeBytes: nil, manifest: audiogen) == nil)
+        // Below the 8 GiB base floor → blocked, with an honest reason naming the engine.
+        let low = CompatibilityCapabilityProvider.insufficientResourceReason(internalFreeBytes: 3 * gib, manifest: audiogen)
+        #expect(low != nil)
+        #expect(low?.contains("sound-fx") == true)
+        // Comfortable headroom for the small model → allowed.
+        #expect(CompatibilityCapabilityProvider.insufficientResourceReason(internalFreeBytes: 12 * gib, manifest: audiogen) == nil)
+        // Heavier model scales the requirement up (2× 8.6 GiB ≈ 17.2 GiB): 12 GiB is fine for audiogen but not flux.
+        #expect(CompatibilityCapabilityProvider.insufficientResourceReason(internalFreeBytes: 12 * gib, manifest: flux) != nil)
+        #expect(CompatibilityCapabilityProvider.insufficientResourceReason(internalFreeBytes: 20 * gib, manifest: flux) == nil)
+    }
+
+    @Test func insufficientResourcesMapsToTemporarilyUnavailable() {
+        let state = CompatibilityEngineState.insufficientResources(reason: "only 3.0 GiB free")
+        guard case .temporarilyUnavailable(let reason) = state.availability else {
+            Issue.record("expected .temporarilyUnavailable"); return
+        }
+        #expect(reason.contains("3.0 GiB"))
     }
 
     // Real end-to-end SFX generation through the esh-managed AudioGen runtime on the configured storage
