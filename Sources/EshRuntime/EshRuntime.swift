@@ -1,5 +1,8 @@
 import Foundation
 import EshCore
+#if canImport(Speech)
+import Speech
+#endif
 
 // esh 2.x — M3: the app-facing runtime facade.
 //
@@ -42,19 +45,36 @@ public struct EshGenerationRequest: Sendable {
     public var messages: [Message]
     public var constraints: EshConstraints
     public var config: GenerationConfig
+    /// Requested output format (text/json/json_schema/grammar). Resolved honestly against the selected
+    /// backend: enforced natively via constrained decoding when supported, otherwise approximated by an
+    /// injected system instruction, otherwise (strict) refused. Reflected in `EshGenerationResult.capabilityResolution`.
+    public var responseFormat: EshResponseFormat?
+    /// Tool/function definitions the model may call. NOTE: native local tool-calling is not available on
+    /// esh's on-device runtimes today; these are accepted and reported (see `capabilityResolution`) but a
+    /// `.toolCall` is only ever emitted when a backend genuinely produces one — never fabricated.
+    public var tools: [EshToolDefinition]?
+    public var toolChoice: EshToolChoice?
 
-    public init(messages: [Message], constraints: EshConstraints = .auto, config: GenerationConfig = .init()) {
+    public init(messages: [Message], constraints: EshConstraints = .auto, config: GenerationConfig = .init(),
+                responseFormat: EshResponseFormat? = nil, tools: [EshToolDefinition]? = nil,
+                toolChoice: EshToolChoice? = nil) {
         self.messages = messages
         self.constraints = constraints
         self.config = config
+        self.responseFormat = responseFormat
+        self.tools = tools
+        self.toolChoice = toolChoice
     }
 
     /// Convenience: a single user prompt with an optional system instruction.
-    public init(prompt: String, system: String? = nil, constraints: EshConstraints = .auto, config: GenerationConfig = .init()) {
+    public init(prompt: String, system: String? = nil, constraints: EshConstraints = .auto,
+                config: GenerationConfig = .init(), responseFormat: EshResponseFormat? = nil,
+                tools: [EshToolDefinition]? = nil, toolChoice: EshToolChoice? = nil) {
         var msgs: [Message] = []
         if let system, !system.isEmpty { msgs.append(Message(role: .system, text: system)) }
         msgs.append(Message(role: .user, text: prompt))
-        self.init(messages: msgs, constraints: constraints, config: config)
+        self.init(messages: msgs, constraints: constraints, config: config,
+                  responseFormat: responseFormat, tools: tools, toolChoice: toolChoice)
     }
 }
 
@@ -77,17 +97,30 @@ public struct EshGenerationResult: Sendable {
     public var text: String
     public var selection: EshSelection
     public var metrics: Metrics
-    public init(text: String, selection: EshSelection, metrics: Metrics) {
+    /// The model's separated reasoning/thinking chain, when it emitted one and `config.enableThinking` was
+    /// set (parsed out of the visible text). `nil` otherwise.
+    public var reasoning: String?
+    /// How the request's `responseFormat`/`tools` were resolved against the selected backend (native /
+    /// approximated / rejected). `nil` when neither was requested.
+    public var capabilityResolution: CapabilityResolution?
+    public init(text: String, selection: EshSelection, metrics: Metrics,
+                reasoning: String? = nil, capabilityResolution: CapabilityResolution? = nil) {
         self.text = text
         self.selection = selection
         self.metrics = metrics
+        self.reasoning = reasoning
+        self.capabilityResolution = capabilityResolution
     }
 }
 
-/// Streaming events. `token` carries incremental text (backends that do not stream emit one token event);
-/// `completed` carries the final assembled result with selection + metrics.
+/// Streaming events. `token` carries incremental visible text; `reasoningDelta` carries incremental
+/// reasoning/thinking text (only when the model separates it and `config.enableThinking` is set);
+/// `toolCall` is emitted only when a backend genuinely produces one (never fabricated — see
+/// `EshGenerationRequest.tools`); `completed` carries the final assembled result.
 public enum EshGenerationEvent: Sendable {
     case token(String)
+    case reasoningDelta(String)
+    case toolCall(EshToolCall)
     case completed(EshGenerationResult)
 }
 
@@ -291,18 +324,12 @@ public actor EshRuntime {
     /// through the existing backend runtime, and returns the assembled text plus selection + metrics.
     public func generate(_ request: EshGenerationRequest) async throws -> EshGenerationResult {
         let plan = try plan(for: request)
-        let runtime: any BackendRuntime
-        do {
-            runtime = try await plan.backend.loadRuntime(for: plan.install)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: Self.reason(from: error))
-        }
-        let session = Self.session(from: request, install: plan.install)
+        let resolved = try resolveCapabilities(for: request, backend: plan.selection.backend)
+        let runtime = try await loadRuntime(plan)
+        let session = Self.session(install: plan.install, messages: resolved.messages)
         var text = ""
         do {
-            for try await chunk in runtime.generate(session: session, config: request.config) {
+            for try await chunk in runtime.generate(session: session, config: resolved.config) {
                 try Task.checkCancellation()
                 text += chunk
             }
@@ -317,7 +344,16 @@ public actor EshRuntime {
             throw EshRuntimeError.generationFailed(reason: Self.reason(from: error))
         }
         let metrics = await runtime.metrics
-        return EshGenerationResult(text: text, selection: plan.selection, metrics: metrics)
+        // §5 reasoning: when thinking is enabled, separate the reasoning chain from the visible answer.
+        var visible = text
+        var reasoning: String? = nil
+        if request.config.enableThinking == true {
+            let parsed = ThinkingParser.parse(text)
+            visible = parsed.answer ?? ""
+            reasoning = parsed.reasoning
+        }
+        return EshGenerationResult(text: visible, selection: plan.selection, metrics: metrics,
+                                   reasoning: reasoning, capabilityResolution: resolved.resolution)
     }
 
     /// Convenience: generate from a single prompt with Auto selection and default config.
@@ -370,21 +406,30 @@ public actor EshRuntime {
             let task = Task {
                 do {
                     let plan = try await self.plan(for: request)
-                    let runtime: any BackendRuntime
+                    let resolved = try await self.resolveCapabilities(for: request, backend: plan.selection.backend)
+                    let runtime = try await self.loadRuntime(plan)
+                    let session = EshRuntime.session(install: plan.install, messages: resolved.messages)
+                    let thinking = request.config.enableThinking == true
+                    var splitter = ReasoningStreamSplitter()
+                    var visibleAll = ""
+                    var rawAll = ""
                     do {
-                        runtime = try await plan.backend.loadRuntime(for: plan.install)
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: EshRuntime.reason(from: error))
-                    }
-                    let session = EshRuntime.session(from: request, install: plan.install)
-                    var text = ""
-                    do {
-                        for try await chunk in runtime.generate(session: session, config: request.config) {
+                        for try await chunk in runtime.generate(session: session, config: resolved.config) {
                             try Task.checkCancellation()
-                            text += chunk
-                            continuation.yield(.token(chunk))
+                            rawAll += chunk
+                            if thinking {
+                                let (v, r) = splitter.ingest(chunk, final: false)
+                                if !r.isEmpty { continuation.yield(.reasoningDelta(r)) }
+                                if !v.isEmpty { visibleAll += v; continuation.yield(.token(v)) }
+                            } else {
+                                visibleAll += chunk
+                                continuation.yield(.token(chunk))
+                            }
+                        }
+                        if thinking {
+                            let (v, r) = splitter.ingest("", final: true)
+                            if !r.isEmpty { continuation.yield(.reasoningDelta(r)) }
+                            if !v.isEmpty { visibleAll += v; continuation.yield(.token(v)) }
                         }
                         try Task.checkCancellation()
                     } catch is CancellationError {
@@ -395,7 +440,18 @@ public actor EshRuntime {
                         throw EshRuntimeError.generationFailed(reason: EshRuntime.reason(from: error))
                     }
                     let metrics = await runtime.metrics
-                    continuation.yield(.completed(EshGenerationResult(text: text, selection: plan.selection, metrics: metrics)))
+                    // Authoritative split for the final result — handles explicit AND implicit-open formats.
+                    var finalText = visibleAll
+                    var finalReasoning: String? = nil
+                    if thinking {
+                        let parsed = ThinkingParser.parse(rawAll)
+                        finalText = parsed.answer ?? ""
+                        finalReasoning = parsed.reasoning
+                    }
+                    let result = EshGenerationResult(
+                        text: finalText, selection: plan.selection, metrics: metrics,
+                        reasoning: finalReasoning, capabilityResolution: resolved.resolution)
+                    continuation.yield(.completed(result))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -509,8 +565,38 @@ public actor EshRuntime {
         return AppleProvider.syntheticInstall()
     }
 
-    static func session(from request: EshGenerationRequest, install: ModelInstall) -> ChatSession {
-        ChatSession(name: "esh-runtime", modelID: install.id, backend: install.spec.backend, messages: request.messages)
+    static func session(install: ModelInstall, messages: [Message]) -> ChatSession {
+        ChatSession(name: "esh-runtime", modelID: install.id, backend: install.spec.backend, messages: messages)
+    }
+
+    /// Load the runtime for a plan, mapping non-typed load failures to a typed `modelLoadFailed`.
+    private func loadRuntime(_ plan: Plan) async throws -> any BackendRuntime {
+        do { return try await plan.backend.loadRuntime(for: plan.install) }
+        catch is CancellationError { throw CancellationError() }
+        catch { throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: Self.reason(from: error)) }
+    }
+
+    /// Resolve `responseFormat`/`tools` against the selected backend (§5). Returns the (possibly augmented)
+    /// messages, the (possibly constrained) config, and the honest resolution. When neither is requested the
+    /// inputs pass through unchanged (identical to the pre-§5 path — no behavior change for plain text).
+    func resolveCapabilities(for request: EshGenerationRequest, backend: BackendKind) throws
+        -> (messages: [Message], config: GenerationConfig, resolution: CapabilityResolution?) {
+        guard request.responseFormat != nil || (request.tools?.isEmpty == false) else {
+            return (request.messages, request.config, nil)
+        }
+        let outcome = CapabilityResolver().resolve(
+            responseFormat: request.responseFormat, backend: backend,
+            tools: request.tools, reasoningEnabled: request.config.enableThinking)
+        if request.responseFormat?.strict == true, outcome.resolution.hasRejections {
+            let detail = outcome.resolution.first(named: "response_format")?.detail ?? "not supported"
+            throw EshRuntimeError.generationFailed(reason: "strict structured output rejected: \(detail)")
+        }
+        var messages = request.messages
+        if let aug = outcome.systemInstructionAugmentation { messages.insert(Message(role: .system, text: aug), at: 0) }
+        var config = request.config
+        if let schema = outcome.nativeJSONSchema { config.jsonSchema = schema }
+        if let grammar = outcome.nativeGrammar { config.grammar = grammar }
+        return (messages, config, outcome.resolution)
     }
 
     /// Human-readable reason for a non-typed backend error, kept as display text on a typed case so the
@@ -596,6 +682,7 @@ public extension EshRuntime {
         func classify(_ cap: CapabilityID) -> CapabilityAvailability {
             if registered.contains(cap) {
                 if cap == .imageOCR { return .ready }               // Apple Vision — zero-dependency, on-device
+                if cap == .audioTranscribe { return Self.speechRecognitionAvailability() }
                 if textDependent.contains(cap) {
                     if textReady { return .ready }
                     return anyTextBackendWired
@@ -651,11 +738,29 @@ public extension EshRuntime {
         registry.register(TextToSVGProvider(infer: infer))
         registry.register(WebArtifactProvider(infer: infer))
         registry.register(ProjectGenProvider(infer: infer))
+        // §4 — portable on-device speech (Apple frameworks; no model download).
+        registry.register(AppleSpeechSynthesizeProvider())
+        registry.register(AppleSpeechTranscribeProvider())
         for provider in additionalProviders { registry.register(provider) }
 
         let context = ExecutionContext(root: root, artifactStore: FileArtifactStore(root: root))
         let service = CapabilityExecutionService(registry: registry, context: context)
         await runtime.attachCapabilities(service: service, registry: registry)
         return runtime
+    }
+
+    /// Honest availability for on-device speech recognition (§4/§6): ready when authorized (or not yet
+    /// asked — the provider prompts on first use), unsupported when the user denied it or the device has no
+    /// recognizer, and unsupported-on-platform where the Speech framework is absent.
+    static func speechRecognitionAvailability() -> CapabilityAvailability {
+        #if canImport(Speech)
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized, .notDetermined: return .ready
+        case .denied, .restricted: return .unsupportedOnDevice(reason: "speech recognition permission is not granted")
+        @unknown default: return .temporarilyUnavailable(reason: "speech recognition status is unknown")
+        }
+        #else
+        return .unsupportedOnPlatform
+        #endif
     }
 }

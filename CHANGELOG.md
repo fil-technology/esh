@@ -26,6 +26,35 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.7 (speech + text-path events — Phase 2)
+
+Additive to rc.6. Two more of the app's requested areas land through the public facade:
+
+**§4 — portable on-device speech (iOS + macOS, Apple frameworks, no model download):**
+- `audio.synthesizeSpeech` — `AppleSpeechSynthesizeProvider` (AVSpeechSynthesizer) → a WAV `Artifact`;
+  honors `voice`/`language`/`speed` via `ExecutionOptions`.
+- `audio.transcribe` — `AppleSpeechTranscribeProvider` (SFSpeechRecognizer, on-device) → `.textDelta`;
+  requests authorization and fails honestly if denied/unavailable (never silent). `capabilityAvailability()`
+  reports STT per the recognizer's authorization status (`ready`/`unsupportedOnDevice`).
+- Both wired into `makeDefault`.
+
+**§5 — tool-calling, reasoning, and structured output on the text path (additive, honest):**
+- `EshGenerationRequest` gains `responseFormat`, `tools`, `toolChoice`. `EshGenerationEvent` gains
+  `.reasoningDelta` and `.toolCall`; `EshGenerationResult` gains `reasoning` and `capabilityResolution`.
+- **Structured output** is now resolved in the facade path (native constrained decoding when the backend
+  supports it, else an injected instruction; strict + unsupported → typed failure).
+- **Reasoning** is separated from the visible answer: live `.reasoningDelta` for the explicit `<think>…
+  </think>` format, and an authoritative split (both explicit and implicit-open) on the final result via
+  `ThinkingParser`. Plain generation is unchanged when thinking is off.
+- **Tools** are accepted and honestly reported via `capabilityResolution` — native local tool-calling is
+  not available on esh's on-device runtimes, so `tools` resolve as *rejected* and no `.toolCall` is ever
+  fabricated; the `.toolCall` event exists for when a backend natively produces one.
+- NOTE: adding `.reasoningDelta`/`.toolCall` to `EshGenerationEvent` means consumers with an exhaustive
+  `switch` over it must add cases (or a `default`).
+
+Still staged: §3 macOS-only image/vision/audio/music/video (Python/MLX — needs a separate macOS
+capabilities product + a Python-runtime distribution decision).
+
 ### SDK — v2.4.0-rc.6 (multimodal capability facade — Phase 1)
 
 Additive to the rc.5 text API (nothing removed or changed for existing consumers). Exposes the EshCore

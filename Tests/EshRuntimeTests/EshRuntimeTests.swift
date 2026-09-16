@@ -167,6 +167,7 @@ struct EshRuntimeTests {
             switch event {
             case .token(let t): tokens.append(t)
             case .completed(let r): completed = r
+            case .reasoningDelta, .toolCall: break
             }
         }
         #expect(tokens == ["a", "b", "c"])

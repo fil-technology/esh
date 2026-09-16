@@ -110,6 +110,27 @@ private func makeMockRuntime(output: String, tmp: URL) async -> EshRuntime {
         #expect(result.outputs.contains { $0.kind == .webProject })
     }
 
+    @Test func synthesizeSpeechProducesAudioArtifact() async throws {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: PersistenceRoot(rootURL: tmp),
+                                                   installProvider: StaticInstallProvider([]))
+        let req = ExecutionRequest(capability: .audioSynthesizeSpeech,
+                                   inputs: [.text("Hello from esh.")], output: OutputSpec(modality: .audio))
+        let result = try await runtime.execute(req)
+        #expect(result.outputs.contains { $0.kind == .audio })
+        #expect((result.outputs.first { $0.kind == .audio }?.totalByteSize ?? 0) > 0)
+    }
+
+    @Test func availabilityIncludesSpeech() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: PersistenceRoot(rootURL: tmp))
+        let snap = await runtime.capabilityAvailability()
+        #expect(snap.isReady(.audioSynthesizeSpeech))                 // TTS needs no permission
+        if case .comingLater = snap.state(for: .audioTranscribe) {    // STT is wired (state depends on auth)
+            Issue.record("audio.transcribe should be registered, not comingLater")
+        }
+    }
+
     @Test func streamWebArtifactEmitsArtifactEvent() async throws {
         let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
         let html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>t</title></head><body><p>hi</p></body></html>"
