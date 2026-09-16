@@ -1,4 +1,7 @@
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 import EshCore
 @testable import EshRuntime
@@ -148,6 +151,52 @@ private func makeMockRuntime(output: String, tmp: URL) async -> EshRuntime {
                                    inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: png1x1))],
                                    output: OutputSpec(modality: .image))
         await #expect(throws: CapabilityError.self) { try await runtime.execute(req) }
+    }
+
+    @Test func upscaleIsNativeAndDiscoverable() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: PersistenceRoot(rootURL: tmp))
+        let snap = await runtime.capabilityAvailability()
+        #expect(snap.isReady(.imageUpscale))   // native MetalFX/Core Image provider — portable, not macOS-only
+    }
+
+    @Test func upscaleProducesLargerImage() async throws {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let root = PersistenceRoot(rootURL: tmp)
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: root,
+                                                   installProvider: StaticInstallProvider([]))
+        let src = Self.solidPNG(width: 64, height: 64)  // real 64×64 image bytes
+        let req = ExecutionRequest(capability: .imageUpscale,
+                                   inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: src.base64EncodedString()))],
+                                   output: OutputSpec(modality: .image),
+                                   options: ExecutionOptions(["scale": .double(2.0)]))
+        let result = try await runtime.execute(req)
+        #expect(result.outputs.count == 1)
+        let artifact = try #require(result.outputs.first)
+        let store = FileArtifactStore(root: root)
+        let png = try #require(try store.data(id: artifact.id, file: artifact.entrypoint ?? "upscaled.png"))
+        let dims = try #require(Self.pngSize(png))
+        #expect(dims == CGSize(width: 128, height: 128))   // 64×64 upscaled 2× → 128×128
+        FileHandle.standardError.write(Data("[upscale] engine=\(artifact.generatedBy.providerID ?? "?") outBytes=\(png.count)\n".utf8))
+    }
+
+    static func solidPNG(width: Int, height: Int) -> Data {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let img = ctx.makeImage()!
+        let data = NSMutableData()
+        let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, img, nil); CGImageDestinationFinalize(dest)
+        return data as Data
+    }
+
+    static func pngSize(_ data: Data) -> CGSize? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        return CGSize(width: img.width, height: img.height)
     }
 
     @Test func streamWebArtifactEmitsArtifactEvent() async throws {

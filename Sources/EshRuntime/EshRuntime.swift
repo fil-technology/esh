@@ -679,8 +679,9 @@ public extension EshRuntime {
         // (image.understand is NOT here: it's now a native MLX-Swift provider via the opt-in EshVision
         // product, portable to iOS + macOS. image.segment is native Vision. The rest remain macOS-only
         // compatibility engines today.)
+        // (image.upscale is NOT here: it's now a native MetalFX/Core Image provider, portable to iOS + macOS.)
         let macOSOnly: Set<CapabilityID> = [
-            .imageGenerate, .imageEdit, .imageUpscale,
+            .imageGenerate, .imageEdit,
             .audioGenerate, .musicGenerate, .audioDiarize, .videoUnderstand
         ]
         // The full set the SDK models today (so the app can render every mode's state).
@@ -758,6 +759,7 @@ public extension EshRuntime {
         registry.register(LanguageGenerateProvider(stream: stream))
         registry.register(AppleVisionOCRProvider())
         registry.register(AppleVisionSegmentationProvider())   // §3/§10 native background removal
+        registry.register(AppleImageUpscaleProvider())         // §3 native upscale (MetalFX + Lanczos fallback)
         registry.register(TextToSVGProvider(infer: infer))
         registry.register(WebArtifactProvider(infer: infer))
         registry.register(ProjectGenProvider(infer: infer))
