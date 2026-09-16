@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import EshCore
-import EshRuntime
+@testable import EshRuntime
 @testable import EshMacCapabilities
 
 // Deterministic tests for the compatibility-runtime state machine + facade integration, using a scriptable
@@ -231,6 +231,24 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(!FileManager.default.fileExists(atPath: site.appendingPathComponent("._" + "__init__.py").path))
         // Idempotent: a second pass removes nothing and does not throw.
         #expect(EshManagedPythonHost.stripAppleDoubleFiles(inVenvFor: venv.appendingPathComponent("bin/python").path) == 0)
+    }
+
+    // Real end-to-end SFX generation through the esh-managed AudioGen runtime on the configured storage
+    // volume. Multi-GB and slow, so it is OFF by default and only runs when ESH_RUN_COMPAT_INTEGRATION=1.
+    // Provision first with scripts/setup-audio-runtime.sh, and launch behind the disk/swap guard:
+    //   scripts/compat-preflight.sh env ESH_RUN_COMPAT_INTEGRATION=1 \
+    //     swift test --filter integrationSFXGeneratesAudioOnManagedRuntime
+    @Test func integrationSFXGeneratesAudioOnManagedRuntime() async throws {
+        guard ProcessInfo.processInfo.environment["ESH_RUN_COMPAT_INTEGRATION"] == "1" else { return }
+        let host = EshManagedPythonHost(pythonPath: nil, bridgeScriptsDir: nil)
+        let runtime = await EshRuntime.makeWithMacCapabilities(host: host)
+        let req = ExecutionRequest(capability: .audioGenerate,
+                                   inputs: [.text("rain on a window with distant thunder")],
+                                   output: OutputSpec(modality: .audio, format: "audio/wav"))
+        let result = try await runtime.execute(req)
+        let audio = result.outputs.first { $0.kind == .audio }
+        #expect(audio != nil, "audio.generate produced no audio artifact (provision with scripts/setup-audio-runtime.sh)")
+        #expect((audio?.totalByteSize ?? 0) > 0, "audio artifact is empty")
     }
 
     @Test func bridgeEnvironmentKeepsHeavyIOoffInternalDisk() {
