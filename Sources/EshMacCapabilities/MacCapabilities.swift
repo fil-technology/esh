@@ -52,6 +52,16 @@ public enum MacCapabilities {
                 ],
                 modelAssets: [.init(id: "audiogen", displayName: "AudioGen", approxBytes: 1_600_000_000)]),
 
+            // macOS text->image generation via mflux's Z-Image-Turbo (Apache-2.0, ~8 steps). The 4-bit
+            // model is already present on the configured assets volume; no gated repo, no token. The native
+            // MLX-Swift SD path (EshImageGen) is the separate iOS-native workstream.
+            CompatibilityEngineManifest(
+                id: .imageGeneration, version: "1", capabilities: [.imageGenerate],
+                acceptedInputs: [.text], producedOutputs: [.image], producedArtifactKind: .image,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [.init(module: "mflux", pipPackage: "mflux")],
+                modelAssets: [.init(id: "z-image-turbo", displayName: "Z-Image Turbo (mflux 4-bit)", approxBytes: 6_500_000_000)]),
+
             CompatibilityEngineManifest(
                 id: .advancedImageEdit, version: "1", capabilities: [.imageEdit],
                 acceptedInputs: [.image, .text], producedOutputs: [.image], producedArtifactKind: .image,

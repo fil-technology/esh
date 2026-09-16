@@ -130,6 +130,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         switch id {
         case .music:             return ("music-generate", "wav", .audio)
         case .soundFX:           return ("audio-generate", "wav", .audio)
+        case .imageGeneration:   return ("image-generate", "png", .image)
         case .advancedImageEdit: return ("image-edit", "png", .image)
         case .diarization:       return ("audio-diarize", "json", .json)
         }
@@ -154,6 +155,16 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             // Route Hugging Face weights to the configured audio cache on the assets volume (external SSD),
             // reusing previously downloaded MusicGen/AudioGen assets instead of the internal `~/.cache`.
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .imageGeneration:
+            let prompt = firstText()
+            guard !prompt.isEmpty else { throw CompatibilityError.executionFailed(reason: "image generation requires a text prompt") }
+            dict["prompt"] = prompt
+            if let w = intOpt("width") { dict["width"] = w }
+            if let h = intOpt("height") { dict["height"] = h }
+            if let s = intOpt("steps") { dict["steps"] = s }
+            if let seed = intOpt("seed") { dict["seed"] = seed }
+            // Reuse the Z-Image-Turbo mflux 4-bit model already on the assets volume (external SSD).
+            dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
         case .advancedImageEdit:
             guard let img = firstFile(.image) else { throw CompatibilityError.executionFailed(reason: "image edit requires an image input") }
             dict["inputPath"] = img
@@ -180,7 +191,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         var env = ProcessInfo.processInfo.environment
         let family: String
         switch id {
-        case .advancedImageEdit: family = "image"
+        case .imageGeneration, .advancedImageEdit: family = "image"
         default: family = "audio"
         }
         let hf = root.pythonHFCacheURL(family: family).path

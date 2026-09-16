@@ -63,6 +63,33 @@ public struct SelfHostedModel: Sendable {
     public init(modelID: String, baseURL: URL, files: [Entry]) {
         self.modelID = modelID; self.baseURL = baseURL; self.files = files
     }
+
+    /// Default community mirror of SD 2.1 base in diffusers layout. The original
+    /// `stabilityai/stable-diffusion-2-1-base` repo was made private/deprecated by Stability AI in late
+    /// 2025 (404/401 anonymously); this mirror carries the same diffusers weights and is publicly fetchable.
+    public static let stableDiffusion21BaseMirror =
+        URL(string: "https://huggingface.co/Manojb/stable-diffusion-2-1-base/resolve/main")!
+
+    /// SD 2.1 base (OpenRAIL-M) served from a public mirror into the MLX StableDiffusion `.base` preset's
+    /// cache layout. `modelID` MUST match the preset id so the loader finds the files locally after prefetch.
+    /// The multi-GB weights are pinned to the mirror's SHA-256 (LFS oids) so a corrupted/partial download is
+    /// rejected; the small JSON/tokenizer files are unpinned. Weights land on the configured storage volume.
+    public static func stableDiffusion21Base(mirror: URL = stableDiffusion21BaseMirror) -> SelfHostedModel {
+        SelfHostedModel(modelID: "stabilityai/stable-diffusion-2-1-base", baseURL: mirror, files: [
+            Entry(relativePath: "unet/config.json"),
+            Entry(relativePath: "unet/diffusion_pytorch_model.safetensors",
+                  sha256: "6dfae3e5f7d459b50f4b0850ead945972c75bb0e1897628933e169eb43974214"),
+            Entry(relativePath: "text_encoder/config.json"),
+            Entry(relativePath: "text_encoder/model.safetensors",
+                  sha256: "cce6febb0b6d876ee5eb24af35e27e764eb4f9b1d0b7c026c8c3333d4cfc916c"),
+            Entry(relativePath: "vae/config.json"),
+            Entry(relativePath: "vae/diffusion_pytorch_model.safetensors",
+                  sha256: "a1d993488569e928462932c8c38a0760b874d166399b14414135bd9c42df5815"),
+            Entry(relativePath: "scheduler/scheduler_config.json"),
+            Entry(relativePath: "tokenizer/vocab.json"),
+            Entry(relativePath: "tokenizer/merges.txt"),
+        ])
+    }
 }
 
 /// Places a `SelfHostedModel`'s files into the Hub cache location, verifying checksums and skipping files

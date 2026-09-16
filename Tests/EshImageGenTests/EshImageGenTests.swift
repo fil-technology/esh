@@ -118,9 +118,11 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
             || FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.esh_imagegen_real")
         guard optedIn else { return }
 
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let root = PersistenceRoot(rootURL: tmp)
-        let runtime = await EshRuntime.makeWithImageGen(backends: [:], root: root)
+        // Use the configured storage root (external SSD via storage.json) so weights land off the internal
+        // disk, and fetch SD 2.1 base from the public community mirror (the official repo is deprecated).
+        let root = PersistenceRoot.default()
+        let runtime = await EshRuntime.makeWithImageGen(selfHosted: SelfHostedModel.stableDiffusion21Base(),
+                                                        backends: [:], root: root)
 
         let before = await runtime.capabilityAvailability()
         if case .requiresDownload = before.entries[.imageGenerate] {} else {

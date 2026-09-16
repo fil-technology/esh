@@ -16,6 +16,7 @@ import EshRuntime
 public enum CompatibilityEngineID: String, Sendable, Hashable, CaseIterable, Codable {
     case music              = "music"
     case soundFX            = "sound-fx"
+    case imageGeneration    = "image-generation"
     case advancedImageEdit  = "advanced-image-edit"
     case diarization        = "diarization"
 }

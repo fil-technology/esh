@@ -102,9 +102,11 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
         let text = (result.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         FileHandle.standardError.write(Data("[realVLM] first=\(String(format: "%.1f", dt1))s text=\"\(text)\"\n".utf8))
         #expect(!text.isEmpty)
+        // The VLM may answer in English or Chinese (non-deterministic); accept both for the content check.
         let lc = text.lowercased()
-        #expect(lc.contains("red"))
-        #expect(lc.contains("circle") || lc.contains("round") || lc.contains("dot") || lc.contains("sphere") || lc.contains("ball"))
+        #expect(lc.contains("red") || text.contains("红"))
+        #expect(lc.contains("circle") || lc.contains("round") || lc.contains("dot") || lc.contains("sphere")
+                || lc.contains("ball") || text.contains("圆"))
 
         // discovery now ready
         let after = await runtime.capabilityAvailability()
