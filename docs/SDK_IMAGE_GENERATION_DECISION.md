@@ -1,8 +1,25 @@
 # esh SDK — Native Image Generation: Model + Runtime/Packaging Decision
 
-Status: **Decision requested (§4).** Prepared in parallel with native VLM/upscale work. Needs your call on
-(1) the base model(s) + license/hosting, and (2) the native runtime/packaging approach — because that same
-choice also governs native VLM.
+Status: **APPROVED (2026-09-16).** Decisions below are now the plan of record.
+
+## Decisions (approved)
+- **Runtime/packaging: Hybrid.** Core ML for `image.generate` (lean, zero SwiftPM dep, iPhone-capable);
+  MLX-Swift (`mlx-swift-examples` → `MLXVLM`) confined to the opt-in **EshVision** product for
+  `image.understand`. mlx-swift is verified swift-syntax-free (LLM.swift coexistence preserved).
+- **Models:** **SD 2.1 base (OpenRAIL-M)** via Core ML as the iPhone-capable default; **FLUX.1-schnell
+  (Apache-2.0)** via MLX on macOS for top quality.
+- **License:** OpenRAIL-M is acceptable for Esh Studio.
+- **Hosting:** convert SD 2.1 base to Core ML and host the `.mlpackage` bundle as a versioned, checksummed
+  esh release asset (same mechanism as the llama.xcframework binaryTarget), installed via the model catalog
+  with Model Fit; FLUX-schnell weights via HF through the MLX path.
+
+Implementation order from here: native VLM (MLX-Swift, EshVision) → native upscale → native image
+generation (Core ML SD 2.1 + FLUX-schnell) → real compatibility validation sweep (SFX/diarization/edit) →
+catalog/discovery/Model Fit → single feature-complete RC.
+
+---
+
+_Original analysis (retained for reference):_
 
 ## Why a decision is needed now
 - Image generation must ship a real, embeddable, **commercially-licensable** model esh can host + install.
