@@ -91,12 +91,29 @@ let package = Package(
         .library(
             name: "EshMacCapabilities",
             targets: ["EshMacCapabilities"]
+        ),
+        // Opt-in native image understanding (VLM) via MLX-Swift. iOS + macOS. Consumers link this only when
+        // they want vision understanding; it pulls the mlx-swift graph (see `dependencies`).
+        .library(
+            name: "EshVision",
+            targets: ["EshVision"]
         )
     ],
-    // No external package dependencies: the portable SDK graph is EshCore/EshRuntime → Apple system
-    // frameworks (and, for EshLlamaCpp, a single binaryTarget). swift-syntax / TTSMLX / mlx-audio are
-    // declared only by the macos/ package.
-    dependencies: [],
+    // Opt-in heavy multimodal: the ONLY external dependency of the portable package, and only the opt-in
+    // `EshVision` product uses it (native MLX-Swift VLM). Its graph is mlx-swift + swift-transformers
+    // (jinja/huggingface/collections/crypto/yyjson) — verified to contain NO swift-syntax, so the rc.3/rc.4
+    // LLM.swift coexistence is preserved. Text/Create-only consumers link EshCore/EshRuntime and never build
+    // this. (Core ML image generation, when added, needs no SwiftPM dependency.)
+    dependencies: [
+        .package(url: "https://github.com/ml-explore/mlx-swift-examples", exact: "2.29.1"),
+        // swift-transformers' `Hub` product (already in the resolved graph transitively via mlx-swift-examples,
+        // and verified to contain NO swift-syntax). Named directly so EshVision can construct a `HubApi` with
+        // offline detection disabled — swift-transformers' NWPathMonitor delivers its first path callback
+        // asynchronously, so a fresh process momentarily reports "not connected" and the FIRST model download
+        // otherwise fails with a spurious "Offline mode error" on a consumer's first launch. Same version spec
+        // as mlx-swift-examples (upToNextMinor 1.0.0) so SwiftPM keeps a single consistent version.
+        .package(url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.0.0")),
+    ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,
         // device profile, and the Apple Foundation Models backend. Builds on every Apple platform and
@@ -129,6 +146,21 @@ let package = Package(
         .testTarget(
             name: "EshMacCapabilitiesTests",
             dependencies: ["EshMacCapabilities"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .target(
+            name: "EshVision",
+            dependencies: [
+                "EshCore", "EshRuntime",
+                .product(name: "MLXVLM", package: "mlx-swift-examples"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
+                .product(name: "Hub", package: "swift-transformers"),
+            ],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .testTarget(
+            name: "EshVisionTests",
+            dependencies: ["EshVision"],
             swiftSettings: quietDebugSwiftSettings
         )
     ] + llamaTargets

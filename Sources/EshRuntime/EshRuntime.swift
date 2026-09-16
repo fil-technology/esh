@@ -676,8 +676,11 @@ public extension EshRuntime {
         let textDependent: Set<CapabilityID> = [.languageGenerate, .vectorGenerate, .webArtifactGenerate, .projectGenerate]
         // Families that today require a macOS/Python(MLX) runtime — not available to a portable consumer on
         // iOS. (image.segment is NOT here: it's now a native Vision provider, portable to iOS.)
+        // (image.understand is NOT here: it's now a native MLX-Swift provider via the opt-in EshVision
+        // product, portable to iOS + macOS. image.segment is native Vision. The rest remain macOS-only
+        // compatibility engines today.)
         let macOSOnly: Set<CapabilityID> = [
-            .imageGenerate, .imageEdit, .imageUpscale, .imageUnderstand,
+            .imageGenerate, .imageEdit, .imageUpscale,
             .audioGenerate, .musicGenerate, .audioDiarize, .videoUnderstand
         ]
         // The full set the SDK models today (so the app can render every mode's state).
