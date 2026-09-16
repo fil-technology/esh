@@ -55,6 +55,12 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
                 guard supported else {
                     continuation.yield(.failed(message: "image understanding is not supported on this platform")); continuation.finish(); return
                 }
+                // If the model isn't already loaded in this process, it must be read from (or downloaded to)
+                // the configured assets volume — fail cleanly if that external volume is unavailable, rather
+                // than silently writing to the internal disk. In-process reuse (state already .ready) skips this.
+                if case .ready = stateBox.get() {} else if case .unavailable(let reason) = StorageService().availability(root: context.root) {
+                    continuation.yield(.failed(message: "model storage is unavailable: \(reason)")); continuation.finish(); return
+                }
                 guard let imagePath = Self.imagePath(from: attachment) else {
                     continuation.yield(.failed(message: "image.understand requires an image attachment (uri or base64)")); continuation.finish(); return
                 }

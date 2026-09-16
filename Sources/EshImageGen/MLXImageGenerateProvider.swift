@@ -81,6 +81,11 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
                 guard !prompt.isEmpty else {
                     continuation.yield(.failed(message: "image.generate requires a text prompt")); continuation.finish(); return
                 }
+                // Fail cleanly if the configured (external) assets volume is unavailable and the model is not
+                // already loaded in-process — never silently fall back to the internal disk.
+                if case .ready = stateBox.get() {} else if case .unavailable(let reason) = StorageService().availability(root: context.root) {
+                    continuation.yield(.failed(message: "model storage is unavailable: \(reason)")); continuation.finish(); return
+                }
                 do {
                     continuation.yield(.status("loading image model"))
                     var produced = false

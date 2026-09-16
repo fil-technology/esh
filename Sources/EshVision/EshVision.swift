@@ -31,8 +31,11 @@ public enum EshVision {
     public static let sharedCache = MLXModelCache()
 
     /// The MLX-backed token stream: load (or reuse) the VLM container, then stream a response for the
-    /// image + prompt. Cancelling the returned stream cancels generation.
-    public static func mlxStream(modelID: String, cache: MLXModelCache = sharedCache) -> VLMStreamFn {
+    /// image + prompt. Cancelling the returned stream cancels generation. `downloadBase`, when provided,
+    /// routes weight downloads to the configured storage volume (external SSD) instead of the internal
+    /// default (`~/Documents/huggingface`).
+    public static func mlxStream(modelID: String, cache: MLXModelCache = sharedCache,
+                                 downloadBase: URL? = nil) -> VLMStreamFn {
         { imagePath, prompt in
             AsyncThrowingStream { continuation in
                 let task = Task {
@@ -44,8 +47,9 @@ public enum EshVision {
                             // Disable swift-transformers' automatic offline detection: its NWPathMonitor
                             // delivers the first path callback asynchronously, so a fresh process would
                             // otherwise fail the very first download with a spurious "Offline mode error"
-                            // before connectivity is known. Weights still download from Hugging Face.
-                            let hub = HubApi(useOfflineMode: false)
+                            // before connectivity is known. Weights still download from Hugging Face, into
+                            // `downloadBase` (the configured assets volume) when provided.
+                            let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
                             container = try await VLMModelFactory.shared.loadContainer(
                                 hub: hub, configuration: ModelConfiguration(id: modelID))
                             await cache.store(modelID, container)
@@ -69,11 +73,13 @@ public enum EshVision {
     }
 
     /// The `image.understand` provider(s) to register. Pass to `makeDefault(additionalProviders:)`.
-    public static func providers(modelID: String = defaultModelID) -> [any CapabilityProvider] {
+    /// `downloadBase` routes VLM weight downloads to the configured storage volume (external SSD).
+    public static func providers(modelID: String = defaultModelID,
+                                 downloadBase: URL? = nil) -> [any CapabilityProvider] {
         let cache = sharedCache
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXVisionUnderstandProvider(modelID: modelID, supported: isSupportedPlatform,
-                                            stream: mlxStream(modelID: modelID, cache: cache),
+                                            stream: mlxStream(modelID: modelID, cache: cache, downloadBase: downloadBase),
                                             readyProbe: readyProbe)]
     }
 }
@@ -89,6 +95,6 @@ public extension EshRuntime {
     ) async -> EshRuntime {
         await EshRuntime.makeDefault(
             backends: backends, root: root, installProvider: installProvider,
-            additionalProviders: EshVision.providers(modelID: modelID))
+            additionalProviders: EshVision.providers(modelID: modelID, downloadBase: root.huggingFaceCacheURL))
     }
 }

@@ -24,6 +24,24 @@ public struct PersistenceRoot: Sendable {
     /// Alias for `rootURL`, for call sites that want to be explicit about the internal state root.
     public var stateRootURL: URL { rootURL }
 
+    /// Download cache for swift-transformers (MLX-Swift) model weights — native VLM (`EshVision`) and
+    /// native image generation (`EshImageGen`). Lives under the relocatable assets root so heavy weights
+    /// follow the configured storage volume (external SSD) instead of defaulting to the internal disk
+    /// (`~/Documents/huggingface`). Distinct from the Python bridge's Hugging Face caches, which use the
+    /// `huggingface_hub` on-disk layout under `caches/audio-models` and `caches/image-models`.
+    public var huggingFaceCacheURL: URL { cachesURL.appendingPathComponent("hf-swift", isDirectory: true) }
+
+    /// The Python bridge's Hugging Face cache for a given asset family (audio: MusicGen/AudioGen; image:
+    /// FLUX/mflux edit). Matches the existing on-disk `caches/<family>-models` layout so previously
+    /// downloaded assets on the configured volume are reused rather than re-fetched.
+    public func pythonHFCacheURL(family: String) -> URL {
+        cachesURL.appendingPathComponent("\(family)-models", isDirectory: true)
+    }
+
+    /// Directory holding the diarization ONNX models (sherpa-onnx segmentation + embedding), under the
+    /// relocatable audio assets so they live on the configured storage volume.
+    public var diarizationModelsURL: URL { audioURL.appendingPathComponent("diarization-models", isDirectory: true) }
+
     /// True when assets are configured to live somewhere other than the internal state root.
     public var usesExternalAssets: Bool {
         rootURL.standardizedFileURL != assetsRootURL.standardizedFileURL

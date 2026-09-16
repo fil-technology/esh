@@ -62,15 +62,21 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             let procBox = ProcessBox()
             let work = Task.detached {
                 do {
+                    // Gate on the configured assets volume before any heavy write: if the external storage
+                    // volume is disconnected/mismatched, fail cleanly instead of falling back to internal disk.
+                    do { try StorageService().ensureAssetsAvailable(root: context.root) }
+                    catch { continuation.yield(.failed(message: "model storage is unavailable: \(error.localizedDescription)")); continuation.finish(); return }
+
                     let (command, outExt, artifactKind) = Self.bridgeCommand(for: manifest.id)
                     try FileManager.default.createDirectory(at: context.root.tempURL, withIntermediateDirectories: true)
                     let outPath = context.root.tempURL.appendingPathComponent(UUID().uuidString + "." + outExt).path
-                    let requestJSON = try Self.bridgeRequest(manifest.id, request, outputPath: outPath)
+                    let requestJSON = try Self.bridgeRequest(manifest.id, request, outputPath: outPath, root: context.root)
 
                     continuation.yield(.status("running \(manifest.id.rawValue) engine"))
                     let proc = Process()
                     proc.executableURL = URL(fileURLWithPath: python)
                     proc.arguments = [dir + "/mlx_vlm_bridge.py", command]
+                    proc.environment = Self.bridgeEnvironment(for: manifest.id, root: context.root)
                     let stdin = Pipe(); let stdout = Pipe(); let stderr = Pipe()
                     proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
                     procBox.set(proc)
@@ -129,7 +135,8 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         }
     }
 
-    static func bridgeRequest(_ id: CompatibilityEngineID, _ request: ResolvedExecutionRequest, outputPath: String) throws -> Data {
+    static func bridgeRequest(_ id: CompatibilityEngineID, _ request: ResolvedExecutionRequest,
+                              outputPath: String, root: PersistenceRoot) throws -> Data {
         let inputs = request.request.inputs
         func firstText() -> String { inputs.compactMap { if case .text(let t) = $0.payload { return t }; return nil }.joined(separator: " ") }
         func firstFile(_ kind: EshAttachment.Kind) -> String? {
@@ -144,16 +151,53 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             dict["prompt"] = firstText()
             dict["seconds"] = dblOpt("seconds") ?? 8.0
             dict["seed"] = intOpt("seed") ?? 0
+            // Route Hugging Face weights to the configured audio cache on the assets volume (external SSD),
+            // reusing previously downloaded MusicGen/AudioGen assets instead of the internal `~/.cache`.
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         case .advancedImageEdit:
             guard let img = firstFile(.image) else { throw CompatibilityError.executionFailed(reason: "image edit requires an image input") }
             dict["inputPath"] = img
             dict["instruction"] = firstText()
+            // Route FLUX/mflux weights to the configured image cache on the assets volume (external SSD).
+            dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
         case .diarization:
             guard let audio = firstFile(.audio) else { throw CompatibilityError.executionFailed(reason: "diarization requires an audio input") }
             dict["audioPath"] = audio
             if let n = intOpt("numSpeakers") { dict["numSpeakers"] = n }
+            // The sherpa-onnx models live on the configured audio-assets volume (external SSD). The provider
+            // passes their paths explicitly; the bridge never downloads them itself.
+            dict["segModel"] = root.diarizationModelsURL.appendingPathComponent("segmentation.onnx").path
+            dict["embModel"] = root.diarizationModelsURL.appendingPathComponent("embedding.onnx").path
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         }
         return try JSONSerialization.data(withJSONObject: dict)
+    }
+
+    /// The subprocess environment that keeps ALL heavy Hugging Face / temp I/O on the configured assets
+    /// volume (external SSD), never the internal disk. Belt-and-suspenders alongside the per-request
+    /// `hfCache` field: some libraries freeze their cache dir from the environment at import time.
+    static func bridgeEnvironment(for id: CompatibilityEngineID, root: PersistenceRoot) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let family: String
+        switch id {
+        case .advancedImageEdit: family = "image"
+        default: family = "audio"
+        }
+        let hf = root.pythonHFCacheURL(family: family).path
+        try? FileManager.default.createDirectory(atPath: hf + "/hub", withIntermediateDirectories: true)
+        env["HF_HOME"] = hf
+        env["HF_HUB_CACHE"] = hf + "/hub"
+        env["HUGGINGFACE_HUB_CACHE"] = hf + "/hub"
+        // Route temporary/staging writes (e.g. large intermediate tensors) to the assets volume too.
+        try? FileManager.default.createDirectory(at: root.tempURL, withIntermediateDirectories: true)
+        env["TMPDIR"] = root.tempURL.path
+        // Reuse an esh-managed AudioGen venv on the assets volume when present (SFX runs in an isolated
+        // mlx-audiocraft runtime); the bridge also accepts ESH_AUDIOGEN_PYTHON from the ambient environment.
+        let audiogenPython = root.audioURL.appendingPathComponent("audiogen-venv/bin/python3").path
+        if FileManager.default.isExecutableFile(atPath: audiogenPython) {
+            env["ESH_AUDIOGEN_PYTHON"] = audiogenPython
+        }
+        return env
     }
 
     static func mime(for ext: String) -> String {

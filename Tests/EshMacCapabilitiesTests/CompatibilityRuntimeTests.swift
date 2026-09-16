@@ -185,6 +185,51 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
     }
     #endif
 
+    #if os(macOS)
+    // The compatibility bridge must route ALL heavy Hugging Face / model / temp I/O to the configured
+    // assets volume (external SSD), never the internal disk — via the per-request paths and the subprocess
+    // environment. These assert both, using a PersistenceRoot whose assets root differs from its state root.
+    @Test func bridgeRequestRoutesHeavyPathsToAssetsRoot() throws {
+        let state = tmpRoot(); let assets = tmpRoot()
+        defer { try? FileManager.default.removeItem(at: state); try? FileManager.default.removeItem(at: assets) }
+        let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
+        func json(_ id: CompatibilityEngineID, _ req: ResolvedExecutionRequest) throws -> [String: Any] {
+            let data = try EshManagedPythonHost.bridgeRequest(id, req, outputPath: "/x/out.bin", root: root)
+            return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        }
+        // music/SFX -> audio cache on the assets volume
+        let music = try json(.music, ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .musicGenerate, inputs: [.text("calm piano")], output: OutputSpec(modality: .audio))))
+        #expect((music["hfCache"] as? String) == assets.appendingPathComponent("caches/audio-models").path)
+        // image edit -> image cache on the assets volume + model paths
+        let edit = try json(.advancedImageEdit, ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageEdit,
+            inputs: [.text("make it snowy"), .attachment(EshAttachment(kind: .image, mimeType: "image/png", uri: "file:///t.png"))],
+            output: OutputSpec(modality: .image))))
+        #expect((edit["hfCache"] as? String) == assets.appendingPathComponent("caches/image-models").path)
+        // diarization -> sherpa-onnx models on the assets volume
+        let diar = try json(.diarization, ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioDiarize,
+            inputs: [.attachment(EshAttachment(kind: .audio, mimeType: "audio/wav", uri: "file:///a.wav"))],
+            output: OutputSpec(modality: .json))))
+        #expect((diar["segModel"] as? String) == assets.appendingPathComponent("audio/diarization-models/segmentation.onnx").path)
+        #expect((diar["embModel"] as? String) == assets.appendingPathComponent("audio/diarization-models/embedding.onnx").path)
+    }
+
+    @Test func bridgeEnvironmentKeepsHeavyIOoffInternalDisk() {
+        let state = tmpRoot(); let assets = tmpRoot()
+        defer { try? FileManager.default.removeItem(at: state); try? FileManager.default.removeItem(at: assets) }
+        let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
+        let audioEnv = EshManagedPythonHost.bridgeEnvironment(for: .music, root: root)
+        #expect(audioEnv["HF_HOME"] == assets.appendingPathComponent("caches/audio-models").path)
+        #expect(audioEnv["TMPDIR"] == assets.appendingPathComponent("tmp").path)
+        // never the internal state root or the user's ~/.cache
+        #expect(audioEnv["HF_HOME"]?.contains(state.path) == false)
+        let imageEnv = EshManagedPythonHost.bridgeEnvironment(for: .advancedImageEdit, root: root)
+        #expect(imageEnv["HF_HOME"] == assets.appendingPathComponent("caches/image-models").path)
+    }
+    #endif
+
     @Test func discoveryThroughFacade() async {
         let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
         let host = MockHost(state: .ready, run: .artifact)

@@ -238,6 +238,19 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
         }
     }
 
+    @Test func storageUnavailableFailsCleanly() async {
+        // A configured external assets volume that isn't mounted -> the provider must fail cleanly
+        // (honest "storage is unavailable"), never silently fall back to the internal disk.
+        let stateTmp = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let missingExternal = URL(fileURLWithPath: "/Volumes/definitely-not-mounted-\(UUID().uuidString)/esh-models")
+        let root = PersistenceRoot(stateRootURL: stateTmp, assetsRootURL: missingExternal)
+        let context = ExecutionContext(root: root, artifactStore: FileArtifactStore(root: root))
+        let p = MLXImageGenerateProvider(modelID: "m", supported: true, generate: mockEngine(png: tinyPNG()))
+        let out = await collect(p.execute(req(), context: context))
+        #expect(out.artifacts == 0)
+        #expect(out.failed?.contains("storage is unavailable") == true)
+    }
+
     @Test func paramsSnapDimensionsAndClampSteps() {
         let params = MLXImageGenerateProvider.params(from: [
             "width": .int(700), "height": .int(500), "steps": .int(9999), "seed": .int(42)

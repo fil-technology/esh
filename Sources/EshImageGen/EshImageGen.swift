@@ -247,13 +247,14 @@ public enum EshImageGen {
 
     /// The MLX-backed generation stream: download (or reuse) the SD generator, run the diffusion loop, and
     /// emit per-step progress then the final PNG. Cancelling the returned stream cancels generation.
-    public static func mlxGenerate(engine: SDEngine = sharedEngine) -> ImageGenFn {
+    public static func mlxGenerate(engine: SDEngine = sharedEngine, downloadBase: URL? = nil) -> ImageGenFn {
         { prompt, params in
             AsyncThrowingStream { continuation in
                 let task = Task {
                     do {
                         // Disable swift-transformers' async offline detection (see EshVision for the rationale).
-                        let hub = HubApi(useOfflineMode: false)
+                        // `downloadBase` routes weights to the configured storage volume (external SSD).
+                        let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
                         let png = try await engine.run(prompt: prompt, params: params, hub: hub) { p in
                             continuation.yield(.progress(p))
                         }
@@ -274,11 +275,13 @@ public enum EshImageGen {
     /// Provide `selfHosted` to serve weights from esh's own checksummed assets (no Hugging Face token/gate);
     /// otherwise the model downloads from Hugging Face on first use (which may be gated for some repos).
     public static func providers(modelID: String = defaultModelID,
-                                 selfHosted: SelfHostedModel? = nil) -> [any CapabilityProvider] {
+                                 selfHosted: SelfHostedModel? = nil,
+                                 downloadBase: URL? = nil) -> [any CapabilityProvider] {
         let engine = selfHosted.map { SDEngine(selfHosted: $0) } ?? sharedEngine
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXImageGenerateProvider(modelID: modelID, supported: isSupportedPlatform,
-                                         generate: mlxGenerate(engine: engine), readyProbe: readyProbe)]
+                                         generate: mlxGenerate(engine: engine, downloadBase: downloadBase),
+                                         readyProbe: readyProbe)]
     }
 }
 
@@ -294,6 +297,7 @@ public extension EshRuntime {
     ) async -> EshRuntime {
         await EshRuntime.makeDefault(
             backends: backends, root: root, installProvider: installProvider,
-            additionalProviders: EshImageGen.providers(modelID: modelID, selfHosted: selfHosted))
+            additionalProviders: EshImageGen.providers(modelID: modelID, selfHosted: selfHosted,
+                                                       downloadBase: root.huggingFaceCacheURL))
     }
 }
