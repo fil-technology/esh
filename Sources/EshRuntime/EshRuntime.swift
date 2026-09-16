@@ -665,9 +665,10 @@ public extension EshRuntime {
 
         // Capabilities whose provider needs a text model (they prompt an LLM).
         let textDependent: Set<CapabilityID> = [.languageGenerate, .vectorGenerate, .webArtifactGenerate, .projectGenerate]
-        // Families that require a macOS/Python(MLX) runtime — not available to a portable consumer on iOS.
+        // Families that today require a macOS/Python(MLX) runtime — not available to a portable consumer on
+        // iOS. (image.segment is NOT here: it's now a native Vision provider, portable to iOS.)
         let macOSOnly: Set<CapabilityID> = [
-            .imageGenerate, .imageEdit, .imageUpscale, .imageSegment, .imageUnderstand,
+            .imageGenerate, .imageEdit, .imageUpscale, .imageUnderstand,
             .audioGenerate, .musicGenerate, .audioDiarize, .videoUnderstand
         ]
         // The full set the SDK models today (so the app can render every mode's state).
@@ -735,6 +736,7 @@ public extension EshRuntime {
         var registry = CapabilityRegistry()
         registry.register(LanguageGenerateProvider(stream: stream))
         registry.register(AppleVisionOCRProvider())
+        registry.register(AppleVisionSegmentationProvider())   // §3/§10 native background removal
         registry.register(TextToSVGProvider(infer: infer))
         registry.register(WebArtifactProvider(infer: infer))
         registry.register(ProjectGenProvider(infer: infer))

@@ -131,6 +131,25 @@ private func makeMockRuntime(output: String, tmp: URL) async -> EshRuntime {
         }
     }
 
+    @Test func segmentationIsNativeAndDiscoverable() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: PersistenceRoot(rootURL: tmp))
+        let snap = await runtime.capabilityAvailability()
+        #expect(snap.isReady(.imageSegment))   // native Vision provider — portable, not macOS-only
+    }
+
+    @Test func segmentationNoSubjectFailsHonestly() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = await EshRuntime.makeDefault(backends: [:], root: PersistenceRoot(rootURL: tmp),
+                                                   installProvider: StaticInstallProvider([]))
+        // 1x1 PNG — no foreground subject → provider must fail honestly, not crash or return garbage.
+        let png1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        let req = ExecutionRequest(capability: .imageSegment,
+                                   inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", base64: png1x1))],
+                                   output: OutputSpec(modality: .image))
+        await #expect(throws: CapabilityError.self) { try await runtime.execute(req) }
+    }
+
     @Test func streamWebArtifactEmitsArtifactEvent() async throws {
         let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
         let html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>t</title></head><body><p>hi</p></body></html>"
