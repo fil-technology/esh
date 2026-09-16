@@ -1,0 +1,46 @@
+import Foundation
+import EshCore
+
+// esh 2.4 — §6 capability discovery. Per-capability availability an app can render directly, instead of
+// only the coarse backend-readiness in `EshCapabilitySnapshot`. States are honest: a capability is `.ready`
+// only when a provider is wired AND anything it needs (a text model) is ready; otherwise the exact reason
+// is surfaced so the product shows the correct "needs download / unsupported here / coming later" state.
+
+/// The honest availability of one capability on this device, right now.
+public enum CapabilityAvailability: Sendable, Equatable {
+    /// A provider is wired and everything it needs is ready — the capability can run now.
+    case ready
+    /// Wired, but needs a model downloaded first (e.g. a GGUF text model for artifact generation).
+    /// `modelID`/`bytes` are filled when a specific recommended model is known.
+    case requiresDownload(modelID: String?, bytes: Int64?)
+    /// A required model is currently downloading/installing.
+    case installing(progress: Double)
+    /// Wired, but not ready for a transient reason (e.g. no text backend loaded yet, low memory).
+    case temporarilyUnavailable(reason: String)
+    /// The underlying tech cannot run on THIS device (e.g. hardware/OS below the floor) though the
+    /// platform could otherwise support it.
+    case unsupportedOnDevice(reason: String)
+    /// This platform cannot provide the capability at all (e.g. a Python/MLX-only generator on iOS).
+    case unsupportedOnPlatform
+    /// Planned but not yet shipped in this SDK build.
+    case comingLater
+}
+
+/// A snapshot of per-capability availability. Build it from `EshRuntime.capabilityAvailability()`.
+public struct CapabilityAvailabilitySnapshot: Sendable {
+    /// Availability keyed by capability. Only capabilities the SDK knows about are present.
+    public var entries: [CapabilityID: CapabilityAvailability]
+    public init(entries: [CapabilityID: CapabilityAvailability]) { self.entries = entries }
+
+    /// Availability for a capability. Unknown capabilities read as `.comingLater` (honest default: the SDK
+    /// makes no claim it can serve something it doesn't model).
+    public func state(for capability: CapabilityID) -> CapabilityAvailability {
+        entries[capability] ?? .comingLater
+    }
+
+    /// True when the capability can run now.
+    public func isReady(_ capability: CapabilityID) -> Bool {
+        if case .ready = state(for: capability) { return true }
+        return false
+    }
+}

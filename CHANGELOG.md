@@ -26,6 +26,30 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.6 (multimodal capability facade — Phase 1)
+
+Additive to the rc.5 text API (nothing removed or changed for existing consumers). Exposes the EshCore
+"UCMR" multimodal contract through the public `EshRuntime` facade so an app no longer has to hand-build a
+`CapabilityRegistry`:
+
+- **`EshRuntime.execute(_ ExecutionRequest) async throws -> ExecutionResult`** and
+  **`stream(_ ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error>`** (cooperative cancellation,
+  same contract as the text `stream`).
+- **`EshRuntime.makeDefault(...) async`** — assembles a runtime with the platform text backend(s) **and** the
+  portable capability providers wired, so `execute`/`stream` work with no manual registry. GGUF variant:
+  `EshRuntime.makeWithEmbeddedGGUF(...) async` (EshLlamaCpp). A bare `EshRuntime()` stays text-only.
+- **Portable providers wired (iOS + macOS):** OCR (`image.ocr`, Apple Vision), SVG (`vector.generate`),
+  Website/HTML (`webArtifact.generate`), Code project (`project.generate`), and text (`language.*`). Their
+  text inference routes back through this runtime — no second inference stack.
+- **`capabilityAvailability() -> CapabilityAvailabilitySnapshot`** — honest per-capability states
+  (`ready` · `requiresDownload` · `installing` · `temporarilyUnavailable` · `unsupportedOnDevice` ·
+  `unsupportedOnPlatform` · `comingLater`); registry-driven so capabilities flip to `ready` as more
+  providers are wired.
+- Staged for later RCs: §3 macOS-only image/vision/audio/music providers (Python/MLX — need a separate
+  macOS capabilities product), §4 portable Apple `Speech`/`AVSpeech` STT-TTS, §5 tool-calling/reasoning/
+  structured-output events on the text path. Their capabilities report honestly (`unsupportedOnPlatform`/
+  `comingLater`) until wired.
+
 ### Packaging — v2.4.0-rc.4 (llama.cpp coexistence)
 
 - **`EshLlamaCpp` can now be linked into an app that already embeds another llama.cpp build** (e.g.

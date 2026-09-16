@@ -21,4 +21,17 @@ public extension EshRuntime {
                           installProvider: FileInstallProvider(root: root),
                           localModelManager: LocalModelManager(root: root))
     }
+
+    /// Like `withEmbeddedGGUF` but also wires the portable multimodal (UCMR) capability providers (OCR,
+    /// SVG, Web, Code, and text) behind the `execute`/`stream(ExecutionRequest)` facade — text capabilities
+    /// run on Apple FM or the embedded GGUF model. Use this when the app wants Create/OCR in addition to
+    /// chat. (Async because provider assembly attaches to the constructed runtime.)
+    static func makeWithEmbeddedGGUF(config: LlamaCppConfig = .init(),
+                                     root: PersistenceRoot = .default()) async -> EshRuntime {
+        await EshRuntime.makeDefault(
+            backends: [.apple: AppleBackend(), .gguf: LlamaCppEmbeddedBackend(config: config)],
+            root: root,
+            installProvider: FileInstallProvider(root: root),
+            localModelManager: LocalModelManager(root: root))
+    }
 }

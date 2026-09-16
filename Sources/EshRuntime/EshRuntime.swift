@@ -182,6 +182,22 @@ public actor EshRuntime {
     private let installProvider: EshInstallProviding
     private let deviceProfileProvider: DeviceProfileProviding
     private let localModelManager: LocalModelManager
+    // Multimodal (UCMR) facade wiring. Populated by `makeDefault(...)` / `withEmbeddedGGUF(...)` (or an
+    // advanced host via `attachCapabilities`); nil on a bare `EshRuntime()` (text-only, unchanged rc.5 API).
+    private var capabilityService: CapabilityExecutionService?
+    private var capabilityRegistry: CapabilityRegistry?
+
+    /// Attach an assembled UCMR capability stack (executor + its registry) to this runtime. Called by the
+    /// platform default factories after the runtime exists so provider closures can route text inference
+    /// back through this runtime. Advanced hosts may call it directly with a hand-built stack.
+    public func attachCapabilities(service: CapabilityExecutionService, registry: CapabilityRegistry) {
+        self.capabilityService = service
+        self.capabilityRegistry = registry
+    }
+
+    /// Actor-isolated accessors used by the `nonisolated` streaming entry point.
+    func capabilityServiceRef() -> CapabilityExecutionService? { capabilityService }
+    func capabilityRegistryRef() -> CapabilityRegistry? { capabilityRegistry }
 
     /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
     /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.
@@ -307,6 +323,43 @@ public actor EshRuntime {
     /// Convenience: generate from a single prompt with Auto selection and default config.
     public func generate(prompt: String) async throws -> EshGenerationResult {
         try await generate(EshGenerationRequest(prompt: prompt))
+    }
+
+    // MARK: - Text bridge for UCMR providers
+
+    /// Run a text `ExternalInferenceRequest` through this runtime's selection + backends and return the
+    /// assembled response. This is the `InferFn` the portable capability providers (SVG/Web/Project) call —
+    /// so they reuse esh's on-device text model with no separate inference stack. `model` maps to a pin
+    /// (Auto when nil); everything else (localOnly, generation config) flows through unchanged.
+    public func inferText(_ request: ExternalInferenceRequest) async throws -> ExternalInferenceResponse {
+        let messages = request.messages.map { Message(role: $0.role, text: $0.text) }
+        let constraints: EshConstraints = request.model.map { EshConstraints.pinned($0) } ?? .auto
+        let result = try await generate(EshGenerationRequest(messages: messages, constraints: constraints, config: request.generation))
+        return ExternalInferenceResponse(
+            modelID: result.selection.modelID,
+            backend: result.selection.backend,
+            integration: ExternalInferenceIntegration(mode: "esh-runtime"),
+            outputText: result.text,
+            metrics: result.metrics)
+    }
+
+    /// Streaming `StreamFn` variant used by `LanguageGenerateProvider` so `language.*` capabilities stream
+    /// through the same text path as `stream(_:)`.
+    nonisolated func inferStreamText(_ request: ExternalInferenceRequest) -> AsyncThrowingStream<String, Error> {
+        let messages = request.messages.map { Message(role: $0.role, text: $0.text) }
+        let constraints: EshConstraints = request.model.map { EshConstraints.pinned($0) } ?? .auto
+        let gen = EshGenerationRequest(messages: messages, constraints: constraints, config: request.generation)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await event in self.stream(gen) {
+                        if case let .token(t) = event { continuation.yield(t) }
+                    }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Streaming generation. Emits `.token` events as the backend produces text (a single `.token` for
@@ -464,5 +517,145 @@ public actor EshRuntime {
     /// host never has to parse it to branch. Prefers `LocalizedError.errorDescription`.
     static func reason(from error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "\(error)"
+    }
+}
+
+// MARK: - Multimodal (UCMR) capability facade (§1/§6)
+//
+// Additive to the text API. `execute`/`stream(ExecutionRequest)` run any wired capability (OCR, SVG, Web,
+// Code today; image/audio/… as providers are wired per platform) through the EshCore
+// `CapabilityExecutionService`; `capabilityAvailability()` reports honest per-capability states; and
+// `makeDefault(...)` assembles a runtime with the portable providers so a consumer never hand-builds a
+// registry. A bare `EshRuntime()` has no providers wired and these throw a clear typed error.
+
+public extension EshRuntime {
+    /// Run a capability request to completion, folding its event stream into an `ExecutionResult`
+    /// (accumulated text + produced artifacts + usage). Throws `CapabilityError.unsupported` when no
+    /// provider is wired for the capability (or none at all — build the runtime with `makeDefault`).
+    func execute(_ request: ExecutionRequest) async throws -> ExecutionResult {
+        guard let service = capabilityService else {
+            throw CapabilityError.unsupported(capability: request.capability.rawValue,
+                detail: "no capability providers are wired on this EshRuntime (build it with EshRuntime.makeDefault()).")
+        }
+        return try await service.executeCollecting(request)
+    }
+
+    /// Stream a capability request's events (`.textDelta`/`.reasoningDelta`/`.progress`/`.artifactProduced`/
+    /// `.previewReady`/`.usage`/`.done`/`.failed`). Cancelling the consuming task cancels the provider —
+    /// the same cooperative-cancellation contract as the text `stream(_:)`.
+    nonisolated func stream(_ request: ExecutionRequest) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                guard let service = await self.capabilityServiceRef() else {
+                    continuation.finish(throwing: CapabilityError.unsupported(capability: request.capability.rawValue,
+                        detail: "no capability providers are wired on this EshRuntime (build it with EshRuntime.makeDefault())."))
+                    return
+                }
+                do {
+                    for try await event in service.execute(request) {
+                        try Task.checkCancellation()
+                        continuation.yield(event)
+                    }
+                    try Task.checkCancellation()
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish(throwing: CancellationError())
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Honest per-capability availability for this device/platform (§6). Registry-driven: a capability is
+    /// `.ready` only when a provider is wired and anything it needs (a text model) is ready; unwired
+    /// capabilities report `.unsupportedOnPlatform` (families that cannot run here) or `.comingLater`.
+    func capabilityAvailability() -> CapabilityAvailabilitySnapshot {
+        let registered = Set((capabilityRegistry?.all ?? []).flatMap { $0.descriptor.capabilities })
+        let snapshot = capabilities()
+        let anyTextBackendWired = !snapshot.backends.isEmpty
+        let textReady = snapshot.hasReadyBackend
+
+        // Capabilities whose provider needs a text model (they prompt an LLM).
+        let textDependent: Set<CapabilityID> = [.languageGenerate, .vectorGenerate, .webArtifactGenerate, .projectGenerate]
+        // Families that require a macOS/Python(MLX) runtime — not available to a portable consumer on iOS.
+        let macOSOnly: Set<CapabilityID> = [
+            .imageGenerate, .imageEdit, .imageUpscale, .imageSegment, .imageUnderstand,
+            .audioGenerate, .musicGenerate, .audioDiarize, .videoUnderstand
+        ]
+        // The full set the SDK models today (so the app can render every mode's state).
+        let known: [CapabilityID] = [
+            .languageGenerate, .vectorGenerate, .webArtifactGenerate, .projectGenerate,
+            .imageOCR, .imageUnderstand,
+            .imageGenerate, .imageEdit, .imageUpscale, .imageSegment,
+            .audioTranscribe, .audioSynthesizeSpeech, .audioGenerate, .musicGenerate, .audioDiarize,
+            .videoUnderstand
+        ]
+
+        func classify(_ cap: CapabilityID) -> CapabilityAvailability {
+            if registered.contains(cap) {
+                if cap == .imageOCR { return .ready }               // Apple Vision — zero-dependency, on-device
+                if textDependent.contains(cap) {
+                    if textReady { return .ready }
+                    return anyTextBackendWired
+                        ? .temporarilyUnavailable(reason: "no text model is ready yet")
+                        : .requiresDownload(modelID: nil, bytes: nil)
+                }
+                return .ready
+            }
+            #if os(iOS) || os(tvOS) || os(watchOS)
+            if macOSOnly.contains(cap) { return .unsupportedOnPlatform }
+            #endif
+            return .comingLater
+        }
+
+        var entries: [CapabilityID: CapabilityAvailability] = [:]
+        for cap in known { entries[cap] = classify(cap) }
+        return CapabilityAvailabilitySnapshot(entries: entries)
+    }
+
+    /// Assemble a runtime with the platform's text backend(s) AND the portable capability providers
+    /// (OCR + SVG + Web + Code + text) wired behind the `execute`/`stream` facade. iOS gets Apple
+    /// Foundation Models text by default; richer/GGUF/macOS assemblies inject more `backends` and
+    /// `additionalProviders`. The provider text closure routes back through this runtime, so there is no
+    /// second inference stack.
+    static func makeDefault(
+        backends: [BackendKind: any InferenceBackend] = [.apple: AppleBackend()],
+        root: PersistenceRoot = .default(),
+        installProvider: EshInstallProviding = FileInstallProvider(),
+        deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
+        localModelManager: LocalModelManager = LocalModelManager(),
+        additionalProviders: [any CapabilityProvider] = []
+    ) async -> EshRuntime {
+        let runtime = EshRuntime(
+            registry: InferenceBackendRegistry(backends: backends),
+            installProvider: installProvider,
+            deviceProfileProvider: deviceProfileProvider,
+            localModelManager: localModelManager
+        )
+        let infer: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse = { [weak runtime] req in
+            guard let runtime else { throw CapabilityError.failed("EshRuntime was released before inference.") }
+            return try await runtime.inferText(req)
+        }
+        let stream: @Sendable (ExternalInferenceRequest) -> AsyncThrowingStream<String, Error> = { [weak runtime] req in
+            guard let runtime else {
+                return AsyncThrowingStream { $0.finish(throwing: CapabilityError.failed("EshRuntime was released before inference.")) }
+            }
+            return runtime.inferStreamText(req)
+        }
+
+        var registry = CapabilityRegistry()
+        registry.register(LanguageGenerateProvider(stream: stream))
+        registry.register(AppleVisionOCRProvider())
+        registry.register(TextToSVGProvider(infer: infer))
+        registry.register(WebArtifactProvider(infer: infer))
+        registry.register(ProjectGenProvider(infer: infer))
+        for provider in additionalProviders { registry.register(provider) }
+
+        let context = ExecutionContext(root: root, artifactStore: FileArtifactStore(root: root))
+        let service = CapabilityExecutionService(registry: registry, context: context)
+        await runtime.attachCapabilities(service: service, registry: registry)
+        return runtime
     }
 }
