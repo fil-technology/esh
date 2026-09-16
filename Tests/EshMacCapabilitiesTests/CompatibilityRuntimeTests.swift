@@ -216,6 +216,23 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect((diar["embModel"] as? String) == assets.appendingPathComponent("audio/diarization-models/embedding.onnx").path)
     }
 
+    @Test func stripsAppleDoubleFilesFromVenv() throws {
+        // exFAT external volumes accumulate macOS AppleDouble `._*` sidecars that break Python package
+        // directory scans (transformers). The managed install path strips them; real `.py` files are kept.
+        let venv = tmpRoot(); defer { try? FileManager.default.removeItem(at: venv) }
+        let site = venv.appendingPathComponent("lib/python3.11/site-packages/transformers/models", isDirectory: true)
+        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
+        try Data("real source".utf8).write(to: site.appendingPathComponent("__init__.py"))
+        try Data([0xb0, 0x00, 0x01]).write(to: site.appendingPathComponent("._" + "__init__.py"))  // binary AppleDouble
+        try Data([0xb0]).write(to: site.appendingPathComponent("._albert"))
+        let removed = EshManagedPythonHost.stripAppleDoubleFiles(inVenvFor: venv.appendingPathComponent("bin/python").path)
+        #expect(removed == 2)
+        #expect(FileManager.default.fileExists(atPath: site.appendingPathComponent("__init__.py").path))
+        #expect(!FileManager.default.fileExists(atPath: site.appendingPathComponent("._" + "__init__.py").path))
+        // Idempotent: a second pass removes nothing and does not throw.
+        #expect(EshManagedPythonHost.stripAppleDoubleFiles(inVenvFor: venv.appendingPathComponent("bin/python").path) == 0)
+    }
+
     @Test func bridgeEnvironmentKeepsHeavyIOoffInternalDisk() {
         let state = tmpRoot(); let assets = tmpRoot()
         defer { try? FileManager.default.removeItem(at: state); try? FileManager.default.removeItem(at: assets) }

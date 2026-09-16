@@ -172,7 +172,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
         case .advancedImageEdit:
             guard let img = firstFile(.image) else { throw CompatibilityError.executionFailed(reason: "image edit requires an image input") }
-            dict["inputPath"] = img
+            dict["imagePath"] = img
             dict["instruction"] = firstText()
             // Route FLUX/mflux weights to the configured image cache on the assets volume (external SSD).
             dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
@@ -271,6 +271,36 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "pip failed"
             throw CompatibilityError.dependencyInstallationFailed(reason: String(msg.suffix(300)))
         }
+        // On volumes without native extended attributes (exFAT/FAT — common for external asset volumes),
+        // macOS writes AppleDouble `._*` sidecars during the install. Python package directory scans (e.g.
+        // transformers importing its `models/`) read `._*.py` as UTF-8 source and crash. Strip them so module
+        // discovery works. No-op on APFS/HFS+ where the sidecars aren't created.
+        Self.stripAppleDoubleFiles(inVenvFor: python)
+    }
+
+    /// Remove macOS AppleDouble `._*` sidecars from an esh-managed venv (see `pipInstall`). Returns the count
+    /// removed. Idempotent and safe on filesystems that never create them.
+    @discardableResult
+    static func stripAppleDoubleFiles(inVenvFor python: String) -> Int {
+        // python is `<venv>/bin/python*`; scan the venv's library tree where packages live.
+        let venvRoot = URL(fileURLWithPath: python).deletingLastPathComponent().deletingLastPathComponent()
+        return stripAppleDoubleFiles(in: venvRoot.appendingPathComponent("lib", isDirectory: true))
+    }
+
+    @discardableResult
+    static func stripAppleDoubleFiles(in directory: URL) -> Int {
+        // NOTE: macOS's Foundation directory enumerators hide AppleDouble `._*` sidecars, so a Swift-level
+        // scan can't see (or delete) them — `find` can. Delete-and-print, then count the printed paths.
+        guard FileManager.default.fileExists(atPath: directory.path) else { return 0 }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/find")
+        p.arguments = [directory.path, "-name", "._*", "-type", "f", "-print", "-delete"]
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run() } catch { return 0 }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return text.split(whereSeparator: \.isNewline).count
     }
 
     static func readAll(_ handle: FileHandle) async throws -> Data {

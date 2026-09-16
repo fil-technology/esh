@@ -47,7 +47,9 @@ public enum MacCapabilities {
                 acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
                 requiredModules: base + [
-                    .init(module: "audiocraft", pipPackage: "mlx-audiocraft==0.1.0"),
+                    // The isolated AudioGen runtime imports `mlx_audiocraft` (underscore); the pip package is
+                    // `mlx-audiocraft`. Declaring the correct import name so preflight probes it accurately.
+                    .init(module: "mlx_audiocraft", pipPackage: "mlx-audiocraft==0.1.0"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
                 ],
                 modelAssets: [.init(id: "audiogen", displayName: "AudioGen", approxBytes: 1_600_000_000)]),
