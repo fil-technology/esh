@@ -82,6 +82,15 @@ let package = Package(
         .library(
             name: "EshRuntime",
             targets: ["EshRuntime"]
+        ),
+        // esh-owned macOS compatibility runtime (v2.4): exposes existing macOS-only capabilities
+        // (music/SFX/advanced image edit/diarization) through the SAME public capability facade, with esh
+        // owning the runtime lifecycle (install/health/repair/process supervision). Lean by design — depends
+        // only on EshCore + EshRuntime (no swift-syntax / TTSMLX), so it never regresses the rc.3/rc.4
+        // coexistence. Providers are macOS-only (`#if os(macOS)`); on iOS they report unsupportedOnPlatform.
+        .library(
+            name: "EshMacCapabilities",
+            targets: ["EshMacCapabilities"]
         )
     ],
     // No external package dependencies: the portable SDK graph is EshCore/EshRuntime → Apple system
@@ -110,6 +119,16 @@ let package = Package(
         .testTarget(
             name: "EshRuntimeTests",
             dependencies: ["EshRuntime"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .target(
+            name: "EshMacCapabilities",
+            dependencies: ["EshCore", "EshRuntime"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .testTarget(
+            name: "EshMacCapabilitiesTests",
+            dependencies: ["EshMacCapabilities"],
             swiftSettings: quietDebugSwiftSettings
         )
     ] + llamaTargets

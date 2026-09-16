@@ -680,7 +680,16 @@ public extension EshRuntime {
             .videoUnderstand
         ]
 
+        // Providers whose availability is runtime-stateful (e.g. macOS compatibility engines) report it
+        // directly; that wins over the static classification below.
+        let reporters = (capabilityRegistry?.all ?? []).compactMap { $0 as? CapabilityAvailabilityReporting }
+        func reported(_ cap: CapabilityID) -> CapabilityAvailability? {
+            for reporter in reporters { if let state = reporter.reportedAvailability(for: cap) { return state } }
+            return nil
+        }
+
         func classify(_ cap: CapabilityID) -> CapabilityAvailability {
+            if let state = reported(cap) { return state }
             if registered.contains(cap) {
                 if cap == .imageOCR { return .ready }               // Apple Vision — zero-dependency, on-device
                 if cap == .audioTranscribe { return Self.speechRecognitionAvailability() }

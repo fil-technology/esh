@@ -1,0 +1,200 @@
+import Foundation
+import Testing
+import EshCore
+import EshRuntime
+@testable import EshMacCapabilities
+
+// Deterministic tests for the compatibility-runtime state machine + facade integration, using a scriptable
+// mock host (no real Python). Covers: discovery states, clean bootstrap, repair, cancellation (no orphan),
+// crash recovery, typed errors (no raw traceback), artifact mapping, and the soundfile regression.
+
+private final class MockHost: CompatibilityEngineHost, @unchecked Sendable {
+    enum Run { case artifact, throwTyped(CompatibilityError), hang }
+    private let lock = NSLock()
+    private var _state: CompatibilityEngineState
+    private var _run: Run
+    private(set) var installCount = 0
+    private(set) var repairCount = 0
+    private(set) var runCancelled = false
+
+    init(state: CompatibilityEngineState, run: Run = .artifact) { _state = state; _run = run }
+    func state() -> CompatibilityEngineState { lock.lock(); defer { lock.unlock() }; return _state }
+    func setState(_ s: CompatibilityEngineState) { lock.lock(); _state = s; lock.unlock() }
+    func setRun(_ r: Run) { lock.lock(); _run = r; lock.unlock() }
+    private func run() -> Run { lock.lock(); defer { lock.unlock() }; return _run }
+    private func markCancelled() { lock.lock(); runCancelled = true; lock.unlock() }
+    private func bump(install: Bool) { lock.lock(); if install { installCount += 1 } else { repairCount += 1 }; lock.unlock() }
+
+    func inspect(_ manifest: CompatibilityEngineManifest) async -> CompatibilityEngineState { state() }
+    func install(_ manifest: CompatibilityEngineManifest, onProgress: @Sendable @escaping (Double) -> Void) async throws {
+        bump(install: true); onProgress(0.5); onProgress(1.0); setState(.ready)
+    }
+    func repair(_ manifest: CompatibilityEngineManifest) async throws { bump(install: false); setState(.ready) }
+    func run(_ manifest: CompatibilityEngineManifest, _ request: ResolvedExecutionRequest,
+             context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        let behavior = run()
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                switch behavior {
+                case .artifact:
+                    continuation.yield(.status("generating"))
+                    let art = try? context.artifactStore.save(
+                        Artifact(kind: manifest.producedArtifactKind, mimeType: "application/octet-stream",
+                                 files: [], entrypoint: "out.bin",
+                                 generatedBy: ArtifactProvenance(providerID: "compat", capability: manifest.capabilities.first)),
+                        files: ["out.bin": Data([1, 2, 3])])
+                    if let art { continuation.yield(.artifactProduced(art)) }
+                    continuation.yield(.done(finishReason: "stop")); continuation.finish()
+                case .throwTyped(let e):
+                    continuation.finish(throwing: e)
+                case .hang:
+                    do { while true { try Task.checkCancellation(); try await Task.sleep(nanoseconds: 15_000_000) } }
+                    catch { self.markCancelled(); continuation.finish(throwing: CancellationError()) }
+                }
+            }
+            continuation.onTermination = { reason in
+                if case .cancelled = reason { self.markCancelled() }
+                task.cancel()
+            }
+        }
+    }
+}
+
+private func musicManifest() -> CompatibilityEngineManifest {
+    MacCapabilities.manifests().first { $0.id == .music }!
+}
+private func ctx(_ tmp: URL) -> ExecutionContext {
+    ExecutionContext(root: PersistenceRoot(rootURL: tmp), artifactStore: FileArtifactStore(root: PersistenceRoot(rootURL: tmp)))
+}
+private func musicRequest() -> ResolvedExecutionRequest {
+    ResolvedExecutionRequest(request: ExecutionRequest(capability: .musicGenerate,
+        inputs: [.text("uplifting cinematic strings")], output: OutputSpec(modality: .audio)))
+}
+private func tmpRoot() -> URL {
+    let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true); return u
+}
+private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) async -> (artifacts: [Artifact], failed: String?) {
+    var arts: [Artifact] = []; var failed: String?
+    do { for try await e in stream {
+        if case .artifactProduced(let a) = e { arts.append(a) }
+        if case .failed(let m) = e { failed = m }
+    } } catch { failed = "\(error)" }
+    return (arts, failed)
+}
+
+@Suite struct CompatibilityRuntimeTests {
+
+    @Test func soundfileDeclaredRequiredForMusic() {
+        // The regression: music must require soundfile so preflight catches it (not a raw traceback).
+        let modules = Set(musicManifest().requiredModules.map { $0.module })
+        #expect(modules.contains("soundfile"))
+    }
+
+    @Test func discoveryReflectsEngineState() async {
+        let host = MockHost(state: .repairRequired(reason: "missing soundfile"))
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
+        await provider.refresh()
+        if case .repairRequired = provider.reportedAvailability(for: .musicGenerate) {} else {
+            Issue.record("expected repairRequired"); return
+        }
+        host.setState(.ready); await provider.refresh()
+        #expect({ if case .ready = provider.reportedAvailability(for: .musicGenerate) { return true }; return false }())
+    }
+
+    @Test func cleanBootstrapInstallsThenProduces() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .notInstalled, run: .artifact)
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
+        let out = await collect(provider.execute(musicRequest(), context: ctx(tmp)))
+        #expect(host.installCount == 1)
+        #expect(out.failed == nil)
+        #expect(out.artifacts.contains { $0.kind == .audio })
+    }
+
+    @Test func repairRequiredIsRepairedThenProduces() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .repairRequired(reason: "missing soundfile"), run: .artifact)
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
+        let out = await collect(provider.execute(musicRequest(), context: ctx(tmp)))
+        #expect(host.repairCount == 1)
+        #expect(out.artifacts.contains { $0.kind == .audio })
+    }
+
+    @Test func cancellationStopsRunNoOrphan() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .ready, run: .hang)
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
+        let stream = provider.execute(musicRequest(), context: ctx(tmp))
+        let consumer = Task { for try await _ in stream {} }
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        consumer.cancel()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        #expect(host.runCancelled)   // cancellation propagated to the host run; no orphan left running
+    }
+
+    @Test func crashYieldsTypedErrorThenRecovers() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .ready, run: .throwTyped(.executionFailed(reason: "engine crashed")))
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: true)
+        let first = await collect(provider.execute(musicRequest(), context: ctx(tmp)))
+        #expect(first.failed != nil)
+        #expect(first.failed?.contains("Traceback") == false)   // typed, not a raw traceback
+        // Recovery: a subsequent request succeeds — the runtime is not permanently poisoned.
+        host.setRun(.artifact)
+        let second = await collect(provider.execute(musicRequest(), context: ctx(tmp)))
+        #expect(second.artifacts.contains { $0.kind == .audio })
+    }
+
+    @Test func unsupportedPlatformReportsHonestly() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .ready, run: .artifact)
+        let provider = CompatibilityCapabilityProvider(manifest: musicManifest(), host: host, supported: false)
+        if case .unsupportedOnPlatform = provider.reportedAvailability(for: .musicGenerate) {} else {
+            Issue.record("expected unsupportedOnPlatform when unsupported")
+        }
+        let out = await collect(provider.execute(musicRequest(), context: ctx(tmp)))
+        #expect(out.failed != nil)
+        #expect(out.artifacts.isEmpty)
+    }
+
+    #if os(macOS)
+    @Test func mapperTurnsRealSoundfileTracebackIntoRepair() {
+        // The exact failure from the screenshot must become a typed, clean repairRequired — not a traceback.
+        let stderr = """
+        Loading weights: 100%|██████████| 611/611 [00:00<00:00, 3244.24it/s]
+        Traceback (most recent call last):
+          File ".../mlx_vlm_bridge.py", line 2517, in audio_or_music_generate
+            import soundfile as sf
+        ModuleNotFoundError: No module named 'soundfile'
+        """
+        let state = EshManagedPythonHost.map(stderr: stderr, fallbackReason: "unknown")
+        guard case .repairRequired(let reason) = state else { Issue.record("expected repairRequired"); return }
+        #expect(reason.contains("soundfile"))
+        #expect(reason.contains("Traceback") == false)
+    }
+
+    @Test func realProbeDetectsMissingModule() {
+        let candidates = ["/opt/homebrew/bin/python3", "/usr/bin/python3"]
+        guard let py = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return }
+        let (code, stderr) = EshManagedPythonHost.runProbe(python: py, module: "definitely_not_a_real_module_xyz_123")
+        #expect(code != 0)
+        if case .repairRequired = EshManagedPythonHost.map(stderr: stderr, fallbackReason: "missing") {} else {
+            Issue.record("expected repairRequired from a real missing-module probe")
+        }
+    }
+    #endif
+
+    @Test func discoveryThroughFacade() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let host = MockHost(state: .ready, run: .artifact)
+        let runtime = await EshRuntime.makeDefault(
+            backends: [:], root: PersistenceRoot(rootURL: tmp),
+            additionalProviders: MacCapabilities.providers(host: host))
+        for p in MacCapabilities.providers(host: host) { _ = p }  // touch
+        let snap = await runtime.capabilityAvailability()
+        // music is registered via the compat provider; state reported (not comingLater/unsupported by default on macOS).
+        let state = snap.state(for: .musicGenerate)
+        if case .comingLater = state { Issue.record("music should be exposed via compat provider, got comingLater") }
+    }
+}

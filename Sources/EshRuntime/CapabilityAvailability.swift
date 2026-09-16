@@ -15,6 +15,11 @@ public enum CapabilityAvailability: Sendable, Equatable {
     case requiresDownload(modelID: String?, bytes: Int64?)
     /// A required model is currently downloading/installing.
     case installing(progress: Double)
+    /// A required runtime/engine is present but broken (missing/corrupt dependency, e.g. `soundfile`).
+    /// esh can repair it; the app should offer/trigger repair rather than showing a raw error.
+    case repairRequired(reason: String)
+    /// A prior attempt failed in a way that isn't a clean transient (surfaced from a typed error).
+    case failed(reason: String)
     /// Wired, but not ready for a transient reason (e.g. no text backend loaded yet, low memory).
     case temporarilyUnavailable(reason: String)
     /// The underlying tech cannot run on THIS device (e.g. hardware/OS below the floor) though the
@@ -43,4 +48,13 @@ public struct CapabilityAvailabilitySnapshot: Sendable {
         if case .ready = state(for: capability) { return true }
         return false
     }
+}
+
+/// A `CapabilityProvider` whose availability depends on live runtime state (installed? repair needed?
+/// downloading?) can conform to this so `EshRuntime.capabilityAvailability()` reports its honest state
+/// instead of a static `.ready`. The value must be cheap/synchronous — providers cache it and refresh it
+/// off the hot path (e.g. after a preflight/execute). Used by the macOS compatibility engines.
+public protocol CapabilityAvailabilityReporting: Sendable {
+    /// The provider's current availability for one of its capabilities, or `nil` to defer to the default.
+    func reportedAvailability(for capability: CapabilityID) -> CapabilityAvailability?
 }
