@@ -1,11 +1,20 @@
 import Foundation
 import CoreGraphics
+import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 import Testing
+import Hub
 import EshCore
 import EshRuntime
 @testable import EshImageGen
+
+private final class ProgressBox: @unchecked Sendable {
+    private let lock = NSLock(); private var values: [Double] = []
+    func append(_ v: Double) { lock.lock(); values.append(v); lock.unlock() }
+    var last: Double? { lock.lock(); defer { lock.unlock() }; return values.last }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return values.count }
+}
 
 // Deterministic tests for the native image-generation provider wiring (discovery/progress/artifact/
 // cancellation/errors) using a mock engine — the real MLX StableDiffusion path is validated by on-device
@@ -176,6 +185,57 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
         return CGSize(width: img.width, height: img.height)
+    }
+
+    // Self-hosted weight fetching (zero Hugging Face credentials): download from a base URL into the Hub
+    // cache layout, verify checksums, concatenate shards, and skip already-valid files. Uses a local file://
+    // source so it needs no network or real weights — the SD load path is exercised by the real gen test.
+    @Test func selfHostedFetchPlacesVerifiesAndSkips() async throws {
+        let src = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cache = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: src); try? FileManager.default.removeItem(at: cache) }
+        try FileManager.default.createDirectory(at: src.appending(path: "vae"), withIntermediateDirectories: true)
+        let cfg = Data("{\"k\":1}".utf8)
+        try cfg.write(to: src.appending(path: "vae/config.json"))
+        // a sharded weight: host as w.bin.000 + w.bin.001
+        let part0 = Data(repeating: 0xAB, count: 2048), part1 = Data(repeating: 0xCD, count: 1024)
+        try FileManager.default.createDirectory(at: src.appending(path: "unet"), withIntermediateDirectories: true)
+        try part0.write(to: src.appending(path: "unet/w.bin.000"))
+        try part1.write(to: src.appending(path: "unet/w.bin.001"))
+        let whole = part0 + part1
+        func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+
+        let model = SelfHostedModel(modelID: "esh-test/sd", baseURL: src, files: [
+            SelfHostedModel.Entry(relativePath: "vae/config.json", sha256: sha(cfg)),
+            SelfHostedModel.Entry(relativePath: "unet/w.bin", sha256: sha(whole), shardCount: 2),
+        ])
+        let hub = HubApi(downloadBase: cache, useOfflineMode: true)
+        let progress = ProgressBox()
+        try await SelfHostedFetcher.prefetch(model, hub: hub) { progress.append($0) }
+
+        let dir = hub.localRepoLocation(Hub.Repo(id: "esh-test/sd"))
+        #expect(try Data(contentsOf: dir.appending(path: "vae/config.json")) == cfg)
+        #expect(try Data(contentsOf: dir.appending(path: "unet/w.bin")) == whole)  // shards concatenated
+        #expect(progress.last == 1.0)
+
+        // idempotent: a second prefetch verifies checksums and does not re-copy/throw
+        try await SelfHostedFetcher.prefetch(model, hub: hub) { _ in }
+        #expect(try Data(contentsOf: dir.appending(path: "unet/w.bin")) == whole)
+    }
+
+    @Test func selfHostedFetchRejectsBadChecksum() async {
+        let src = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let cache = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: src); try? FileManager.default.removeItem(at: cache) }
+        try? FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+        try? Data("real".utf8).write(to: src.appending(path: "x.bin"))
+        let model = SelfHostedModel(modelID: "esh-test/bad", baseURL: src, files: [
+            SelfHostedModel.Entry(relativePath: "x.bin", sha256: String(repeating: "0", count: 64))
+        ])
+        let hub = HubApi(downloadBase: cache, useOfflineMode: true)
+        await #expect(throws: EshImageGenError.self) {
+            try await SelfHostedFetcher.prefetch(model, hub: hub) { _ in }
+        }
     }
 
     @Test func paramsSnapDimensionsAndClampSteps() {
