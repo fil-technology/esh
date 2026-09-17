@@ -618,6 +618,8 @@ public extension EshRuntime {
     /// Run a capability request to completion, folding its event stream into an `ExecutionResult`
     /// (accumulated text + produced artifacts + usage). Throws `CapabilityError.unsupported` when no
     /// provider is wired for the capability (or none at all — build the runtime with `makeDefault`).
+    /// Public so a consumer can invoke non-text capabilities (e.g. macOS compatibility image.generate/
+    /// image.edit) through the facade without reaching into internals.
     func execute(_ request: ExecutionRequest) async throws -> ExecutionResult {
         guard let service = capabilityService else {
             throw CapabilityError.unsupported(capability: request.capability.rawValue,
