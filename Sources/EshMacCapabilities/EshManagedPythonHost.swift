@@ -8,24 +8,67 @@ import EshRuntime
 // declared modules for preflight, repairs missing dependencies via pip, and supervises the model-execution
 // bridge subprocess. A consumer never sees Python — only states/events/artifacts through the provider.
 //
-// Honesty on scope: module probing, dependency repair over an esh-managed venv, and the bridge subprocess
-// supervision (spawn/stdin-JSON/output-artifact/cancel/error-map) are implemented and validatable against a
-// real interpreter + the shipped bridge scripts. Provisioning a relocatable interpreter on a truly clean
-// machine (python-build-standalone) is the remaining productionization; `pythonPath` is injected so esh
-// owns it and this host stays real + testable.
+// Scope: esh owns the managed Python runtime end-to-end. When no `pythonPath` is injected (the consumer
+// contract — `EshManagedPythonHost()`), the host adopts or provisions a relocatable esh-controlled
+// interpreter (python-build-standalone, no Homebrew) under the configured assets root via
+// `ManagedPythonRuntime`, creates the venv, installs/repairs engine deps, and resolves the shipped bridge
+// scripts from `Bundle.module` — the consumer supplies nothing. `pythonPath`/`bridgeScriptsDir` remain
+// injectable so the CLI and tests can pin a specific interpreter/bridge and this host stays real + testable.
 public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sendable {
     private let pythonPath: String?
     private let bridgeScriptsDir: String?     // dir containing mlx_vlm_bridge.py (shipped by esh, not the consumer)
+    private let explicitRoot: PersistenceRoot?
 
-    public init(pythonPath: String?, bridgeScriptsDir: String?) {
+    /// Managed default: esh owns interpreter + bridge provisioning. A consumer uses exactly this.
+    public convenience init() { self.init(pythonPath: nil, bridgeScriptsDir: nil, root: nil) }
+
+    public init(pythonPath: String?, bridgeScriptsDir: String?, root: PersistenceRoot? = nil) {
         self.pythonPath = pythonPath
         self.bridgeScriptsDir = bridgeScriptsDir
+        self.explicitRoot = root
+    }
+
+    // MARK: - Managed runtime + bridge resolution
+
+    /// The persistence root that locates the managed runtime. Falls back to the process-wide default, which
+    /// honors the public storage lever (`ESH_ASSETS_HOME` / `~/.esh/storage.json`) — so heavy runtime/assets
+    /// land on the configured external volume without the consumer passing anything.
+    private func resolvedRoot() -> PersistenceRoot { explicitRoot ?? .default() }
+
+    /// An interpreter esh can use right now WITHOUT provisioning: an injected path, else an already-adopted
+    /// managed venv. Returns nil when nothing usable exists yet (→ honest `.requiresDownload`).
+    private func adoptablePython(root: PersistenceRoot) -> String? {
+        if let pythonPath, FileManager.default.isExecutableFile(atPath: pythonPath) { return pythonPath }
+        let managed = ManagedPythonRuntime(root: root).venvPythonPath
+        return ManagedPythonRuntime.isUsable(managed) ? managed : nil
+    }
+
+    /// An interpreter esh can use, provisioning the managed runtime if necessary (install/repair path).
+    private func ensurePython(root: PersistenceRoot, onProgress: @Sendable @escaping (Double) -> Void) async throws -> String {
+        if let pythonPath, FileManager.default.isExecutableFile(atPath: pythonPath) { onProgress(1.0); return pythonPath }
+        return try await ManagedPythonRuntime(root: root).provisionedPython(onProgress: onProgress)
+    }
+
+    /// The bridge-scripts directory: an injected dir (CLI), else the scripts shipped inside the SDK bundle.
+    private func resolvedBridgeDir() -> String? {
+        if let bridgeScriptsDir { return bridgeScriptsDir }
+        return Self.bundledBridgeDir()
+    }
+
+    /// The esh-shipped bridge directory inside the package bundle (`Resources/bridge`). The consumer never
+    /// supplies this — esh owns it.
+    static func bundledBridgeDir() -> String? {
+        guard let url = Bundle.module.url(forResource: "mlx_vlm_bridge", withExtension: "py", subdirectory: "bridge")
+              ?? Bundle.module.url(forResource: "mlx_vlm_bridge", withExtension: "py") else { return nil }
+        return url.deletingLastPathComponent().path
     }
 
     // MARK: - Preflight / repair (real, testable)
 
     public func inspect(_ manifest: CompatibilityEngineManifest) async -> CompatibilityEngineState {
-        guard let python = pythonPath, FileManager.default.isExecutableFile(atPath: python) else {
+        // Honest state before provisioning: nothing usable yet → the engine "requires download" (esh will
+        // provision the interpreter + deps on install). Adopted managed venv or injected python → probe deps.
+        guard let python = adoptablePython(root: resolvedRoot()) else {
             return .requiresDownload(bytes: manifest.approxDownloadBytes)
         }
         for requirement in manifest.requiredModules {
@@ -36,16 +79,14 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     }
 
     public func install(_ manifest: CompatibilityEngineManifest, onProgress: @Sendable @escaping (Double) -> Void) async throws {
-        guard let python = pythonPath, FileManager.default.isExecutableFile(atPath: python) else {
-            throw CompatibilityError.runtimeUnavailable(reason: "esh-managed Python interpreter is not provisioned")
-        }
-        try Self.pipInstall(python: python, packages: manifest.requiredModules.map { $0.pipPackage }, onProgress: onProgress)
+        // Provisioning (interpreter + venv) is the first half of progress; dependency install is the second.
+        let python = try await ensurePython(root: resolvedRoot(), onProgress: { onProgress($0 * 0.5) })
+        try Self.pipInstall(python: python, packages: manifest.requiredModules.map { $0.pipPackage },
+                            onProgress: { onProgress(0.5 + $0 * 0.5) })
     }
 
     public func repair(_ manifest: CompatibilityEngineManifest) async throws {
-        guard let python = pythonPath, FileManager.default.isExecutableFile(atPath: python) else {
-            throw CompatibilityError.runtimeUnavailable(reason: "esh-managed Python interpreter is not provisioned")
-        }
+        let python = try await ensurePython(root: resolvedRoot(), onProgress: { _ in })
         let missing = manifest.requiredModules.filter { Self.runProbe(python: python, module: $0.module).code != 0 }
         guard !missing.isEmpty else { return }
         try Self.pipInstall(python: python, packages: missing.map { $0.pipPackage }, onProgress: { _ in })
@@ -56,8 +97,14 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     public func run(_ manifest: CompatibilityEngineManifest, _ request: ResolvedExecutionRequest,
                     context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
         AsyncThrowingStream { continuation in
-            guard let python = pythonPath, let dir = bridgeScriptsDir else {
-                continuation.finish(throwing: CompatibilityError.runtimeUnavailable(reason: "bridge is not configured")); return
+            // Resolve the esh-managed interpreter (adopted/provisioned by inspect+install before run) and the
+            // esh-shipped bridge dir. The consumer supplied neither. Provisioning itself happens in install();
+            // by the time run() is reached the provider's state machine has driven the engine to `.ready`.
+            guard let python = adoptablePython(root: context.root) else {
+                continuation.finish(throwing: CompatibilityError.runtimeUnavailable(reason: "esh-managed Python interpreter is not provisioned")); return
+            }
+            guard let dir = resolvedBridgeDir() else {
+                continuation.finish(throwing: CompatibilityError.runtimeUnavailable(reason: "esh bridge scripts are missing from the SDK bundle")); return
             }
             let procBox = ProcessBox()
             let work = Task.detached {

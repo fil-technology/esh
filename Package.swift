@@ -153,6 +153,10 @@ let package = Package(
         .target(
             name: "EshMacCapabilities",
             dependencies: ["EshCore", "EshRuntime"],
+            // esh-owned Python bridge scripts, shipped WITH the SDK so a consumer never supplies a bridge
+            // path. `EshManagedPythonHost` resolves them via `Bundle.module`. Mirrored from the repo `Tools/`
+            // (canonical for the CLI); keep the two in sync when the bridge changes.
+            resources: [.copy("Resources/bridge")],
             swiftSettings: quietDebugSwiftSettings
         ),
         .testTarget(
