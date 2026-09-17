@@ -321,8 +321,13 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         // On volumes without native extended attributes (exFAT/FAT — common for external asset volumes),
         // macOS writes AppleDouble `._*` sidecars during the install. Python package directory scans (e.g.
         // transformers importing its `models/`) read `._*.py` as UTF-8 source and crash. Strip them so module
-        // discovery works. No-op on APFS/HFS+ where the sidecars aren't created.
+        // discovery works. No-op on APFS/HFS+ where the sidecars aren't created. (The managed venv now lives
+        // on the internal APFS state root, so this is normally a no-op; kept as defense in depth.)
         Self.stripAppleDoubleFiles(inVenvFor: python)
+        // Quarantine hygiene after dependency install: any freshly written binary that inherited
+        // `com.apple.quarantine` (sandboxed context) would fail to exec. Strip it from the venv tree.
+        let venvRoot = URL(fileURLWithPath: python).deletingLastPathComponent().deletingLastPathComponent()
+        ManagedPythonRuntime.stripQuarantine(at: venvRoot)
     }
 
     /// Remove macOS AppleDouble `._*` sidecars from an esh-managed venv (see `pipInstall`). Returns the count

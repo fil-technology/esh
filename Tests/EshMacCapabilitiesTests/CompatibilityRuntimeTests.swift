@@ -92,6 +92,10 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
 }
 
 @Suite struct CompatibilityRuntimeTests {
+    // These tests inject a scriptable mock host to exercise the compat state machine. They must not be
+    // coupled to the CI/dev machine's real free disk, so disable the in-SDK resource preflight here (the
+    // preflight itself is covered by dedicated pure-function tests). Set once for the test process.
+    init() { setenv("ESH_DISABLE_COMPAT_RESOURCE_PREFLIGHT", "1", 1) }
 
     @Test func soundfileDeclaredRequiredForMusic() {
         // The regression: music must require soundfile so preflight catches it (not a raw traceback).

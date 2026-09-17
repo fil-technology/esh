@@ -39,9 +39,14 @@ struct ManagedPythonRuntime {
 
     // MARK: Canonical paths (pure — the persistence contract, reused across launches)
 
-    /// The managed runtime lives under the assets root so a multi-GB venv never lands on the internal disk
-    /// when an external volume is configured. Matches the existing on-disk layout `<assets>/runtime/py311`.
-    var runtimeRootURL: URL { root.assetsRootURL.appendingPathComponent("runtime/py311", isDirectory: true) }
+    /// The managed runtime (interpreter + venv + bridge/runtime state) lives under the INTERNAL state root
+    /// (`PersistenceRoot.rootURL`), never the relocatable assets volume. Two reasons, both found via Esh
+    /// Studio dogfood: (1) the assets volume is commonly exFAT, where macOS xattrs (`com.apple.provenance`)
+    /// become AppleDouble `._*` sidecars — Python metadata scans then choke on `._METADATA`; APFS stores
+    /// xattrs natively. (2) `PersistenceRoot.rootURL` is by contract the home of internal state including the
+    /// runtime, and must not follow external model storage. Model weights / HF caches stay on `assetsRootURL`
+    /// (see `pythonHFCacheURL`, `bridgeEnvironment`) — unchanged.
+    var runtimeRootURL: URL { root.stateRootURL.appendingPathComponent("runtime/py311", isDirectory: true) }
     var venvURL: URL { runtimeRootURL.appendingPathComponent("venv", isDirectory: true) }
     var venvPythonPath: String { venvURL.appendingPathComponent("bin/python3").path }
     /// Where the esh-owned relocatable base interpreter is extracted (python-build-standalone).
@@ -83,6 +88,8 @@ struct ManagedPythonRuntime {
         let base = try await ensureBaseInterpreter(onProgress: { onProgress($0 * 0.7) })
         onProgress(0.72)
         try Self.createVenv(base: base, venv: venvURL)
+        Self.stripQuarantine(at: venvURL)   // the venv's python symlinks/binaries inherit no quarantine here,
+                                            // but strip defensively so a sandboxed exec is never blocked.
         onProgress(0.95)
         guard Self.isUsable(venvPythonPath) else {
             throw CompatibilityError.runtimeUnavailable(reason: "esh-managed venv did not become usable after provisioning")
@@ -114,6 +121,9 @@ struct ManagedPythonRuntime {
         try FileManager.default.createDirectory(at: baseStandaloneDirURL, withIntermediateDirectories: true)
         try Self.untar(tmp, into: baseStandaloneDirURL)
         try? FileManager.default.removeItem(at: tmp)
+        // A sandboxed app's download tags files with `com.apple.quarantine`; Gatekeeper then denies exec of
+        // the extracted interpreter (EPERM). Strip it so the managed interpreter is runnable.
+        Self.stripQuarantine(at: baseStandaloneDirURL)
         onProgress(1.0)
         guard Self.isUsable(baseStandalonePythonPath) else {
             throw CompatibilityError.runtimeUnavailable(reason: "extracted managed interpreter is not usable")
@@ -173,6 +183,18 @@ struct ManagedPythonRuntime {
         var hasher = SHA256()
         while case let chunk = handle.readData(ofLength: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Remove `com.apple.quarantine` from a provisioned tree (best-effort, recursive, no-op when absent) so a
+    /// sandboxed app can exec the managed interpreter. Consistent with the AppleDouble hygiene in
+    /// `EshManagedPythonHost`; leaves other xattrs (e.g. `com.apple.provenance`) untouched.
+    static func stripQuarantine(at url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        p.arguments = ["-dr", "com.apple.quarantine", url.path]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        do { try p.run(); p.waitUntilExit() } catch { /* best-effort hygiene */ }
     }
 
     static func untar(_ archive: URL, into dir: URL) throws {

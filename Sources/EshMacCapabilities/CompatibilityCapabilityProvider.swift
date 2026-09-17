@@ -62,7 +62,11 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
                     // when the internal volume lacks the swap headroom this model needs. Honest, typed, and
                     // non-crashing — the 2026-09-16 watchdog panic came from letting a heavy run proceed into
                     // swap exhaustion on a near-full disk. Freeing disk restores availability.
-                    let internalFree = SystemStorage.snapshot(at: context.root.stateRootURL)?.availableBytes
+                    // Test/override seam (consistent with scripts/compat-preflight.sh's env overrides): allow
+                    // the in-SDK disk-headroom preflight to be disabled so deterministic tests that inject a
+                    // mock host aren't coupled to the CI/dev machine's real free disk. Defaults to enabled.
+                    let preflightDisabled = ProcessInfo.processInfo.environment["ESH_DISABLE_COMPAT_RESOURCE_PREFLIGHT"] == "1"
+                    let internalFree = preflightDisabled ? nil : SystemStorage.snapshot(at: context.root.stateRootURL)?.availableBytes
                     if let reason = Self.insufficientResourceReason(internalFreeBytes: internalFree, manifest: manifest) {
                         stateBox.set(.insufficientResources(reason: reason))
                         continuation.yield(.failed(message: CompatibilityError.insufficientResources(reason: reason).errorDescription ?? "insufficient resources"))

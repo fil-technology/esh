@@ -32,11 +32,44 @@ import EshCore
     }
     private func music() -> CompatibilityEngineManifest { MacCapabilities.manifests().first { $0.id == .imageGeneration }! }
 
-    @Test func managedRuntimePathsResolveUnderAssetsRoot() {
-        let assets = tmpRoot(); defer { try? FileManager.default.removeItem(at: assets) }
-        let rt = ManagedPythonRuntime(root: PersistenceRoot(rootURL: assets))
-        #expect(rt.venvPythonPath == assets.appendingPathComponent("runtime/py311/venv/bin/python3").path)
-        #expect(rt.baseStandalonePythonPath == assets.appendingPathComponent("runtime/py311/base/python/bin/python3").path)
+    @Test func managedRuntimeStaysInternalWhileModelsStayExternal() {
+        // rc.10 Fix B: the managed interpreter/venv live on the INTERNAL state root (rootURL), while model
+        // weights + HF caches remain on the EXTERNAL assets root. exFAT/xattr AppleDouble issues and the
+        // PersistenceRoot contract both require this separation.
+        let internalRoot = tmpRoot(); defer { try? FileManager.default.removeItem(at: internalRoot) }
+        let externalRoot = tmpRoot(); defer { try? FileManager.default.removeItem(at: externalRoot) }
+        let root = PersistenceRoot(stateRootURL: internalRoot, assetsRootURL: externalRoot)
+        let rt = ManagedPythonRuntime(root: root)
+        // Runtime → internal.
+        #expect(rt.venvPythonPath == internalRoot.appendingPathComponent("runtime/py311/venv/bin/python3").path)
+        #expect(rt.baseStandalonePythonPath == internalRoot.appendingPathComponent("runtime/py311/base/python/bin/python3").path)
+        #expect(rt.runtimeRootURL.path.hasPrefix(internalRoot.path))
+        #expect(!rt.runtimeRootURL.path.hasPrefix(externalRoot.path))
+        // Models / HF cache → external (unchanged routing).
+        #expect(root.cachesURL.path.hasPrefix(externalRoot.path))
+        #expect(root.pythonHFCacheURL(family: "image").path.hasPrefix(externalRoot.path))
+        #expect(root.modelsURL.path.hasPrefix(externalRoot.path))
+    }
+
+    @Test func stripQuarantineRemovesTheAttribute() throws {
+        // Fix A: provisioning hygiene must clear com.apple.quarantine (which blocks exec in a sandboxed app)
+        // while leaving other xattrs intact.
+        let dir = tmpRoot(); defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("bin/python3")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: file)
+        // Set quarantine via xattr.
+        let set = Process(); set.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        set.arguments = ["-w", "com.apple.quarantine", "0081;00000000;Test;", file.path]
+        set.standardError = Pipe(); try set.run(); set.waitUntilExit()
+        ManagedPythonRuntime.stripQuarantine(at: dir)
+        // Read remaining xattrs.
+        let read = Process(); read.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        read.arguments = [file.path]
+        let out = Pipe(); read.standardOutput = out; read.standardError = Pipe(); try read.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile(); read.waitUntilExit()
+        let attrs = String(data: data, encoding: .utf8) ?? ""
+        #expect(!attrs.contains("com.apple.quarantine"))
     }
 
     @Test func versionDetectionAndUsability() {
@@ -78,12 +111,15 @@ import EshCore
         guard case .requiresDownload = state else { Issue.record("expected .requiresDownload, got \(state)"); return }
     }
 
-    @Test func hostAdoptsAnExistingManagedVenv() async {
-        // A previously-provisioned managed venv at the canonical path must be adopted (reused across launches),
-        // not re-provisioned. Fake interpreter reports 3.12 and "imports" every module → engine is ready.
-        let assets = tmpRoot(); defer { try? FileManager.default.removeItem(at: assets) }
-        makeFakePython(version: "3.12", at: assets.appendingPathComponent("runtime/py311/venv/bin/python3"))
-        let host = EshManagedPythonHost(pythonPath: nil, bridgeScriptsDir: nil, root: PersistenceRoot(rootURL: assets))
+    @Test func hostAdoptsAnExistingInternalManagedVenv() async {
+        // A previously-provisioned managed venv at the canonical INTERNAL path must be adopted (reused across
+        // launches), not re-provisioned — even when a separate external assets root is configured. Fake
+        // interpreter reports 3.12 and "imports" every module → engine is ready.
+        let internalRoot = tmpRoot(); defer { try? FileManager.default.removeItem(at: internalRoot) }
+        let externalRoot = tmpRoot(); defer { try? FileManager.default.removeItem(at: externalRoot) }
+        makeFakePython(version: "3.12", at: internalRoot.appendingPathComponent("runtime/py311/venv/bin/python3"))
+        let host = EshManagedPythonHost(pythonPath: nil, bridgeScriptsDir: nil,
+                                        root: PersistenceRoot(stateRootURL: internalRoot, assetsRootURL: externalRoot))
         let state = await host.inspect(music())
         #expect(state == .ready)
     }
