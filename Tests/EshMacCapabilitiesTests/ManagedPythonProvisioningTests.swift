@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import EshCore
+import Darwin   // setxattr / getxattr — exercise the real in-process quarantine strip
 @testable import EshRuntime
 @testable import EshMacCapabilities
 
@@ -51,25 +52,35 @@ import EshCore
         #expect(root.modelsURL.path.hasPrefix(externalRoot.path))
     }
 
-    @Test func stripQuarantineRemovesTheAttribute() throws {
-        // Fix A: provisioning hygiene must clear com.apple.quarantine (which blocks exec in a sandboxed app)
-        // while leaving other xattrs intact.
+    // Darwin xattr helpers (in-process, matching what the sandbox-safe strip uses).
+    private func setQuarantine(_ path: String) {
+        let v = Array("0081;00000000;Test;".utf8)
+        _ = path.withCString { c in "com.apple.quarantine".withCString { n in
+            setxattr(c, n, v, v.count, 0, XATTR_NOFOLLOW) } }
+    }
+    private func hasQuarantine(_ path: String) -> Bool {
+        path.withCString { c in "com.apple.quarantine".withCString { n in
+            getxattr(c, n, nil, 0, 0, XATTR_NOFOLLOW) >= 0 } }
+    }
+
+    @Test func stripQuarantineRemovesTheAttributeInProcess() throws {
+        // rc.11 Fix: the strip must work IN-PROCESS (the /usr/bin/xattr subprocess was a silent no-op under
+        // the App Sandbox). Set com.apple.quarantine via setxattr on a nested tree, strip, assert getxattr
+        // reports it gone (ENOATTR) on the root, a nested file, AND a symlink (XATTR_NOFOLLOW).
         let dir = tmpRoot(); defer { try? FileManager.default.removeItem(at: dir) }
-        let file = dir.appendingPathComponent("bin/python3")
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("#!/bin/sh\n".utf8).write(to: file)
-        // Set quarantine via xattr.
-        let set = Process(); set.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        set.arguments = ["-w", "com.apple.quarantine", "0081;00000000;Test;", file.path]
-        set.standardError = Pipe(); try set.run(); set.waitUntilExit()
+        let binDir = dir.appendingPathComponent("base/python/bin")
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        let real = binDir.appendingPathComponent("python3.11")
+        try Data("#!/bin/sh\n".utf8).write(to: real)
+        let link = binDir.appendingPathComponent("python3")
+        try? FileManager.default.removeItem(at: link)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        setQuarantine(dir.path); setQuarantine(real.path); setQuarantine(link.path)
+        #expect(hasQuarantine(real.path))   // sanity: it was set
         ManagedPythonRuntime.stripQuarantine(at: dir)
-        // Read remaining xattrs.
-        let read = Process(); read.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        read.arguments = [file.path]
-        let out = Pipe(); read.standardOutput = out; read.standardError = Pipe(); try read.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile(); read.waitUntilExit()
-        let attrs = String(data: data, encoding: .utf8) ?? ""
-        #expect(!attrs.contains("com.apple.quarantine"))
+        #expect(!hasQuarantine(dir.path))
+        #expect(!hasQuarantine(real.path))
+        #expect(!hasQuarantine(link.path))
     }
 
     @Test func versionDetectionAndUsability() {

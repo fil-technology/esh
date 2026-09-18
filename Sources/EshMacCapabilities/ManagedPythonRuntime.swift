@@ -2,6 +2,7 @@ import Foundation
 import EshCore
 import EshRuntime
 import CryptoKit
+import Darwin   // removexattr / XATTR_NOFOLLOW — in-process quarantine removal (sandbox-safe)
 
 #if os(macOS)
 
@@ -84,6 +85,7 @@ struct ManagedPythonRuntime {
     /// and safe to call every launch — the fast path is a single version probe.
     func provisionedPython(onProgress: @Sendable (Double) -> Void) async throws -> String {
         if Self.isUsable(venvPythonPath) { onProgress(1.0); return venvPythonPath }   // adopt existing venv
+        onProgress(0.01)   // immediate heartbeat so the consumer UI reflects "provisioning" before any I/O
         try FileManager.default.createDirectory(at: runtimeRootURL, withIntermediateDirectories: true)
         let base = try await ensureBaseInterpreter(onProgress: { onProgress($0 * 0.7) })
         onProgress(0.72)
@@ -167,7 +169,14 @@ struct ManagedPythonRuntime {
 
     static func download(_ url: URL, to dest: URL, onProgress: @Sendable (Double) -> Void) async throws {
         let tmp: URL, response: URLResponse
-        do { (tmp, response) = try await URLSession.shared.download(from: url) }
+        // Bounded timeouts so provisioning fails fast with a typed error instead of hanging on a stalled
+        // network (URLSession's default resource timeout is effectively unbounded).
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 600
+        let session = URLSession(configuration: cfg)
+        defer { session.finishTasksAndInvalidate() }
+        do { (tmp, response) = try await session.download(from: url) }
         catch { throw CompatibilityError.runtimeUnavailable(reason: "managed interpreter download failed: \(error.localizedDescription)") }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw CompatibilityError.runtimeUnavailable(reason: "managed interpreter download failed (HTTP \(http.statusCode))")
@@ -185,16 +194,29 @@ struct ManagedPythonRuntime {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Remove `com.apple.quarantine` from a provisioned tree (best-effort, recursive, no-op when absent) so a
-    /// sandboxed app can exec the managed interpreter. Consistent with the AppleDouble hygiene in
-    /// `EshManagedPythonHost`; leaves other xattrs (e.g. `com.apple.provenance`) untouched.
+    /// Remove `com.apple.quarantine` from a provisioned tree (recursive, no-op when absent) so a sandboxed
+    /// app can exec the managed interpreter. Uses the in-process Darwin `removexattr` API rather than
+    /// spawning `/usr/bin/xattr`: under the App Sandbox that subprocess (a Python-script wrapper) does not
+    /// reliably clear the attribute, leaving the extracted base interpreter quarantined and non-executable
+    /// (EPERM). A sandboxed app IS permitted to remove quarantine from files it owns via `removexattr`.
+    /// `XATTR_NOFOLLOW` acts on symlinks themselves (e.g. `bin/python3`); other xattrs (`com.apple.provenance`)
+    /// are left untouched. ENOATTR/errors are ignored (best-effort hygiene).
     static func stripQuarantine(at url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        p.arguments = ["-dr", "com.apple.quarantine", url.path]
-        p.standardOutput = Pipe(); p.standardError = Pipe()
-        do { try p.run(); p.waitUntilExit() } catch { /* best-effort hygiene */ }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+        func removeOne(_ path: String) {
+            path.withCString { c in
+                _ = "com.apple.quarantine".withCString { name in
+                    removexattr(c, name, XATTR_NOFOLLOW)   // returns -1 with errno=ENOATTR when absent; ignored
+                }
+            }
+        }
+        removeOne(url.path)   // the root itself
+        // Descendants: files, directories, and symlinks (not followed). The URL enumerator hides AppleDouble
+        // `._*` sidecars, which is fine — quarantine lives on the real extracted files (binaries, dylibs).
+        if let en = fm.enumerator(at: url, includingPropertiesForKeys: nil, options: [], errorHandler: nil) {
+            for case let child as URL in en { removeOne(child.path) }
+        }
     }
 
     static func untar(_ archive: URL, into dir: URL) throws {
