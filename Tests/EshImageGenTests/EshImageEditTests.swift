@@ -111,4 +111,35 @@ private func collectEdit(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async
         #expect(ps.first?.descriptor.capabilities == [.imageEdit])
         #expect(ps.first?.descriptor.backend == .mlx)
     }
+
+    @Test func sdxlTurboSelfHostedModelIsTokenFreeAndPinned() {
+        // Token-free source for the gated stabilityai/sdxl-turbo; modelID MUST equal the .sdxlTurbo preset id
+        // so the loader finds the prefetched files locally.
+        let m = SelfHostedModel.sdxlTurbo()
+        #expect(m.modelID == "stabilityai/sdxl-turbo")
+        #expect(m.baseURL.absoluteString.contains("sdxl-turbo/resolve/main"))
+        let paths = Set(m.files.map(\.relativePath))
+        // The exact file set the .sdxlTurbo preset loads (13 files incl. the SDXL second text encoder).
+        for req in ["unet/config.json", "unet/diffusion_pytorch_model.safetensors",
+                    "text_encoder/config.json", "text_encoder/model.safetensors",
+                    "text_encoder_2/config.json", "text_encoder_2/model.safetensors",
+                    "vae/config.json", "vae/diffusion_pytorch_model.safetensors",
+                    "scheduler/scheduler_config.json",
+                    "tokenizer/vocab.json", "tokenizer/merges.txt",
+                    "tokenizer_2/vocab.json", "tokenizer_2/merges.txt"] {
+            #expect(paths.contains(req))
+        }
+        #expect(m.files.count == 13)
+        // The four multi-GB safetensors are integrity-pinned; small JSON/tokenizer files are not.
+        let pinned = Set(m.files.filter { $0.sha256 != nil }.map(\.relativePath))
+        #expect(pinned == ["unet/diffusion_pytorch_model.safetensors", "text_encoder/model.safetensors",
+                           "text_encoder_2/model.safetensors", "vae/diffusion_pytorch_model.safetensors"])
+    }
+
+    @Test func providersAcceptSelfHostedSDXLTurbo() {
+        // The consumer path that unblocks token-free image.edit in the sandbox.
+        let ps = EshImageEdit.providers(selfHosted: .sdxlTurbo())
+        #expect(ps.first?.descriptor.capabilities == [.imageEdit])
+        #expect(ps.first?.descriptor.backend == .mlx)
+    }
 }

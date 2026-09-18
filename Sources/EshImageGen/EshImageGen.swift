@@ -90,6 +90,38 @@ public struct SelfHostedModel: Sendable {
             Entry(relativePath: "tokenizer/merges.txt"),
         ])
     }
+
+    /// Token-free source for SDXL-Turbo (`image.edit`, SDXL-Turbo img2img). `stabilityai/sdxl-turbo` errors
+    /// with "Authentication required" through swift-transformers' Hub metadata path, but its `/resolve/main`
+    /// LFS files are anonymously fetchable — and `SelfHostedFetcher` fetches those directly with a plain
+    /// URLSession, bypassing the Hub auth entirely (same mechanism as `stableDiffusion21Base`). So the default
+    /// mirror is the upstream repo's resolve endpoint; pass `mirror:` to point at an independent host if
+    /// upstream ever gates `/resolve`. The four multi-GB safetensors are pinned to their git-LFS sha256 (a
+    /// corrupted/partial download is rejected); the small JSON/tokenizer files are unpinned.
+    public static let sdxlTurboMirror =
+        URL(string: "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main")!
+
+    public static func sdxlTurbo(mirror: URL = sdxlTurboMirror) -> SelfHostedModel {
+        SelfHostedModel(modelID: "stabilityai/sdxl-turbo", baseURL: mirror, files: [
+            Entry(relativePath: "unet/config.json"),
+            Entry(relativePath: "unet/diffusion_pytorch_model.safetensors",
+                  sha256: "1968fc61aa8449ab3d3f9b9a05bce88c611760c01e0c4a7a3785911b546fe582"),
+            Entry(relativePath: "text_encoder/config.json"),
+            Entry(relativePath: "text_encoder/model.safetensors",
+                  sha256: "778d02eb9e707c3fbaae0b67b79ea0d1399b52e624fb634f2f19375ae7c047c3"),
+            Entry(relativePath: "text_encoder_2/config.json"),
+            Entry(relativePath: "text_encoder_2/model.safetensors",
+                  sha256: "fa5b2e6f4c2efc2d82e4b8312faec1a5540eabfc6415126c9a05c8436a530ef4"),
+            Entry(relativePath: "vae/config.json"),
+            Entry(relativePath: "vae/diffusion_pytorch_model.safetensors",
+                  sha256: "716971093e3428c9156906fcbcc5500abf005317c5f4d3a5bb3fa28c45e1e071"),
+            Entry(relativePath: "scheduler/scheduler_config.json"),
+            Entry(relativePath: "tokenizer/vocab.json"),
+            Entry(relativePath: "tokenizer/merges.txt"),
+            Entry(relativePath: "tokenizer_2/vocab.json"),
+            Entry(relativePath: "tokenizer_2/merges.txt"),
+        ])
+    }
 }
 
 /// Places a `SelfHostedModel`'s files into the Hub cache location, verifying checksums and skipping files
