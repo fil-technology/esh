@@ -4,11 +4,11 @@ import EshRuntime
 
 // Native, in-process instruction/img2img image editing (`image.edit`) via MLX-Swift's StableDiffusion
 // (SDXL-Turbo img2img by default). No Python — runs under the macOS App Sandbox with weights as data. The
-// pixel-producing engine is injected (`ImageEditFn`) so the provider wiring (discovery/progress/artifact/
-// cancellation/errors) is deterministically testable; the concrete MLX engine lives in EshImageEdit.swift.
+// pixel-producing engine is injected (`ImageRestyleFn`) so the provider wiring (discovery/progress/artifact/
+// cancellation/errors) is deterministically testable; the concrete MLX engine lives in EshImageRestyle.swift.
 
 /// Edit parameters resolved from the request options.
-public struct EshImageEditParams: Sendable {
+public struct EshImageRestyleParams: Sendable {
     /// How much the source image is transformed (0 = unchanged, 1 = full re-generation). img2img "strength".
     public var strength: Float
     public var steps: Int
@@ -25,18 +25,18 @@ public struct EshImageEditParams: Sendable {
 }
 
 /// Reuses `ImageGenChunk` (progress → final PNG) from the generate provider.
-public typealias ImageEditFn = @Sendable (_ imagePath: String, _ prompt: String, _ params: EshImageEditParams)
+public typealias ImageRestyleFn = @Sendable (_ imagePath: String, _ prompt: String, _ params: EshImageRestyleParams)
     -> AsyncThrowingStream<ImageGenChunk, Error>
 
-public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let modelID: String
-    private let edit: ImageEditFn
+    private let edit: ImageRestyleFn
     private let supported: Bool
     private let readyProbe: (@Sendable () -> Bool)?
     private let stateBox: StateBox
 
-    public init(modelID: String, supported: Bool, edit: @escaping ImageEditFn,
+    public init(modelID: String, supported: Bool, edit: @escaping ImageRestyleFn,
                 readyProbe: (@Sendable () -> Bool)? = nil) {
         self.modelID = modelID
         self.supported = supported
@@ -44,7 +44,7 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
         self.readyProbe = readyProbe
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
-            id: "mlx-image-edit", capabilities: [.imageEdit],
+            id: "mlx-image-restyle", capabilities: [.imageRestyle],
             acceptedInputs: [.image, .text], producedOutputs: [.image],
             backend: .mlx, streaming: true, structuredOutput: false,
             requiredPrivilege: .artifactOnly, previewMode: .none)
@@ -75,13 +75,13 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
         return AsyncThrowingStream { continuation in
             let task = Task {
                 guard supported else {
-                    continuation.yield(.failed(message: "image editing is not supported on this platform")); continuation.finish(); return
+                    continuation.yield(.failed(message: "image restyle is not supported on this platform")); continuation.finish(); return
                 }
                 guard let imagePath, !imagePath.isEmpty else {
-                    continuation.yield(.failed(message: "image.edit requires an image input")); continuation.finish(); return
+                    continuation.yield(.failed(message: "image.restyle requires an image input")); continuation.finish(); return
                 }
                 guard !prompt.isEmpty else {
-                    continuation.yield(.failed(message: "image.edit requires a text instruction")); continuation.finish(); return
+                    continuation.yield(.failed(message: "image.restyle requires a style prompt")); continuation.finish(); return
                 }
                 // Fail cleanly if the configured (external) assets volume is unavailable and the model is not
                 // already loaded in-process — never silently fall back to the internal disk.
@@ -89,7 +89,7 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
                     continuation.yield(.failed(message: "model storage is unavailable: \(reason)")); continuation.finish(); return
                 }
                 do {
-                    continuation.yield(.status("loading image-edit model"))
+                    continuation.yield(.status("loading restyle model"))
                     var produced = false
                     for try await chunk in edit(imagePath, prompt, params) {
                         try Task.checkCancellation()
@@ -98,9 +98,9 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
                             continuation.yield(.progress(p))
                         case .image(let png):
                             let artifact = Artifact(
-                                kind: .image, mimeType: "image/png", files: [], entrypoint: "edited.png",
-                                generatedBy: ArtifactProvenance(providerID: providerID, capability: .imageEdit))
-                            let saved = try store.save(artifact, files: ["edited.png": png])
+                                kind: .image, mimeType: "image/png", files: [], entrypoint: "restyled.png",
+                                generatedBy: ArtifactProvenance(providerID: providerID, capability: .imageRestyle))
+                            let saved = try store.save(artifact, files: ["restyled.png": png])
                             produced = true
                             stateBox.set(.ready)
                             continuation.yield(.artifactProduced(saved))
@@ -108,7 +108,7 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
                     }
                     try Task.checkCancellation()
                     guard produced else {
-                        continuation.yield(.failed(message: "image edit produced no image")); continuation.finish(); return
+                        continuation.yield(.failed(message: "image restyle produced no image")); continuation.finish(); return
                     }
                     continuation.yield(.done(finishReason: "stop"))
                     continuation.finish()
@@ -137,7 +137,7 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
     }
 
     /// Resolve edit parameters from request options. Defaults suit SDXL-Turbo img2img (few steps, no CFG).
-    static func params(from options: [String: JSONValue]) -> EshImageEditParams {
+    static func params(from options: [String: JSONValue]) -> EshImageRestyleParams {
         func int(_ key: String) -> Int? {
             switch options[key] { case .int(let i): return i; case .double(let d): return Int(d); default: return nil }
         }
@@ -149,7 +149,7 @@ public final class MLXImageEditProvider: CapabilityProvider, CapabilityAvailabil
         let steps = int("steps").map { max(1, min(100, $0)) } ?? 4      // SDXL-Turbo: few steps
         let seed = int("seed").map { UInt64(bitPattern: Int64($0)) }
         let maxEdge = int("maximumEdge").map { max(256, min(1536, ($0 / 8) * 8)) } ?? 768
-        return EshImageEditParams(strength: strength, steps: steps, seed: seed,
+        return EshImageRestyleParams(strength: strength, steps: steps, seed: seed,
                                   negativePrompt: string("negativePrompt") ?? "",
                                   cfgWeight: float("cfg"), maximumEdge: maxEdge)
     }

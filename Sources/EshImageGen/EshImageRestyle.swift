@@ -7,12 +7,12 @@ import StableDiffusion
 
 // Native on-device image editing (`image.edit`) via MLX-Swift's StableDiffusion img2img (SDXL-Turbo by
 // default). No Python — runs under the macOS App Sandbox, weights downloaded as data. A consumer registers
-// `EshImageEdit.providers()` (or uses `EshRuntime.makeWithImageEdit()`) and uses the normal execute/stream/
+// `EshImageRestyle.providers()` (or uses `EshRuntime.makeWithImageRestyle()`) and uses the normal execute/stream/
 // capabilityAvailability facade. The generator is cached and reused across requests. Reuses this module's
 // SelfHostedFetcher, EshImageGenError, and SDEngine.encodePNG.
 
 /// Owns the (non-Sendable) MLX img2img generator and serializes GPU access. Only `Data` crosses the boundary.
-public actor SDImageEditEngine {
+public actor SDImageRestyleEngine {
     private let preset: StableDiffusionConfiguration.Preset
     private let loadConfiguration: LoadConfiguration
     private let selfHosted: SelfHostedModel?
@@ -47,7 +47,7 @@ public actor SDImageEditEngine {
     }
 
     /// Run the img2img loop for one image and return PNG bytes. `onProgress` is called per denoise step.
-    func run(imagePath: String, prompt: String, params: EshImageEditParams, hub: HubApi,
+    func run(imagePath: String, prompt: String, params: EshImageRestyleParams, hub: HubApi,
              onProgress: @Sendable (Double) -> Void) async throws -> Data {
         let g = try await makeGenerator(hub: hub, onProgress: onProgress)
         // Load the source image and normalize to [-1, 1] (the autoencoder's expected input range).
@@ -86,7 +86,7 @@ public actor SDImageEditEngine {
     }
 }
 
-public enum EshImageEdit {
+public enum EshImageRestyle {
     /// SDXL-Turbo img2img runs on Apple silicon (macOS today). The model downloads on first use.
     public static var isSupportedPlatform: Bool {
         #if os(macOS)
@@ -99,11 +99,11 @@ public enum EshImageEdit {
     /// Default model: SDXL-Turbo (img2img). The provider is model-agnostic; other presets can be wired.
     public static let defaultModelID = "stabilityai/sdxl-turbo"
 
-    public static let sharedEngine = SDImageEditEngine()
+    public static let sharedEngine = SDImageRestyleEngine()
 
     /// The MLX-backed edit stream: load (or reuse) the img2img generator, run the loop, emit per-step
     /// progress then the final PNG. Cancelling the returned stream cancels editing.
-    public static func mlxEdit(engine: SDImageEditEngine = sharedEngine, downloadBase: URL? = nil) -> ImageEditFn {
+    public static func mlxRestyle(engine: SDImageRestyleEngine = sharedEngine, downloadBase: URL? = nil) -> ImageRestyleFn {
         { imagePath, prompt, params in
             AsyncThrowingStream { continuation in
                 let task = Task {
@@ -133,10 +133,10 @@ public enum EshImageEdit {
     public static func providers(modelID: String = defaultModelID,
                                  selfHosted: SelfHostedModel? = nil,
                                  downloadBase: URL? = nil) -> [any CapabilityProvider] {
-        let engine = selfHosted.map { SDImageEditEngine(selfHosted: $0) } ?? sharedEngine
+        let engine = selfHosted.map { SDImageRestyleEngine(selfHosted: $0) } ?? sharedEngine
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
-        return [MLXImageEditProvider(modelID: modelID, supported: isSupportedPlatform,
-                                     edit: mlxEdit(engine: engine, downloadBase: downloadBase),
+        return [MLXImageRestyleProvider(modelID: modelID, supported: isSupportedPlatform,
+                                     edit: mlxRestyle(engine: engine, downloadBase: downloadBase),
                                      readyProbe: readyProbe)]
     }
 }
@@ -144,8 +144,8 @@ public enum EshImageEdit {
 public extension EshRuntime {
     /// A runtime with the portable native providers AND native MLX image editing (`image.edit`, SDXL-Turbo
     /// img2img). macOS (Apple silicon); no Python. The model downloads on first use.
-    static func makeWithImageEdit(
-        modelID: String = EshImageEdit.defaultModelID,
+    static func makeWithImageRestyle(
+        modelID: String = EshImageRestyle.defaultModelID,
         selfHosted: SelfHostedModel? = nil,
         backends: [BackendKind: any InferenceBackend] = [.apple: AppleBackend()],
         root: PersistenceRoot = .default(),
@@ -153,7 +153,7 @@ public extension EshRuntime {
     ) async -> EshRuntime {
         await EshRuntime.makeDefault(
             backends: backends, root: root, installProvider: installProvider,
-            additionalProviders: EshImageEdit.providers(modelID: modelID, selfHosted: selfHosted,
+            additionalProviders: EshImageRestyle.providers(modelID: modelID, selfHosted: selfHosted,
                                                         downloadBase: root.huggingFaceCacheURL))
     }
 }

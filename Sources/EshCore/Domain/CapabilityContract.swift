@@ -46,7 +46,11 @@ public struct CapabilityID: RawRepresentable, Codable, Hashable, Sendable, Custo
     public static let imageUnderstand: CapabilityID = "image.understand"
     public static let imageOCR: CapabilityID = "image.ocr"
     public static let imageGenerate: CapabilityID = "image.generate"
-    public static let imageEdit: CapabilityID = "image.edit"
+    public static let imageEdit: CapabilityID = "image.edit"        // content-preserving INSTRUCT edit
+    /// Fast img2img style transfer (e.g. SDXL-Turbo). Regenerates from the prompt with light image
+    /// conditioning — it does NOT preserve subject/scene the way `imageEdit` (instruct) does. Distinct
+    /// capability so it is never silently used as the instruct `image.edit` default.
+    public static let imageRestyle: CapabilityID = "image.restyle"
     public static let imageSegment: CapabilityID = "image.segment"
     public static let imageUpscale: CapabilityID = "image.upscale"
     // Audio

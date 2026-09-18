@@ -687,10 +687,12 @@ public extension EshRuntime {
             .audioGenerate, .musicGenerate, .audioDiarize, .videoUnderstand
         ]
         // The full set the SDK models today (so the app can render every mode's state).
+        // image.restyle is a native (EshImageGen, macOS+iOS) fast img2img — NOT in macOSOnly, distinct from
+        // the content-preserving instruct `image.edit` (a macOS-only compat engine today).
         let known: [CapabilityID] = [
             .languageGenerate, .vectorGenerate, .webArtifactGenerate, .projectGenerate,
             .imageOCR, .imageUnderstand,
-            .imageGenerate, .imageEdit, .imageUpscale, .imageSegment,
+            .imageGenerate, .imageEdit, .imageRestyle, .imageUpscale, .imageSegment,
             .audioTranscribe, .audioSynthesizeSpeech, .audioGenerate, .musicGenerate, .audioDiarize,
             .videoUnderstand
         ]
