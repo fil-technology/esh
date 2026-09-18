@@ -164,6 +164,10 @@ import Darwin   // setxattr / getxattr — exercise the real in-process quaranti
         let py = try await rt.provisionedPython(onProgress: { _ in })
         #expect(ManagedPythonRuntime.isUsable(py))
         #expect(py == rt.venvPythonPath)
+        // The invariant the rc.12 prevention guarantees: the app-created tarball → extracted tree carries NO
+        // com.apple.quarantine. Trivially true off-sandbox; the real regression guard is a sandboxed CI run.
+        #expect(!hasQuarantine(rt.baseStandalonePythonPath))
+        #expect(!hasQuarantine(py))
         // Reuse: a second call adopts the just-provisioned venv (idempotent).
         let py2 = try await rt.provisionedPython(onProgress: { _ in })
         #expect(py2 == py)

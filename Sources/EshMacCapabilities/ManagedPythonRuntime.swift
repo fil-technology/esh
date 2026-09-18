@@ -168,7 +168,7 @@ struct ManagedPythonRuntime {
     }
 
     static func download(_ url: URL, to dest: URL, onProgress: @Sendable (Double) -> Void) async throws {
-        let tmp: URL, response: URLResponse
+        let data: Data, response: URLResponse
         // Bounded timeouts so provisioning fails fast with a typed error instead of hanging on a stalled
         // network (URLSession's default resource timeout is effectively unbounded).
         let cfg = URLSessionConfiguration.ephemeral
@@ -176,13 +176,20 @@ struct ManagedPythonRuntime {
         cfg.timeoutIntervalForResource = 600
         let session = URLSession(configuration: cfg)
         defer { session.finishTasksAndInvalidate() }
-        do { (tmp, response) = try await session.download(from: url) }
+        // PREVENT quarantine (the only fix that works under the App Sandbox — a sandboxed process cannot
+        // remove com.apple.quarantine from its own files). A URLSession *download task* writes a file that
+        // LaunchServices marks with com.apple.quarantine, and extracting that quarantined tarball propagates
+        // the mark to every extracted file → the interpreter is non-executable (EPERM). Fetching the bytes
+        // in memory (`data(from:)`, nothing written to disk by URLSession) and writing them ourselves with
+        // `Data.write` produces an APP-CREATED file that is not quarantined — exactly like the venv files esh
+        // creates by running python. `tar` then extracts an unquarantined archive → an unquarantined tree.
+        do { (data, response) = try await session.data(from: url) }
         catch { throw CompatibilityError.runtimeUnavailable(reason: "managed interpreter download failed: \(error.localizedDescription)") }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw CompatibilityError.runtimeUnavailable(reason: "managed interpreter download failed (HTTP \(http.statusCode))")
         }
         try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: tmp, to: dest)
+        try data.write(to: dest)   // app-created file — not an LS-quarantined download
         onProgress(1.0)
     }
 
@@ -194,13 +201,13 @@ struct ManagedPythonRuntime {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Remove `com.apple.quarantine` from a provisioned tree (recursive, no-op when absent) so a sandboxed
-    /// app can exec the managed interpreter. Uses the in-process Darwin `removexattr` API rather than
-    /// spawning `/usr/bin/xattr`: under the App Sandbox that subprocess (a Python-script wrapper) does not
-    /// reliably clear the attribute, leaving the extracted base interpreter quarantined and non-executable
-    /// (EPERM). A sandboxed app IS permitted to remove quarantine from files it owns via `removexattr`.
-    /// `XATTR_NOFOLLOW` acts on symlinks themselves (e.g. `bin/python3`); other xattrs (`com.apple.provenance`)
-    /// are left untouched. ENOATTR/errors are ignored (best-effort hygiene).
+    /// Best-effort removal of `com.apple.quarantine` from a provisioned tree (recursive, no-op when absent).
+    /// NOTE: this is only effective OUTSIDE the App Sandbox — a *sandboxed* process is denied removing
+    /// quarantine from its own files (verified: both `/usr/bin/xattr` and in-process `removexattr` clear 0
+    /// under the sandbox). The real fix is PREVENTION: `download` writes the tarball as an app-created file
+    /// so nothing extracted is ever quarantined (see `download`). This strip is kept as cheap extra hygiene
+    /// for non-sandboxed use and legacy quarantined trees. `XATTR_NOFOLLOW` acts on symlinks themselves;
+    /// other xattrs (`com.apple.provenance`) are left untouched; ENOATTR/errors ignored.
     static func stripQuarantine(at url: URL) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path) else { return }
