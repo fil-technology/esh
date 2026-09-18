@@ -15,6 +15,12 @@ public enum RuntimeKind: String, Codable, Hashable, Sendable, CaseIterable {
     case python           // MLX/other via the Python bridge
     case coreml
     case native           // pure-Swift (e.g. JSON-IR → SVG renderer)
+
+    /// In-process (native Swift / MLX-Swift / Apple / Core ML) vs the out-of-process Python compat bridge.
+    /// Only `.python` runs a subprocess+interpreter; everything else runs inside the host process. Native
+    /// engines are preferred for a capability — they run under the macOS App Sandbox (App Store viable),
+    /// whereas the Python bridge cannot (a sandboxed app quarantines the interpreter, which then can't exec).
+    public var isInProcess: Bool { self != .python }
 }
 
 public struct ResourceRequirements: Codable, Hashable, Sendable {
@@ -142,13 +148,19 @@ public struct CapabilityRegistry: Sendable {
     public func providers(for capability: CapabilityID,
                           inputs: [ModelModality],
                           output: ModelModality) -> [any CapabilityProvider] {
-        providers.filter { p in
+        let matches = providers.filter { p in
             let d = p.descriptor
             guard d.capabilities.contains(capability) else { return false }
             guard Set(inputs).isSubset(of: Set(d.acceptedInputs)) else { return false }
             guard d.producedOutputs.contains(output) else { return false }
             return true
         }
+        // Native in-process engines win over the Python compat bridge for the SAME capability: only native
+        // paths run under the macOS App Sandbox. Stable partition — registration order is preserved within
+        // each class, so a lone provider (native or compat) is unaffected; when both are registered the
+        // native one is selected first (candidates.first). See RuntimeKind.isInProcess.
+        return matches.filter { $0.descriptor.backend.isInProcess }
+             + matches.filter { !$0.descriptor.backend.isInProcess }
     }
 
     /// Convenience: candidates for a whole request.

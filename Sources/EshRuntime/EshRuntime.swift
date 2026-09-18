@@ -696,8 +696,13 @@ public extension EshRuntime {
         ]
 
         // Providers whose availability is runtime-stateful (e.g. macOS compatibility engines) report it
-        // directly; that wins over the static classification below.
-        let reporters = (capabilityRegistry?.all ?? []).compactMap { $0 as? CapabilityAvailabilityReporting }
+        // directly; that wins over the static classification below. Native (in-process) reporters are
+        // consulted BEFORE the Python compat bridge so discovery matches execution: when both a native and a
+        // compat provider exist for a capability, the native one's state is reported (it's the one that runs).
+        let allRegistered = capabilityRegistry?.all ?? []
+        let reporters = (allRegistered.filter { $0.descriptor.backend.isInProcess }
+                       + allRegistered.filter { !$0.descriptor.backend.isInProcess })
+            .compactMap { $0 as? CapabilityAvailabilityReporting }
         func reported(_ cap: CapabilityID) -> CapabilityAvailability? {
             for reporter in reporters { if let state = reporter.reportedAvailability(for: cap) { return state } }
             return nil
