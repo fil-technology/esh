@@ -1,5 +1,5 @@
 {
-  "originHash" : "dcf063d836b2347c3c2ad2190766d4bd214afe9171e965ec044992833e25e133",
+  "originHash" : "5303972bd50264ebbd36a405f1e9ebabb547c0a164228e7aea69e904a1720e41",
   "pins" : [
     {
       "identity" : "gzipswift",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "9bff95ca5f0b9e8c021acc4d71a2bbe4a7441631",
         "version" : "2.29.1"
+      }
+    },
+    {
+      "identity" : "mlx-swift-image-edit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/fil-technology/mlx-swift-image-edit",
+      "state" : {
+        "revision" : "f8675c384ac90589e7370c0763d87801192ee042",
+        "version" : "0.1.0"
       }
     },
     {

@@ -125,6 +125,11 @@ let package = Package(
         // Named directly so the opt-in EshImageGen product can `eval()`/decode latents during diffusion.
         // Same version spec as mlx-swift-examples (upToNextMinor 0.29.1).
         .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.29.1")),
+        // Native, content-preserving INSTRUCT image editing (`image.edit`, InstructPix2Pix). Standalone,
+        // validated package pinned to an immutable tag. Its graph is mlx-swift (0.29.x) + swift-transformers
+        // `Hub` (1.0.x) — the SAME versions esh already resolves, and NO swift-syntax, so it introduces no new
+        // conflict and preserves the LLM.swift coexistence. Only the opt-in EshImageGen product links it.
+        .package(url: "https://github.com/fil-technology/mlx-swift-image-edit", exact: "0.1.0"),
     ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,
@@ -186,6 +191,8 @@ let package = Package(
                 .product(name: "StableDiffusion", package: "mlx-swift-examples"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hub", package: "swift-transformers"),
+                // Native instruct image edit (`image.edit`): the standalone InstructPix2Pix engine.
+                .product(name: "MLXImageEdit", package: "mlx-swift-image-edit"),
             ],
             swiftSettings: quietDebugSwiftSettings
         ),

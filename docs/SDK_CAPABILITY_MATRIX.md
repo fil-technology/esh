@@ -43,7 +43,8 @@ links the published SwiftPM products and calls `EshRuntime` `execute` / `stream`
 | segmentation / bg-removal (`image.segment`) | **Production** | **Production** | native | Apple Vision `VNGenerateForegroundInstanceMask` (iOS 17 / macOS 14) | in `EshCore`; discoverable + honest "no subject" failure; no model download |
 | upscale (`image.upscale`) | **Production** | **Production** | native | MetalFX spatial scaler + Core Image Lanczos fallback (iOS 16 / macOS 13) | real-validated: 64×64 → 128×128 2×, MetalFX path (`apple-image-upscale.metalfx`), not the fallback |
 | generation (`image.generate`) | Unsupported | **Experimental** | compat | mflux Z-Image-Turbo 4-bit (Apache-2.0) | real-validated on macOS (324 KB PNG on SSD, reused weights). Native MLX-Swift SD path = **Coming Later** (self-hosted SD 2.1-base weights checksum-pinned but pending a verified-provenance re-host). Weights require external storage. |
-| editing (`image.edit`) | Unsupported | **Experimental** | compat | mflux qwen-image-edit-2511 4-bit (Apache-2.0) | wired + discoverable; end-to-end real-validation still in progress. Weights (~27 GB) require external storage. |
+| instruct editing (`image.edit`) | Unsupported | **Experimental** | native (`.mlx`) | InstructPix2Pix / SD1.5 (CreativeML OpenRAIL-M) via `mlx-swift-image-edit` | content-preserving instruct edit; real-validated on M1 Pro (blue car→red / day→sunset / add snow preserve source). fp16 ~2 GB, token-free, sha256-pinned. Native wins over the compat path. Peak RSS ~7 GB (2 GB MLX cache cap). |
+| instruct editing (`image.edit`, fallback) | Unsupported | Experimental | compat | mflux qwen-image-edit-2511 4-bit (Apache-2.0) | Python-bridge fallback where the native path is unavailable; not sandbox-viable. Weights (~27 GB) require external storage. |
 
 ## Speech
 | Capability | State (iOS) | State (macOS) | Class | Runtime | Notes |
@@ -104,7 +105,8 @@ native capabilities (OCR, segment, upscale, STT, TTS, Create, text) need no exte
 | image.understand | `mlx-community/Qwen2-VL-2B-Instruct-4bit` | Apache-2.0 | ~1.2 GB | runtime loader |
 | image.generate (compat) | `filipstrand/Z-Image-Turbo-mflux-4bit` | Apache-2.0 | ~5.5 GB | runtime loader |
 | image.generate (native, Coming Later) | `stabilityai/stable-diffusion-2-1-base` (self-hosted mirror) | OpenRAIL-M | ~5 GB | **sha256-pinned** (unet/text_encoder/vae), verify-or-reject |
-| image.edit (compat) | `mflux-community/qwen-image-edit-2511-mflux-q4` | Apache-2.0 | ~27 GB | runtime loader |
+| image.edit (native) | `timbrooks/instruct-pix2pix` (fp16, upstream resolve) | CreativeML OpenRAIL-M | ~2 GB | **sha256-pinned** (unet/text_encoder/vae fp16), verify-or-reject; token-free |
+| image.edit (compat, fallback) | `mflux-community/qwen-image-edit-2511-mflux-q4` | Apache-2.0 | ~27 GB | runtime loader |
 | audio.diarize | sherpa-onnx segmentation + embedding | Apache-2.0 | ~45 MB | runtime loader |
 | music.generate | `facebook/musicgen-small` | **CC-BY-NC-4.0** | ~2.2 GB | runtime loader |
 | audio.generate (SFX) | `facebook/audiogen-medium` | **CC-BY-NC-4.0** | ~1.6 GB | runtime loader |
