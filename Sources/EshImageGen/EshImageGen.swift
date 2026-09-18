@@ -48,15 +48,21 @@ public struct SelfHostedModel: Sendable {
     public let files: [Entry]
 
     public struct Entry: Sendable {
-        /// Path within the repo, e.g. "unet/diffusion_pytorch_model.safetensors".
+        /// Local path within the repo cache the loader reads, e.g. "unet/diffusion_pytorch_model.safetensors".
         public let relativePath: String
         /// Optional lowercase hex SHA-256 for integrity verification (strongly recommended for weights).
         public let sha256: String?
         /// >1 means the file is hosted as `<relativePath>.000`, `.001`, … and concatenated on download
         /// (to stay under a host's per-file size limit, e.g. GitHub release assets' 2 GB cap).
         public let shardCount: Int
-        public init(relativePath: String, sha256: String? = nil, shardCount: Int = 1) {
+        /// Optional path to FETCH from (`baseURL + sourceRelativePath`) when it differs from the local
+        /// `relativePath` — e.g. fetch a lighter `.fp16.safetensors` but store it under the preset's non-fp16
+        /// name so the loader (which converts to fp16 in memory anyway) finds it. Defaults to `relativePath`.
+        public let sourceRelativePath: String?
+        public init(relativePath: String, sha256: String? = nil, shardCount: Int = 1,
+                    sourceRelativePath: String? = nil) {
             self.relativePath = relativePath; self.sha256 = sha256; self.shardCount = max(1, shardCount)
+            self.sourceRelativePath = sourceRelativePath
         }
     }
 
@@ -101,20 +107,36 @@ public struct SelfHostedModel: Sendable {
     public static let sdxlTurboMirror =
         URL(string: "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main")!
 
-    public static func sdxlTurbo(mirror: URL = sdxlTurboMirror) -> SelfHostedModel {
-        SelfHostedModel(modelID: "stabilityai/sdxl-turbo", baseURL: mirror, files: [
+    /// - Parameter fp16: when true (default), fetch the `.fp16.safetensors` weights (~7 GB) — lighter to
+    ///   download and load; the MLX loader runs in fp16 anyway. Set false for the full fp32 weights (~13 GB).
+    ///   Either way the files are stored under the preset's non-fp16 names via `Entry.sourceRelativePath`.
+    public static func sdxlTurbo(mirror: URL = sdxlTurboMirror, fp16: Bool = true) -> SelfHostedModel {
+        // A weight entry: fetch the fp16 variant (stored under the fp32 dest name) or the fp32 file directly.
+        func weight(_ dest: String, fp16Source: String, sha16: String, sha32: String) -> Entry {
+            fp16 ? Entry(relativePath: dest, sha256: sha16, sourceRelativePath: fp16Source)
+                 : Entry(relativePath: dest, sha256: sha32)
+        }
+        return SelfHostedModel(modelID: "stabilityai/sdxl-turbo", baseURL: mirror, files: [
             Entry(relativePath: "unet/config.json"),
-            Entry(relativePath: "unet/diffusion_pytorch_model.safetensors",
-                  sha256: "1968fc61aa8449ab3d3f9b9a05bce88c611760c01e0c4a7a3785911b546fe582"),
+            weight("unet/diffusion_pytorch_model.safetensors",
+                   fp16Source: "unet/diffusion_pytorch_model.fp16.safetensors",
+                   sha16: "48fa46161a745f48d4054df3fe13804ee255486bca893403b60373c188fd1bdb",
+                   sha32: "1968fc61aa8449ab3d3f9b9a05bce88c611760c01e0c4a7a3785911b546fe582"),
             Entry(relativePath: "text_encoder/config.json"),
-            Entry(relativePath: "text_encoder/model.safetensors",
-                  sha256: "778d02eb9e707c3fbaae0b67b79ea0d1399b52e624fb634f2f19375ae7c047c3"),
+            weight("text_encoder/model.safetensors",
+                   fp16Source: "text_encoder/model.fp16.safetensors",
+                   sha16: "660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd",
+                   sha32: "778d02eb9e707c3fbaae0b67b79ea0d1399b52e624fb634f2f19375ae7c047c3"),
             Entry(relativePath: "text_encoder_2/config.json"),
-            Entry(relativePath: "text_encoder_2/model.safetensors",
-                  sha256: "fa5b2e6f4c2efc2d82e4b8312faec1a5540eabfc6415126c9a05c8436a530ef4"),
+            weight("text_encoder_2/model.safetensors",
+                   fp16Source: "text_encoder_2/model.fp16.safetensors",
+                   sha16: "ec310df2af79c318e24d20511b601a591ca8cd4f1fce1d8dff822a356bcdb1f4",
+                   sha32: "fa5b2e6f4c2efc2d82e4b8312faec1a5540eabfc6415126c9a05c8436a530ef4"),
             Entry(relativePath: "vae/config.json"),
-            Entry(relativePath: "vae/diffusion_pytorch_model.safetensors",
-                  sha256: "716971093e3428c9156906fcbcc5500abf005317c5f4d3a5bb3fa28c45e1e071"),
+            weight("vae/diffusion_pytorch_model.safetensors",
+                   fp16Source: "vae/diffusion_pytorch_model.fp16.safetensors",
+                   sha16: "02ee4bd18e5d16e7fe5fc5b85b4aefa2cba6db28897f674226c9d6ddd2f34f06",
+                   sha32: "716971093e3428c9156906fcbcc5500abf005317c5f4d3a5bb3fa28c45e1e071"),
             Entry(relativePath: "scheduler/scheduler_config.json"),
             Entry(relativePath: "tokenizer/vocab.json"),
             Entry(relativePath: "tokenizer/merges.txt"),
@@ -143,10 +165,11 @@ enum SelfHostedFetcher {
                 }
             }
             try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let source = entry.sourceRelativePath ?? entry.relativePath   // fetch path (may differ from dest)
             if entry.shardCount <= 1 {
-                try await download(from: model.baseURL.appending(path: entry.relativePath), to: dest)
+                try await download(from: model.baseURL.appending(path: source), to: dest)
             } else {
-                try await downloadShards(base: model.baseURL.appending(path: entry.relativePath),
+                try await downloadShards(base: model.baseURL.appending(path: source),
                                          count: entry.shardCount, to: dest)
             }
             if let want = entry.sha256 {

@@ -3,6 +3,7 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 import Testing
+import Hub
 import EshCore
 import EshRuntime
 @testable import EshImageGen
@@ -141,5 +142,42 @@ private func collectEdit(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async
         let ps = EshImageEdit.providers(selfHosted: .sdxlTurbo())
         #expect(ps.first?.descriptor.capabilities == [.imageEdit])
         #expect(ps.first?.descriptor.backend == .mlx)
+    }
+
+    @Test func sdxlTurboFetchesFP16ByDefaultFP32OptOut() {
+        // Default = lighter fp16 (~7 GB): fetched from the .fp16 source, stored under the preset's fp32 name.
+        let m = SelfHostedModel.sdxlTurbo()
+        let unet = m.files.first { $0.relativePath == "unet/diffusion_pytorch_model.safetensors" }!
+        #expect(unet.sourceRelativePath == "unet/diffusion_pytorch_model.fp16.safetensors")
+        #expect(unet.sha256 == "48fa46161a745f48d4054df3fe13804ee255486bca893403b60373c188fd1bdb")
+        // fp32 opt-out: fetches the non-fp16 file directly (no source remap), fp32 checksum.
+        let f32 = SelfHostedModel.sdxlTurbo(fp16: false)
+        let unet32 = f32.files.first { $0.relativePath == "unet/diffusion_pytorch_model.safetensors" }!
+        #expect(unet32.sourceRelativePath == nil)
+        #expect(unet32.sha256 == "1968fc61aa8449ab3d3f9b9a05bce88c611760c01e0c4a7a3785911b546fe582")
+        // Loader-facing dest paths are identical for both variants.
+        #expect(Set(m.files.map(\.relativePath)) == Set(f32.files.map(\.relativePath)))
+        // All four fp16 weights carry a .fp16 source + a pin.
+        let fp16Weights = m.files.filter { $0.sourceRelativePath?.contains(".fp16.safetensors") == true }
+        #expect(fp16Weights.count == 4)
+        #expect(fp16Weights.allSatisfy { $0.sha256 != nil })
+    }
+
+    @Test func selfHostedFetcherUsesSourceRelativePathForFetch() async throws {
+        // The decoupling that makes fp16 possible: fetch from sourceRelativePath, store at relativePath.
+        let mirror = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: mirror, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: mirror) }
+        try "FP16-CONTENT".data(using: .utf8)!.write(to: mirror.appendingPathComponent("w.fp16.bin"))
+        let model = SelfHostedModel(modelID: "test/model", baseURL: mirror, files: [
+            SelfHostedModel.Entry(relativePath: "w.bin", sourceRelativePath: "w.fp16.bin")
+        ])
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let hub = HubApi(downloadBase: cache)
+        try await SelfHostedFetcher.prefetch(model, hub: hub) { _ in }
+        let dest = hub.localRepoLocation(Hub.Repo(id: "test/model")).appending(path: "w.bin")
+        #expect(FileManager.default.fileExists(atPath: dest.path))
+        #expect((try? String(contentsOf: dest, encoding: .utf8)) == "FP16-CONTENT")
     }
 }
