@@ -163,9 +163,17 @@ public struct CapabilityRegistry: Sendable {
              + matches.filter { !$0.descriptor.backend.isInProcess }
     }
 
-    /// Convenience: candidates for a whole request.
+    /// Convenience: candidates for a whole request. When `request.model` is set (explicit provider/model
+    /// pin), providers whose `descriptor.id` or `modelFamily` matches are preferred — this is how the app
+    /// selects a specific tier (e.g. the PhotoMaker identity tier vs the InstructPix2Pix lightweight tier)
+    /// of the same capability. With no pin (Auto) the native-first order is used unchanged.
     public func candidates(for request: ExecutionRequest) -> [any CapabilityProvider] {
         let inputMods = Array(Set(request.inputs.map { $0.modality }))
-        return providers(for: request.capability, inputs: inputMods, output: request.output.modality)
+        let base = providers(for: request.capability, inputs: inputMods, output: request.output.modality)
+        if let pin = request.model {
+            let pinned = base.filter { $0.descriptor.id == pin || $0.descriptor.modelFamily == pin }
+            if !pinned.isEmpty { return pinned }
+        }
+        return base
     }
 }

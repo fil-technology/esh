@@ -129,7 +129,7 @@ let package = Package(
         // validated package pinned to an immutable tag. Its graph is mlx-swift (0.29.x) + swift-transformers
         // `Hub` (1.0.x) — the SAME versions esh already resolves, and NO swift-syntax, so it introduces no new
         // conflict and preserves the LLM.swift coexistence. Only the opt-in EshImageGen product links it.
-        .package(url: "https://github.com/fil-technology/mlx-swift-image-edit", exact: "0.1.0"),
+        .package(url: "https://github.com/fil-technology/mlx-swift-image-edit", exact: "0.2.0"),
     ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,

@@ -43,17 +43,22 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
     private let readyProbe: (@Sendable () -> Bool)?
     private let stateBox: StateBox
 
+    /// - Parameters:
+    ///   - providerID: descriptor id used for provider/model selection (the app pins it via `request.model`).
+    ///     Defaults to the InstructPix2Pix tier; the PhotoMaker identity tier passes its own id here.
+    ///   - modelFamily: optional family alias also matchable by `request.model`.
     public init(modelID: String, supported: Bool, edit: @escaping InstructImageEditFn,
-                readyProbe: (@Sendable () -> Bool)? = nil) {
+                readyProbe: (@Sendable () -> Bool)? = nil,
+                providerID: String = "mlx-instruct-image-edit", modelFamily: String? = "instruct-pix2pix") {
         self.modelID = modelID
         self.supported = supported
         self.edit = edit
         self.readyProbe = readyProbe
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
-            id: "mlx-instruct-image-edit", capabilities: [.imageEdit],
+            id: providerID, capabilities: [.imageEdit],
             acceptedInputs: [.image, .text], producedOutputs: [.image],
-            backend: .mlx, streaming: true, structuredOutput: false,
+            backend: .mlx, modelFamily: modelFamily, streaming: true, structuredOutput: false,
             requiredPrivilege: .artifactOnly, previewMode: .none)
     }
 
