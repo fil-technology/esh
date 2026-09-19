@@ -117,6 +117,34 @@ OOM / jetsam / swap exhaustion. This is a generic Scheduler / Model Fit layer, n
   *execution-time* "supported but not safe right now" state, transient and surfaced as the typed error above.
 - Providers that declare no resource profile keep the legacy native-first `.first` selection unchanged.
 
+## Runtime resource + download-lifecycle APIs (rc.21)
+Public facade over resource/lifecycle state esh already owns, so a consumer (Esh Studio) never fabricates
+state or re-derives runtime knowledge. All additive; the existing `install(_:onProgress:)` is unchanged.
+
+**Runtime resource state** (`EshRuntime`):
+- `residentModels() -> [ResidentModel]` — heavy models esh is keeping resident, truthfully. Reports only
+  providers that publish runtime state (the native image tiers today); each `ResidentModel` carries
+  `residency` (`.warm`/`.active`/`.idle`), `estimatedPeakMemoryBytes` (declared), and `measuredMemoryBytes`
+  (nil unless genuinely measured — never synthesized from an estimate). LLM/text residency is not tracked at
+  this layer yet, so those are omitted rather than guessed.
+- `resourcePressure() -> ResourcePressureSnapshot` — `totalMemoryBytes`, `availableMemoryBytes?`,
+  `memoryCritical` (esh's judgment), `systemVolumeFreeBytes?` (internal/swap volume),
+  `assetsVolumeFreeBytes?` (model volume).
+- `unload(modelID:) async throws` — explicit per-model unload; an **active** model throws
+  `UnloadError.modelActive` (never force-unloaded); unknown ids throw `.unknownModel`; already-unloaded is a
+  no-op. `unloadIdleRuntimes() async` releases warm/idle-but-not-active models.
+
+**Download lifecycle** (`EshRuntime`):
+- `installStream(_:) -> AsyncThrowingStream<DownloadState, Error>` — rich progress (`bytesDownloaded`,
+  `totalBytes`, `bytesPerSecond`, `etaSeconds`, `currentFile`, `phase`) instead of a bare `Double`.
+- `installSession(_:) -> ModelDownloadHandle` — a stable handle (`id`, `events`, `pause()`, `resume()`,
+  `cancel()`). **pause** retains the resumable partial; **resume** continues (not restart); **cancel**
+  terminates cleanly and discards the partial. Removing an installed model (`remove`) stays separate.
+- `DownloadState.Phase` gains `.paused`.
+
+Not in scope (owned elsewhere): a multi-model download **queue** (the app sequences installs; esh owns each
+one's lifecycle), and Automations (Ashex).
+
 ## External-storage requirement (shipping)
 Every heavy-model capability requires a configured external assets volume (`~/.esh/storage.json` →
 `assetsRoot`): native VLM, native/compat image.generate, compat image.edit, music, SFX, diarization,

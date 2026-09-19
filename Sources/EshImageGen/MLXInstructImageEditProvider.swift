@@ -41,7 +41,11 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
     private let edit: InstructImageEditFn
     private let supported: Bool
     private let readyProbe: (@Sendable () -> Bool)?
+    private let unloadFn: (@Sendable () async -> Void)?
     private let stateBox: StateBox
+    /// Truthful runtime state (installed / warm / active). `warm` flips true when the engine becomes resident
+    /// (first successful run) and false on `unload()`; `active` is true only while a request is in flight.
+    private let runtimeState = ProviderStateBox()
 
     /// - Parameters:
     ///   - providerID: descriptor id used for provider/model selection (the app pins it via `request.model`).
@@ -49,14 +53,17 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
     ///   - modelFamily: optional family alias also matchable by `request.model`.
     ///   - resourceProfile: esh-owned resource facts for resource-aware Auto routing (peak memory, download
     ///     bytes, per-volume headroom, quality/latency). nil keeps the tier out of resource ranking.
+    ///   - unload: releases the underlying engine's resident weights (called by `unload()`); nil = no-op.
     public init(modelID: String, supported: Bool, edit: @escaping InstructImageEditFn,
                 readyProbe: (@Sendable () -> Bool)? = nil,
                 providerID: String = "mlx-instruct-image-edit", modelFamily: String? = "instruct-pix2pix",
-                resourceProfile: CapabilityResourceProfile? = nil) {
+                resourceProfile: CapabilityResourceProfile? = nil,
+                unload: (@Sendable () async -> Void)? = nil) {
         self.modelID = modelID
         self.supported = supported
         self.edit = edit
         self.readyProbe = readyProbe
+        self.unloadFn = unload
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
             id: providerID, capabilities: [.imageEdit],
@@ -65,12 +72,12 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
             requiredPrivilege: .artifactOnly, previewMode: .none, resourceProfile: resourceProfile)
     }
 
-    /// Install/warm state for the scheduler. After a successful run the pipeline is resident (`.ready`), so
-    /// it reports warm+installed — this keeps warm reuse from being falsely memory-gated. Before any run,
-    /// `readyProbe` may report weights already on disk (installed, not yet warm).
+    /// Truthful install/warm/active state. `installed` is warm-or-on-disk (keeps rc.20 download-gating);
+    /// `warm`/`active` come from the live runtime box, so resident reuse isn't falsely gated and an in-flight
+    /// model is never force-unloaded.
     public var resourceState: ProviderRuntimeState {
-        if case .ready = stateBox.get() { return ProviderRuntimeState(installed: true, warm: true) }
-        return ProviderRuntimeState(installed: readyProbe?() ?? false, warm: false)
+        let s = runtimeState.state
+        return ProviderRuntimeState(installed: s.installed || (readyProbe?() ?? false), warm: s.warm, active: s.active)
     }
 
     public func refreshAvailability() async {
@@ -93,11 +100,13 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
         let edit = self.edit
         let supported = self.supported
         let stateBox = self.stateBox
+        let runtimeState = self.runtimeState
         let store = context.artifactStore
         let providerID = descriptor.id
         return AsyncThrowingStream { continuation in
             let task = Task {
-                defer { resolvedImage?.cleanup?() }
+                runtimeState.setActive(true)
+                defer { resolvedImage?.cleanup?(); runtimeState.setActive(false) }
                 guard supported else {
                     continuation.yield(.failed(message: "instruct image edit is not supported on this platform")); continuation.finish(); return
                 }
@@ -127,6 +136,8 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
                             let saved = try store.save(artifact, files: ["edited.png": png])
                             produced = true
                             stateBox.set(.ready)
+                            runtimeState.setInstalled(true)
+                            runtimeState.setWarm(true)   // engine is now resident in-process
                             continuation.yield(.artifactProduced(saved))
                         }
                     }
@@ -147,7 +158,12 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
         }
     }
 
-    public func unload() async {}
+    /// Release the resident engine (frees weights). No-op while a request is active is the caller's concern —
+    /// `EshRuntime.unload(modelID:)` refuses an active model with a typed error before reaching here.
+    public func unload() async {
+        await unloadFn?()
+        runtimeState.setWarm(false)
+    }
 
     /// A resolved source image: a filesystem path, plus an optional cleanup for a temp file we materialized
     /// from inline base64.

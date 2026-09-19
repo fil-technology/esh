@@ -163,7 +163,11 @@ public struct AppleImageUpscaleProvider: CapabilityProvider {
         // Input texture, filled from the CGImage via a CoreImage render (sRGB -> linear-agnostic RGBA8).
         let inDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: fmt, width: inW, height: inH, mipmapped: false)
         inDesc.usage = [.shaderRead, .shaderWrite]
+        #if os(macOS)
         inDesc.storageMode = .managed
+        #else
+        inDesc.storageMode = .shared
+        #endif
         guard let inTex = device.makeTexture(descriptor: inDesc) else { throw UpscaleError.renderFailed }
         let ciCtx = CIContext(mtlDevice: device)
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
@@ -172,7 +176,13 @@ public struct AppleImageUpscaleProvider: CapabilityProvider {
 
         let outDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: fmt, width: outW, height: outH, mipmapped: false)
         outDesc.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        // `.managed` (with an explicit CPU sync below) is macOS-only; iOS/other Apple platforms use the
+        // unified-memory `.shared` mode, which needs no synchronize.
+        #if os(macOS)
         outDesc.storageMode = .managed
+        #else
+        outDesc.storageMode = .shared
+        #endif
         guard let outTex = device.makeTexture(descriptor: outDesc) else { throw UpscaleError.renderFailed }
 
         let scalerDesc = MTLFXSpatialScalerDescriptor()
@@ -187,11 +197,14 @@ public struct AppleImageUpscaleProvider: CapabilityProvider {
 
         guard let cmd = queue.makeCommandBuffer() else { throw UpscaleError.renderFailed }
         scaler.encode(commandBuffer: cmd)
-        // Sync the managed output back to CPU so we can read it.
+        // Sync the managed output back to CPU so we can read it. Only needed (and only available) for the
+        // macOS `.managed` texture; iOS `.shared` textures are already CPU-visible.
+        #if os(macOS)
         if let blit = cmd.makeBlitCommandEncoder() {
             blit.synchronize(resource: outTex)
             blit.endEncoding()
         }
+        #endif
         cmd.commit()
         cmd.waitUntilCompleted()
         if cmd.error != nil { throw UpscaleError.renderFailed }

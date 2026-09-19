@@ -10,8 +10,9 @@ import Foundation
 public struct ProviderRuntimeState: Sendable, Equatable {
     public var installed: Bool   // weights present on disk (no download needed)
     public var warm: Bool        // pipeline already resident in memory
-    public init(installed: Bool = false, warm: Bool = false) {
-        self.installed = installed; self.warm = warm
+    public var active: Bool      // currently serving a request (never force-unload)
+    public init(installed: Bool = false, warm: Bool = false, active: Bool = false) {
+        self.installed = installed; self.warm = warm; self.active = active
     }
 }
 
@@ -32,6 +33,7 @@ public final class ProviderStateBox: @unchecked Sendable {
     }
     public func setInstalled(_ v: Bool) { lock.lock(); _state.installed = v; lock.unlock() }
     public func setWarm(_ v: Bool) { lock.lock(); _state.warm = v; lock.unlock() }
+    public func setActive(_ v: Bool) { lock.lock(); _state.active = v; lock.unlock() }
 }
 
 /// One provider offered to the scheduler, reduced to what selection needs.

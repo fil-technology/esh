@@ -72,6 +72,10 @@ public actor EshPhotoMakerEngine {
 
     public var isLoaded: Bool { editor != nil }
 
+    /// Release the resident pipeline (frees the in-process weights). Staged files on disk are kept, so a
+    /// later run re-loads without re-downloading.
+    public func unload() { editor = nil }
+
     func run(imagePath: String, prompt: String, params: EshImageEditParams,
              onProgress: @Sendable @escaping (Double) -> Void) async throws -> Data {
         let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
@@ -178,7 +182,8 @@ public enum EshPhotoMaker {
             modelID: defaultModelID, supported: isSupportedPlatform,
             edit: mlxPhotoMakerEdit(engine: engine), readyProbe: { false },
             providerID: providerID, modelFamily: modelFamily,
-            resourceProfile: resourceProfile)]
+            resourceProfile: resourceProfile,
+            unload: { await engine.unload() })]
     }
 }
 

@@ -219,18 +219,22 @@ public actor EshRuntime {
     // advanced host via `attachCapabilities`); nil on a bare `EshRuntime()` (text-only, unchanged rc.5 API).
     private var capabilityService: CapabilityExecutionService?
     private var capabilityRegistry: CapabilityRegistry?
+    private var persistenceRoot: PersistenceRoot?
 
     /// Attach an assembled UCMR capability stack (executor + its registry) to this runtime. Called by the
     /// platform default factories after the runtime exists so provider closures can route text inference
     /// back through this runtime. Advanced hosts may call it directly with a hand-built stack.
-    public func attachCapabilities(service: CapabilityExecutionService, registry: CapabilityRegistry) {
+    public func attachCapabilities(service: CapabilityExecutionService, registry: CapabilityRegistry,
+                                   root: PersistenceRoot? = nil) {
         self.capabilityService = service
         self.capabilityRegistry = registry
+        if let root { self.persistenceRoot = root }
     }
 
     /// Actor-isolated accessors used by the `nonisolated` streaming entry point.
     func capabilityServiceRef() -> CapabilityExecutionService? { capabilityService }
     func capabilityRegistryRef() -> CapabilityRegistry? { capabilityRegistry }
+    func localModelManagerRef() -> LocalModelManager { localModelManager }
 
     /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
     /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.
@@ -734,6 +738,60 @@ public extension EshRuntime {
         return CapabilityAvailabilitySnapshot(entries: entries)
     }
 
+    // MARK: - Runtime resource state (rc.21)
+
+    /// The heavy models/runtimes esh is currently keeping resident, with truthful per-model facts. Reports
+    /// only what esh genuinely knows: providers that publish runtime state (the native image tiers today).
+    /// LLM/text residency is not tracked at this layer, so those are omitted rather than guessed;
+    /// `measuredMemoryBytes` is nil unless esh has a real measurement.
+    func residentModels() -> [ResidentModel] {
+        capabilityRegistry?.residentModels() ?? []
+    }
+
+    /// Device resource facts for a consumer's headroom reasoning: memory + per-volume free space, plus esh's
+    /// own memory-pressure judgment. System volume = the internal state root (swap headroom); assets volume =
+    /// the configured model store.
+    func resourcePressure() -> ResourcePressureSnapshot {
+        let p = deviceProfileProvider.currentProfile()
+        let total = Int64(p.physicalMemoryBytes)
+        let available = p.availableMemoryBytes.map(Int64.init)
+        let root = persistenceRoot ?? .default()
+        let systemFree = SystemStorage.snapshot(at: root.stateRootURL)?.availableBytes
+        let assetsFree = StorageService().availability(root: root).freeBytes
+        // esh's pressure judgment: thermal-critical, or available memory below a safe floor (2 GB or 10%).
+        let floor = max(Int64(2) * 1_073_741_824, total / 10)
+        let memoryCritical = (p.thermalState == .critical) || (available.map { $0 < floor } ?? false)
+        return ResourcePressureSnapshot(totalMemoryBytes: total, availableMemoryBytes: available,
+                                        memoryCritical: memoryCritical,
+                                        systemVolumeFreeBytes: systemFree, assetsVolumeFreeBytes: assetsFree)
+    }
+
+    /// Explicitly unload one resident model by its id (the pinning id from `residentModels()`). An **active**
+    /// model is never force-unloaded — it throws `UnloadError.modelActive`. Unknown ids throw
+    /// `.unknownModel`; a model that is already not resident is a no-op (idempotent).
+    func unload(modelID: String) async throws {
+        guard let registry = capabilityRegistry,
+              let provider = registry.all.first(where: { $0.descriptor.id == modelID }) else {
+            throw UnloadError.unknownModel(modelID)
+        }
+        if let reporting = provider as? ResourceStateReporting {
+            let state = reporting.resourceState
+            if state.active { throw UnloadError.modelActive(modelID) }
+            if !state.warm { return }   // already released — nothing to do
+        }
+        await provider.unload()
+    }
+
+    /// Release every resident model that is warm/idle but not currently serving a request. Active models are
+    /// left untouched. Best-effort memory reclaim for low-headroom situations.
+    func unloadIdleRuntimes() async {
+        guard let registry = capabilityRegistry else { return }
+        let idle = Set(registry.idleUnloadableProviderIDs())
+        for provider in registry.all where idle.contains(provider.descriptor.id) {
+            await provider.unload()
+        }
+    }
+
     /// Assemble a runtime with the platform's text backend(s) AND the portable capability providers
     /// (OCR + SVG + Web + Code + text) wired behind the `execute`/`stream` facade. iOS gets Apple
     /// Foundation Models text by default; richer/GGUF/macOS assemblies inject more `backends` and
@@ -789,7 +847,7 @@ public extension EshRuntime {
         }
         let service = CapabilityExecutionService(registry: registry, context: context,
                                                  resourceHost: resourceHost, providerState: providerState)
-        await runtime.attachCapabilities(service: service, registry: registry)
+        await runtime.attachCapabilities(service: service, registry: registry, root: root)
         return runtime
     }
 

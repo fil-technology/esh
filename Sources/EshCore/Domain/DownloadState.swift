@@ -4,6 +4,7 @@ public struct DownloadState: Codable, Hashable, Sendable {
     public enum Phase: String, Codable, Sendable, CaseIterable {
         case resolving
         case downloading
+        case paused        // stopped with resumable partial retained (rc.21)
         case verifying
         case installed
         case failed

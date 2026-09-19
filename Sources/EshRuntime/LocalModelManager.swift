@@ -67,6 +67,14 @@ public actor LocalModelManager {
     }
     private var installsRoot: URL { root.modelsURL.appendingPathComponent("installs", isDirectory: true) }
 
+    /// Discard a resumable partial download for `id` (an explicit *cancel*, distinct from `remove()` of an
+    /// installed model). Call after the in-flight transfer has stopped; leaves no resume token, so a later
+    /// `install` starts fresh. No-op when nothing partial is present.
+    public func discardPartialDownload(_ id: String) {
+        try? FileManager.default.removeItem(at: resumeDataURL(id))
+        coordinator.clearRecord(id)
+    }
+
     // MARK: Query
 
     /// A model is installed only when its install record exists AND the model file is present.

@@ -59,6 +59,9 @@ public actor InstructImageEditEngine {
 
     public var isLoaded: Bool { editor != nil }
 
+    /// Release the resident pipeline (frees in-process weights); staged files on disk are kept.
+    public func unload() { editor = nil }
+
     /// Stage weights (once), run the instruct edit for one image, and return PNG bytes. `onProgress` is
     /// called during download (0…1) and then per denoise step (0…1).
     func run(imagePath: String, prompt: String, params: EshImageEditParams,
@@ -172,7 +175,8 @@ public enum EshImageEdit {
         return [MLXInstructImageEditProvider(modelID: modelID, supported: isSupportedPlatform,
                                              edit: mlxInstructEdit(engine: engine),
                                              readyProbe: readyProbe,
-                                             resourceProfile: resourceProfile)]
+                                             resourceProfile: resourceProfile,
+                                             unload: { await engine.unload() })]
     }
 }
 
