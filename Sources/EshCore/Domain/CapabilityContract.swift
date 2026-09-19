@@ -121,17 +121,65 @@ public struct ExecutionConstraints: Codable, Hashable, Sendable {
     /// Ceiling on the privilege a provider/preview may use for this request (default: least privilege).
     public var maxPrivilege: PrivilegeLevel?
 
+    // Generic, model-agnostic resource policy the caller MAY supply for resource-aware Auto routing. The
+    // caller never sends model-specific facts (peak RAM, download sizes) — esh owns those. All optional so
+    // legacy callers/payloads are unaffected.
+    /// Memory the caller wants held back for the OS + its own app, beyond the model's own footprint.
+    public var reserveMemoryGB: Double?
+    /// Whether esh may download a not-yet-installed model to satisfy Auto (default: allowed).
+    public var allowDownload: Bool
+    /// Hard offline: never touch the network (implies no downloads). Stricter than `localOnly` (which is
+    /// about local *execution*). Default false.
+    public var offlineOnly: Bool
+    /// Generic quality/latency lean for Auto ranking (auto = highest quality that safely fits).
+    public var qualityPreference: ResourcePolicy.QualityPreference?
+
     public init(localOnly: Bool = true,
                 quality: CapabilityRequest.Quality? = nil,
                 latency: CapabilityRequest.Latency? = nil,
                 maxMemoryGB: Double? = nil,
-                maxPrivilege: PrivilegeLevel? = nil) {
+                maxPrivilege: PrivilegeLevel? = nil,
+                reserveMemoryGB: Double? = nil,
+                allowDownload: Bool = true,
+                offlineOnly: Bool = false,
+                qualityPreference: ResourcePolicy.QualityPreference? = nil) {
         self.localOnly = localOnly
         self.quality = quality
         self.latency = latency
         self.maxMemoryGB = maxMemoryGB
         self.maxPrivilege = maxPrivilege
+        self.reserveMemoryGB = reserveMemoryGB
+        self.allowDownload = allowDownload
+        self.offlineOnly = offlineOnly
+        self.qualityPreference = qualityPreference
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case localOnly, quality, latency, maxMemoryGB, maxPrivilege
+        case reserveMemoryGB, allowDownload, offlineOnly, qualityPreference
+    }
+
+    // Tolerant decode: older payloads omit the resource-policy fields.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.localOnly = try c.decodeIfPresent(Bool.self, forKey: .localOnly) ?? true
+        self.quality = try c.decodeIfPresent(CapabilityRequest.Quality.self, forKey: .quality)
+        self.latency = try c.decodeIfPresent(CapabilityRequest.Latency.self, forKey: .latency)
+        self.maxMemoryGB = try c.decodeIfPresent(Double.self, forKey: .maxMemoryGB)
+        self.maxPrivilege = try c.decodeIfPresent(PrivilegeLevel.self, forKey: .maxPrivilege)
+        self.reserveMemoryGB = try c.decodeIfPresent(Double.self, forKey: .reserveMemoryGB)
+        self.allowDownload = try c.decodeIfPresent(Bool.self, forKey: .allowDownload) ?? true
+        self.offlineOnly = try c.decodeIfPresent(Bool.self, forKey: .offlineOnly) ?? false
+        self.qualityPreference = try c.decodeIfPresent(ResourcePolicy.QualityPreference.self, forKey: .qualityPreference)
+    }
+
+    /// The generic policy this constraint set expresses, for the resource-fit evaluator.
+    public var resourcePolicy: ResourcePolicy {
+        ResourcePolicy(maxMemoryGB: maxMemoryGB, reserveMemoryGB: reserveMemoryGB,
+                       allowDownload: allowDownload && !offlineOnly, offlineOnly: offlineOnly,
+                       qualityPreference: qualityPreference ?? .auto)
+    }
+
     public static let `default` = ExecutionConstraints()
 }
 

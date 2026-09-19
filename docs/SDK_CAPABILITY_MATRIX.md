@@ -91,6 +91,32 @@ The SDK reports it honestly instead of running into swap:
 - The public SFX API is unchanged. On a machine with adequate free disk the same path runs; the durable
   gated integration test is `integrationSFXGeneratesAudioOnManagedRuntime` (`ESH_RUN_COMPAT_INTEGRATION=1`).
 
+## Resource-aware Auto routing (rc.20)
+When several providers implement the same capability at different cost (today: the `image.edit` identity vs
+lightweight tiers), **Auto** (`ExecutionRequest.model == nil`) now picks the **highest-quality tier that
+safely fits the live machine**, and falls back — or returns a typed transient gate — instead of running into
+OOM / jetsam / swap exhaustion. This is a generic Scheduler / Model Fit layer, not PhotoMaker special-casing.
+
+- **The app never sends model-specific facts.** esh owns each provider's `CapabilityResourceProfile`
+  (estimated peak memory, download/install bytes, per-volume headroom, quality/latency). The caller only
+  sends generic policy on `ExecutionConstraints`: `maxMemoryGB`, `reserveMemoryGB`, `allowDownload`,
+  `offlineOnly`, `qualityPreference` (`auto`/`bestQuality`/`fastestReady`/`lowMemory`).
+- **Storage is multiple resources.** The fit evaluator distinguishes the **system/runtime volume** (internal
+  APFS, where swap lives) from the **assets/model volume** (often an external SSD) and from **staging**
+  space. This is what makes "the weights fit the SSD, but the internal disk is nearly full" correctly
+  *unsafe*: PhotoMaker declares an 18 GB system-volume/swap headroom, so on a machine with a full internal
+  disk it is gated even when the SSD has hundreds of GB free. Real-machine dogfood on a 32 GB Mac with
+  15.3 GB internal free / 616 GB SSD free: Auto → `mlx-instruct-image-edit` (PhotoMaker gated on swap
+  headroom); the decision is emitted as an explainable `.status` line.
+- **Explicit pins stay explicit.** A pinned `model` that does not fit returns
+  `CapabilityError.resourceGated` (transient) — esh never silently substitutes a different provider.
+- **Warm / anti-flapping.** A resident model reports warm state so re-use isn't falsely memory-gated; among
+  equal-quality tiers the warm/installed one wins the tie-break, so routing doesn't oscillate.
+- **Capability availability vs execution-time fit.** Discovery still reports whether the device/platform is
+  *capable* (`.ready` / `.requiresDownload` / `.unsupportedOnPlatform`); the resource gate is the
+  *execution-time* "supported but not safe right now" state, transient and surfaced as the typed error above.
+- Providers that declare no resource profile keep the legacy native-first `.first` selection unchanged.
+
 ## External-storage requirement (shipping)
 Every heavy-model capability requires a configured external assets volume (`~/.esh/storage.json` →
 `assetsRoot`): native VLM, native/compat image.generate, compat image.edit, music, SFX, diarization,

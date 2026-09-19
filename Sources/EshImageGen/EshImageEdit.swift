@@ -120,6 +120,21 @@ public enum EshImageEdit {
     /// Default model: InstructPix2Pix (SD1.5, CreativeML OpenRAIL-M).
     public static let defaultModelID = "timbrooks/instruct-pix2pix"
 
+    /// Provider id the app pins via `ExecutionRequest.model` to select this lightweight tier.
+    public static let defaultTierProviderID = "mlx-instruct-image-edit"
+
+    /// esh-owned resource facts for resource-aware Auto routing. Lightweight content-preserving tier:
+    /// fp16 ~2 GB weights, measured peak RSS ~7 GB. Quality tier below the PhotoMaker identity tier.
+    public static let resourceProfile = CapabilityResourceProfile(
+        estimatedPeakMemoryGB: 8,
+        modelDownloadBytes: 2 * 1_073_741_824,
+        installedBytes: 2 * 1_073_741_824,
+        temporaryInstallBytes: 1 * 1_073_741_824,
+        minimumSystemVolumeHeadroomGB: 12,   // swap headroom for the working set
+        minimumAssetsVolumeHeadroomGB: 2,
+        qualityTier: 50,
+        latencyClass: .moderate)
+
     public static let sharedEngine = InstructImageEditEngine(selfHosted: SelfHostedModel.instructPix2Pix())
 
     /// The MLX-backed instruct-edit stream: stage (or reuse) the model, run the edit, emit per-step progress
@@ -156,7 +171,8 @@ public enum EshImageEdit {
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXInstructImageEditProvider(modelID: modelID, supported: isSupportedPlatform,
                                              edit: mlxInstructEdit(engine: engine),
-                                             readyProbe: readyProbe)]
+                                             readyProbe: readyProbe,
+                                             resourceProfile: resourceProfile)]
     }
 }
 

@@ -35,7 +35,7 @@ public struct EshImageEditParams: Sendable {
 public typealias InstructImageEditFn = @Sendable (_ imagePath: String, _ prompt: String, _ params: EshImageEditParams)
     -> AsyncThrowingStream<ImageGenChunk, Error>
 
-public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, ResourceStateReporting, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let modelID: String
     private let edit: InstructImageEditFn
@@ -47,9 +47,12 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
     ///   - providerID: descriptor id used for provider/model selection (the app pins it via `request.model`).
     ///     Defaults to the InstructPix2Pix tier; the PhotoMaker identity tier passes its own id here.
     ///   - modelFamily: optional family alias also matchable by `request.model`.
+    ///   - resourceProfile: esh-owned resource facts for resource-aware Auto routing (peak memory, download
+    ///     bytes, per-volume headroom, quality/latency). nil keeps the tier out of resource ranking.
     public init(modelID: String, supported: Bool, edit: @escaping InstructImageEditFn,
                 readyProbe: (@Sendable () -> Bool)? = nil,
-                providerID: String = "mlx-instruct-image-edit", modelFamily: String? = "instruct-pix2pix") {
+                providerID: String = "mlx-instruct-image-edit", modelFamily: String? = "instruct-pix2pix",
+                resourceProfile: CapabilityResourceProfile? = nil) {
         self.modelID = modelID
         self.supported = supported
         self.edit = edit
@@ -59,7 +62,15 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
             id: providerID, capabilities: [.imageEdit],
             acceptedInputs: [.image, .text], producedOutputs: [.image],
             backend: .mlx, modelFamily: modelFamily, streaming: true, structuredOutput: false,
-            requiredPrivilege: .artifactOnly, previewMode: .none)
+            requiredPrivilege: .artifactOnly, previewMode: .none, resourceProfile: resourceProfile)
+    }
+
+    /// Install/warm state for the scheduler. After a successful run the pipeline is resident (`.ready`), so
+    /// it reports warm+installed — this keeps warm reuse from being falsely memory-gated. Before any run,
+    /// `readyProbe` may report weights already on disk (installed, not yet warm).
+    public var resourceState: ProviderRuntimeState {
+        if case .ready = stateBox.get() { return ProviderRuntimeState(installed: true, warm: true) }
+        return ProviderRuntimeState(installed: readyProbe?() ?? false, warm: false)
     }
 
     public func refreshAvailability() async {

@@ -133,6 +133,20 @@ public enum EshPhotoMaker {
     public static let modelFamily = "photomaker-v1"
     public static let defaultModelID = "fil-technology/photomaker-v1"
 
+    /// esh-owned resource facts for resource-aware Auto routing. Identity/high-quality tier: SDXL fp16 +
+    /// PhotoMaker compact LoRAs (~10 GB on disk), measured MLX peak ~12.4 GB (tiled VAE decode) — safe
+    /// threshold ~14 GB. Highest quality tier; slow first generation (~199 s cold). The large system-volume
+    /// headroom is what makes "weights fit the SSD but the internal disk is nearly full" correctly unsafe.
+    public static let resourceProfile = CapabilityResourceProfile(
+        estimatedPeakMemoryGB: 14,
+        modelDownloadBytes: 10 * 1_073_741_824,
+        installedBytes: 10 * 1_073_741_824,
+        temporaryInstallBytes: 2 * 1_073_741_824,
+        minimumSystemVolumeHeadroomGB: 18,   // swap headroom for the ~14 GB working set + macOS
+        minimumAssetsVolumeHeadroomGB: 3,
+        qualityTier: 100,
+        latencyClass: .slow)
+
     public static let sharedEngine = EshPhotoMakerEngine()
 
     public static func mlxPhotoMakerEdit(engine: EshPhotoMakerEngine) -> InstructImageEditFn {
@@ -163,7 +177,8 @@ public enum EshPhotoMaker {
         return [MLXInstructImageEditProvider(
             modelID: defaultModelID, supported: isSupportedPlatform,
             edit: mlxPhotoMakerEdit(engine: engine), readyProbe: { false },
-            providerID: providerID, modelFamily: modelFamily)]
+            providerID: providerID, modelFamily: modelFamily,
+            resourceProfile: resourceProfile)]
     }
 }
 

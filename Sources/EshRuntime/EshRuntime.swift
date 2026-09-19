@@ -778,7 +778,17 @@ public extension EshRuntime {
         for provider in additionalProviders { registry.register(provider) }
 
         let context = ExecutionContext(root: root, artifactStore: FileArtifactStore(root: root))
-        let service = CapabilityExecutionService(registry: registry, context: context)
+        // Resource-aware Auto routing: read the live machine (memory + per-volume disk + swap headroom) once
+        // per request, and report each provider's install/warm state (for anti-flapping + warm reuse).
+        let resourceHost: @Sendable () -> HostResources = {
+            HostResourceProbe.snapshot(root: root, deviceProfile: deviceProfileProvider)
+        }
+        let allProviders = registry.all
+        let providerState: @Sendable (String) -> ProviderRuntimeState = { id in
+            (allProviders.first { $0.descriptor.id == id } as? ResourceStateReporting)?.resourceState ?? .init()
+        }
+        let service = CapabilityExecutionService(registry: registry, context: context,
+                                                 resourceHost: resourceHost, providerState: providerState)
         await runtime.attachCapabilities(service: service, registry: registry)
         return runtime
     }

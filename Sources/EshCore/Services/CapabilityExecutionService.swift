@@ -8,11 +8,16 @@ import Foundation
 public enum CapabilityError: Error, LocalizedError, Equatable {
     case unsupported(capability: String, detail: String)
     case failed(String)
+    /// The capability is supported but cannot safely run right now (memory / disk / swap headroom / offline).
+    /// Transient: freeing resources or connecting the assets volume restores it. For an explicit model pin
+    /// this is returned instead of substituting a different provider.
+    case resourceGated(CapabilityResourceGate)
 
     public var errorDescription: String? {
         switch self {
         case let .unsupported(capability, detail): return "No local provider for \(capability): \(detail)"
         case let .failed(m): return m
+        case let .resourceGated(gate): return gate.message
         }
     }
 }
@@ -153,16 +158,28 @@ public struct CapabilityExecutionService: Sendable {
     /// resolver to pick an evidence-backed model and (for interactive requests) config.
     private let scheduler: CapabilityScheduler?
     private let candidateModels: (@Sendable (CapabilityID) -> [String])?
+    /// Resource-aware Auto routing. When present, providers that declare a `CapabilityResourceProfile` are
+    /// ranked by quality and filtered to those that safely fit the live machine (memory + per-volume disk +
+    /// swap headroom + generic policy). `resourceHost` reads the live machine once per request; `providerState`
+    /// reports install/warm state per provider. When nil, selection is the legacy native-first `.first`.
+    private let resourceHost: (@Sendable () -> HostResources)?
+    private let providerState: (@Sendable (String) -> ProviderRuntimeState)?
+    private let resourceScheduler: ResourceScheduler
 
     public init(registry: CapabilityRegistry, context: ExecutionContext,
                 modelResolver: (@Sendable (ExecutionRequest) -> String?)? = nil,
                 scheduler: CapabilityScheduler? = nil,
-                candidateModels: (@Sendable (CapabilityID) -> [String])? = nil) {
+                candidateModels: (@Sendable (CapabilityID) -> [String])? = nil,
+                resourceHost: (@Sendable () -> HostResources)? = nil,
+                providerState: (@Sendable (String) -> ProviderRuntimeState)? = nil) {
         self.registry = registry
         self.context = context
         self.modelResolver = modelResolver
         self.scheduler = scheduler
         self.candidateModels = candidateModels
+        self.resourceHost = resourceHost
+        self.providerState = providerState
+        self.resourceScheduler = ResourceScheduler()
     }
 
     /// Apply performance-aware scheduling (evidence-backed model + interactive config) to a request.
@@ -191,15 +208,57 @@ public struct CapabilityExecutionService: Sendable {
         var request = request
         if request.model == nil, let resolved = modelResolver?(request) { request.model = resolved }
         let candidates = registry.candidates(for: request)
-        guard let provider = candidates.first else {
+        guard !candidates.isEmpty else {
             let mods = request.inputs.map { $0.modality.rawValue }.joined(separator: "+")
             let detail = "inputs=[\(mods)] output=\(request.output.modality.rawValue). Install or enable a provider for this capability."
             return AsyncThrowingStream { cont in
                 cont.finish(throwing: CapabilityError.unsupported(capability: request.capability.rawValue, detail: detail))
             }
         }
+
+        // Resource-aware selection (Auto ranks by quality among safely-fitting tiers; an explicit pin is
+        // honored-or-gated, never substituted). Falls through to legacy `.first` when no provider declares a
+        // resource profile, or when resource detection is not wired.
+        var chosen = candidates[0]
+        var selectionReason: String?
+        if let resourceHost {
+            let host = resourceHost()
+            let rc = candidates.map { p -> ResourceCandidate in
+                ResourceCandidate(providerID: p.descriptor.id, profile: p.descriptor.resourceProfile,
+                                  state: providerState?(p.descriptor.id) ?? .init())
+            }
+            let outcome = resourceScheduler.select(
+                capability: request.capability.rawValue, explicit: request.model != nil,
+                candidates: rc, host: host, policy: request.constraints.resourcePolicy)
+            switch outcome {
+            case let .passthrough(reason):
+                selectionReason = reason
+            case let .selected(providerID, diag):
+                chosen = candidates.first { $0.descriptor.id == providerID } ?? candidates[0]
+                selectionReason = diag.reason
+            case let .gated(gate, _):
+                return AsyncThrowingStream { cont in
+                    cont.yield(.failed(message: gate.message))
+                    cont.finish(throwing: CapabilityError.resourceGated(gate))
+                }
+            }
+        }
+
+        let provider = chosen
         let resolved = ResolvedExecutionRequest(request: request, modelID: request.model)
-        return provider.execute(resolved, context: context)
+        let downstream = provider.execute(resolved, context: context)
+        guard let selectionReason else { return downstream }
+        // Prepend the routing rationale as a status line (explainable routing) without altering the payload.
+        return AsyncThrowingStream { cont in
+            let task = Task {
+                cont.yield(.status(selectionReason))
+                do {
+                    for try await ev in downstream { cont.yield(ev) }
+                    cont.finish()
+                } catch { cont.finish(throwing: error) }
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Run to completion, collecting a typed ExecutionResult (text and/or artifacts).

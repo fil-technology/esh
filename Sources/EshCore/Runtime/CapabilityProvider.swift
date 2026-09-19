@@ -49,6 +49,11 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
     public var requiredPrivilege: PrivilegeLevel
     /// The preview mode this provider's output supports, if any.
     public var previewMode: PreviewDescriptor.Mode
+    /// esh-owned resource facts (peak memory, download/install bytes, per-volume headroom, quality/latency).
+    /// Providers that declare one participate in resource-aware Auto ranking + execution-time fit gating;
+    /// providers without one keep legacy native-first selection unchanged. NOT visible to the app — the
+    /// caller only ever sends generic policy (see `ResourcePolicy`).
+    public var resourceProfile: CapabilityResourceProfile?
 
     public init(id: String,
                 capabilities: [CapabilityID],
@@ -59,7 +64,8 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
                 streaming: Bool = false,
                 structuredOutput: Bool = false,
                 requiredPrivilege: PrivilegeLevel = .artifactOnly,
-                previewMode: PreviewDescriptor.Mode = .none) {
+                previewMode: PreviewDescriptor.Mode = .none,
+                resourceProfile: CapabilityResourceProfile? = nil) {
         self.id = id
         self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs
@@ -70,6 +76,7 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
         self.structuredOutput = structuredOutput
         self.requiredPrivilege = requiredPrivilege
         self.previewMode = previewMode
+        self.resourceProfile = resourceProfile
     }
 }
 
