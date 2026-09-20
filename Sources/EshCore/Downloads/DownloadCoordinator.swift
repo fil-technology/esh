@@ -94,19 +94,21 @@ public struct DownloadCoordinator: Sendable {
             try handle.seekToEnd()
 
             var currentFileDownloaded = ResumeSupport.existingSize(at: destinationURL)
-            var buffer = Data()
-            buffer.reserveCapacity(64 * 1024)
-            for try await byte in stream.bytes {
-                buffer.append(byte)
-                if buffer.count < 64 * 1024 {
-                    continue
-                }
-
-                try handle.write(contentsOf: buffer)
-                let chunkCount = Int64(buffer.count)
+            // Read the body as whole `Data` blocks (delegate-delivered), writing each directly. This keeps CPU
+            // near-zero on multi-GB downloads — the old per-`UInt8` `AsyncBytes` loop pinned two cores. Progress
+            // still emits on the same ~64 KB cadence, and byte-accounting is unchanged.
+            var bytesSinceEmit: Int64 = 0
+            for try await chunk in stream {
+                guard !chunk.isEmpty else { continue }
+                try handle.write(contentsOf: chunk)
+                let chunkCount = Int64(chunk.count)
                 currentFileDownloaded += chunkCount
                 aggregateDownloaded += chunkCount
-                buffer.removeAll(keepingCapacity: true)
+                bytesSinceEmit += chunkCount
+                if bytesSinceEmit < 64 * 1024 {
+                    continue
+                }
+                bytesSinceEmit = 0
 
                 let elapsed = max(stopwatch.elapsedMilliseconds() / 1_000, 0.001)
                 let speed = Double(aggregateDownloaded) / elapsed
@@ -128,13 +130,6 @@ public struct DownloadCoordinator: Sendable {
                 )
             }
 
-            if !buffer.isEmpty {
-                try handle.write(contentsOf: buffer)
-                let chunkCount = Int64(buffer.count)
-                currentFileDownloaded += chunkCount
-                aggregateDownloaded += chunkCount
-            }
-
             if let expected = file.sizeBytes, currentFileDownloaded < expected {
                 throw StoreError.invalidManifest("Downloaded file \(file.path) is smaller than expected.")
             }
@@ -153,34 +148,30 @@ public struct DownloadCoordinator: Sendable {
         reporter: ProgressReporting,
         totalBytes: Int64?,
         currentFileTotalBytes: inout Int64?
-    ) async throws -> (bytes: URLSession.AsyncBytes, response: URLResponse) {
+    ) async throws -> AsyncThrowingStream<Data, Error> {
         let resumedBytes = ResumeSupport.existingSize(at: destinationURL)
+        let request = try makeRequest(
+            repoID: plan.repoID,
+            revision: plan.revision,
+            file: file.path,
+            resumeFrom: resumedBytes
+        )
+        let (response, stream, cancel) = try await NetworkRequestExecutor.dataStream(
+            session: session,
+            request: request,
+            retryPolicy: retryPolicy
+        )
         do {
-            let request = try makeRequest(
-                repoID: plan.repoID,
-                revision: plan.revision,
-                file: file.path,
-                resumeFrom: resumedBytes
-            )
-            let (bytes, response) = try await NetworkRequestExecutor.bytes(
-                session: session,
-                request: request,
-                retryPolicy: retryPolicy
-            )
             try validate(response: response, file: file.path, resumeFrom: resumedBytes)
-            currentFileTotalBytes = inferCurrentFileTotalBytes(
-                fallback: currentFileTotalBytes,
-                response: response,
-                resumedBytes: resumedBytes
-            )
-            return (bytes, response)
         } catch let error as StoreError {
             guard case let .invalidManifest(message) = error,
                   resumedBytes > 0,
                   message.contains("status 416") else {
+                cancel()
                 throw error
             }
 
+            cancel()   // abandon the 416 response's transfer before restarting from 0
             try? FileManager.default.removeItem(at: destinationURL)
             aggregateDownloaded -= resumedBytes
             reporter.emit(
@@ -197,25 +188,36 @@ public struct DownloadCoordinator: Sendable {
                 )
             )
 
-            let request = try makeRequest(
+            let retryRequest = try makeRequest(
                 repoID: plan.repoID,
                 revision: plan.revision,
                 file: file.path,
                 resumeFrom: 0
             )
-            let (bytes, response) = try await NetworkRequestExecutor.bytes(
+            let (response2, stream2, cancel2) = try await NetworkRequestExecutor.dataStream(
                 session: session,
-                request: request,
+                request: retryRequest,
                 retryPolicy: retryPolicy
             )
-            try validate(response: response, file: file.path, resumeFrom: 0)
+            do {
+                try validate(response: response2, file: file.path, resumeFrom: 0)
+            } catch {
+                cancel2()
+                throw error
+            }
             currentFileTotalBytes = inferCurrentFileTotalBytes(
                 fallback: currentFileTotalBytes,
-                response: response,
+                response: response2,
                 resumedBytes: 0
             )
-            return (bytes, response)
+            return stream2
         }
+        currentFileTotalBytes = inferCurrentFileTotalBytes(
+            fallback: currentFileTotalBytes,
+            response: response,
+            resumedBytes: resumedBytes
+        )
+        return stream
     }
 
     private func inferCurrentFileTotalBytes(

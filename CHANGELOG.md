@@ -26,6 +26,26 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.26 (fix: model downloads pegged ~200% CPU — per-byte stream read)
+
+Performance fix. Multi-GB model downloads pinned ~2 cores for the whole transfer (fan/heat/battery,
+competing with concurrent generation). Bytes on disk were always correct — purely a CPU-efficiency bug.
+
+Root cause: `DownloadCoordinator` consumed the response via `for try await byte in stream.bytes`, and
+`URLSession.AsyncBytes` yields the body **one `UInt8` per async iteration** (plus a one-byte `Data.append`).
+An 8.5 GB file is billions of per-element async iterations — the per-byte loop, not the network/TLS, pinned
+the cores.
+
+- The read is now **block-based**: `NetworkRequestExecutor.dataStream(...)` drives a `URLSessionDataDelegate`
+  that delivers whole `Data` blocks (16 KB–1 MB) and bridges them into an `AsyncThrowingStream<Data, Error>`.
+  The write loop writes each block directly. Near-zero app CPU on large downloads.
+- Everything else is preserved: connection-phase retry policy, per-file `Range` resume + 416 restart, the
+  `Authorization` header for gated/private, the rich `DownloadState` progress (same ~64 KB emit cadence and
+  byte-accounting), and pause/resume/cancel — consuming-task cancellation tears down the transfer (partial
+  retained on disk) exactly as `AsyncBytes` did.
+- Tests: `DownloadCoordinatorTests` gains multi-block reassembly (byte-exact across many blocks), resume via
+  `Range` header, and 416 restart, all through a chunk-delivering `URLProtocol`.
+
 ### SDK — v2.4.0-rc.25 (fix: model installs blocked on exFAT / non-APFS storage)
 
 Bug fix. On a non-APFS model-storage volume (e.g. an exFAT external SSD), `DeviceProfile.availableStorageBytes`
