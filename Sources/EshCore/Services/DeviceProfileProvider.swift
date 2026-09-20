@@ -69,15 +69,14 @@ public struct SystemDeviceProfileProvider: DeviceProfileProviding {
         #endif
     }
 
-    /// Free storage usable for model installation, in the given sandbox directory. Uses
-    /// `volumeAvailableCapacityForImportantUsage` (the value Apple recommends for "can I download this?").
+    /// Free storage usable for model installation, on the volume backing the given directory. Delegates to the
+    /// canonical `SystemStorage.snapshot`, which trusts `volumeAvailableCapacityForImportantUsage` only when
+    /// positive and falls back to plain available capacity — so a non-APFS (exFAT/FAT) volume that reports 0
+    /// for important-usage no longer masks its real free space. `nil` only when capacity is genuinely unknown.
     static func availableStorage(at url: URL) -> UInt64? {
         let probe = (try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)) != nil ? url : url.deletingLastPathComponent()
-        if let values = try? probe.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let bytes = values.volumeAvailableCapacityForImportantUsage, bytes >= 0 {
-            return UInt64(bytes)
-        }
-        return nil
+        guard let snapshot = SystemStorage.snapshot(at: probe) else { return nil }
+        return UInt64(max(0, snapshot.availableBytes))
     }
 
     static func map(_ thermal: ProcessInfo.ThermalState) -> ThermalState? {

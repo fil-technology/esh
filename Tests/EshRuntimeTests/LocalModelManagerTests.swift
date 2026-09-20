@@ -81,6 +81,21 @@ struct LocalModelManagerTests {
         #expect(plan.suitable == false)
     }
 
+    @Test func installPlanSuitableWhenExFATImportantUsageIsZeroButVolumeHasSpace() async {
+        // Reproduces the exFAT bug end-to-end at the plan gate: the canonical reader turns
+        // (importantUsage: 0, ordinary: 500 GB) into a positive capacity, so the plan is not blocked.
+        let gb: Int64 = 1_073_741_824
+        let free = SystemStorage.selectAvailableBytes(importantUsage: 0, ordinaryAvailable: 500 * gb)
+        #expect(free == 500 * gb)
+        let mgr = LocalModelManager(root: tempRoot(),
+                                    deviceProfileProvider: FixedProfile(storage: UInt64(free!), physical: 16 << 30))
+        let d = descriptor(url: URL(string: "http://127.0.0.1:1/x")!, bytes: 986_048_768, sha: "00")
+        let plan = await mgr.installPlan(for: d)
+        #expect(plan.availableStorageBytes == 500 * gb)
+        #expect(plan.storageSufficient == true)
+        #expect(plan.suitable == true)
+    }
+
     @Test func installFailsFastOnInsufficientStorage() async {
         let mgr = LocalModelManager(root: tempRoot(), deviceProfileProvider: FixedProfile(storage: 1 * 1024 * 1024, physical: 8 << 30))
         let d = descriptor(url: URL(string: "http://127.0.0.1:1/x")!, bytes: 986_048_768, sha: "00")

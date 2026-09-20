@@ -26,6 +26,29 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.25 (fix: model installs blocked on exFAT / non-APFS storage)
+
+Bug fix. On a non-APFS model-storage volume (e.g. an exFAT external SSD), `DeviceProfile.availableStorageBytes`
+came back **0** even with hundreds of GB free, so `installPlan.storageSufficient` was false and installs were
+refused with `insufficientStorage(freeBytes: 0)`.
+
+Root cause: `SystemDeviceProfileProvider.availableStorage(at:)` read **only**
+`volumeAvailableCapacityForImportantUsage`, which is APFS-specific and returns 0 on exFAT/FAT, and accepted
+that 0 as valid — a second, divergent reader from the canonical `SystemStorage.snapshot`.
+
+- `DeviceProfileProvider.availableStorage(at:)` now delegates to the canonical `SystemStorage.snapshot` — one
+  cross-filesystem reader. `SystemStorage` trusts important-usage only when positive and falls back to plain
+  `volumeAvailableCapacity`; a genuinely full volume now reports `0` (not "unknown"), and capacity is `nil`
+  only when neither signal is readable. A pure `SystemStorage.selectAvailableBytes(importantUsage:ordinaryAvailable:)`
+  seam makes this testable without a real disk.
+- `LocalModelManager`'s default storage probe is anchored to the **actual install destination**
+  (`root.modelsURL`), so the gate measures the configured external volume, not the boot disk.
+- Storage-capacity, system/swap headroom, and RAM/Model Fit remain separate gates — no resource gate weakened.
+- Tests: `SystemStorageTests` (Cases A–D + unknown/clamp/real-probe) and an install-plan regression proving
+  `storageSufficient == true` when important-usage is 0 but the volume has space. Real exFAT dogfood on a live
+  volume: importantUsage 0 → esh reports 520 GiB, `installPlan.suitable == true`, and a real GGUF install
+  landed on the exFAT SSD with no internal fallback.
+
 ### SDK — v2.4.0-rc.24 (Hugging Face OAuth + PKCE native sign-in)
 
 Additive. Primary auth UX becomes "Continue with Hugging Face" (Authorization Code + PKCE, **public client,

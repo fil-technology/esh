@@ -21,12 +21,15 @@ public actor LocalModelManager {
 
     public init(root: PersistenceRoot = .default(),
                 store: ModelStore? = nil,
-                deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
+                deviceProfileProvider: DeviceProfileProviding? = nil,
                 storageSafetyReserveBytes: Int64 = 512 * 1024 * 1024,
                 downloadConfiguration: (@Sendable () -> URLSessionConfiguration)? = nil) {
         self.root = root
         self.store = store ?? FileModelStore(root: root)
+        // Probe the ACTUAL install destination volume (models live under the assets root) so the storage gate
+        // measures the external SSD, not the boot volume. An injected provider (tests) is used as-is.
         self.deviceProfileProvider = deviceProfileProvider
+            ?? SystemDeviceProfileProvider(storageProbeURL: root.modelsURL)
         self.storageSafetyReserveBytes = storageSafetyReserveBytes
         let installsRoot = root.modelsURL.appendingPathComponent("installs", isDirectory: true)
         self.coordinator = ModelDownloadCoordinator(installsRoot: installsRoot,
