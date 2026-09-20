@@ -73,6 +73,70 @@ struct LocalModelManagerTests {
         #expect(LocalModelCatalog.models.allSatisfy { $0.license == "apache-2.0" && !$0.sha256.isEmpty && $0.expectedBytes > 0 })
     }
 
+    // MARK: non-curated (Hugging Face / side-loaded) installs (rc.27)
+
+    /// Writes an HF-style install (manifest + real-named weight file) directly to the store, as
+    /// `HuggingFaceModelDownloader` would. `staleDirLocalPath` reproduces the old bug where a GGUF spec's
+    /// `localPath` pointed at the install directory instead of the weight file.
+    @discardableResult
+    private func writeHFInstall(root: PersistenceRoot, id: String, repo: String, fileName: String,
+                                bytes: Int, staleDirLocalPath: Bool) throws -> URL {
+        let store = FileModelStore(root: root)
+        let dir = root.modelsURL.appendingPathComponent("installs").appendingPathComponent(id, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent(fileName)
+        try Data(repeating: 7, count: bytes).write(to: fileURL)
+        let spec = ModelSpec(id: id, displayName: repo, backend: .gguf,
+                             source: ModelSource(kind: .huggingFace, reference: repo),
+                             localPath: staleDirLocalPath ? dir.path : fileURL.path,
+                             baseModelID: repo, variant: "Q8_0")
+        let install = ModelInstall(id: id, spec: spec, installPath: dir.path, sizeBytes: Int64(bytes),
+                                   backendFormat: "gguf", runtimeVersion: nil,
+                                   huggingFace: HuggingFaceInstallProvenance(repoID: repo, revision: "abc",
+                                       files: [fileName], format: "gguf", quantization: "Q8_0"))
+        try store.save(manifest: ModelManifest(install: install, files: [fileName]))
+        return fileURL
+    }
+
+    @Test func statusesSurfacesNonCuratedHFInstall() async throws {
+        let root = tempRoot()
+        try writeHFInstall(root: root, id: "mradermacher--llama-3-8b-web-gguf",
+                           repo: "mradermacher/Llama-3-8B-Web-GGUF",
+                           fileName: "Llama-3-8B-Web.Q8_0.gguf", bytes: 4096, staleDirLocalPath: false)
+        let mgr = LocalModelManager(root: root, deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 16 << 30))
+        let statuses = await mgr.statuses()
+        let hf = statuses.first { $0.descriptor.id == "mradermacher--llama-3-8b-web-gguf" }
+        #expect(hf != nil)                                   // was invisible before the fix
+        #expect(hf?.state == .installed)
+        #expect(hf?.descriptor.repository == "mradermacher/Llama-3-8B-Web-GGUF")
+        #expect(hf?.descriptor.quantization == "Q8_0")
+        #expect(await mgr.isInstalled("mradermacher--llama-3-8b-web-gguf"))
+        // Curated models still listed.
+        #expect(statuses.contains { $0.descriptor.id == "qwen2.5-1.5b-instruct-q4km" })
+    }
+
+    @Test func reconcileDoesNotDeleteNonCuratedHFInstall() async throws {
+        let root = tempRoot()
+        let weight = try writeHFInstall(root: root, id: "owner--model-gguf", repo: "owner/model-GGUF",
+                                        fileName: "model.Q8_0.gguf", bytes: 4096, staleDirLocalPath: false)
+        let mgr = LocalModelManager(root: root, deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 16 << 30))
+        let report = await mgr.reconcile()
+        #expect(!report.removedBrokenRecords.contains("owner--model-gguf"))   // regression: was deleted (data loss)
+        #expect(FileManager.default.fileExists(atPath: weight.path))          // 8.5 GB file would have been removed
+        #expect(await mgr.isInstalled("owner--model-gguf"))
+    }
+
+    @Test func reconcileRepairsStaleDirectoryLocalPath() async throws {
+        let root = tempRoot()
+        let weight = try writeHFInstall(root: root, id: "owner--stale-gguf", repo: "owner/stale-GGUF",
+                                        fileName: "stale.Q8_0.gguf", bytes: 4096, staleDirLocalPath: true)
+        let mgr = LocalModelManager(root: root, deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 16 << 30))
+        let report = await mgr.reconcile()
+        #expect(report.repairedModelPaths.contains("owner--stale-gguf"))
+        let manifest = try FileModelStore(root: root).loadManifest(id: "owner--stale-gguf")
+        #expect(manifest.install.spec.localPath == weight.path)              // now points at the weight FILE
+    }
+
     @Test func installPlanRejectsInsufficientStorage() async {
         let mgr = LocalModelManager(root: tempRoot(), deviceProfileProvider: FixedProfile(storage: 10 * 1024 * 1024, physical: 8 << 30))
         let d = descriptor(url: URL(string: "http://127.0.0.1:1/x")!, bytes: 986_048_768, sha: "00")

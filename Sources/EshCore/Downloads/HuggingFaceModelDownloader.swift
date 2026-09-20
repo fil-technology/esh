@@ -169,6 +169,13 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             capabilities = ModelCapabilities(vision: VisionCapabilities(supportsImageUnderstanding: true, supportsOCR: false))
         }
 
+        // The runnable path: GGUF loads from the weight FILE, MLX from the install DIRECTORY. Pointing a
+        // GGUF spec at the directory (as before) left the model listed-but-unloadable.
+        let ggufPrimary = downloadedFiles.first { $0.lowercased().hasSuffix(".gguf") }
+        let runnableLocalPath = (modelPlan.backend == .gguf
+            ? ggufPrimary.map { installDirectory.appendingPathComponent($0).path }
+            : nil) ?? installDirectory.path
+
         let install = ModelInstall(
             id: installID,
             spec: ModelSpec(
@@ -176,7 +183,7 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 displayName: source.reference,
                 backend: modelPlan.backend,
                 source: source,
-                localPath: installDirectory.path,
+                localPath: runnableLocalPath,
                 baseModelID: baseModelID,
                 architectureFingerprint: modelPlan.architectureFingerprint,
                 variant: modelPlan.variant,

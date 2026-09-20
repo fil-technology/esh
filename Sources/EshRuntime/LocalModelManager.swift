@@ -70,6 +70,22 @@ public actor LocalModelManager {
     }
     private var installsRoot: URL { root.modelsURL.appendingPathComponent("installs", isDirectory: true) }
 
+    /// The on-disk weight file for an install, or nil when it isn't present. Uses the manifest's recorded
+    /// file names (Hugging Face / side-loaded installs keep the real filename, e.g. `Llama-3-8B-Web.Q8_0.gguf`)
+    /// and only reports present when EVERY recorded file exists; falls back to the legacy fixed `model.gguf`
+    /// layout used by curated installs. This is the single "is this install usable?" check — used by both the
+    /// inventory and reconcile, so a valid HF install is neither hidden nor (worse) deleted as "broken".
+    private func installedWeightURL(id: String) -> URL? {
+        let dir = installsRoot.appendingPathComponent(id, isDirectory: true)
+        if let manifest = try? store.loadManifest(id: id), !manifest.files.isEmpty {
+            let urls = manifest.files.map { dir.appendingPathComponent($0) }
+            guard urls.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else { return nil }
+            return urls.first(where: { $0.pathExtension.lowercased() == "gguf" }) ?? urls.first
+        }
+        let legacy = dir.appendingPathComponent("model.gguf")
+        return FileManager.default.fileExists(atPath: legacy.path) ? legacy : nil
+    }
+
     /// Discard a resumable partial download for `id` (an explicit *cancel*, distinct from `remove()` of an
     /// installed model). Call after the in-flight transfer has stopped; leaves no resume token, so a later
     /// `install` starts fresh. No-op when nothing partial is present.
@@ -80,10 +96,11 @@ public actor LocalModelManager {
 
     // MARK: Query
 
-    /// A model is installed only when its install record exists AND the model file is present.
+    /// A model is installed only when its install record exists AND its weight file(s) are present. The file
+    /// check honors the manifest's real filenames (not just the curated `model.gguf`).
     public func isInstalled(_ id: String) -> Bool {
         guard let installs = try? store.listInstalls(), installs.contains(where: { $0.id == id }) else { return false }
-        return FileManager.default.fileExists(atPath: modelFileURL(id).path)
+        return installedWeightURL(id: id) != nil
     }
 
     public func state(for d: LocalModelDescriptor) -> LocalModelState {
@@ -103,7 +120,40 @@ public actor LocalModelManager {
     }
 
     public func statuses() -> [LocalModelStatus] {
-        LocalModelCatalog.models.map { LocalModelStatus(descriptor: $0, state: state(for: $0)) }
+        var result = LocalModelCatalog.models.map { LocalModelStatus(descriptor: $0, state: state(for: $0)) }
+        // Also surface installed models that are NOT in the curated catalog (Hugging Face / side-loaded),
+        // read from their on-disk manifest. Without this, a valid HF install is invisible to localModels()
+        // even though its manifest + weight file are present. Only report the ones whose file(s) actually exist.
+        let catalogIDs = Set(LocalModelCatalog.models.map(\.id))
+        let installs = (try? store.listInstalls()) ?? []
+        for install in installs where !catalogIDs.contains(install.id) {
+            guard installedWeightURL(id: install.id) != nil else { continue }
+            result.append(LocalModelStatus(descriptor: descriptor(from: install), state: .installed))
+        }
+        return result
+    }
+
+    /// Synthesize a `LocalModelDescriptor` for a non-curated (Hugging Face / side-loaded) install from its
+    /// stored spec + provenance, so it can be listed like a curated model. Integrity fields (sha256) are
+    /// unknown for side-loaded models and left empty.
+    private func descriptor(from install: ModelInstall) -> LocalModelDescriptor {
+        let hf = install.huggingFace
+        let repo = hf?.repoID ?? install.spec.source.reference
+        let sourceURL = URL(string: "https://huggingface.co/\(repo)") ?? URL(string: "https://huggingface.co")!
+        let files = (try? store.loadManifest(id: install.id).files) ?? []
+        let params = ModelFilenameHeuristics.inferParameterCountB(identifier: repo, filenames: files) ?? 0
+        return LocalModelDescriptor(
+            id: install.id,
+            displayName: install.spec.displayName,
+            sourceURL: sourceURL,
+            repository: repo,
+            license: hf?.licenseIdentifier ?? "",
+            expectedBytes: install.sizeBytes,
+            sha256: "",
+            quantization: hf?.quantization ?? install.spec.variant ?? "",
+            parameterCountB: params,
+            recommendedContext: 2048,
+            recommendedHardwareClass: "")
     }
 
     // MARK: Preflight (storage + Model Fit, both honest)
@@ -228,10 +278,13 @@ public actor LocalModelManager {
         public var clearedStaleResume: [String] = []
         /// Background downloads that completed while the app was suspended → verified + installed on relaunch.
         public var finalizedPendingDownloads: [String] = []
+        /// Installs whose recorded runnable path was repaired to point at the real weight file (e.g. older HF
+        /// GGUF installs that stored the install directory) so they load without a re-download.
+        public var repairedModelPaths: [String] = []
         public var isConsistent: Bool {
             recoveredRecords.isEmpty && removedBrokenRecords.isEmpty
                 && removedOrphanDirs.isEmpty && clearedStaleResume.isEmpty
-                && finalizedPendingDownloads.isEmpty
+                && finalizedPendingDownloads.isEmpty && repairedModelPaths.isEmpty
         }
     }
 
@@ -273,19 +326,39 @@ public actor LocalModelManager {
         let installs = (try? store.listInstalls()) ?? []
         let recordIDs = Set(installs.map { $0.id })
 
-        // 1. Records whose model file is missing → not usable → drop the record + dir.
-        for install in installs where !fm.fileExists(atPath: modelFileURL(install.id).path) {
+        // 1. Records whose weight file is missing → not usable → drop the record + dir. The presence check
+        //    honors the manifest's real filenames, so a valid Hugging Face install (whose file is NOT named
+        //    `model.gguf`) is never mistaken for "broken" and deleted.
+        for install in installs where installedWeightURL(id: install.id) == nil {
             try? store.removeInstall(id: install.id)
             try? fm.removeItem(at: installsRoot.appendingPathComponent(install.id, isDirectory: true))
             report.removedBrokenRecords.append(install.id)
         }
 
         // 2. Installed records with leftover resume tokens → clear the stale token.
-        for install in installs where fm.fileExists(atPath: modelFileURL(install.id).path) {
+        for install in installs where installedWeightURL(id: install.id) != nil {
             let resume = resumeDataURL(install.id)
             if fm.fileExists(atPath: resume.path) {
                 try? fm.removeItem(at: resume)
                 report.clearedStaleResume.append(install.id)
+            }
+        }
+
+        // 2b. Repair an install whose recorded `spec.localPath` doesn't point at an existing file — e.g. an
+        //     older HF GGUF install that stored the install DIRECTORY instead of the weight file, which left
+        //     it listed-but-unloadable. Rewrite the manifest to the real weight file so it becomes usable
+        //     without a re-download. (GGUF only; MLX legitimately loads from the directory.)
+        for install in installs where install.spec.backend == .gguf {
+            guard let weight = installedWeightURL(id: install.id) else { continue }
+            let current = install.spec.localPath
+            if current == nil || !fm.fileExists(atPath: current!) || (current.map { !$0.hasSuffix(".gguf") } ?? true) {
+                if let manifest = try? store.loadManifest(id: install.id) {
+                    var repaired = manifest
+                    repaired.install.spec.localPath = weight.path
+                    if (try? store.save(manifest: repaired)) != nil {
+                        report.repairedModelPaths.append(install.id)
+                    }
+                }
             }
         }
 

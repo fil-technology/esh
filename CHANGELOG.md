@@ -26,6 +26,34 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.27 (fix: Hugging Face installs invisible to localModels() + reconcile data loss)
+
+Bug fix. A Hugging Face model installed correctly (manifest + weight on disk) but never appeared in
+`localModels()`, so it was unusable and uncounted — and `reconcileLocalModels()` would silently **delete** it.
+
+Root cause: `LocalModelManager` assumed the curated layout everywhere. `statuses()` enumerated only
+`LocalModelCatalog.models`, so a non-curated (HF / side-loaded) install was structurally invisible.
+Install-verification (`isInstalled`, `reconcile`) checked a fixed `model.gguf` filename, but HF installs keep
+the real filename (e.g. `Llama-3-8B-Web.Q8_0.gguf`) — so `reconcile` pass 1 treated the install as "broken"
+and removed the manifest **and** the multi-GB file. Separately, HF GGUF installs recorded `spec.localPath` as
+the install *directory* rather than the weight *file*, leaving them listed-but-unloadable.
+
+- `statuses()` now merges the curated catalog with **installed manifests from the store**, surfacing
+  non-curated installs (descriptor synthesized from the stored spec + HF provenance) as `.installed`.
+- A single manifest-aware `installedWeightURL(id:)` ("is this install's real file present?") backs
+  `isInstalled` and `reconcile`, honoring the manifest's actual filenames (legacy `model.gguf` still works).
+  `reconcile` no longer deletes a valid non-curated install.
+- HF **GGUF** installs now record `spec.localPath` at the weight file (MLX still uses the directory), and
+  `reconcile` repairs older installs whose `localPath` pointed at the directory (`repairedModelPaths`) so they
+  load without a re-download.
+- Curated install behavior, the storage/fit gates, and pause/resume are unchanged.
+- Tests: `LocalModelManagerTests` gains non-curated-install surfacing, the reconcile-doesn't-delete
+  regression, and the stale-`localPath` repair.
+
+Note for Esh Studio: the download ✓ was reported by the install session independently of `localModels()`; with
+this fix a completed HF install now also appears in the inventory. (Studio's own "installed but not usable"
+reconciliation remains a good belt-and-suspenders, but is no longer required for HF GGUF installs.)
+
 ### SDK — v2.4.0-rc.26 (fix: model downloads pegged ~200% CPU — per-byte stream read)
 
 Performance fix. Multi-GB model downloads pinned ~2 cores for the whole transfer (fan/heat/battery,
