@@ -19,7 +19,7 @@ struct HuggingFaceModelDownloaderTests {
         DownloadTestURLProtocol.handler = { request in
             let url = try #require(request.url)
             switch url.absoluteString {
-            case "https://huggingface.co/api/models/OpenReasonAI/Graphite1.0-4B":
+            case "https://huggingface.co/api/models/OpenReasonAI/Graphite1.0-4B?blobs=true":
                 let payload = """
                 {
                   "id": "OpenReasonAI/Graphite1.0-4B",
@@ -69,6 +69,64 @@ struct HuggingFaceModelDownloaderTests {
     }
 
     @Test
+    func installRecordsHuggingFaceProvenanceWithoutCredentials() async throws {
+        let root = PersistenceRoot(rootURL: temporaryDirectory())
+        let session = makeSession()
+        let store = FileModelStore(root: root)
+        let downloader = HuggingFaceModelDownloader(
+            modelStore: store,
+            coordinator: DownloadCoordinator(session: session, retryPolicy: .init(maxAttempts: 1)),
+            session: session,
+            retryPolicy: .init(maxAttempts: 1),
+            provenanceContext: HFInstallProvenanceContext(licenseIdentifier: "apache-2.0", gated: true, isPrivate: false)
+        )
+
+        DownloadTestURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            switch url.absoluteString {
+            case "https://huggingface.co/api/models/mlx-community/prov-model?blobs=true":
+                let payload = """
+                {
+                  "id": "mlx-community/prov-model",
+                  "sha": "sha9999",
+                  "siblings": [
+                    { "rfilename": "config.json" },
+                    { "rfilename": "model.safetensors" }
+                  ]
+                }
+                """
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(payload.utf8))
+            case "https://huggingface.co/mlx-community/prov-model/resolve/sha9999/config.json":
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data("{}".utf8))
+            case "https://huggingface.co/mlx-community/prov-model/resolve/sha9999/model.safetensors":
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data("weights".utf8))
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let manifest = try await downloader.install(
+            source: ModelSource(kind: .huggingFace, reference: "mlx-community/prov-model"),
+            suggestedID: "prov-model",
+            progress: { _ in }
+        )
+        let hf = try #require(manifest.install.huggingFace)
+        #expect(hf.repoID == "mlx-community/prov-model")
+        #expect(hf.revision == "sha9999")
+        #expect(hf.format == "mlx")
+        #expect(hf.licenseIdentifier == "apache-2.0")
+        #expect(hf.gated == true)
+        #expect(hf.isPrivate == false)
+        #expect(hf.files.contains("config.json"))
+        #expect(hf.files.contains("model.safetensors"))
+
+        // Provenance must never carry a token; re-decode the persisted manifest and scan for hf_ tokens.
+        let reloaded = try store.loadManifest(id: "prov-model")
+        let json = try JSONEncoder().encode(reloaded.install)
+        #expect(!String(data: json, encoding: .utf8)!.contains("hf_"))
+    }
+
+    @Test
     func installRejectsSafetensorsRepoWithoutConfigOrAdapterMetadata() async throws {
         let root = PersistenceRoot(rootURL: temporaryDirectory())
         let session = makeSession()
@@ -83,7 +141,7 @@ struct HuggingFaceModelDownloaderTests {
         DownloadTestURLProtocol.handler = { request in
             let url = try #require(request.url)
             switch url.absoluteString {
-            case "https://huggingface.co/api/models/example/bare-weights":
+            case "https://huggingface.co/api/models/example/bare-weights?blobs=true":
                 let payload = """
                 {
                   "id": "example/bare-weights",
@@ -129,7 +187,7 @@ struct HuggingFaceModelDownloaderTests {
         DownloadTestURLProtocol.handler = { request in
             let url = try #require(request.url)
             switch url.absoluteString {
-            case "https://huggingface.co/api/models/mlx-community/demo-model":
+            case "https://huggingface.co/api/models/mlx-community/demo-model?blobs=true":
                 let payload = """
                 {
                   "id": "mlx-community/demo-model",

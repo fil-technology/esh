@@ -220,6 +220,10 @@ public actor EshRuntime {
     private var capabilityService: CapabilityExecutionService?
     private var capabilityRegistry: CapabilityRegistry?
     private var persistenceRoot: PersistenceRoot?
+    // Hugging Face wiring (HF3). Default to the Keychain store + URLSession client; a host/test may override.
+    // The raw token lives only in the credential store — never held on the runtime.
+    var hfCredentialStoreOverride: HFCredentialStore?
+    var hfHTTPClientOverride: HFHTTPClient?
 
     /// Attach an assembled UCMR capability stack (executor + its registry) to this runtime. Called by the
     /// platform default factories after the runtime exists so provider closures can route text inference
@@ -235,6 +239,9 @@ public actor EshRuntime {
     func capabilityServiceRef() -> CapabilityExecutionService? { capabilityService }
     func capabilityRegistryRef() -> CapabilityRegistry? { capabilityRegistry }
     func localModelManagerRef() -> LocalModelManager { localModelManager }
+    /// The configured persistence root (honors the external assets volume via `.default()`), for the HF facade.
+    func persistenceRootRef() -> PersistenceRoot { persistenceRoot ?? .default() }
+    func deviceProfileProviderRef() -> DeviceProfileProviding { deviceProfileProvider }
 
     /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
     /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.

@@ -26,13 +26,18 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let retryPolicy: NetworkRetryPolicy
+    /// Read at request-build time so an authenticated search can also surface the account's private/gated
+    /// repos. Never persisted; nil for anonymous search.
+    private let authorizationToken: (@Sendable () -> String?)?
 
     public init(
         session: URLSession = .shared,
-        retryPolicy: NetworkRetryPolicy = .default
+        retryPolicy: NetworkRetryPolicy = .default,
+        authorizationToken: (@Sendable () -> String?)? = nil
     ) {
         self.session = session
         self.retryPolicy = retryPolicy
+        self.authorizationToken = authorizationToken
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
@@ -53,7 +58,10 @@ public struct HuggingFaceModelCatalog: ModelCatalog, Sendable {
             .init(name: "cardData", value: "true")
         ]
 
-        let request = URLRequest(url: components.url!)
+        var request = URLRequest(url: components.url!)
+        if let token = authorizationToken?(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await NetworkRequestExecutor.data(
             session: session,
             request: request,

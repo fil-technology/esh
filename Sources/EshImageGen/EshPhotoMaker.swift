@@ -78,7 +78,8 @@ public actor EshPhotoMakerEngine {
 
     func run(imagePath: String, prompt: String, params: EshImageEditParams,
              onProgress: @Sendable @escaping (Double) -> Void) async throws -> Data {
-        let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
+        // Thread the connected HF token (nil → env fallback) so gated weights resolve.
+        let hub = HubApi(downloadBase: downloadBase, hfToken: KeychainHFCredentialStore().loadToken(), useOfflineMode: false)
         let assetsDir = hub.localRepoLocation(Hub.Repo(id: "fil-technology/photomaker-v1"))
         if !staged {
             try await SelfHostedFetcher.prefetch(.sdxlBase(), hub: hub, onProgress: onProgress)

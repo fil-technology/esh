@@ -1,10 +1,31 @@
 import Foundation
 
+/// License + gated/private facts known to the resolver but not derivable from the file list alone. The
+/// facade passes these so the recorded install provenance is complete. Never carries credentials.
+public struct HFInstallProvenanceContext: Sendable {
+    public var licenseIdentifier: String?
+    public var gated: Bool
+    public var isPrivate: Bool
+    public init(licenseIdentifier: String? = nil, gated: Bool = false, isPrivate: Bool = false) {
+        self.licenseIdentifier = licenseIdentifier; self.gated = gated; self.isPrivate = isPrivate
+    }
+}
+
 public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     private struct ModelInfo: Decodable {
         struct Sibling: Decodable {
             var rfilename: String
             var size: Int64?
+            private struct LFS: Decodable { var size: Int64? }
+            private enum CodingKeys: String, CodingKey { case rfilename, size, lfs }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                self.rfilename = try c.decode(String.self, forKey: .rfilename)
+                let top = try c.decodeIfPresent(Int64.self, forKey: .size)
+                // LFS-tracked weights carry their real size under `lfs.size`.
+                let lfs = try c.decodeIfPresent(LFS.self, forKey: .lfs)
+                self.size = lfs?.size ?? top
+            }
         }
 
         var id: String
@@ -38,6 +59,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     private let retryPolicy: NetworkRetryPolicy
     private let storageRoot: PersistenceRoot
     private let storageService: StorageService
+    /// Read at request-build time so a gated/private repo's metadata resolves under the connected account.
+    /// Never persisted. nil for anonymous installs.
+    private let authorizationToken: (@Sendable () -> String?)?
+    /// License + gated/private facts to record in the install provenance (HF6). nil records neither.
+    private let provenanceContext: HFInstallProvenanceContext?
 
     public init(
         modelStore: ModelStore,
@@ -45,7 +71,9 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         session: URLSession = .shared,
         retryPolicy: NetworkRetryPolicy = .default,
         storageRoot: PersistenceRoot = .default(),
-        storageService: StorageService = StorageService()
+        storageService: StorageService = StorageService(),
+        authorizationToken: (@Sendable () -> String?)? = nil,
+        provenanceContext: HFInstallProvenanceContext? = nil
     ) {
         self.modelStore = modelStore
         self.coordinator = coordinator
@@ -53,6 +81,8 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
         self.retryPolicy = retryPolicy
         self.storageRoot = storageRoot
         self.storageService = storageService
+        self.authorizationToken = authorizationToken
+        self.provenanceContext = provenanceContext
     }
 
     public func install(
@@ -106,6 +136,11 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
                 backend: modelPlan.backend
             )
         } catch {
+            // A cancellation (pause) must retain the per-file partials so a later resume continues from the
+            // Range offsets DownloadCoordinator already supports. Any other failure cleans up.
+            if Task.isCancelled || error is CancellationError {
+                throw CancellationError()
+            }
             try? FileManager.default.removeItem(at: installDirectory)
             throw error
         }
@@ -153,7 +188,16 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
             installPath: installDirectory.path,
             sizeBytes: resolvedSize,
             backendFormat: modelPlan.backendFormat,
-            runtimeVersion: nil
+            runtimeVersion: nil,
+            huggingFace: HuggingFaceInstallProvenance(
+                repoID: source.reference,
+                revision: source.revision ?? info.sha,
+                files: downloadedFiles.sorted(),
+                format: modelPlan.backendFormat,
+                quantization: modelPlan.variant,
+                licenseIdentifier: provenanceContext?.licenseIdentifier,
+                gated: provenanceContext?.gated ?? false,
+                isPrivate: provenanceContext?.isPrivate ?? false)
         )
         let manifest = ModelManifest(install: install, files: downloadedFiles)
         try modelStore.save(manifest: manifest)
@@ -164,13 +208,18 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
 
     private func fetchModelInfo(repoID: String) async throws -> ModelInfo {
         let encoded = repoID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? repoID
-        guard let url = URL(string: "https://huggingface.co/api/models/\(encoded)") else {
+        // `blobs=true` yields real per-file sizes (LFS weights under `lfs.size`) for progress + verification.
+        guard let url = URL(string: "https://huggingface.co/api/models/\(encoded)?blobs=true") else {
             throw URLError(.badURL)
         }
 
+        var request = URLRequest(url: url)
+        if let token = authorizationToken?(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await NetworkRequestExecutor.data(
             session: session,
-            request: URLRequest(url: url),
+            request: request,
             retryPolicy: retryPolicy
         )
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
@@ -335,6 +384,12 @@ public struct HuggingFaceModelDownloader: ModelDownloader, Sendable {
     }
 
     private func sanitizedInstallID(from repoID: String) -> String {
+        Self.installID(for: repoID)
+    }
+
+    /// Deterministic install id derived from a repo reference (`owner/name` → `owner--name`). Exposed so a
+    /// controllable install session can address the same on-disk directory for resume/discard.
+    public static func installID(for repoID: String) -> String {
         repoID
             .lowercased()
             .replacingOccurrences(of: "/", with: "--")

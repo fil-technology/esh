@@ -26,6 +26,32 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.23 (first-class Hugging Face model source, HF1–HF9)
+
+Additive. A first-class Hugging Face source built on the existing model architecture — **no** second
+downloader, catalog, or storage system.
+
+- **Reference + resolve (HF1/HF2):** `HuggingFaceReference.parse` (owner/repo, huggingface.co URLs, `@rev`);
+  `resolveHuggingFace` → `ModelSourceRecord` (metadata + access + license + compatibility + gated). Typed
+  access states (`ModelAccessStatus`) and typed, UX-safe errors (`HuggingFaceError`).
+- **Auth (HF3):** token + **Keychain** (`KeychainHFCredentialStore`); `connectHuggingFace`/`disconnect`/
+  `huggingFaceAccountState` (`whoami`-validated). The public surface exposes account *state*, never the token.
+  Token threaded into the download `Authorization` header, metadata/search/whoami, and `HubApi(hfToken:)`.
+- **Candidates + fit + recommendation (HF4):** `huggingFaceArtifactCandidates` enumerates GGUF quants / the
+  MLX layout, each with its own Model Fit (real per-file sizes via `?blobs=true` + `lfs.size`); exactly one
+  `isRecommended` (heaviest that fits; lightest non-unsupported when fit is unknown).
+- **Search (HF5):** `searchHuggingFace` (account's private/gated repos included when connected).
+- **Install + provenance (HF6):** `installHuggingFaceArtifact` (one-shot) and `installHuggingFaceSession`
+  (controllable — rich `DownloadState` events + pause/resume/cancel). Honors the configured external assets
+  root (fails cleanly, never silent internal fallback). Records credential-free provenance on
+  `ModelInstall.huggingFace` (repo, revision/commit SHA, files, format, quantization, license, gated/private).
+- **Compatibility** is truthful — a raw HF resolve is at most `.compatible`, never `.verified`.
+- Docs: `docs/SDK_CAPABILITY_MATRIX.md` → "Hugging Face model source". Fully mocked test matrix
+  (`HuggingFaceModelSourceTests`, `HuggingFaceFacadeTests`, provenance in `HuggingFaceModelDownloaderTests`);
+  CI never depends on live Hugging Face.
+- NOTE: additive only. `ModelInstall` gains an optional `huggingFace` field (tolerant decode); no breaking
+  changes. Studio migration: use the `EshRuntime` HF methods above; no direct HF internals.
+
 ### SDK — v2.4.0-rc.7 (speech + text-path events — Phase 2)
 
 Additive to rc.6. Two more of the app's requested areas land through the public facade:

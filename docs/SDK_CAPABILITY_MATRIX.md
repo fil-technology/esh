@@ -199,3 +199,58 @@ commercial product without a license change.
 | `EshVision` (opt-in) | iOS 17 / macOS 14 | native VLM (image.understand) | mlx-swift-examples, swift-transformers, mlx-swift |
 | `EshImageGen` (opt-in) | macOS 14 | native MLX-Swift SD (image.generate, Coming Later) | mlx-swift-examples, swift-transformers, mlx-swift |
 | `EshLlamaCpp` (opt-in, when binary present) | iOS/macOS | embedded GGUF backend | prebuilt `esh_llama.xcframework` |
+
+## Hugging Face model source (rc.23, HF1–HF9)
+A first-class Hugging Face source, built on the existing model architecture (no second downloader, catalog,
+or storage system). One authed repo fetch drives resolve + access + candidates; downloads reuse
+`DownloadCoordinator` (now Authorization-threaded) and record credential-free provenance.
+
+**Public API (`EshRuntime`, via `import EshRuntime`):**
+| Method | Purpose |
+|---|---|
+| `parseHuggingFaceReference(_:) -> ModelSource?` | Parse `owner/repo`, a huggingface.co URL (`/tree`,`/blob`,`/resolve`), or `owner/repo@rev` (pure). |
+| `huggingFaceAccountState() async -> HFAccountState` | `disconnected` / `connected(username:)` / `tokenInvalid` (validates via `whoami`). |
+| `connectHuggingFace(token:) async throws -> String?` | Validate + store token in the **Keychain**; returns username. |
+| `disconnectHuggingFace()` | Delete the stored token (sign out). |
+| `huggingFaceAccess(_:) async throws -> ModelAccessStatus` | `publicAccess` / `authenticationRequired` / `gatedTermsRequired(actionURL:)` / `accessDenied` / `privateAuthorized` / `notFound`. |
+| `resolveHuggingFace(_:) / (reference:) async throws -> ModelSourceRecord` | Metadata + access + license + compatibility + gated flag. |
+| `huggingFaceArtifactCandidates(_:) async throws -> [ModelArtifactCandidate]` | Installable artifacts (GGUF quants / MLX layout), each with its own Model Fit; exactly one `isRecommended`. |
+| `recommendHuggingFaceArtifact(from:) -> [ModelArtifactCandidate]` | Re-apply esh's recommendation (pure). |
+| `searchHuggingFace(query:limit:) async throws -> [ModelSearchResult]` | Search (account's private/gated repos included when connected). |
+| `installHuggingFaceSession(_:candidate:suggestedID:) async throws -> ModelDownloadHandle` | Controllable install (rich `events` stream + pause/resume/cancel). |
+| `installHuggingFaceArtifact(_:candidate:suggestedID:onProgress:) async throws -> ModelInstall` | One-shot install (awaits completion). |
+| `configureHuggingFace(credentials:http:)` | Optional DI (tests/hosts); production defaults to Keychain + `URLSession`. |
+
+**Domain types (`EshCore`):** `HuggingFaceReference`, `HFAccountState`, `ModelAccessStatus`,
+`SourceCompatibility`, `HFLicenseInfo`, `ModelArtifactCandidate`, `ModelSourceRecord`, `HuggingFaceError`
+(typed, UX-safe), `HFCredentialStore` (+ `KeychainHFCredentialStore` / `InMemoryHFCredentialStore`),
+`HuggingFaceInstallProvenance`.
+
+**Compatibility verdict** is truthful: a raw HF resolve is at most `.compatible` — never `.verified`
+(reserved for the curated catalog); unknown format → `.unknown`, no supported backend → `.unsupported`,
+adapter/LoRA → `.experimental`.
+
+**Model Fit + recommendation** use real per-file sizes (`?blobs=true`; LFS weights via `lfs.size`). The
+recommendation is the heaviest artifact that fits comfortably/fits; when fit is unknown (no parameter hint)
+it conservatively picks the lightest non-unsupported artifact.
+
+**Provenance (HF6, credential-free)** recorded on `ModelInstall.huggingFace`: `repoID`, `revision` (commit
+SHA), `files`, `format`, `quantization`, `licenseIdentifier`, `gated`, `isPrivate` (+ `sizeBytes`,
+`installedAt`, backend on the install itself). No token is ever written to provenance, manifests, logs, or
+`UserDefaults`.
+
+**Storage:** HF installs honor the configured external assets root via `PersistenceRoot.default()` and fail
+cleanly (never silently fall back to internal disk) when the volume/marker is missing.
+
+**Security notes:** the token lives **only** in the Keychain (`technology.fil.esh.huggingface` /
+`hf-token`, `kSecAttrAccessibleAfterFirstUnlock`); the public surface exposes account *state*, never the raw
+token. The token is threaded into the download `Authorization` header, the metadata/search/whoami requests,
+and `HubApi(hfToken:)` for native VLM/image weight fetches. Error strings pass through `HFTokenRedaction`.
+No license auto-acceptance and no browser-HTML scraping; gated terms are surfaced as an `actionURL` for the
+user to open on huggingface.co. "Commercial-safe" is never inferred — only the raw license identifier is
+reported.
+
+**Known limitations:** for an anonymous caller HF returns `401` for both private and non-existent repos, so
+an unauthenticated resolve of a missing/private repo surfaces `authenticationRequired` (HF cannot
+distinguish them without a token). OAuth is deferred (token + Keychain is the v1 auth). Model uploads /
+training / conversion are out of scope.

@@ -67,7 +67,8 @@ public actor InstructImageEditEngine {
     func run(imagePath: String, prompt: String, params: EshImageEditParams,
              onProgress: @Sendable @escaping (Double) -> Void) async throws -> Data {
         if let selfHosted, !prefetched {
-            let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
+            // Thread the connected HF token (nil → swift-transformers' env fallback) so gated weights resolve.
+            let hub = HubApi(downloadBase: downloadBase, hfToken: KeychainHFCredentialStore().loadToken(), useOfflineMode: false)
             try await SelfHostedFetcher.prefetch(selfHosted, hub: hub, onProgress: onProgress)
             prefetched = true
         }

@@ -53,12 +53,17 @@ final class DownloadProgressTracker: @unchecked Sendable {
 /// an already-installed model stays separate (`EshRuntime.remove`).
 public actor ModelDownloadHandle {
     public typealias InstallRun = @Sendable (_ onProgress: @escaping @Sendable (Double) -> Void) async throws -> Void
+    /// A transfer that already emits a rich `DownloadState` (e.g. the Hugging Face installer, which reports
+    /// real per-file byte counts). Preferred over `InstallRun` when available — no fraction→bytes estimation.
+    public typealias StateInstallRun = @Sendable (_ onState: @escaping @Sendable (DownloadState) -> Void) async throws -> Void
 
     public nonisolated let id: String
     public nonisolated let events: AsyncThrowingStream<DownloadState, Error>
 
     private let expectedBytes: Int64
-    private let runInstall: InstallRun               // continues from any retained partial on each call
+    // Exactly one of these drives the transfer; both continue from any retained partial on each call.
+    private let runInstall: InstallRun?
+    private let runStateInstall: StateInstallRun?
     private let discardPartial: @Sendable () async -> Void
     private let tracker: DownloadProgressTracker
     private let continuation: AsyncThrowingStream<DownloadState, Error>.Continuation
@@ -75,6 +80,22 @@ public actor ModelDownloadHandle {
         self.id = id
         self.expectedBytes = expectedBytes
         self.runInstall = install
+        self.runStateInstall = nil
+        self.discardPartial = discardPartial
+        self.tracker = DownloadProgressTracker(expectedBytes: expectedBytes, fileName: id)
+        var cont: AsyncThrowingStream<DownloadState, Error>.Continuation!
+        self.events = AsyncThrowingStream { cont = $0 }
+        self.continuation = cont
+    }
+
+    /// State-emitting variant: the run reports a full `DownloadState` per sample (forwarded verbatim), so
+    /// no fraction→bytes estimation is applied. Same pause/resume/cancel semantics.
+    init(id: String, expectedBytes: Int64, stateInstall: @escaping StateInstallRun,
+         discardPartial: @escaping @Sendable () async -> Void) {
+        self.id = id
+        self.expectedBytes = expectedBytes
+        self.runInstall = nil
+        self.runStateInstall = stateInstall
         self.discardPartial = discardPartial
         self.tracker = DownloadProgressTracker(expectedBytes: expectedBytes, fileName: id)
         var cont: AsyncThrowingStream<DownloadState, Error>.Continuation!
@@ -90,11 +111,16 @@ public actor ModelDownloadHandle {
         if emitResolving {
             continuation.yield(DownloadState(phase: .resolving, totalBytes: total(), currentFile: id))
         }
-        let cont = continuation, tracker = tracker, run = runInstall
+        let cont = continuation, tracker = tracker
+        let run = runInstall, stateRun = runStateInstall
         let fileID = id, bytes = expectedBytes
         task = Task { [weak self] in
             do {
-                try await run { p in cont.yield(tracker.state(fraction: p)) }
+                if let stateRun {
+                    try await stateRun { s in cont.yield(s) }   // forward real DownloadState verbatim
+                } else if let run {
+                    try await run { p in cont.yield(tracker.state(fraction: p)) }
+                }
                 cont.yield(DownloadState(phase: .installed, bytesDownloaded: bytes,
                                          totalBytes: bytes > 0 ? bytes : nil, currentFile: fileID))
                 await self?.finishSuccessfully()

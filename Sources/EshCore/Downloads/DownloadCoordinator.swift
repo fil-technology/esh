@@ -25,13 +25,17 @@ public struct DownloadPlan: Sendable {
 public struct DownloadCoordinator: Sendable {
     private let session: URLSession
     private let retryPolicy: NetworkRetryPolicy
+    /// Read at request-build time so gated/private downloads carry the current HF token. Never persisted.
+    private let authorizationToken: (@Sendable () -> String?)?
 
     public init(
         session: URLSession = .shared,
-        retryPolicy: NetworkRetryPolicy = .default
+        retryPolicy: NetworkRetryPolicy = .default,
+        authorizationToken: (@Sendable () -> String?)? = nil
     ) {
         self.session = session
         self.retryPolicy = retryPolicy
+        self.authorizationToken = authorizationToken
     }
 
     public func download(
@@ -250,6 +254,9 @@ public struct DownloadCoordinator: Sendable {
         var request = URLRequest(url: url)
         if resumeFrom > 0 {
             request.setValue("bytes=\(resumeFrom)-", forHTTPHeaderField: "Range")
+        }
+        if let token = authorizationToken?(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         return request
     }

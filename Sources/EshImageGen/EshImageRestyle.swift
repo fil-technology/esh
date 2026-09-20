@@ -110,7 +110,8 @@ public enum EshImageRestyle {
                     do {
                         // Disable swift-transformers' async offline detection (see EshVision); route weights
                         // to the configured storage volume (external SSD) via `downloadBase`.
-                        let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
+                        // Thread the connected HF token (nil → env fallback) so gated weights resolve.
+                        let hub = HubApi(downloadBase: downloadBase, hfToken: KeychainHFCredentialStore().loadToken(), useOfflineMode: false)
                         let png = try await engine.run(imagePath: imagePath, prompt: prompt, params: params, hub: hub) { p in
                             continuation.yield(.progress(p))
                         }

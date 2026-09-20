@@ -49,7 +49,8 @@ public enum EshVision {
                             // otherwise fail the very first download with a spurious "Offline mode error"
                             // before connectivity is known. Weights still download from Hugging Face, into
                             // `downloadBase` (the configured assets volume) when provided.
-                            let hub = HubApi(downloadBase: downloadBase, useOfflineMode: false)
+                            // Thread the connected HF token (nil → env fallback) so gated weights resolve.
+                            let hub = HubApi(downloadBase: downloadBase, hfToken: KeychainHFCredentialStore().loadToken(), useOfflineMode: false)
                             container = try await VLMModelFactory.shared.loadContainer(
                                 hub: hub, configuration: ModelConfiguration(id: modelID))
                             await cache.store(modelID, container)
