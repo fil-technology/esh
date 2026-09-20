@@ -26,6 +26,37 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.24 (Hugging Face OAuth + PKCE native sign-in)
+
+Additive. Primary auth UX becomes "Continue with Hugging Face" (Authorization Code + PKCE, **public client,
+no secret**); manual PAT stays as an Advanced fallback. esh owns the OAuth protocol; the consumer app owns
+the browser + callback delivery. Verified against HF's live OIDC discovery + docs (public apps authenticate
+with client_id only; PKCE `S256`; loopback any-port + custom-scheme redirects).
+
+- **Single credential path:** new `HFCredential` (PAT + OAuth, with expiry/scopes/refresh metadata) stored as
+  JSON in the Keychain; `loadToken()` stays the universal accessor, so every existing authenticated consumer
+  (metadata/search/resolve, `DownloadCoordinator`, `HuggingFaceModelDownloader`, `HubApi`) uses OAuth with no
+  forking. Legacy rc.23 raw-token Keychain values migrate to a PAT credential on read (no forced logout).
+- **OAuth API (`EshRuntime`):** `beginHuggingFaceOAuth(configuration:)` → `HFAuthorizationRequest`;
+  `completeHuggingFaceOAuth(callbackURL:requestID:)`; `cancelHuggingFaceOAuth(requestID:)`;
+  `refreshHuggingFaceOAuthIfNeeded()`. `HFOAuthConfiguration` (endpoints default to HF), `HFOAuthClient`
+  (public-client code exchange + refresh), `HFOAuthCallback`, `HFPendingOAuthSession` (transient, capped,
+  600s TTL). esh never hardcodes a client ID — the consumer supplies it.
+- **Scopes (least privilege):** `openid profile gated-repos read-repos`.
+- **Redirect strategy:** esh is redirect-neutral (app delivers the callback); recommended
+  `ASWebAuthenticationSession` + custom scheme `technology.fil.eshstudio://oauth/huggingface`; loopback
+  (any port, RFC 8252) also accepted. Callback validated against the configured redirect URI.
+- **Expiry/refresh:** `expires_in` → `expiresAt`; auto-refresh when a refresh token is issued; expired +
+  non-refreshable → `.expired` account state / typed `oauthReauthenticationRequired` (never a bare 401).
+- `HFAccountState` gains `.expired`; `HuggingFaceError` gains typed `oauth*` cases. Token redaction broadened
+  to `hf_`/`hf_oauth_`/JWT/Bearer (not just the `hf_` prefix). Failed OAuth never destroys a working
+  credential; success replaces atomically.
+- Docs: `SDK_CAPABILITY_MATRIX.md` OAuth section + Esh Studio migration contract. Tests: deterministic OAuth
+  matrix (`HFOAuthTests`, `HFOAuthFacadeTests`) — PKCE/state/URL/callback/exchange(no secret)/refresh/
+  redaction/migration/atomic-replace/PAT-coexistence/OAuth-token threading. CI never needs live OAuth.
+- NOTE: `HFAccountState` gains a case → consumers with an exhaustive `switch` must add `.expired` (or a
+  `default`). Otherwise additive; no breaking changes to rc.23 behavior.
+
 ### SDK — v2.4.0-rc.23 (first-class Hugging Face model source, HF1–HF9)
 
 Additive. A first-class Hugging Face source built on the existing model architecture — **no** second

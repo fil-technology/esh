@@ -224,6 +224,28 @@ public actor EshRuntime {
     // The raw token lives only in the credential store — never held on the runtime.
     var hfCredentialStoreOverride: HFCredentialStore?
     var hfHTTPClientOverride: HFHTTPClient?
+    // Transient pending OAuth sessions (rc.24), keyed by request id. Hold the PKCE verifier + state only in
+    // memory between begin/complete; never persisted, never exposed. Capped + expired to avoid accumulation.
+    private var hfPendingOAuth: [String: HFPendingOAuthSession] = [:]
+    private static let hfMaxPendingOAuth = 8
+
+    func storePendingOAuth(_ session: HFPendingOAuthSession) {
+        purgeStalePendingOAuth()
+        if hfPendingOAuth.count >= Self.hfMaxPendingOAuth,
+           let oldest = hfPendingOAuth.values.min(by: { $0.createdAt < $1.createdAt }) {
+            hfPendingOAuth[oldest.id] = nil     // evict oldest to bound growth
+        }
+        hfPendingOAuth[session.id] = session
+    }
+    func takePendingOAuth(_ id: String) -> HFPendingOAuthSession? {
+        purgeStalePendingOAuth()
+        return hfPendingOAuth.removeValue(forKey: id)
+    }
+    func removePendingOAuth(_ id: String) { hfPendingOAuth[id] = nil }
+    func clearAllPendingOAuth() { hfPendingOAuth.removeAll() }
+    private func purgeStalePendingOAuth() {
+        for (id, session) in hfPendingOAuth where session.isExpired() { hfPendingOAuth[id] = nil }
+    }
 
     /// Attach an assembled UCMR capability stack (executor + its registry) to this runtime. Called by the
     /// platform default factories after the runtime exists so provider closures can route text inference

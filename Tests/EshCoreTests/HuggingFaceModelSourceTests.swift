@@ -64,7 +64,7 @@ struct HuggingFaceModelSourceTests {
     @Test func redactsTokens() {
         let redacted = HFTokenRedaction.redact("failed with hf_ABC123def in header")
         #expect(!redacted.contains("hf_ABC123def"))
-        #expect(redacted.contains("hf_***"))
+        #expect(redacted.contains("***"))   // rc.24: broadened redaction scrubs to *** (not only hf_***)
     }
 
     // MARK: credentials store

@@ -39,21 +39,28 @@ public final class MockHFHTTPClient: HFHTTPClient, @unchecked Sendable {
     private var prefixes: [(String, Stub)] = []
     /// Records the Authorization header seen on the last matching request (to assert token threading).
     public private(set) var lastAuthorization: String?
+    /// Records the last request URL + form/JSON body (to assert token-exchange parameters, no client_secret).
+    public private(set) var lastURL: String?
+    public private(set) var lastRequestBody: String?
 
     public init() {}
     public func stub(url: String, _ stub: Stub) { lock.lock(); exact[url] = stub; lock.unlock() }
     public func stub(prefix: String, _ stub: Stub) { lock.lock(); prefixes.append((prefix, stub)); lock.unlock() }
 
     public func send(_ request: URLRequest) async throws -> HFHTTPResponse {
+        let body = request.httpBody.flatMap { String(data: $0, encoding: .utf8) }
         let stub = resolveStub(url: request.url?.absoluteString ?? "",
-                               authorization: request.value(forHTTPHeaderField: "Authorization"))
+                               authorization: request.value(forHTTPHeaderField: "Authorization"),
+                               body: body)
         guard let stub else { return HFHTTPResponse(statusCode: 404, data: Data()) }
         return HFHTTPResponse(statusCode: stub.statusCode, data: stub.data)
     }
 
-    private func resolveStub(url: String, authorization: String?) -> Stub? {
+    private func resolveStub(url: String, authorization: String?, body: String?) -> Stub? {
         lock.lock(); defer { lock.unlock() }
         lastAuthorization = authorization
+        lastURL = url
+        lastRequestBody = body
         return exact[url] ?? prefixes.first(where: { url.hasPrefix($0.0) })?.1
     }
 }

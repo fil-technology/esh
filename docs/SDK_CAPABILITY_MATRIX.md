@@ -254,3 +254,65 @@ reported.
 an unauthenticated resolve of a missing/private repo surfaces `authenticationRequired` (HF cannot
 distinguish them without a token). OAuth is deferred (token + Keychain is the v1 auth). Model uploads /
 training / conversion are out of scope.
+
+## Hugging Face OAuth sign-in (rc.24, PKCE public client)
+Primary auth UX: "Continue with Hugging Face" (Authorization Code + PKCE, **public client, no secret**).
+Manual PAT (`connectHuggingFace(token:)`) remains an **Advanced fallback**. Both feed the same single
+credential path (`HFCredentialStore` → `loadToken()`), so every authenticated consumer (metadata, search,
+resolve/access, `DownloadCoordinator`, `HuggingFaceModelDownloader`, `HubApi(hfToken:)`) is unified with no
+forking by auth method. Verified against HF's live OIDC discovery + docs (public apps authenticate with
+client_id only; PKCE `S256`; loopback any-port + custom-scheme redirects).
+
+**esh owns** the OAuth protocol (PKCE, state, authorization URL, callback validation, code/refresh exchange,
+credential persistence). **The consumer app owns** the browser + callback delivery only.
+
+**Public API (`EshRuntime`):**
+| Method | Purpose |
+|---|---|
+| `beginHuggingFaceOAuth(configuration:) async throws -> HFAuthorizationRequest` | Generate PKCE+state, return `{id, authorizationURL}` for the app to open. |
+| `completeHuggingFaceOAuth(callbackURL:requestID:) async throws -> HFAccountState` | Validate state, exchange code, store credential, return account state. |
+| `cancelHuggingFaceOAuth(requestID:)` | Drop a pending session (browser dismissed). |
+| `refreshHuggingFaceOAuthIfNeeded() async -> HFAccountState` | Proactive refresh (safe at launch). |
+| `connectHuggingFace(token:)` / `disconnectHuggingFace()` | PAT fallback / sign out (clears credential + pending sessions). |
+| `huggingFaceAccountState() async -> HFAccountState` | `disconnected` / `connected(username:)` / `tokenInvalid` / **`expired`**. |
+| `configureHuggingFace(credentials:http:)` | Optional DI. |
+
+**Types (`EshCore`):** `HFOAuthConfiguration { clientID, redirectURI, scopes, endpoints }` (endpoints default
+to HF), `HFAuthorizationRequest`, `HFOAuthPKCE`, `HFPendingOAuthSession` (transient, in-memory, capped +
+600s TTL), `HFOAuthCallback`, `HFOAuthClient`, `HFCredential { accessToken, method(.pat/.oauth), expiresAt?,
+scopes?, refreshToken?, clientID? }`, `HFUserInfo`. `HFAccountState` gains `.expired`; `HuggingFaceError`
+gains `oauth*` cases.
+
+**Scopes (least privilege):** `openid profile gated-repos read-repos`. `gated-repos` → already-approved
+public gated repos; `read-repos` → user's private repos. Org repos require the user to grant org access at
+consent (esh does not force `orgIds`).
+
+**Redirect strategy:** esh is redirect-neutral — the app delivers the callback URL. Recommended:
+`ASWebAuthenticationSession` + custom scheme `technology.fil.eshstudio://oauth/huggingface`. Loopback
+(`http://127.0.0.1/callback`, any port, RFC 8252) is also accepted. esh validates the callback against the
+configured `redirectURI` (exact scheme+host+path for custom scheme; host+path, port-agnostic, for loopback).
+
+**Expiry/refresh:** the OAuth token's `expires_in` is normalized to `expiresAt`; when a `refresh_token` is
+issued esh refreshes automatically (before authed ops and in `accountState`), carrying the prior refresh
+token forward if HF omits a new one. Expired + non-refreshable → `.expired` account state and typed
+`oauthReauthenticationRequired` on protected ops (never a bare 401).
+
+**Security:** the credential (PAT or OAuth) lives only in the Keychain (JSON `HFCredential`); the public
+surface never exposes the token; the PKCE verifier/state never leave esh and are never persisted; token
+exchange sends no client secret; `HFTokenRedaction` scrubs `hf_…`, `hf_oauth_…`, JWTs, and Bearer values
+(not just the `hf_` prefix). Failed OAuth never destroys a working credential; success replaces atomically.
+Legacy rc.23 raw-token Keychain values migrate to a PAT credential on read (no forced logout).
+
+### Esh Studio migration contract (rc.24)
+1. Create a **public** HF OAuth app (no secret); ship its `client_id` in Studio (not secret).
+2. Register redirect URI(s) on the app — recommended custom scheme `technology.fil.eshstudio://oauth/huggingface`
+   (add it to Studio's `Info.plist` `CFBundleURLTypes`); or a port-less loopback `http://localhost/callback`.
+3. Build `HFOAuthConfiguration(clientID:redirectURI:scopes:)` (scopes default to `openid profile gated-repos
+   read-repos`).
+4. `let req = try await runtime.beginHuggingFaceOAuth(configuration:)` → open `req.authorizationURL` with
+   `ASWebAuthenticationSession` (callbackURLScheme = your scheme).
+5. On callback: `try await runtime.completeHuggingFaceOAuth(callbackURL:requestID: req.id)` → show
+   `connected(username:)`. On dismiss: `cancelHuggingFaceOAuth(requestID:)`.
+6. At launch: `refreshHuggingFaceOAuthIfNeeded()`; render `.expired` as "Reconnect".
+7. Keep the manual-PAT textbox only under "Advanced" (`connectHuggingFace(token:)`).
+8. Never construct token requests, hold the PKCE verifier, or persist credentials in Studio — esh owns all of that.

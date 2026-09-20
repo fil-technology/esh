@@ -23,20 +23,55 @@ public struct HuggingFaceModelSource: Sendable {
 
     // MARK: - Account (HF3)
 
-    /// Account state. Validates a stored token against whoami; offline/unknown keeps the connected view
-    /// (we don't downgrade to disconnected on a transient network error).
+    /// Account state. Validates the stored credential against whoami; offline/unknown keeps the connected view
+    /// (we don't downgrade to disconnected on a transient network error). An expired OAuth credential is
+    /// refreshed when possible, else surfaced as `.expired` (never a generic 401).
     public func accountState() async -> HFAccountState {
-        guard let token = credentials.loadToken() else { return .disconnected }
+        guard let credential = credentials.loadCredential() else { return .disconnected }
+        var effective = credential
+        if credential.isExpired() {
+            guard credential.canRefresh else { return .expired }
+            do { effective = try await refreshAndStore(credential) } catch { return .expired }
+        }
         do {
-            let resp = try await http.send(authed(request(path: "/api/whoami-v2"), token: token))
+            let resp = try await http.send(authed(request(path: "/api/whoami-v2"), token: effective.accessToken))
             switch resp.statusCode {
             case 200:
                 let name = (try? JSONDecoder().decode(WhoAmI.self, from: resp.data))?.name
                 return .connected(username: name)
-            case 401, 403: return .tokenInvalid
+            case 401, 403:
+                return credential.method == .oauth ? .expired : .tokenInvalid
             default: return .connected(username: nil)
             }
         } catch { return .connected(username: nil) }
+    }
+
+    // MARK: - OAuth (rc.24) — token exchange, refresh, freshness
+
+    /// The HF token endpoint used for refresh (exchange uses the session's configured endpoint).
+    private var refreshTokenEndpoint: URL { URL(string: "https://huggingface.co/oauth/token")! }
+
+    /// Exchange an authorization code for an OAuth credential, store it, and return the resulting account state.
+    public func completeOAuth(code: String, session: HFPendingOAuthSession) async throws -> HFAccountState {
+        let credential = try await HFOAuthClient(http: http).exchangeCode(code, session: session)
+        try credentials.saveCredential(credential)     // atomic replace; only after a successful exchange
+        return await accountState()
+    }
+
+    private func refreshAndStore(_ credential: HFCredential) async throws -> HFCredential {
+        let refreshed = try await HFOAuthClient(http: http).refresh(credential, tokenEndpoint: refreshTokenEndpoint)
+        try credentials.saveCredential(refreshed)
+        return refreshed
+    }
+
+    /// Ensure the stored credential is usable before an authenticated operation: refresh an expired OAuth
+    /// credential when possible, else throw `oauthReauthenticationRequired`. No-op for PAT / valid credentials.
+    @discardableResult
+    public func ensureFreshCredential() async throws -> String? {
+        guard let credential = credentials.loadCredential() else { return nil }
+        guard credential.isExpired() else { return credential.accessToken }
+        guard credential.canRefresh else { throw HuggingFaceError.oauthReauthenticationRequired }
+        return try await refreshAndStore(credential).accessToken
     }
 
     /// Validate + store a token in the Keychain. Returns the username on success; throws `.tokenInvalid`

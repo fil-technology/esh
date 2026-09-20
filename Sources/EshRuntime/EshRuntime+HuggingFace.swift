@@ -19,23 +19,78 @@ public extension EshRuntime {
 
     // MARK: - Account (HF3)
 
-    /// The Hugging Face account state (`disconnected` / `connected(username:)` / `tokenInvalid`). Validates a
-    /// stored token against `whoami`; a transient network error keeps the connected view.
+    /// The Hugging Face account state (`disconnected` / `connected(username:)` / `tokenInvalid` / `expired`).
+    /// Validates the stored credential against `whoami`; a transient network error keeps the connected view.
+    /// An expired OAuth credential is refreshed when possible, else reported as `.expired`.
     func huggingFaceAccountState() async -> HFAccountState {
         await hfSource().accountState()
     }
 
-    /// Validate a personal access token against `whoami` and, on success, store it in the Keychain. Returns
-    /// the account username when available. Throws `HuggingFaceError.tokenInvalid` for a rejected token. The
-    /// token is never returned, logged, or persisted anywhere but the Keychain.
+    /// **Advanced fallback.** Validate a manually created personal access token against `whoami` and, on
+    /// success, store it in the Keychain as a PAT credential. Returns the username when available. Throws
+    /// `HuggingFaceError.tokenInvalid` for a rejected token. OAuth (`beginHuggingFaceOAuth`) is the primary UX.
+    /// The token is never returned, logged, or persisted anywhere but the Keychain.
     @discardableResult
     func connectHuggingFace(token: String) async throws -> String? {
         try await hfSource().connect(token: token)
     }
 
-    /// Remove the stored token from the Keychain (sign out). No-op when not connected.
+    /// Remove the stored credential (PAT or OAuth) from the Keychain and drop any pending OAuth sessions
+    /// (sign out). Local deletion always succeeds; it does not depend on any remote revocation call.
     func disconnectHuggingFace() {
         hfSource().disconnect()
+        clearAllPendingOAuth()
+    }
+
+    // MARK: - OAuth sign-in (rc.24 — primary UX; esh owns the protocol, the app owns the browser)
+
+    /// Begin an Authorization Code + PKCE sign-in for a **public** OAuth client (no secret). esh generates the
+    /// PKCE verifier + `state`, holds them in a transient in-memory session, and returns the authorization URL
+    /// for the consumer app to open in a browser (e.g. `ASWebAuthenticationSession`). The consumer never sees
+    /// the PKCE verifier or state. Throws `oauthConfigurationInvalid` for an empty client ID / scopes.
+    func beginHuggingFaceOAuth(configuration: HFOAuthConfiguration) async throws -> HFAuthorizationRequest {
+        guard !configuration.clientID.trimmingCharacters(in: .whitespaces).isEmpty,
+              !configuration.scopes.isEmpty else {
+            throw HuggingFaceError.oauthConfigurationInvalid
+        }
+        let pkce = HFOAuthPKCE.generate()
+        let state = HFOAuthRandom.urlSafeToken(byteCount: 32)
+        let session = HFPendingOAuthSession(id: UUID().uuidString, state: state,
+                                            verifier: pkce.verifier, configuration: configuration)
+        storePendingOAuth(session)
+        let url = HFOAuthURLBuilder.authorizationURL(configuration: configuration, state: state, challenge: pkce.challenge)
+        return HFAuthorizationRequest(id: session.id, authorizationURL: url)
+    }
+
+    /// Complete sign-in: the consumer passes the browser callback URL plus the `id` from `beginHuggingFaceOAuth`.
+    /// esh validates the session + `state`, extracts the code, performs the public-client token exchange, stores
+    /// the OAuth credential in the Keychain (atomically replacing any prior credential), and returns the account
+    /// state. A failed exchange leaves any previously working credential intact. Typed `HuggingFaceError` on
+    /// denial/mismatch/expiry/exchange failure.
+    @discardableResult
+    func completeHuggingFaceOAuth(callbackURL: URL, requestID: String) async throws -> HFAccountState {
+        guard let session = takePendingOAuth(requestID) else { throw HuggingFaceError.oauthSessionNotFound }
+        guard !session.isExpired() else { throw HuggingFaceError.oauthSessionExpired }
+        let callback = try HFOAuthCallback.parse(callbackURL, redirectURI: session.configuration.redirectURI)
+        if let error = callback.error {
+            throw error == "access_denied" ? HuggingFaceError.oauthAccessDenied : HuggingFaceError.oauthTokenExchangeFailed
+        }
+        guard callback.state == session.state else { throw HuggingFaceError.oauthStateMismatch }
+        guard let code = callback.code, !code.isEmpty else { throw HuggingFaceError.oauthCallbackInvalid }
+        return try await hfSource().completeOAuth(code: code, session: session)
+    }
+
+    /// Cancel a pending sign-in (e.g. the user dismissed the browser). Idempotent.
+    func cancelHuggingFaceOAuth(requestID: String) {
+        removePendingOAuth(requestID)
+    }
+
+    /// Proactively refresh an expired OAuth credential if a refresh token is available; returns the resulting
+    /// account state (`.expired` when it cannot be refreshed). Safe to call at launch.
+    @discardableResult
+    func refreshHuggingFaceOAuthIfNeeded() async -> HFAccountState {
+        _ = try? await hfSource().ensureFreshCredential()
+        return await hfSource().accountState()
     }
 
     // MARK: - Reference parsing (HF1)
@@ -56,7 +111,9 @@ public extension EshRuntime {
     /// Resolve a repo to its metadata + access + license + compatibility. Throws a typed `HuggingFaceError`
     /// when the repo can't be read (auth/gated/denied/not-found).
     func resolveHuggingFace(_ source: ModelSource) async throws -> ModelSourceRecord {
-        try await hfSource().resolve(source)
+        let src = hfSource()
+        _ = try? await src.ensureFreshCredential()   // best-effort refresh; public reads still work when signed out
+        return try await src.resolve(source)
     }
 
     /// Convenience: parse a raw reference then resolve it. Throws `.invalidReference` on an unparseable string.
@@ -72,7 +129,9 @@ public extension EshRuntime {
     /// The installable artifacts (e.g. GGUF quants, or the single MLX layout) for a repo, each with its own
     /// Model Fit and exactly one flagged `isRecommended`.
     func huggingFaceArtifactCandidates(_ source: ModelSource) async throws -> [ModelArtifactCandidate] {
-        try await hfSource().candidateArtifacts(source)
+        let src = hfSource()
+        _ = try? await src.ensureFreshCredential()
+        return try await src.candidateArtifacts(source)
     }
 
     /// Re-apply esh's recommendation to a candidate list (e.g. after the host re-filters it). Pure — it reads
@@ -86,6 +145,7 @@ public extension EshRuntime {
     /// Search Hugging Face for installable models. When connected, the account's private/gated repos are
     /// included. Results reuse the existing `ModelSearchResult` shape.
     func searchHuggingFace(query: String, limit: Int = 20) async throws -> [ModelSearchResult] {
+        _ = try? await hfSource().ensureFreshCredential()
         let creds = hfCredentials()
         let catalog = HuggingFaceModelCatalog(authorizationToken: { creds.loadToken() })
         return try await catalog.search(query: query, limit: limit)
@@ -101,6 +161,7 @@ public extension EshRuntime {
     func installHuggingFaceSession(_ source: ModelSource,
                                    candidate: ModelArtifactCandidate? = nil,
                                    suggestedID: String? = nil) async throws -> ModelDownloadHandle {
+        try await hfSource().ensureFreshCredential()   // enforce a usable credential before downloading
         let record = try await resolveHuggingFace(source)
         try Self.ensureInstallable(record)
         let context = HFInstallProvenanceContext(
@@ -131,6 +192,7 @@ public extension EshRuntime {
                                     candidate: ModelArtifactCandidate? = nil,
                                     suggestedID: String? = nil,
                                     onProgress: (@Sendable (DownloadState) -> Void)? = nil) async throws -> ModelInstall {
+        try await hfSource().ensureFreshCredential()   // enforce a usable credential before downloading
         let record = try await resolveHuggingFace(source)
         try Self.ensureInstallable(record)
         let context = HFInstallProvenanceContext(

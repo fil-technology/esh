@@ -56,6 +56,8 @@ public enum HFAccountState: Sendable, Equatable {
     case disconnected
     case connected(username: String?)
     case tokenInvalid
+    /// An OAuth session whose token expired and could not be refreshed — the user must reconnect. (rc.24)
+    case expired
 }
 
 /// Normalized access state for a repo. HF remains the authority; web-required steps expose an `actionURL`.
@@ -142,6 +144,17 @@ public enum HuggingFaceError: Error, LocalizedError, Equatable {
     case networkFailure(String)
     case tokenInvalid
     case licenseMetadataUnavailable
+    // OAuth (rc.24) — typed, UX-safe. Raw token-endpoint payloads never cross the boundary.
+    case oauthConfigurationInvalid
+    case oauthSessionNotFound
+    case oauthSessionExpired
+    case oauthStateMismatch
+    case oauthAccessDenied
+    case oauthCallbackInvalid
+    case oauthTokenExchangeFailed
+    case oauthTokenInvalid
+    case oauthScopeInsufficient
+    case oauthReauthenticationRequired
 
     public var errorDescription: String? {
         switch self {
@@ -159,6 +172,16 @@ public enum HuggingFaceError: Error, LocalizedError, Equatable {
         case let .networkFailure(m): return "Network error: \(m)"
         case .tokenInvalid: return "The Hugging Face token is invalid or expired."
         case .licenseMetadataUnavailable: return "License information is unavailable for this model."
+        case .oauthConfigurationInvalid: return "The Hugging Face sign-in configuration is invalid."
+        case .oauthSessionNotFound: return "This Hugging Face sign-in session was not found. Try connecting again."
+        case .oauthSessionExpired: return "This Hugging Face sign-in session expired. Try connecting again."
+        case .oauthStateMismatch: return "The Hugging Face sign-in response failed validation. Try connecting again."
+        case .oauthAccessDenied: return "Hugging Face sign-in was cancelled or denied."
+        case .oauthCallbackInvalid: return "The Hugging Face sign-in response was invalid."
+        case .oauthTokenExchangeFailed: return "Could not complete Hugging Face sign-in."
+        case .oauthTokenInvalid: return "The Hugging Face sign-in token is invalid."
+        case .oauthScopeInsufficient: return "The Hugging Face account did not grant the required permissions."
+        case .oauthReauthenticationRequired: return "Your Hugging Face session expired. Please reconnect."
         }
     }
 }
