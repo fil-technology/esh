@@ -50,7 +50,8 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
             id: "mlx-image-generate", capabilities: [.imageGenerate],
             acceptedInputs: [.text], producedOutputs: [.image],
             backend: .mlx, streaming: true, structuredOutput: false,
-            requiredPrivilege: .artifactOnly, previewMode: .none)
+            requiredPrivilege: .artifactOnly, previewMode: .none,
+            supportsMultipleOutputs: true, maximumOutputCount: 4)
     }
 
     public func refreshAvailability() async {
@@ -68,6 +69,13 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
             if case .text(let t) = i.payload { return t }; return nil
         }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let params = Self.params(from: request.request.options.values)
+        // rc.22 multi-output: N variants from ONE execution, each a real generation with a deterministic
+        // per-variant seed (index 0 == the requested/base seed, so single-output is byte-identical to before).
+        // Native SD batch shares one seed across N draws and can't record a per-variant seed, so per-seed
+        // generation is used — each artifact honestly records the seed that produced it. All share one batchID.
+        let variantCount = max(1, request.request.outputCount ?? 1)
+        let baseSeed = params.seed ?? UInt64.random(in: 0 ... UInt64.max)
+        let batchID = UUID()
         let generate = self.generate
         let supported = self.supported
         let stateBox = self.stateBox
@@ -89,19 +97,27 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
                 do {
                     continuation.yield(.status("loading image model"))
                     var produced = false
-                    for try await chunk in generate(prompt, params) {
+                    for index in 0 ..< variantCount {
                         try Task.checkCancellation()
-                        switch chunk {
-                        case .progress(let p):
-                            continuation.yield(.progress(p))
-                        case .image(let png):
-                            let artifact = Artifact(
-                                kind: .image, mimeType: "image/png", files: [], entrypoint: "generated.png",
-                                generatedBy: ArtifactProvenance(providerID: providerID, capability: .imageGenerate))
-                            let saved = try store.save(artifact, files: ["generated.png": png])
-                            produced = true
-                            stateBox.set(.ready)
-                            continuation.yield(.artifactProduced(saved))
+                        let seed = VariantSeed.derive(base: baseSeed, index: index)
+                        var variantParams = params
+                        variantParams.seed = seed
+                        for try await chunk in generate(prompt, variantParams) {
+                            try Task.checkCancellation()
+                            switch chunk {
+                            case .progress(let p):
+                                // Monotonic across variants.
+                                continuation.yield(.progress((Double(index) + p) / Double(variantCount)))
+                            case .image(let png):
+                                let artifact = Artifact(
+                                    kind: .image, mimeType: "image/png", files: [], entrypoint: "generated.png",
+                                    generatedBy: ArtifactProvenance(providerID: providerID, capability: .imageGenerate,
+                                                                    batchID: batchID, variantIndex: index, seed: seed))
+                                let saved = try store.save(artifact, files: ["generated.png": png])
+                                produced = true
+                                stateBox.set(.ready)
+                                continuation.yield(.artifactProduced(saved))   // streamed as each variant completes
+                            }
                         }
                     }
                     try Task.checkCancellation()

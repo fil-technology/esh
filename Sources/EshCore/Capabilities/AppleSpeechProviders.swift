@@ -170,7 +170,8 @@ public struct AppleSpeechTranscribeProvider: CapabilityProvider {
                     let req = SFSpeechURLRecognitionRequest(url: audioURL)
                     req.shouldReportPartialResults = true
                     if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-                    try await Self.recognize(recognizer: recognizer, request: req, into: continuation)
+                    try await Self.recognize(recognizer: recognizer, request: req, into: continuation,
+                                             store: context.artifactStore, providerID: descriptor.id, locale: localeID)
                     continuation.yield(.done(finishReason: "stop"))
                     continuation.finish()
                 } catch is CancellationError {
@@ -216,7 +217,8 @@ public struct AppleSpeechTranscribeProvider: CapabilityProvider {
 
     static func recognize(recognizer: SFSpeechRecognizer,
                           request: SFSpeechURLRecognitionRequest,
-                          into continuation: AsyncThrowingStream<CapabilityEvent, Error>.Continuation) async throws {
+                          into continuation: AsyncThrowingStream<CapabilityEvent, Error>.Continuation,
+                          store: ArtifactStore, providerID: String, locale: String) async throws {
         let taskBox = TaskBox()
         let emitted = Counter()
         let resume = ResumeOnce()
@@ -230,7 +232,26 @@ public struct AppleSpeechTranscribeProvider: CapabilityProvider {
                             emitted.value = full.count
                             if !delta.isEmpty { continuation.yield(.textDelta(delta)) }
                         }
-                        if result.isFinal, resume.take() { cont.resume() }
+                        if result.isFinal {
+                            // Surface the real per-segment timing Apple already produced (start = timestamp,
+                            // end = timestamp + duration; no sub-segment words → words: nil). Additive: the
+                            // .textDelta stream + ExecutionResult.text above are unchanged.
+                            let timed = result.bestTranscription.segments.map {
+                                (text: $0.substring, timestamp: $0.timestamp, duration: $0.duration)
+                            }
+                            let transcript = Transcript.fromTimedSegments(
+                                fullText: full, locale: locale, segments: timed)
+                            if let json = try? transcript.jsonData() {
+                                let artifact = Artifact(
+                                    kind: .transcript, mimeType: "application/json", files: [],
+                                    entrypoint: Transcript.artifactFileName,
+                                    generatedBy: ArtifactProvenance(providerID: providerID, capability: .audioTranscribe))
+                                if let saved = try? store.save(artifact, files: [Transcript.artifactFileName: json]) {
+                                    continuation.yield(.artifactProduced(saved))
+                                }
+                            }
+                            if resume.take() { cont.resume() }
+                        }
                     }
                     if let error, resume.take() { cont.resume(throwing: error) }
                 }

@@ -245,6 +245,11 @@ public struct CapabilityExecutionService: Sendable {
         }
 
         let provider = chosen
+        // Clamp the requested variant count to what the selected provider honestly supports (≥1). The
+        // provider reads the clamped `outputCount`; single-output providers always see 1.
+        if let requested = request.outputCount {
+            request.outputCount = max(1, min(requested, provider.descriptor.maximumOutputCount))
+        }
         let resolved = ResolvedExecutionRequest(request: request, modelID: request.model)
         let downstream = provider.execute(resolved, context: context)
         guard let selectionReason else { return downstream }

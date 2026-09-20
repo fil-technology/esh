@@ -738,6 +738,16 @@ public extension EshRuntime {
         return CapabilityAvailabilitySnapshot(entries: entries)
     }
 
+    /// Whether a capability can produce multiple candidate outputs (variants) in one execution, and the max
+    /// esh will produce — aggregated over the capability's providers, so a consumer never hardcodes model
+    /// knowledge. `maxCount` is 1 for single-output capabilities. (rc.22)
+    func outputCapability(for capability: CapabilityID) -> (supportsMultiple: Bool, maxCount: Int) {
+        let providers = (capabilityRegistry?.all ?? []).filter { $0.descriptor.capabilities.contains(capability) }
+        let maxCount = providers.map { $0.descriptor.maximumOutputCount }.max() ?? 1
+        let supportsMultiple = providers.contains { $0.descriptor.supportsMultipleOutputs }
+        return (supportsMultiple, max(1, maxCount))
+    }
+
     // MARK: - Runtime resource state (rc.21)
 
     /// The heavy models/runtimes esh is currently keeping resident, with truthful per-model facts. Reports

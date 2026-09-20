@@ -145,6 +145,27 @@ state or re-derives runtime knowledge. All additive; the existing `install(_:onP
 Not in scope (owned elsewhere): a multi-model download **queue** (the app sequences installs; esh owns each
 one's lifecycle), and Automations (Ashex).
 
+## Multi-output variants + timestamped transcript (rc.22)
+Both additive over existing transport; single-output + text-only callers are byte-for-byte unchanged.
+
+**A — Multi-output / variants.** `ExecutionRequest.outputCount: Int? = nil` (nil == 1) requests N candidate
+variants from ONE execution over the existing plural transport (`.artifactProduced` per variant → `outputs:
+[Artifact]`). Discovery: `CapabilityProviderDescriptor.supportsMultipleOutputs` + `maximumOutputCount`, read
+via `EshRuntime.outputCapability(for:) -> (supportsMultiple, maxCount)` so consumers don't hardcode model
+knowledge. esh clamps `outputCount` to the selected provider's `maximumOutputCount`. Variant lineage on
+`ArtifactProvenance`: `batchID` (one execution), `variantIndex` (0…N-1), `seed` (the ACTUAL derived seed).
+Seeds are deterministic via `VariantSeed.derive(base:index:)` — index 0 == base, so a single-output request
+(or variant 0) reproduces the pre-rc.22 result exactly. First adopter: `image.generate` (`mlx-image-generate`,
+`maximumOutputCount 4`) — per-variant seeded generation, so each artifact honestly records the seed that made
+it (native SD batch shares one seed and can't). Other providers stay `maximumOutputCount 1`.
+
+**B — Timestamped transcript.** New `ArtifactKind.transcript` + normalized public `Transcript` /
+`TranscriptSegment` / `TranscriptWord` (Codable, reusable outside Studio). `audio.transcribe` now also emits a
+`.transcript` artifact (`transcript.json`) built from the real `SFTranscription.segments` timing Apple already
+produces (start = timestamp, end = timestamp + duration; `words = nil` — segment-only, never fabricated).
+`ExecutionResult.text` + `.textDelta` streaming are unchanged (the transcript artifact is additive). A
+plain-text-only backend yields a valid transcript with `segments: []`.
+
 ## External-storage requirement (shipping)
 Every heavy-model capability requires a configured external assets volume (`~/.esh/storage.json` →
 `assetsRoot`): native VLM, native/compat image.generate, compat image.edit, music, SFX, diarization,

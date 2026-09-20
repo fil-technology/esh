@@ -16,6 +16,7 @@ public enum ArtifactKind: String, Codable, Hashable, Sendable, CaseIterable {
     case embedding
     case ranked
     case segmentation
+    case transcript   // rc.22: timed speech transcript (JSON: Transcript) + raw text
 }
 
 /// One file within an artifact bundle (single-file artifacts have exactly one).
@@ -39,13 +40,23 @@ public struct ArtifactProvenance: Codable, Hashable, Sendable {
     /// The artifact this one was derived FROM (image.edit result → its source image, edit→upscale chains,
     /// iterative "Edit again"). Enables lineage for iterative transforms + Ashex. nil for first-generation.
     public var sourceArtifactID: UUID?
+    /// Variant lineage (rc.22): all outputs of ONE execution share `batchID`; `variantIndex` is 0…(N-1);
+    /// `seed` is the ACTUAL (derived) seed used for this output. nil on single-output/legacy paths. A later
+    /// revision is a NEW execution with a new `batchID` and a `sourceArtifactID` pointing at the prior output.
+    public var batchID: UUID?
+    public var variantIndex: Int?
+    public var seed: UInt64?
     public init(providerID: String? = nil, modelID: String? = nil, capability: CapabilityID? = nil,
-                executionPlanID: UUID? = nil, sourceArtifactID: UUID? = nil) {
+                executionPlanID: UUID? = nil, sourceArtifactID: UUID? = nil,
+                batchID: UUID? = nil, variantIndex: Int? = nil, seed: UInt64? = nil) {
         self.providerID = providerID
         self.modelID = modelID
         self.capability = capability
         self.executionPlanID = executionPlanID
         self.sourceArtifactID = sourceArtifactID
+        self.batchID = batchID
+        self.variantIndex = variantIndex
+        self.seed = seed
     }
 }
 

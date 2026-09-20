@@ -54,6 +54,13 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
     /// providers without one keep legacy native-first selection unchanged. NOT visible to the app — the
     /// caller only ever sends generic policy (see `ResourcePolicy`).
     public var resourceProfile: CapabilityResourceProfile?
+    /// Whether this provider can produce multiple candidate outputs (variants) from ONE execution
+    /// (`ExecutionRequest.outputCount`). Default false → single output. A consumer reads this (via
+    /// `EshRuntime.outputCapability(for:)`) instead of hardcoding per-model knowledge.
+    public var supportsMultipleOutputs: Bool
+    /// The most outputs this provider will produce in one execution (esh clamps `outputCount` to it).
+    /// Default 1. Only meaningful when `supportsMultipleOutputs` is true.
+    public var maximumOutputCount: Int
 
     public init(id: String,
                 capabilities: [CapabilityID],
@@ -65,7 +72,9 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
                 structuredOutput: Bool = false,
                 requiredPrivilege: PrivilegeLevel = .artifactOnly,
                 previewMode: PreviewDescriptor.Mode = .none,
-                resourceProfile: CapabilityResourceProfile? = nil) {
+                resourceProfile: CapabilityResourceProfile? = nil,
+                supportsMultipleOutputs: Bool = false,
+                maximumOutputCount: Int = 1) {
         self.id = id
         self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs
@@ -77,6 +86,8 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
         self.requiredPrivilege = requiredPrivilege
         self.previewMode = previewMode
         self.resourceProfile = resourceProfile
+        self.supportsMultipleOutputs = supportsMultipleOutputs
+        self.maximumOutputCount = maximumOutputCount
     }
 }
 

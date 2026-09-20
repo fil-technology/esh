@@ -202,6 +202,10 @@ public struct ExecutionRequest: Codable, Sendable {
     public var options: ExecutionOptions
     /// Optional explicit model id; nil means "let the scheduler resolve the best provider/model".
     public var model: String?
+    /// Number of candidate outputs (variants) to produce from THIS one execution. `nil` == 1. esh clamps it
+    /// to the selected provider's `maximumOutputCount`; providers that don't support batching produce 1.
+    /// All variants share one `batchID`; each output records its actual derived seed (see ArtifactProvenance).
+    public var outputCount: Int?
 
     public init(capability: CapabilityID,
                 inputs: [CapabilityInput],
@@ -209,6 +213,7 @@ public struct ExecutionRequest: Codable, Sendable {
                 constraints: ExecutionConstraints = .default,
                 options: ExecutionOptions = .none,
                 model: String? = nil,
+                outputCount: Int? = nil,
                 schemaVersion: String = ExecutionRequest.currentSchemaVersion) {
         self.schemaVersion = schemaVersion
         self.capability = capability
@@ -217,10 +222,11 @@ public struct ExecutionRequest: Codable, Sendable {
         self.constraints = constraints
         self.options = options
         self.model = model
+        self.outputCount = outputCount
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, capability, inputs, output, constraints, options, model
+        case schemaVersion, capability, inputs, output, constraints, options, model, outputCount
     }
 
     // Tolerant decode so callers may omit schemaVersion and the optional-with-defaults fields.
@@ -233,5 +239,6 @@ public struct ExecutionRequest: Codable, Sendable {
         self.constraints = try c.decodeIfPresent(ExecutionConstraints.self, forKey: .constraints) ?? .default
         self.options = try c.decodeIfPresent(ExecutionOptions.self, forKey: .options) ?? .none
         self.model = try c.decodeIfPresent(String.self, forKey: .model)
+        self.outputCount = try c.decodeIfPresent(Int.self, forKey: .outputCount)
     }
 }
