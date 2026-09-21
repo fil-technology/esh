@@ -60,6 +60,9 @@ public struct CapabilityID: RawRepresentable, Codable, Hashable, Sendable, Custo
     public static let audioDiarize: CapabilityID = "audio.diarize"
     public static let audioGenerate: CapabilityID = "audio.generate"   // non-speech: SFX / ambience / Foley
     public static let musicGenerate: CapabilityID = "music.generate"   // musical compositions / loops / scores
+    /// Zero-shot voice cloning: synthesize `text` in the voice of a short reference-audio sample.
+    /// Distinct from `audio.synthesizeSpeech` (fixed system voices) — this conditions on a supplied speaker.
+    public static let audioCloneVoice: CapabilityID = "audio.cloneVoice"
     // Video
     public static let videoUnderstand: CapabilityID = "video.understand"
     // Artifact / program generation

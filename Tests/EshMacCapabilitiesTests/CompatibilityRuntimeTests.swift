@@ -114,6 +114,60 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect({ if case .ready = provider.reportedAvailability(for: .musicGenerate) { return true }; return false }())
     }
 
+    // MARK: voice cloning (audio.cloneVoice) — XTTS-v2 compat engine (rc.28)
+
+    @Test func voiceCloneManifestIsDeclared() {
+        let m = MacCapabilities.manifests().first { $0.id == .voiceClone }
+        #expect(m != nil)
+        #expect(m?.capabilities == [.audioCloneVoice])
+        #expect(m?.acceptedInputs.contains(.audio) == true)   // reference sample
+        #expect(m?.acceptedInputs.contains(.text) == true)    // words to speak
+        #expect(m?.producedArtifactKind == .audio)
+        #expect(m?.requiredModules.contains { $0.module == "TTS" } == true)
+    }
+
+    @Test func voiceCloneProviderExecutesToAudio() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let manifest = MacCapabilities.manifests().first { $0.id == .voiceClone }!
+        let host = MockHost(state: .ready, run: .artifact)
+        let provider = CompatibilityCapabilityProvider(manifest: manifest, host: host, supported: true)
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioCloneVoice,
+            inputs: [.text("hello in my voice"),
+                     .init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/ref.wav")), role: "reference")],
+            output: OutputSpec(modality: .audio)))
+        let out = await collect(provider.execute(req, context: ctx(tmp)))
+        #expect(out.failed == nil)
+        #expect(out.artifacts.contains { $0.kind == .audio })
+    }
+
+    @Test func bridgeRequestMapsVoiceCloneInputs() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioCloneVoice,
+            inputs: [.text("clone this line"),
+                     .init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/voices/ref.wav")), role: "reference")],
+            output: OutputSpec(modality: .audio),
+            options: ExecutionOptions(["language": .string("es")])))
+        let data = try EshManagedPythonHost.bridgeRequest(.voiceClone, req, outputPath: "/tmp/out.wav",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["text"] as? String == "clone this line")
+        #expect(dict["referencePath"] as? String == "/tmp/voices/ref.wav")   // file:// resolved to a path
+        #expect(dict["language"] as? String == "es")
+        #expect(dict["outputPath"] as? String == "/tmp/out.wav")
+        #expect((dict["hfCache"] as? String)?.isEmpty == false)
+    }
+
+    @Test func bridgeRequestVoiceCloneRejectsMissingReference() {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioCloneVoice, inputs: [.text("no reference here")],
+            output: OutputSpec(modality: .audio)))
+        #expect(throws: CompatibilityError.self) {
+            _ = try EshManagedPythonHost.bridgeRequest(.voiceClone, req, outputPath: "/tmp/out.wav",
+                                                       root: PersistenceRoot(rootURL: tmpRoot()))
+        }
+    }
+
     @Test func cleanBootstrapInstallsThenProduces() async {
         let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
         let host = MockHost(state: .notInstalled, run: .artifact)

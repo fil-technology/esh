@@ -26,6 +26,31 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.28 (new capability: audio.cloneVoice — zero-shot voice cloning, dogfood)
+
+Adds the previously-missing voice-cloning capability as a macOS compatibility engine, mirroring the existing
+MusicGen/AudioGen/diarization compat engines (managed Python + bridge script).
+
+- **`CapabilityID.audioCloneVoice = "audio.cloneVoice"`** — synthesize text in the voice of a supplied
+  reference-audio sample (distinct from `audio.synthesizeSpeech`'s fixed system voices).
+- **Engine:** new `.voiceClone` compat engine (Coqui **XTTS-v2** via `coqui-tts`), inputs `[audio (reference)
+  + text]` → WAV artifact; runs in the isolated audio venv with weights on the configured assets volume.
+  **License: CPML (NON-COMMERCIAL) — dogfood-only**, exactly like MusicGen/AudioGen (not for commercial ship).
+- Bridge `voice-clone` command + request mapping (text / referencePath / language / hfCache); honest failure
+  when the engine isn't provisioned (no raw traceback).
+- iOS reports `.unsupportedOnPlatform` (compat engines are macOS-only), same as the other audio engines.
+- Tests: manifest declaration, provider execution (mock host), bridge request mapping + missing-reference
+  rejection.
+
+**Validated live end-to-end:** a real clone was produced through the actual bridge handler — reference WAV
+(macOS `say`) → XTTS-v2 (~1.87 GB downloaded) → an 8.4 s, 24 kHz mono WAV; handler returned
+`{provider: xtts-v2, license: cpml-noncommercial}`. The dogfood surfaced the dependency pins now encoded in
+the manifest: `torchaudio` is required; `torch`/`torchaudio` `<2.9` (2.9+ needs `torchcodec`+FFmpeg);
+`transformers` `>=4.57,<5` (coqui needs ≥4.57, 5.x drops `isin_mps_friendly`). **Known limitation:**
+`transformers<5` can clash with the main runtime's transformers in a shared venv — the robust shape is an
+isolated venv for this engine (like AudioGen), tracked as a follow-up. (Swift contract/provider/bridge
+mapping remain unit-tested; the Python handler is exercised by the live run.)
+
 ### SDK — v2.4.0-rc.27 (fix: Hugging Face installs invisible to localModels() + reconcile data loss)
 
 Bug fix. A Hugging Face model installed correctly (manifest + weight on disk) but never appeared in

@@ -19,6 +19,7 @@ public enum CompatibilityEngineID: String, Sendable, Hashable, CaseIterable, Cod
     case imageGeneration    = "image-generation"
     case advancedImageEdit  = "advanced-image-edit"
     case diarization        = "diarization"
+    case voiceClone         = "voice-clone"
 }
 
 /// A required Python module and the pip package that provides it. Preflight probes `module`; a missing one

@@ -71,6 +71,32 @@ public enum MacCapabilities {
                 requiredModules: base + [.init(module: "mflux", pipPackage: "mflux")],
                 modelAssets: [.init(id: "flux2-klein", displayName: "FLUX.2 Klein", approxBytes: 8_600_000_000)]),
 
+            // Zero-shot voice cloning via Coqui XTTS-v2 (coqui-tts `TTS`). License: Coqui Public Model License
+            // (CPML) — NON-COMMERCIAL, so dogfood-only, exactly like MusicGen/AudioGen. Clones the voice from a
+            // short reference-audio sample and speaks the supplied text.
+            //
+            // Dependency pins below were VALIDATED by a live end-to-end clone (real 24 kHz WAV from XTTS-v2):
+            //   • `torchaudio` is REQUIRED by XTTS (not optional).
+            //   • `torch`/`torchaudio` pinned < 2.9 — 2.9+ requires `torchcodec` (+ system FFmpeg) for audio IO.
+            //   • `transformers` pinned >=4.57,<5 — coqui-tts 0.27.x needs >=4.57, and 5.x drops
+            //     `isin_mps_friendly` which XTTS imports.
+            // KNOWN LIMITATION: `transformers<5` can clash with the main runtime's newer transformers when they
+            // share a venv; the robust production shape is an ISOLATED venv for this engine (like AudioGen's
+            // `ESH_AUDIOGEN_PYTHON`). Tracked as a follow-up. exFAT venvs also need AppleDouble (`._*`) stripping,
+            // which the host already performs.
+            CompatibilityEngineManifest(
+                id: .voiceClone, version: "1", capabilities: [.audioCloneVoice],
+                acceptedInputs: [.audio, .text], producedOutputs: [.audio], producedArtifactKind: .audio,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [
+                    .init(module: "TTS", pipPackage: "coqui-tts"),
+                    .init(module: "torch", pipPackage: "torch<2.9"),
+                    .init(module: "torchaudio", pipPackage: "torchaudio<2.9"),
+                    .init(module: "transformers", pipPackage: "transformers>=4.57,<5"),
+                    .init(module: "soundfile", pipPackage: "soundfile"),
+                ],
+                modelAssets: [.init(id: "xtts-v2", displayName: "XTTS-v2 (voice clone)", approxBytes: 1_870_000_000)]),
+
             CompatibilityEngineManifest(
                 id: .diarization, version: "1", capabilities: [.audioDiarize],
                 acceptedInputs: [.audio], producedOutputs: [.json], producedArtifactKind: .json,

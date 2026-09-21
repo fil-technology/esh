@@ -180,6 +180,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         case .imageGeneration:   return ("image-generate", "png", .image)
         case .advancedImageEdit: return ("image-edit", "png", .image)
         case .diarization:       return ("audio-diarize", "json", .json)
+        case .voiceClone:        return ("voice-clone", "wav", .audio)
         }
     }
 
@@ -197,6 +198,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         }
         func intOpt(_ k: String) -> Int? { if case .int(let v)? = request.request.options.values[k] { return v }; return nil }
         func dblOpt(_ k: String) -> Double? { switch request.request.options.values[k] { case .double(let d): return d; case .int(let i): return Double(i); default: return nil } }
+        func strOpt(_ k: String) -> String? { if case .string(let v)? = request.request.options.values[k] { return v }; return nil }
 
         var dict: [String: Any] = ["outputPath": outputPath]
         switch id {
@@ -231,6 +233,15 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             // passes their paths explicitly; the bridge never downloads them itself.
             dict["segModel"] = root.diarizationModelsURL.appendingPathComponent("segmentation.onnx").path
             dict["embModel"] = root.diarizationModelsURL.appendingPathComponent("embedding.onnx").path
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .voiceClone:
+            let text = firstText()
+            guard !text.isEmpty else { throw CompatibilityError.executionFailed(reason: "voice cloning requires text to speak") }
+            guard let reference = firstFile(.audio) else { throw CompatibilityError.executionFailed(reason: "voice cloning requires a reference audio sample") }
+            dict["text"] = text
+            dict["referencePath"] = reference
+            dict["language"] = strOpt("language") ?? "en"
+            // XTTS weights + coqui-tts model store live on the configured audio-assets volume (external SSD).
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         }
         return try JSONSerialization.data(withJSONObject: dict)

@@ -2207,6 +2207,7 @@ def main() -> None:
             "image-upscale-onnx",
             "audio-generate",
             "music-generate",
+            "voice-clone",
             "audio-diarize",
             "mlx-transcribe",
             "speech-serve",
@@ -2251,6 +2252,8 @@ def main() -> None:
         audio_or_music_generate(kind="sound")
     elif args.command == "music-generate":
         audio_or_music_generate(kind="music")
+    elif args.command == "voice-clone":
+        voice_clone()
     elif args.command == "audio-diarize":
         audio_diarize()
     elif args.command == "mlx-transcribe":
@@ -2469,6 +2472,53 @@ def _peak_normalize(arr, ceiling: float = 0.99):
     if peak > ceiling:
         return arr * (ceiling / peak), peak, True
     return arr, peak, False
+
+
+def voice_clone() -> None:
+    """Zero-shot voice cloning via Coqui XTTS-v2 (coqui-tts). Synthesizes `text` in the voice of a short
+    reference sample and writes a WAV to outputPath. License: CPML (NON-COMMERCIAL) — dogfood-only."""
+    import os
+    request = _load_json()
+    text = (request.get("text") or "").strip()
+    reference = request.get("referencePath")
+    language = (request.get("language") or "en").strip() or "en"
+    out_path = request["outputPath"]
+    if not text:
+        _fail("voice cloning requires text to speak")
+    if not reference or not os.path.exists(reference):
+        _fail("voice cloning requires an existing reference audio sample")
+
+    # XTTS asks to accept its non-commercial license interactively; accept it non-interactively (dogfood).
+    os.environ.setdefault("COQUI_TOS_AGREED", "1")
+    # Keep the coqui model store on the configured assets volume (external SSD), not the internal user dir.
+    hf_cache = request.get("hfCache")
+    if hf_cache:
+        os.environ.setdefault("TTS_HOME", os.path.join(hf_cache, "coqui"))
+        try:
+            os.makedirs(os.environ["TTS_HOME"], exist_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        import torch  # noqa: F401
+        from TTS.api import TTS
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"voice-clone engine not ready: {type(exc).__name__}: {exc}")
+
+    # Apple Silicon: XTTS runs on CPU reliably; MPS support in coqui-tts is uneven, so pin CPU for determinism.
+    try:
+        tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+        try:
+            tts.to("cpu")
+        except Exception:  # noqa: BLE001
+            pass
+        tts.tts_to_file(text=text, speaker_wav=reference, language=language, file_path=out_path)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"voice cloning failed: {type(exc).__name__}: {exc}")
+
+    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        _fail("voice cloning produced no audio")
+    _dump_json({"outputPath": out_path, "provider": "xtts-v2", "license": "cpml-noncommercial", "language": language})
 
 
 def audio_or_music_generate(kind: str) -> None:
