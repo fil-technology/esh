@@ -8,6 +8,21 @@ import EshCore
 // mock host (no real Python). Covers: discovery states, clean bootstrap, repair, cancellation (no orphan),
 // crash recovery, typed errors (no raw traceback), artifact mapping, and the soundfile regression.
 
+/// A minimal image.generate provider for registry/gate tests (commercial flag configurable).
+private struct MockGenProvider: CapabilityProvider, @unchecked Sendable {
+    let descriptor: CapabilityProviderDescriptor
+    init(id: String, commercial: Bool) {
+        descriptor = CapabilityProviderDescriptor(
+            id: id, capabilities: [.imageGenerate], acceptedInputs: [.text], producedOutputs: [.image],
+            backend: .mlx, modelFamily: id, streaming: true, structuredOutput: false,
+            requiredPrivilege: .artifactOnly, previewMode: .none, commercialUse: commercial)
+    }
+    func execute(_ r: ResolvedExecutionRequest, context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
+    func unload() async {}
+}
+
 private final class MockHost: CompatibilityEngineHost, @unchecked Sendable {
     enum Run { case artifact, throwTyped(CompatibilityError), hang }
     private let lock = NSLock()
@@ -193,6 +208,104 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(dict["language"] as? String == "es")
         #expect(dict["outputPath"] as? String == "/tmp/out.wav")
         #expect((dict["hfCache"] as? String)?.isEmpty == false)
+    }
+
+    // MARK: Qwen-Image-2.1 (image.generate + image.restyle via MFLUX, NON-COMMERCIAL) — rc.31
+
+    @Test func qwenImage21ManifestIsGenerateAndRestyleOnly() {
+        let m = MacCapabilities.manifests().first { $0.id == .qwenImage21 }
+        #expect(m != nil)
+        // Only what the MFLUX port actually implements: txt2img + img2img restyle. NOT instruction edit.
+        #expect(m?.capabilities == [.imageGenerate, .imageRestyle])
+        #expect(m?.capabilities.contains(.imageEdit) == false)
+        #expect(m?.acceptedInputs.contains(.text) == true)
+        #expect(m?.acceptedInputs.contains(.image) == true)   // img2img restyle source
+        #expect(m?.producedArtifactKind == .image)
+        // Truthful non-commercial license + resource profile reflecting the ~46 GB / 17.5 GB-resident reality.
+        #expect(m?.licenseIdentifier == "LicenseRef-Qwen-Research")
+        #expect(m?.commercialUse == false)
+        #expect(m?.resourceProfile != nil)
+        #expect((m?.resourceProfile?.estimatedPeakMemoryGB ?? 0) >= 24)   // never a "fits comfortably" claim
+        #expect(m?.requiredModules.contains { $0.pipPackage.contains("mflux") } == true)
+    }
+
+    @Test func qwenImage21ProviderDescriptorIsNonCommercialAndPinnable() {
+        let manifest = MacCapabilities.manifests().first { $0.id == .qwenImage21 }!
+        let provider = CompatibilityCapabilityProvider(manifest: manifest, host: MockHost(state: .ready), supported: true)
+        let d = provider.descriptor
+        #expect(d.commercialUse == false)
+        #expect(d.modelFamily == "qwen-image-2.1")            // pinnable id
+        #expect(d.resourceProfile?.estimatedPeakMemoryGB ?? 0 >= 24)
+        #expect(d.capabilities.contains(.imageGenerate) && d.capabilities.contains(.imageRestyle))
+    }
+
+    @Test func nonCommercialModelIsPinOnlyNeverAutoDefault() {
+        // The commercial gate: a non-commercial provider must never be offered by Auto (no pin), but must be
+        // reachable when explicitly pinned — so it can't silently become a commercial-production default.
+        var reg = CapabilityRegistry()
+        let qwen = MacCapabilities.manifests().first { $0.id == .qwenImage21 }!
+        reg.register(CompatibilityCapabilityProvider(manifest: qwen, host: MockHost(state: .ready, run: .artifact), supported: true))
+        reg.register(MockGenProvider(id: "z-image", commercial: true))   // a commercial-safe image.generate default
+
+        let auto = ExecutionRequest(capability: .imageGenerate, inputs: [.text("a tiger")],
+                                    output: OutputSpec(modality: .image), model: nil)
+        let autoIDs = reg.candidates(for: auto).map { $0.descriptor.id }
+        #expect(autoIDs.contains("z-image"))                                  // commercial default offered
+        #expect(autoIDs.contains("compat-qwen-image-2.1") == false)          // NON-commercial excluded from Auto
+
+        let pinned = ExecutionRequest(capability: .imageGenerate, inputs: [.text("a tiger")],
+                                      output: OutputSpec(modality: .image), model: "qwen-image-2.1")
+        let pinnedIDs = reg.candidates(for: pinned).map { $0.descriptor.id }
+        #expect(pinnedIDs == ["compat-qwen-image-2.1"])                       // explicit pin reaches it
+    }
+
+    @Test func bridgeCommandForQwenImage21() {
+        let (cmd, ext, kind) = EshManagedPythonHost.bridgeCommand(for: .qwenImage21)
+        #expect(cmd == "image-generate-qwen21")
+        #expect(ext == "png")
+        #expect(kind == .image)
+    }
+
+    @Test func bridgeRequestMapsQwenImage21Generate() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageGenerate, inputs: [.text("a majestic tiger, photorealistic")],
+            output: OutputSpec(modality: .image),
+            options: ExecutionOptions(["steps": .int(30), "seed": .int(42), "width": .int(1024),
+                                       "height": .int(768), "quantize": .int(4)])))
+        let data = try EshManagedPythonHost.bridgeRequest(.qwenImage21, req, outputPath: "/tmp/q.png",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["prompt"] as? String == "a majestic tiger, photorealistic")
+        #expect(dict["steps"] as? Int == 30)
+        #expect(dict["seed"] as? Int == 42)
+        #expect(dict["width"] as? Int == 1024)
+        #expect(dict["quantize"] as? Int == 4)
+        #expect(dict["imagePath"] == nil)                  // no image → txt2img (generate)
+        #expect((dict["hfCache"] as? String)?.contains("image-models") == true)
+    }
+
+    @Test func bridgeRequestMapsQwenImage21RestyleImg2Img() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageRestyle,
+            inputs: [.text("3d animation style"),
+                     .init(payload: .attachment(EshAttachment(kind: .image, uri: "file:///tmp/couple.png")), role: "source")],
+            output: OutputSpec(modality: .image),
+            options: ExecutionOptions(["imageStrength": .double(0.6)])))
+        let data = try EshManagedPythonHost.bridgeRequest(.qwenImage21, req, outputPath: "/tmp/q.png",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["imagePath"] as? String == "/tmp/couple.png")   // image present → img2img restyle
+        #expect(dict["imageStrength"] as? Double == 0.6)
+        #expect(dict["steps"] as? Int == 40)                          // qwen-2.1 default when unspecified
+    }
+
+    @Test func bridgeRequestQwenImage21RejectsEmptyPrompt() {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageGenerate, inputs: [], output: OutputSpec(modality: .image)))
+        #expect(throws: CompatibilityError.self) {
+            _ = try EshManagedPythonHost.bridgeRequest(.qwenImage21, req, outputPath: "/tmp/q.png",
+                                                       root: PersistenceRoot(rootURL: tmpRoot()))
+        }
     }
 
     @Test func bridgeRequestVoiceCloneRejectsMissingReference() {

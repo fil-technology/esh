@@ -1430,6 +1430,73 @@ def image_generate() -> None:
     _dump_json({"outputPath": out_path, "width": out_w, "height": out_h})
 
 
+def qwen21_generate() -> None:
+    """Qwen-Image-2.1 (image.generate + image.restyle) via MFLUX's `mflux-generate-qwen-2.1` (>=0.20.0).
+
+    Reads {prompt, outputPath, steps?(40), seed?, width?, height?, guidance?, negativePrompt?, quantize?(8),
+    imagePath?, imageStrength?, model?, lowRam?(True), minFreeMemMB?, hfCache?}. An `imagePath` switches the
+    run to img2img (image.restyle); otherwise it's text->image (image.generate). Writes a PNG and returns
+    provenance incl. the NON-COMMERCIAL license. Weights download on first use (~33 GB bf16).
+
+    Memory: the Qwen3-VL text encoder (~17.5 GB) stays bf16 resident even quantized, so the run is heavy on a
+    32 GB Mac — guarded by the same RAM watchdog as `image_generate` (kills + reports instead of thrashing)."""
+    import os
+
+    request = _load_json()
+    prompt = (request.get("prompt") or "").strip()
+    out_path = request["outputPath"]
+    if not prompt:
+        _fail("Qwen-Image-2.1 requires a non-empty prompt")
+    steps = int(request.get("steps") or 40)
+    seed = int(request.get("seed") or 0)
+    quantize = request.get("quantize")
+    width = request.get("width")
+    height = request.get("height")
+    guidance = request.get("guidance")
+    negative = request.get("negativePrompt")
+    image_path = request.get("imagePath")            # present -> img2img (restyle)
+    image_strength = request.get("imageStrength")
+    low_ram = request.get("lowRam", True)            # default on for the 32 GB target
+    min_free = float(request.get("minFreeMemMB") or 2500)
+    _route_hf_cache(request.get("hfCache"))
+
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"Qwen-Image-2.1 not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    cli = os.path.join(os.path.dirname(sys.executable), "mflux-generate-qwen-2.1")
+    if not os.path.exists(cli):
+        _fail("mflux>=0.20.0 with Qwen-Image-2.1 is not available (install with: pip install 'mflux>=0.20.0')")
+
+    model = request.get("model") or "Qwen/Qwen-Image-2.1"
+    cmd = [cli, "--model", str(model), "--prompt", prompt, "--output", out_path,
+           "--steps", str(steps), "--seed", str(seed)]
+    if quantize is not None:
+        cmd += ["--quantize", str(int(quantize))]
+    if width is not None:
+        cmd += ["--width", str(int(width))]
+    if height is not None:
+        cmd += ["--height", str(int(height))]
+    if guidance is not None:
+        cmd += ["--guidance", str(float(guidance))]
+    if negative:
+        cmd += ["--negative-prompt", str(negative)]
+    if image_path:
+        cmd += ["--image-path", str(image_path)]
+        if image_strength is not None:
+            cmd += ["--image-strength", str(float(image_strength))]
+    if low_ram:
+        cmd += ["--low-ram"]
+
+    out_w, out_h = _run_guarded_image_cli(cmd, out_path, min_free, "Qwen-Image-2.1 generation")
+    _watermark_png(out_path)
+    _dump_json({"outputPath": out_path, "width": out_w, "height": out_h,
+                "provider": "mflux-qwen-image-2.1", "model": model, "seed": seed, "steps": steps,
+                "quantize": (int(quantize) if quantize is not None else None),
+                "mode": ("restyle" if image_path else "generate"),
+                "license": "qwen-research-noncommercial"})
+
+
 # Backends for instruction-based image editing (image + instruction -> image), via mflux CLIs already
 # installed alongside this interpreter. Default is the Apache-2.0 Qwen-Image-Edit (commercial-safe);
 # FLUX.1 Kontext is available but NON-COMMERCIAL (BFL license) so it's opt-in/experimental, never default.
@@ -2200,6 +2267,7 @@ def main() -> None:
             "mlx-vlm-generate",
             "image-segment",
             "image-generate",
+            "image-generate-qwen21",
             "image-edit",
             "image-edit-bake",
             "image-adapter-install",
@@ -2238,6 +2306,8 @@ def main() -> None:
         image_segment()
     elif args.command == "image-generate":
         image_generate()
+    elif args.command == "image-generate-qwen21":
+        qwen21_generate()
     elif args.command == "image-edit":
         image_edit()
     elif args.command == "image-edit-bake":

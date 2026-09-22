@@ -230,7 +230,9 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     }
                     let artifact = Artifact(
                         kind: artifactKind, mimeType: Self.mime(for: outExt), files: [], entrypoint: "output." + outExt,
-                        generatedBy: ArtifactProvenance(providerID: "compat-\(manifest.id.rawValue)", capability: manifest.capabilities.first))
+                        generatedBy: ArtifactProvenance(providerID: "compat-\(manifest.id.rawValue)",
+                                                        modelID: manifest.id.rawValue,
+                                                        capability: manifest.capabilities.first))
                     let saved = try context.artifactStore.save(artifact, files: ["output." + outExt: bytes])
                     continuation.yield(.artifactProduced(saved))
                     continuation.yield(.done(finishReason: "stop"))
@@ -260,6 +262,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         case .advancedImageEdit: return ("image-edit", "png", .image)
         case .diarization:       return ("audio-diarize", "json", .json)
         case .voiceClone:        return ("voice-clone", "wav", .audio)
+        case .qwenImage21:       return ("image-generate-qwen21", "png", .image)
         }
     }
 
@@ -313,6 +316,28 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             dict["segModel"] = root.diarizationModelsURL.appendingPathComponent("segmentation.onnx").path
             dict["embModel"] = root.diarizationModelsURL.appendingPathComponent("embedding.onnx").path
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .qwenImage21:
+            // Text->image (image.generate) and img2img style conditioning (image.restyle). The bridge shells to
+            // mflux-generate-qwen-2.1; an image input switches it to img2img (restyle). Only options the MFLUX
+            // port actually consumes are forwarded (no ignored knobs).
+            let prompt = firstText()
+            guard !prompt.isEmpty else { throw CompatibilityError.executionFailed(reason: "Qwen-Image-2.1 requires a text prompt") }
+            dict["prompt"] = prompt
+            dict["steps"] = intOpt("steps") ?? 40                    // qwen-2.1 recommended default
+            dict["seed"] = intOpt("seed") ?? 0
+            if let w = intOpt("width") { dict["width"] = w }
+            if let h = intOpt("height") { dict["height"] = h }
+            if let g = dblOpt("guidance") { dict["guidance"] = g }   // >1 enables true CFG (needs negativePrompt)
+            if let np = strOpt("negativePrompt") { dict["negativePrompt"] = np }
+            // Quantization of the transformer/VAE (the Qwen3-VL text encoder stays bf16). Default q8 keeps the
+            // peak as low as the port allows on a 32 GB Mac; override via options.
+            dict["quantize"] = intOpt("quantize") ?? 8
+            if let img = firstFile(.image) {                        // present → img2img restyle
+                dict["imagePath"] = img
+                if let s = dblOpt("imageStrength") { dict["imageStrength"] = s }
+            }
+            if let m = strOpt("model") { dict["model"] = m }
+            dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
         case .voiceClone:
             let text = firstText()
             guard !text.isEmpty else { throw CompatibilityError.executionFailed(reason: "voice cloning requires text to speak") }
@@ -333,7 +358,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         var env = ProcessInfo.processInfo.environment
         let family: String
         switch manifest.id {
-        case .imageGeneration, .advancedImageEdit: family = "image"
+        case .imageGeneration, .advancedImageEdit, .qwenImage21: family = "image"
         default: family = "audio"
         }
         let hf = root.pythonHFCacheURL(family: family).path

@@ -117,6 +117,38 @@ public enum MacCapabilities {
                     .init(module: "soundfile", pipPackage: "soundfile"),
                 ],
                 modelAssets: [.init(id: "diarization", displayName: "Speaker diarization", approxBytes: 200_000_000)]),
+
+            // Qwen-Image-2.1 (Qwen/Qwen-Image-2.1, Sep 2026) — a single-stream block-causal 7.1B DiT + 64-ch
+            // causal VAE + Qwen3-VL text encoder, via MFLUX's MLX port (>=0.20.0, CLI mflux-generate-qwen-2.1).
+            // Capabilities are ONLY what the port actually implements today: text->image (image.generate) and
+            // img2img style conditioning (image.restyle via --image-strength). The instruction/edit variant,
+            // multi-reference, LoRA, and transparent-RGBA output are NOT supported by the port (the edit variant
+            // needs the Qwen3-VL vision tower; the VAE's alpha carries edit masks, decode returns RGB) — so this
+            // engine deliberately does NOT claim image.edit.
+            //
+            // LICENSE: Qwen Research License — NON-COMMERCIAL. commercialUse=false keeps it OUT of Auto defaults
+            // (pin the model id "qwen-image-2.1" to use it), so it can never silently become a commercial default;
+            // eval/dogfood use stays enabled. The license is persisted truthfully in artifact provenance.
+            //
+            // MEMORY: the Qwen3-VL text encoder (~17.5 GB) stays bf16 resident even when the transformer/VAE are
+            // quantized, so the real peak is high (~46 GB bf16; ~28-30 GB at q8/q4). The resourceProfile below is
+            // honest, so resource-aware fit-gating correctly refuses it on <64 GB machines (and on a near-full
+            // internal/swap volume) unless the caller pins it and accepts the risk.
+            CompatibilityEngineManifest(
+                id: .qwenImage21, version: "1", capabilities: [.imageGenerate, .imageRestyle],
+                acceptedInputs: [.text, .image], producedOutputs: [.image], producedArtifactKind: .image,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [.init(module: "mflux", pipPackage: "mflux>=0.20.0")],
+                modelAssets: [.init(id: "qwen-image-2.1", displayName: "Qwen-Image-2.1 (MFLUX)",
+                                    approxBytes: 33_000_000_000)],
+                licenseIdentifier: "LicenseRef-Qwen-Research", commercialUse: false,
+                resourceProfile: CapabilityResourceProfile(
+                    estimatedPeakMemoryGB: 30,            // q8/q4 default; ~46 at bf16 (never fits 32 GB)
+                    modelDownloadBytes: 33_000_000_000,   // bf16 weights on disk (TE never quantized)
+                    installedBytes: 33_000_000_000,
+                    minimumSystemVolumeHeadroomGB: 24,    // large internal swap headroom for the resident TE
+                    minimumAssetsVolumeHeadroomGB: 8,
+                    qualityTier: 95, latencyClass: .slow)),
         ]
     }
 

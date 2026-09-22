@@ -20,6 +20,7 @@ public enum CompatibilityEngineID: String, Sendable, Hashable, CaseIterable, Cod
     case advancedImageEdit  = "advanced-image-edit"
     case diarization        = "diarization"
     case voiceClone         = "voice-clone"
+    case qwenImage21        = "qwen-image-2.1"
 }
 
 /// A required Python module and the pip package that provides it. Preflight probes `module`; a missing one
@@ -74,17 +75,30 @@ public struct CompatibilityEngineManifest: Sendable, Hashable, Codable {
     /// An optional isolated interpreter this engine's heavy runtime lives in (see `IsolatedRuntime`). `nil` for
     /// engines that run entirely in the shared managed venv (music, diarization, image generation/edit).
     public let isolatedRuntime: IsolatedRuntime?
+    /// SPDX-style license identifier of the engine's weights (e.g. `apache-2.0`, `LicenseRef-Qwen-Research`).
+    /// Surfaced truthfully to consumers + persisted in artifact provenance. `nil` = unspecified/permissive.
+    public let licenseIdentifier: String?
+    /// Whether the weights may be used commercially. `false` = research/non-commercial only — esh keeps such
+    /// an engine out of Auto defaults (pin-only) so it can't silently become a commercial-production default.
+    public let commercialUse: Bool
+    /// esh-owned resource facts (peak memory, download/install bytes, per-volume headroom) — drives
+    /// resource-aware Auto ranking + execution-time fit gating. `nil` keeps legacy native-first selection.
+    public let resourceProfile: CapabilityResourceProfile?
 
     public init(id: CompatibilityEngineID, version: String, capabilities: [CapabilityID],
                 acceptedInputs: [ModelModality], producedOutputs: [ModelModality],
                 producedArtifactKind: ArtifactKind, runtimeVersion: String, minimumOS: String,
                 requiredModules: [CompatibilityModule], modelAssets: [CompatibilityModelAsset],
-                isolatedRuntime: IsolatedRuntime? = nil) {
+                isolatedRuntime: IsolatedRuntime? = nil,
+                licenseIdentifier: String? = nil, commercialUse: Bool = true,
+                resourceProfile: CapabilityResourceProfile? = nil) {
         self.id = id; self.version = version; self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs; self.producedOutputs = producedOutputs
         self.producedArtifactKind = producedArtifactKind; self.runtimeVersion = runtimeVersion
         self.minimumOS = minimumOS; self.requiredModules = requiredModules; self.modelAssets = modelAssets
         self.isolatedRuntime = isolatedRuntime
+        self.licenseIdentifier = licenseIdentifier; self.commercialUse = commercialUse
+        self.resourceProfile = resourceProfile
     }
 
     /// Total declared download footprint (dependencies aren't sized here; models are).

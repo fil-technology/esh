@@ -61,6 +61,11 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
     /// The most outputs this provider will produce in one execution (esh clamps `outputCount` to it).
     /// Default 1. Only meaningful when `supportsMultipleOutputs` is true.
     public var maximumOutputCount: Int
+    /// Whether the underlying weights may be used commercially. `false` = research/non-commercial only: such a
+    /// provider is NEVER chosen by Auto selection — it is usable only when the caller explicitly pins it by id
+    /// or model family — so a non-commercial model can't silently become a commercial-production default. eval/
+    /// dogfood use stays available via an explicit pin. Default `true` (permissive) keeps existing providers as-is.
+    public var commercialUse: Bool
 
     public init(id: String,
                 capabilities: [CapabilityID],
@@ -74,7 +79,8 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
                 previewMode: PreviewDescriptor.Mode = .none,
                 resourceProfile: CapabilityResourceProfile? = nil,
                 supportsMultipleOutputs: Bool = false,
-                maximumOutputCount: Int = 1) {
+                maximumOutputCount: Int = 1,
+                commercialUse: Bool = true) {
         self.id = id
         self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs
@@ -88,6 +94,7 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
         self.resourceProfile = resourceProfile
         self.supportsMultipleOutputs = supportsMultipleOutputs
         self.maximumOutputCount = maximumOutputCount
+        self.commercialUse = commercialUse
     }
 }
 
@@ -190,8 +197,10 @@ public struct CapabilityRegistry: Sendable {
         let base = providers(for: request.capability, inputs: inputMods, output: request.output.modality)
         if let pin = request.model {
             let pinned = base.filter { $0.descriptor.id == pin || $0.descriptor.modelFamily == pin }
-            if !pinned.isEmpty { return pinned }
+            if !pinned.isEmpty { return pinned }   // an explicit pin may select a non-commercial model
         }
-        return base
+        // Auto selection (no matching pin) never offers a non-commercial model, so it can't silently become a
+        // commercial-production default; such a model is reachable only via an explicit pin above.
+        return base.filter { $0.descriptor.commercialUse }
     }
 }

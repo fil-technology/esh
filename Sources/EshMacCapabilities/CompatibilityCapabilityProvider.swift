@@ -24,8 +24,17 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
             capabilities: manifest.capabilities,
             acceptedInputs: manifest.acceptedInputs,
             producedOutputs: manifest.producedOutputs,
-            backend: .python, streaming: true, structuredOutput: false,
-            requiredPrivilege: .artifactOnly, previewMode: .none)
+            backend: .python,
+            // Pinnable by the engine's id (e.g. "qwen-image-2.1"), which is how a non-commercial engine is
+            // explicitly selected past the Auto commercial gate.
+            modelFamily: manifest.id.rawValue,
+            streaming: true, structuredOutput: false,
+            requiredPrivilege: .artifactOnly, previewMode: .none,
+            // Declared resource facts (e.g. Qwen-Image-2.1's ~30 GB peak) drive resource-aware Auto ranking +
+            // execution-time fit gating; nil keeps legacy native-first selection for engines without a profile.
+            resourceProfile: manifest.resourceProfile,
+            // Non-commercial engines (Qwen-Image-2.1: Qwen Research License) are pin-only — never Auto-defaulted.
+            commercialUse: manifest.commercialUse)
     }
 
     /// Refresh cached availability from a live preflight (call off the hot path, e.g. at discovery time).

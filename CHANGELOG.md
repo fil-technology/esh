@@ -26,6 +26,36 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.31 (Qwen-Image-2.1: first-class non-commercial image.generate + image.restyle provider)
+
+Adds `Qwen/Qwen-Image-2.1` (Sep 2026) as a first-class esh image provider through the existing managed-Python/
+MFLUX compatibility runtime — no new runtime architecture. Runtime = MFLUX's MLX port (`mflux>=0.20.0`,
+`mflux-generate-qwen-2.1`), a single-stream block-causal 7.1B DiT + 64-ch causal VAE + Qwen3-VL text encoder.
+
+- **New compat engine `qwen-image-2.1`** with capabilities **`image.generate` (txt2img)** and **`image.restyle`
+  (img2img via `--image-strength`)**. It deliberately does NOT claim `image.edit`: MFLUX's port has no
+  edit/instruction variant (needs the Qwen3-VL vision tower), no multi-reference, no LoRA, and its VAE decode
+  returns RGB only (no transparent/RGBA output). Only options the port actually consumes are forwarded
+  (prompt, steps[40], seed, width, height, guidance/negative-prompt true-CFG, quantize, image-path/strength,
+  low-ram) — no ignored knobs.
+- **Commercial-use gate (new, general).** `CompatibilityEngineManifest` gains `licenseIdentifier` +
+  `commercialUse`; `CapabilityProviderDescriptor` gains `commercialUse`; `CapabilityRegistry.candidates(...)`
+  now excludes non-commercial providers from Auto selection entirely — they are reachable ONLY via an explicit
+  model pin. So Qwen-Image-2.1 (Qwen Research License, NON-COMMERCIAL) can never silently become a
+  commercial-production default; eval/dogfood use stays available by pinning `"qwen-image-2.1"`. Existing
+  providers default to `commercialUse=true` (unchanged).
+- **Resource-aware fit gating.** The manifest declares a `CapabilityResourceProfile` (~30 GB peak, 24 GB
+  system-volume headroom, ~33 GB download) surfaced on the descriptor — honest because the Qwen3-VL text
+  encoder (~17.5 GB) stays bf16-resident even when the transformer/VAE are quantized (~46 GB bf16 peak). So
+  fit-gating correctly refuses it on <64 GB machines / near-full disks unless explicitly pinned.
+- Storage/provenance: reuses the esh HF image cache on the assets volume; artifact provenance now records
+  `modelID`. Truthful non-commercial license is surfaced in the manifest, descriptor, and bridge output.
+- **Validated live on M1 Pro 32 GB** (the exact target): `image.generate`, q4 + `--low-ram`, 1024², 40 steps
+  → excellent photoreal quality, **fit 32 GB with no swap thrash** (~18–19 GB real peak, swap flat at ~1.6 GB
+  baseline), ~21 min cold (incl. 33 GB weight load). bf16 (~46 GB peak) does not fit 32 GB and is correctly
+  gated. Tests: manifest/descriptor wiring, the pin-only commercial gate, bridge command + generate/restyle
+  request translation. Full regression + macOS + iOS builds green.
+
 ### SDK — v2.4.0-rc.30 (audio engines: isolated per-engine venvs — voice-clone + AudioGen fixed, all four validated)
 
 Fixes the Esh Studio handoff where compatibility audio engines reported false/blocking dependency states and
