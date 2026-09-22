@@ -29,6 +29,20 @@ private func editReq(model: String?) -> ExecutionRequest {
 }
 
 @Suite struct EshPhotoMakerTests {
+    @Test func editSizeKnobAndHonestResourceProfile() {
+        // Default is SDXL-native 1024 (max quality). editSize is a speed/quality knob, not a memory lever —
+        // a live sweep measured ~12.4 GB peak at both 1024 and 768.
+        #expect(EshPhotoMaker.defaultEditSize == 1024)
+        // Clamp: multiple of 8, within [512, 1024].
+        #expect(EshPhotoMaker.clampedEditSize(768) == 768)
+        #expect(EshPhotoMaker.clampedEditSize(1024) == 1024)
+        #expect(EshPhotoMaker.clampedEditSize(2048) == 1024)   // capped
+        #expect(EshPhotoMaker.clampedEditSize(256) == 512)     // floored
+        #expect(EshPhotoMaker.clampedEditSize(700) == 696)     // snapped down to a multiple of 8
+        // Advertised peak is the measured value (~12.4 GB) + small margin, not the old padded 14.
+        #expect(EshPhotoMaker.resourceProfile.estimatedPeakMemoryGB == 13)
+    }
+
     @Test func photoMakerProviderDescriptorIsNativeIdentityTier() {
         let ps = EshPhotoMaker.providers()
         #expect(ps.count == 1)

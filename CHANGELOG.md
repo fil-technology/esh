@@ -26,6 +26,26 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.29 (PhotoMaker: honest resource profile + opt-in speed knob + prewarm)
+
+Measurement-driven. A live MLX peak sweep of the PhotoMaker v1 identity tier showed the peak is
+**weights-bound and resolution-independent**: 12.38 GB at 1024 and 12.36 GB at 768 (resident fp16 SDXL
+`active ≈ 7.85 GB` + a ~4.5 GB fixed working set; the VAE decode is already tiled at 512 px). So lowering the
+edit resolution does **not** reduce peak — only quantizing the fp16 weights would (tracked as a follow-up
+spike).
+
+- `EshPhotoMaker.resourceProfile.estimatedPeakMemoryGB` corrected **14 → 13** (measured ~12.4 GB + margin),
+  system-volume headroom **18 → 16**, so resource-aware Auto routing stops being over-conservative on
+  16–32 GB Macs. (The old 14 was a padded estimate; the true peak is ~12.4 GB.)
+- `editSize` is now a configurable, opt-in **speed/quality** knob (not a memory lever) — default stays SDXL
+  native **1024** (max quality); a host can pass `makeWithImageEditTiers(photoMakerEditSize: 768)` for ~2×
+  faster first generation (~40 s vs ~83 s denoise) at slightly lower fidelity. Clamped to a multiple of 8 in
+  [512, 1024] via `EshPhotoMaker.clampedEditSize`.
+- New public `EshPhotoMakerEngine.prewarm(onProgress:)` — pre-stage SDXL + PhotoMaker weights (token-free,
+  checksum-pinned) so the first edit isn't blocked on a multi-GB download.
+- Tests: deterministic `editSizeKnobAndHonestResourceProfile` (default 1024, clamp, `estimatedPeakMemoryGB
+  == 13`). Peaks validated by a live on-device sweep.
+
 ### SDK — v2.4.0-rc.28 (new capability: audio.cloneVoice — zero-shot voice cloning, dogfood)
 
 Adds the previously-missing voice-cloning capability as a macOS compatibility engine, mirroring the existing
