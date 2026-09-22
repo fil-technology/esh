@@ -42,17 +42,25 @@ public enum MacCapabilities {
                 ],
                 modelAssets: [.init(id: "musicgen", displayName: "MusicGen", approxBytes: 2_400_000_000)]),
 
+            // Environmental SFX via AudioGen (mlx-audiocraft) in an ISOLATED venv — its audiocraft/
+            // multiprocessing stack is kept out of the shared MLX runtime. The shared bridge (main venv) only
+            // launches the isolated worker, so its own required modules are just the `base` bridge deps; the
+            // AudioGen deps are probed/installed against the isolated venv the host points the bridge at via
+            // `ESH_AUDIOGEN_PYTHON`. (Before rc.30 these were declared as top-level `requiredModules` and so
+            // were falsely probed against the main venv → a spurious "missing module 'mlx_audiocraft'".)
             CompatibilityEngineManifest(
                 id: .soundFX, version: "1", capabilities: [.audioGenerate],
                 acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: base + [
+                requiredModules: base,
+                modelAssets: [.init(id: "audiogen", displayName: "AudioGen", approxBytes: 1_600_000_000)],
+                isolatedRuntime: .init(dirName: "audiogen-venv", envVar: "ESH_AUDIOGEN_PYTHON", modules: [
                     // The isolated AudioGen runtime imports `mlx_audiocraft` (underscore); the pip package is
                     // `mlx-audiocraft`. Declaring the correct import name so preflight probes it accurately.
-                    .init(module: "mlx_audiocraft", pipPackage: "mlx-audiocraft==0.1.0"),
+                    .init(module: "numpy", pipPackage: "numpy"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
-                ],
-                modelAssets: [.init(id: "audiogen", displayName: "AudioGen", approxBytes: 1_600_000_000)]),
+                    .init(module: "mlx_audiocraft", pipPackage: "mlx-audiocraft==0.1.0"),
+                ])),
 
             // macOS text->image generation via mflux's Z-Image-Turbo (Apache-2.0, ~8 steps). The 4-bit
             // model is already present on the configured assets volume; no gated repo, no token. The native
@@ -80,22 +88,25 @@ public enum MacCapabilities {
             //   • `torch`/`torchaudio` pinned < 2.9 — 2.9+ requires `torchcodec` (+ system FFmpeg) for audio IO.
             //   • `transformers` pinned >=4.57,<5 — coqui-tts 0.27.x needs >=4.57, and 5.x drops
             //     `isin_mps_friendly` which XTTS imports.
-            // KNOWN LIMITATION: `transformers<5` can clash with the main runtime's newer transformers when they
-            // share a venv; the robust production shape is an ISOLATED venv for this engine (like AudioGen's
-            // `ESH_AUDIOGEN_PYTHON`). Tracked as a follow-up. exFAT venvs also need AppleDouble (`._*`) stripping,
-            // which the host already performs.
+            // Because `transformers<5` clashes with the main runtime's newer transformers, this engine runs in
+            // its OWN isolated venv (rc.30), exactly like AudioGen — the shared bridge (main venv) only launches
+            // the isolated `esh_voiceclone.py` worker, located via `ESH_VOICECLONE_PYTHON`. The pinned deps
+            // below are probed/installed against that isolated venv, never the shared one. exFAT venvs also need
+            // AppleDouble (`._*`) stripping, which the host + worker already perform.
             CompatibilityEngineManifest(
                 id: .voiceClone, version: "1", capabilities: [.audioCloneVoice],
                 acceptedInputs: [.audio, .text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: base + [
-                    .init(module: "TTS", pipPackage: "coqui-tts"),
+                requiredModules: base,
+                modelAssets: [.init(id: "xtts-v2", displayName: "XTTS-v2 (voice clone)", approxBytes: 1_870_000_000)],
+                isolatedRuntime: .init(dirName: "voiceclone-venv", envVar: "ESH_VOICECLONE_PYTHON", modules: [
+                    .init(module: "numpy", pipPackage: "numpy"),
                     .init(module: "torch", pipPackage: "torch<2.9"),
                     .init(module: "torchaudio", pipPackage: "torchaudio<2.9"),
                     .init(module: "transformers", pipPackage: "transformers>=4.57,<5"),
+                    .init(module: "TTS", pipPackage: "coqui-tts"),
                     .init(module: "soundfile", pipPackage: "soundfile"),
-                ],
-                modelAssets: [.init(id: "xtts-v2", displayName: "XTTS-v2 (voice clone)", approxBytes: 1_870_000_000)]),
+                ])),
 
             CompatibilityEngineManifest(
                 id: .diarization, version: "1", capabilities: [.audioDiarize],

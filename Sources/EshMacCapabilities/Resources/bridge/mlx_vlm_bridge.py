@@ -2334,8 +2334,27 @@ def _isolated_audiogen_python() -> "str | None":
     import os
     cand = [os.environ.get("ESH_AUDIOGEN_PYTHON")]
     cand += [
+        # esh-managed isolated venv on the internal state root (canonical since rc.30).
+        os.path.expanduser("~/.esh/runtime/isolated/audiogen-venv/bin/python3"),
+        # Legacy locations provisioned by scripts/setup-audio-runtime.sh (kept for backward-compat).
         "/Volumes/Sviat SSD/esh-runtime/audio/audiogen-mlx/venv/bin/python",
         os.path.expanduser("~/.esh/runtime/audio/audiogen-mlx/venv/bin/python"),
+    ]
+    for c in cand:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _isolated_voiceclone_python() -> "str | None":
+    """Locate the ISOLATED voice-clone venv (coqui-tts / XTTS-v2) — env override, then known managed paths.
+    Kept separate from the main esh venv because coqui-tts pins torch<2.9 / transformers<5, which would
+    destabilize the MLX LLM/VLM runtime if shared. esh provisions this venv on install and sets the env var."""
+    import os
+    cand = [os.environ.get("ESH_VOICECLONE_PYTHON")]
+    cand += [
+        # esh-managed isolated venv on the internal state root (canonical; exFAT poisons pip metadata scans).
+        os.path.expanduser("~/.esh/runtime/isolated/voiceclone-venv/bin/python3"),
     ]
     for c in cand:
         if c and os.path.exists(c):
@@ -2475,50 +2494,55 @@ def _peak_normalize(arr, ceiling: float = 0.99):
 
 
 def voice_clone() -> None:
-    """Zero-shot voice cloning via Coqui XTTS-v2 (coqui-tts). Synthesizes `text` in the voice of a short
-    reference sample and writes a WAV to outputPath. License: CPML (NON-COMMERCIAL) — dogfood-only."""
+    """Zero-shot voice cloning via Coqui XTTS-v2 (coqui-tts). Runs in the ISOLATED voice-clone venv
+    (Tools/esh_voiceclone.py), NOT the main esh venv — coqui-tts pins torch<2.9 / transformers<5 which would
+    destabilize the shared MLX runtime. Synthesizes `text` in the voice of a short reference sample and writes
+    a WAV to outputPath. License: CPML (NON-COMMERCIAL) — dogfood-only.
+
+    This launcher (main venv) validates the request, locates the isolated interpreter, strips exFAT AppleDouble
+    sidecars (which poison coqui/transformers module scans), and relays the worker's single JSON result."""
     import os
     request = _load_json()
     text = (request.get("text") or "").strip()
     reference = request.get("referencePath")
-    language = (request.get("language") or "en").strip() or "en"
-    out_path = request["outputPath"]
+    out_path = request.get("outputPath")
     if not text:
         _fail("voice cloning requires text to speak")
     if not reference or not os.path.exists(reference):
         _fail("voice cloning requires an existing reference audio sample")
+    if not out_path:
+        _fail("voice cloning requires an output path")
 
-    # XTTS asks to accept its non-commercial license interactively; accept it non-interactively (dogfood).
-    os.environ.setdefault("COQUI_TOS_AGREED", "1")
-    # Keep the coqui model store on the configured assets volume (external SSD), not the internal user dir.
-    hf_cache = request.get("hfCache")
-    if hf_cache:
-        os.environ.setdefault("TTS_HOME", os.path.join(hf_cache, "coqui"))
+    py = _isolated_voiceclone_python()
+    if not py:
+        _fail("the voice-clone runtime is not installed — esh provisions an isolated coqui-tts venv on install "
+              "(ESH_VOICECLONE_PYTHON)")
+    _strip_appledouble(os.path.join(os.path.dirname(os.path.dirname(py)), "lib"))  # clear exFAT ._* sidecars
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_voiceclone.py")
+    env = dict(os.environ)
+    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1", "COQUI_TOS_AGREED": "1",
+                "TOKENIZERS_PARALLELISM": "false"})
+    hf = request.get("hfCache")
+    if hf:
+        env["HF_HOME"] = hf
+        env["HF_HUB_CACHE"] = os.path.join(hf, "hub")
+        env.setdefault("TTS_HOME", os.path.join(hf, "coqui"))
         try:
-            os.makedirs(os.environ["TTS_HOME"], exist_ok=True)
+            os.makedirs(env["TTS_HOME"], exist_ok=True)
         except Exception:  # noqa: BLE001
             pass
 
-    try:
-        import torch  # noqa: F401
-        from TTS.api import TTS
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"voice-clone engine not ready: {type(exc).__name__}: {exc}")
-
-    # Apple Silicon: XTTS runs on CPU reliably; MPS support in coqui-tts is uneven, so pin CPU for determinism.
-    try:
-        tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-        try:
-            tts.to("cpu")
-        except Exception:  # noqa: BLE001
-            pass
-        tts.tts_to_file(text=text, speaker_wav=reference, language=language, file_path=out_path)
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"voice cloning failed: {type(exc).__name__}: {exc}")
-
-    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        _fail("voice cloning produced no audio")
-    _dump_json({"outputPath": out_path, "provider": "xtts-v2", "license": "cpml-noncommercial", "language": language})
+    res, code, errtext = _run_sfx_worker(py, script, env, request)   # same JSON-stdin/JSON-stdout worker contract
+    if res is not None:
+        if res.get("error"):
+            _fail(res["error"])
+        _dump_json(res)
+        return
+    if code == "timeout":
+        _fail("voice cloning timed out")
+    detail = f": {errtext}" if errtext else ""
+    _fail(f"voice cloning failed{detail}")
 
 
 def audio_or_music_generate(kind: str) -> None:

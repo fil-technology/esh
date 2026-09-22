@@ -30,6 +30,23 @@ public struct CompatibilityModule: Sendable, Hashable, Codable {
     public init(module: String, pipPackage: String) { self.module = module; self.pipPackage = pipPackage }
 }
 
+/// An ISOLATED interpreter an engine's heavy runtime lives in, kept OUT of the shared MLX venv because its
+/// dependency pins would destabilize it (voice-clone needs `torch<2.9` / `transformers<5`; AudioGen needs the
+/// `mlx-audiocraft` stack). When present, esh provisions a dedicated venv, installs/probes `modules` THERE,
+/// and points the bridge at it via `envVar` at run time. The manifest's top-level `requiredModules` remain the
+/// SHARED bridge dependencies, always probed against the main managed venv (the bridge itself runs there).
+public struct IsolatedRuntime: Sendable, Hashable, Codable {
+    /// Venv directory name under the managed audio-assets root (e.g. `voiceclone-venv`).
+    public let dirName: String
+    /// The environment variable the bridge reads to locate this interpreter (e.g. `ESH_VOICECLONE_PYTHON`).
+    public let envVar: String
+    /// The Python modules this isolated runtime requires, probed/installed against the isolated venv only.
+    public let modules: [CompatibilityModule]
+    public init(dirName: String, envVar: String, modules: [CompatibilityModule]) {
+        self.dirName = dirName; self.envVar = envVar; self.modules = modules
+    }
+}
+
 /// A model asset an engine needs, described in esh's own catalog terms (never a Python path to the consumer).
 public struct CompatibilityModelAsset: Sendable, Hashable, Codable {
     public let id: String
@@ -54,15 +71,20 @@ public struct CompatibilityEngineManifest: Sendable, Hashable, Codable {
     public let minimumOS: String
     public let requiredModules: [CompatibilityModule]
     public let modelAssets: [CompatibilityModelAsset]
+    /// An optional isolated interpreter this engine's heavy runtime lives in (see `IsolatedRuntime`). `nil` for
+    /// engines that run entirely in the shared managed venv (music, diarization, image generation/edit).
+    public let isolatedRuntime: IsolatedRuntime?
 
     public init(id: CompatibilityEngineID, version: String, capabilities: [CapabilityID],
                 acceptedInputs: [ModelModality], producedOutputs: [ModelModality],
                 producedArtifactKind: ArtifactKind, runtimeVersion: String, minimumOS: String,
-                requiredModules: [CompatibilityModule], modelAssets: [CompatibilityModelAsset]) {
+                requiredModules: [CompatibilityModule], modelAssets: [CompatibilityModelAsset],
+                isolatedRuntime: IsolatedRuntime? = nil) {
         self.id = id; self.version = version; self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs; self.producedOutputs = producedOutputs
         self.producedArtifactKind = producedArtifactKind; self.runtimeVersion = runtimeVersion
         self.minimumOS = minimumOS; self.requiredModules = requiredModules; self.modelAssets = modelAssets
+        self.isolatedRuntime = isolatedRuntime
     }
 
     /// Total declared download footprint (dependencies aren't sized here; models are).

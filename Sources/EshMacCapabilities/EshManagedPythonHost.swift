@@ -49,6 +49,55 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         return try await ManagedPythonRuntime(root: root).provisionedPython(onProgress: onProgress)
     }
 
+    // MARK: - Isolated per-engine venvs (voice-clone, AudioGen)
+    //
+    // A few engines can't share the main MLX venv (conflicting pins would destabilize it), so their heavy deps
+    // live in a dedicated venv under the managed audio-assets root. The env override the bridge reads takes
+    // precedence, so an externally-provisioned isolated venv (e.g. from scripts/setup-audio-runtime.sh) is
+    // honored too. inspect/install/repair route to whichever venv actually holds the engine's runtime.
+
+    /// The esh-managed venv directory for an isolated engine. It lives on the INTERNAL APFS state root
+    /// alongside the main managed venv — NOT the external assets volume, which is often exFAT and poisons pip's
+    /// metadata scan with AppleDouble `._*` sidecars (a `python -m venv` + pip there fails with a
+    /// `UnicodeDecodeError`). Only heavy model weights/caches go to the assets volume (via `HF_HOME` etc.).
+    private func isolatedVenvURL(_ iso: IsolatedRuntime, root: PersistenceRoot) -> URL {
+        root.stateRootURL.appendingPathComponent("runtime/isolated", isDirectory: true)
+            .appendingPathComponent(iso.dirName, isDirectory: true)
+    }
+
+    /// The esh-managed location of an isolated engine venv's interpreter (on the internal state root).
+    private func isolatedPythonPath(_ iso: IsolatedRuntime, root: PersistenceRoot) -> String {
+        isolatedVenvURL(iso, root: root).appendingPathComponent("bin/python3").path
+    }
+
+    /// An isolated interpreter esh can use right now WITHOUT provisioning: an env-injected path (bridge
+    /// override / externally-provisioned venv), else the esh-managed isolated venv. `nil` when neither exists.
+    private func adoptableIsolatedPython(_ iso: IsolatedRuntime, root: PersistenceRoot) -> String? {
+        if let injected = ProcessInfo.processInfo.environment[iso.envVar],
+           ManagedPythonRuntime.isUsable(injected) { return injected }
+        let managed = isolatedPythonPath(iso, root: root)
+        return ManagedPythonRuntime.isUsable(managed) ? managed : nil
+    }
+
+    /// An isolated interpreter esh can use, provisioning a dedicated venv from the esh-owned base interpreter if
+    /// necessary (install/repair path). Never touches the main venv.
+    private func ensureIsolatedPython(_ iso: IsolatedRuntime, root: PersistenceRoot,
+                                      onProgress: @Sendable @escaping (Double) -> Void) async throws -> String {
+        if let ready = adoptableIsolatedPython(iso, root: root) { onProgress(1.0); return ready }
+        let runtime = ManagedPythonRuntime(root: root)
+        let base = try await runtime.ensureBaseInterpreter(onProgress: { onProgress($0 * 0.8) })
+        let venvURL = isolatedVenvURL(iso, root: root)
+        try FileManager.default.createDirectory(at: venvURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ManagedPythonRuntime.createVenv(base: base, venv: venvURL)
+        ManagedPythonRuntime.stripQuarantine(at: venvURL)
+        onProgress(1.0)
+        let py = isolatedPythonPath(iso, root: root)
+        guard ManagedPythonRuntime.isUsable(py) else {
+            throw CompatibilityError.runtimeUnavailable(reason: "esh could not provision the \(iso.dirName) runtime")
+        }
+        return py
+    }
+
     /// The bridge-scripts directory: an injected dir (CLI), else the scripts shipped inside the SDK bundle.
     private func resolvedBridgeDir() -> String? {
         if let bridgeScriptsDir { return bridgeScriptsDir }
@@ -68,28 +117,58 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     public func inspect(_ manifest: CompatibilityEngineManifest) async -> CompatibilityEngineState {
         // Honest state before provisioning: nothing usable yet → the engine "requires download" (esh will
         // provision the interpreter + deps on install). Adopted managed venv or injected python → probe deps.
-        guard let python = adoptablePython(root: resolvedRoot()) else {
+        let root = resolvedRoot()
+        // Shared bridge deps are always probed against the main managed venv (the bridge runs there).
+        guard let python = adoptablePython(root: root) else {
             return .requiresDownload(bytes: manifest.approxDownloadBytes)
         }
         for requirement in manifest.requiredModules {
             let (code, stderr) = Self.runProbe(python: python, module: requirement.module)
             if code != 0 { return Self.map(stderr: stderr, fallbackReason: "missing module '\(requirement.module)'") }
         }
+        // Engines with an isolated runtime (voice-clone, AudioGen) have their heavy deps in a dedicated venv;
+        // probe THOSE there, never against the main venv (which never has them → false "missing module").
+        if let iso = manifest.isolatedRuntime {
+            guard let isoPython = adoptableIsolatedPython(iso, root: root) else {
+                return .requiresDownload(bytes: manifest.approxDownloadBytes)
+            }
+            for requirement in iso.modules {
+                let (code, stderr) = Self.runProbe(python: isoPython, module: requirement.module)
+                if code != 0 { return Self.map(stderr: stderr, fallbackReason: "missing module '\(requirement.module)'") }
+            }
+        }
         return .ready
     }
 
     public func install(_ manifest: CompatibilityEngineManifest, onProgress: @Sendable @escaping (Double) -> Void) async throws {
-        // Provisioning (interpreter + venv) is the first half of progress; dependency install is the second.
-        let python = try await ensurePython(root: resolvedRoot(), onProgress: { onProgress($0 * 0.5) })
+        let root = resolvedRoot()
+        // Split progress: main-venv provisioning + deps, then (if any) the isolated venv + its deps.
+        let hasIsolated = manifest.isolatedRuntime != nil
+        let mainShare = hasIsolated ? 0.5 : 1.0
+        let python = try await ensurePython(root: root, onProgress: { onProgress($0 * 0.5 * mainShare) })
         try Self.pipInstall(python: python, packages: manifest.requiredModules.map { $0.pipPackage },
-                            onProgress: { onProgress(0.5 + $0 * 0.5) })
+                            onProgress: { onProgress((0.5 + $0 * 0.5) * mainShare) })
+        if let iso = manifest.isolatedRuntime {
+            let isoPython = try await ensureIsolatedPython(iso, root: root, onProgress: { onProgress(0.5 + $0 * 0.25) })
+            try Self.pipInstall(python: isoPython, packages: iso.modules.map { $0.pipPackage },
+                                onProgress: { onProgress(0.75 + $0 * 0.25) })
+        }
     }
 
     public func repair(_ manifest: CompatibilityEngineManifest) async throws {
-        let python = try await ensurePython(root: resolvedRoot(), onProgress: { _ in })
+        let root = resolvedRoot()
+        let python = try await ensurePython(root: root, onProgress: { _ in })
         let missing = manifest.requiredModules.filter { Self.runProbe(python: python, module: $0.module).code != 0 }
-        guard !missing.isEmpty else { return }
-        try Self.pipInstall(python: python, packages: missing.map { $0.pipPackage }, onProgress: { _ in })
+        if !missing.isEmpty {
+            try Self.pipInstall(python: python, packages: missing.map { $0.pipPackage }, onProgress: { _ in })
+        }
+        if let iso = manifest.isolatedRuntime {
+            let isoPython = try await ensureIsolatedPython(iso, root: root, onProgress: { _ in })
+            let isoMissing = iso.modules.filter { Self.runProbe(python: isoPython, module: $0.module).code != 0 }
+            if !isoMissing.isEmpty {
+                try Self.pipInstall(python: isoPython, packages: isoMissing.map { $0.pipPackage }, onProgress: { _ in })
+            }
+        }
     }
 
     // MARK: - Execution (real bridge subprocess supervision)
@@ -123,7 +202,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     let proc = Process()
                     proc.executableURL = URL(fileURLWithPath: python)
                     proc.arguments = [dir + "/mlx_vlm_bridge.py", command]
-                    proc.environment = Self.bridgeEnvironment(for: manifest.id, root: context.root)
+                    proc.environment = self.bridgeEnvironment(for: manifest, root: context.root)
                     let stdin = Pipe(); let stdout = Pipe(); let stderr = Pipe()
                     proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
                     procBox.set(proc)
@@ -250,10 +329,10 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     /// The subprocess environment that keeps ALL heavy Hugging Face / temp I/O on the configured assets
     /// volume (external SSD), never the internal disk. Belt-and-suspenders alongside the per-request
     /// `hfCache` field: some libraries freeze their cache dir from the environment at import time.
-    static func bridgeEnvironment(for id: CompatibilityEngineID, root: PersistenceRoot) -> [String: String] {
+    func bridgeEnvironment(for manifest: CompatibilityEngineManifest, root: PersistenceRoot) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         let family: String
-        switch id {
+        switch manifest.id {
         case .imageGeneration, .advancedImageEdit: family = "image"
         default: family = "audio"
         }
@@ -265,11 +344,11 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         // Route temporary/staging writes (e.g. large intermediate tensors) to the assets volume too.
         try? FileManager.default.createDirectory(at: root.tempURL, withIntermediateDirectories: true)
         env["TMPDIR"] = root.tempURL.path
-        // Reuse an esh-managed AudioGen venv on the assets volume when present (SFX runs in an isolated
-        // mlx-audiocraft runtime); the bridge also accepts ESH_AUDIOGEN_PYTHON from the ambient environment.
-        let audiogenPython = root.audioURL.appendingPathComponent("audiogen-venv/bin/python3").path
-        if FileManager.default.isExecutableFile(atPath: audiogenPython) {
-            env["ESH_AUDIOGEN_PYTHON"] = audiogenPython
+        // Point the bridge at this engine's isolated runtime (voice-clone, AudioGen) when one exists — the
+        // env override the bridge reads. Prefer an already-usable interpreter (an ambient override or an
+        // externally-provisioned venv) and fall back to the esh-managed isolated venv path.
+        if let iso = manifest.isolatedRuntime, let py = adoptableIsolatedPython(iso, root: root) {
+            env[iso.envVar] = py
         }
         return env
     }

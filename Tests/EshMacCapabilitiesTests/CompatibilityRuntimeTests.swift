@@ -77,6 +77,17 @@ private func tmpRoot() -> URL {
     let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true); return u
 }
+/// Run `body` with the given environment overrides applied (nil value = unset), restoring the prior values
+/// afterward. Used to exercise env-driven interpreter resolution deterministically.
+private func withEnv(_ overrides: [String: String?], _ body: () -> Void) {
+    var previous: [String: String?] = [:]
+    for (k, v) in overrides {
+        previous[k] = ProcessInfo.processInfo.environment[k]
+        if let v { setenv(k, v, 1) } else { unsetenv(k) }
+    }
+    defer { for (k, v) in previous { if let v { setenv(k, v, 1) } else { unsetenv(k) } } }
+    body()
+}
 /// Poll a condition until true or the timeout elapses (deterministic replacement for fixed test sleeps).
 private func pollUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
     let deadline = Date().addingTimeInterval(timeout)
@@ -123,7 +134,33 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(m?.acceptedInputs.contains(.audio) == true)   // reference sample
         #expect(m?.acceptedInputs.contains(.text) == true)    // words to speak
         #expect(m?.producedArtifactKind == .audio)
-        #expect(m?.requiredModules.contains { $0.module == "TTS" } == true)
+        // coqui-tts lives in the ISOLATED venv (torch<2.9 / transformers<5 can't share the main venv), NOT
+        // in the top-level requiredModules that are probed against the shared venv.
+        #expect(m?.isolatedRuntime?.modules.contains { $0.module == "TTS" } == true)
+        #expect(m?.requiredModules.contains { $0.module == "TTS" } == false)
+    }
+
+    @Test func isolatedRuntimesWiredForVoiceCloneAndSoundFX() {
+        // rc.30: the two engines whose heavy deps can't share the main MLX venv declare an isolated runtime.
+        // Their top-level requiredModules are just the shared bridge deps (probed against the main venv); the
+        // conflicting/heavy modules are probed/installed against the dedicated venv instead.
+        let manifests = MacCapabilities.manifests()
+        let vc = manifests.first { $0.id == .voiceClone }!
+        #expect(vc.isolatedRuntime?.dirName == "voiceclone-venv")
+        #expect(vc.isolatedRuntime?.envVar == "ESH_VOICECLONE_PYTHON")
+        let vcIso = Set(vc.isolatedRuntime?.modules.map { $0.module } ?? [])
+        #expect(vcIso.isSuperset(of: ["TTS", "torch", "torchaudio", "transformers", "soundfile"]))
+        #expect(vc.requiredModules.contains { $0.module == "torch" } == false)  // not in the shared venv
+
+        let sfx = manifests.first { $0.id == .soundFX }!
+        #expect(sfx.isolatedRuntime?.dirName == "audiogen-venv")
+        #expect(sfx.isolatedRuntime?.envVar == "ESH_AUDIOGEN_PYTHON")
+        #expect(sfx.isolatedRuntime?.modules.contains { $0.module == "mlx_audiocraft" } == true)
+        #expect(sfx.requiredModules.contains { $0.module == "mlx_audiocraft" } == false)  // was a false main-venv probe pre-rc.30
+
+        // Engines that DO share the main venv carry no isolated runtime.
+        #expect(manifests.first { $0.id == .music }?.isolatedRuntime == nil)
+        #expect(manifests.first { $0.id == .diarization }?.isolatedRuntime == nil)
     }
 
     @Test func voiceCloneProviderExecutesToAudio() async {
@@ -357,13 +394,43 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         let state = tmpRoot(); let assets = tmpRoot()
         defer { try? FileManager.default.removeItem(at: state); try? FileManager.default.removeItem(at: assets) }
         let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
-        let audioEnv = EshManagedPythonHost.bridgeEnvironment(for: .music, root: root)
+        let host = EshManagedPythonHost()
+        let manifests = MacCapabilities.manifests()
+        let music = manifests.first { $0.id == .music }!
+        let imageEdit = manifests.first { $0.id == .advancedImageEdit }!
+        let audioEnv = host.bridgeEnvironment(for: music, root: root)
         #expect(audioEnv["HF_HOME"] == assets.appendingPathComponent("caches/audio-models").path)
         #expect(audioEnv["TMPDIR"] == assets.appendingPathComponent("tmp").path)
         // never the internal state root or the user's ~/.cache
         #expect(audioEnv["HF_HOME"]?.contains(state.path) == false)
-        let imageEnv = EshManagedPythonHost.bridgeEnvironment(for: .advancedImageEdit, root: root)
+        let imageEnv = host.bridgeEnvironment(for: imageEdit, root: root)
         #expect(imageEnv["HF_HOME"] == assets.appendingPathComponent("caches/image-models").path)
+
+        // Engines with no isolated runtime never set an isolated interpreter env var.
+        #expect(audioEnv["ESH_VOICECLONE_PYTHON"] == nil)
+        #expect(audioEnv["ESH_AUDIOGEN_PYTHON"] == nil)
+    }
+
+    @Test func bridgeEnvironmentHonorsIsolatedInterpreterOverride() {
+        // The bridge locates an isolated engine venv via its env var; an ambient override to a usable
+        // interpreter (an externally-provisioned venv) must be honored so run() points the worker at it.
+        let state = tmpRoot(); let assets = tmpRoot()
+        defer { try? FileManager.default.removeItem(at: state); try? FileManager.default.removeItem(at: assets) }
+        let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
+        let host = EshManagedPythonHost()
+        let voiceClone = MacCapabilities.manifests().first { $0.id == .voiceClone }!
+
+        // No isolated venv anywhere → the env var is left unset (honest: not yet provisioned).
+        withEnv(["ESH_VOICECLONE_PYTHON": nil]) {
+            #expect(host.bridgeEnvironment(for: voiceClone, root: root)["ESH_VOICECLONE_PYTHON"] == nil)
+        }
+        // A usable interpreter injected via the override is adopted verbatim.
+        let sysPython = "/usr/bin/python3"
+        if FileManager.default.isExecutableFile(atPath: sysPython) {
+            withEnv(["ESH_VOICECLONE_PYTHON": sysPython]) {
+                #expect(host.bridgeEnvironment(for: voiceClone, root: root)["ESH_VOICECLONE_PYTHON"] == sysPython)
+            }
+        }
     }
     #endif
 

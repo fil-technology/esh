@@ -26,6 +26,38 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.30 (audio engines: isolated per-engine venvs — voice-clone + AudioGen fixed, all four validated)
+
+Fixes the Esh Studio handoff where compatibility audio engines reported false/blocking dependency states and
+voice-clone could not run. Root cause: `inspect`/`install`/`repair` always probed the **main** managed venv,
+but two engines actually run their heavy runtime in a **separate** venv (their dependency pins can't share the
+MLX runtime). So AudioGen's `mlx_audiocraft` (isolated) was probed against the main venv → a spurious
+"missing module 'mlx_audiocraft'", and voice-clone's coqui-tts (`torch<2.9` / `transformers<5`) was
+unbuildable in a shared venv at all.
+
+- **Isolated runtimes are now first-class.** `CompatibilityEngineManifest.isolatedRuntime` (`IsolatedRuntime`:
+  `dirName` + `envVar` + `modules`) declares a dedicated venv. The host provisions it from the esh-owned base
+  interpreter, installs/probes its modules **there** (never the main venv), and points the bridge at it via the
+  env var at run time. `soundFX` → `audiogen-venv` / `ESH_AUDIOGEN_PYTHON`; `voiceClone` → `voiceclone-venv` /
+  `ESH_VOICECLONE_PYTHON`. The manifest's top-level `requiredModules` stay the shared bridge deps.
+- **One interpreter per engine, end to end.** `inspect`/`install`/`repair` now resolve the correct venv per
+  engine, so an isolated engine's real state is reported (no more false "missing module" against the main
+  venv), and install provisions the isolated venv + its deps. This also removes the stale/misleading status the
+  consumer saw, because the probed interpreter finally matches the one the engine runs in.
+- **voice-clone now runs in its own venv.** The shared bridge (main venv) launches an isolated
+  `esh_voiceclone.py` worker (mirroring AudioGen's `esh_audiogen.py`) located via `ESH_VOICECLONE_PYTHON`, so
+  `coqui-tts`'s `torch<2.9` / `transformers<5` never destabilize the MLX LLM/VLM runtime (main venv stays on
+  torch 2.14 / transformers 5.17).
+- **Isolated venvs live on the internal APFS state root** (`~/.esh/runtime/isolated/<name>`), alongside the
+  main venv — NOT the external assets volume, where exFAT AppleDouble `._*` sidecars poison pip's metadata scan
+  and break `python -m venv` + pip (`UnicodeDecodeError`). Only model weights/caches stay on the assets volume.
+- **Validated live, real generation (all on-device):** music (MusicGen 4.9 s WAV), sound (AudioGen "rain on a
+  tin roof" 4 s, isolated venv), diarize (2-speaker clip correctly split at 4.5 s), and voice-clone (XTTS-v2
+  6.4 s cloned from a reference sample, isolated venv on torch 2.8 / transformers 4.57). Non-commercial models
+  (MusicGen/AudioGen/XTTS, CC-BY-NC / CPML) remain opt-in, labeled, dogfood-only.
+- Tests: `isolatedRuntimesWiredForVoiceCloneAndSoundFX`, `bridgeEnvironmentHonorsIsolatedInterpreterOverride`,
+  and updated `voiceCloneManifestIsDeclared` (coqui-tts now in the isolated runtime, not `requiredModules`).
+
 ### SDK — v2.4.0-rc.29 (PhotoMaker: honest resource profile + opt-in speed knob + prewarm)
 
 Measurement-driven. A live MLX peak sweep of the PhotoMaker v1 identity tier showed the peak is
