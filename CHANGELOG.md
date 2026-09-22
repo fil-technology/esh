@@ -26,6 +26,31 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.32 (image.edit style presets: first-class "3D animation" via FLUX.2 Klein 4B + LoRA)
+
+Surfaces esh-web's Imagine "3D animation" stylizer as a first-class, discoverable SDK feature. The stylizer is
+**FLUX.2 Klein 4B** (Black Forest Labs, Apache-2.0) as an edit backend + the **`Latentiq/Flux2_Klein_4B_3D2AI`
+LoRA** — a 4B model that fits 32 GB (measured ~11 GB peak, ~1.8 min, no swap thrash), identity-preserving and
+commercial-safe. (This corrects an earlier assumption that the Pixar path was the 20B Qwen-Image-Edit-2511,
+which does NOT fit 32 GB.)
+
+- **Named style presets** (`MacImageStyle` / `MacImageStyles`, new `ImageStylePresets.swift`): a style is a
+  curated backend + optional LoRA + prompt. Built-in **`3d-animation`** → flux2-klein + the 3D2AI LoRA. A
+  consumer applies it by name via the `image.edit` option `style: "3d-animation"` — no hard-coded model paths.
+- **image.edit now forwards the real edit knobs.** The `advancedImageEdit` bridge request maps `style`
+  (resolved to backend + LoRA + composed prompt) plus direct passthroughs `backend`, `lora`, `loraScale`,
+  `quantize`, `guidance`, `steps`, `seed`, `maxEditSide` — previously it only forwarded image + instruction, so
+  a consumer could not select a backend or a LoRA at all.
+- **LoRA resolution** (`resolveLoRAPath`): prefers the cached local adapter in the image HF cache, else falls
+  back to the HF repo id so mflux downloads it on first use (offline-first, no hard-coded snapshot paths).
+- **Discovery**: `MacCapabilities.imageStyles()` lists the presets (id, display name, backend, license,
+  commercial flag) so a consumer (Esh Studio, the CLI) enumerates styles instead of hardcoding them.
+- Runs on the managed-Python image engine — available to consumers that can run the managed runtime (the CLI /
+  `esh web`, non-sandboxed hosts). A sandboxed host that cannot spawn Python needs the native route (the native
+  FLUX.2 Klein port, tracked next). Validated live: couple photo → 3D animation on a 32 GB M1 Pro via both the
+  rc.32 bridge and esh 2.2.0's own bridge under the mflux-ready venv. Tests: catalog/discovery, prompt
+  composition, style→backend/LoRA/prompt resolution, direct-override passthrough. Full regression + iOS green.
+
 ### SDK — v2.4.0-rc.31 (Qwen-Image-2.1: first-class non-commercial image.generate + image.restyle provider)
 
 Adds `Qwen/Qwen-Image-2.1` (Sep 2026) as a first-class esh image provider through the existing managed-Python/

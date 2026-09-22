@@ -156,6 +156,12 @@ public enum MacCapabilities {
     public static func providers(host: CompatibilityEngineHost) -> [any CapabilityProvider] {
         manifests().map { CompatibilityCapabilityProvider(manifest: $0, host: host, supported: isSupportedPlatform) }
     }
+
+    /// Discoverable image-edit STYLE presets (rc.32). A consumer (Esh Studio, the CLI) lists these and applies
+    /// one by id via the `image.edit` option `style` (e.g. `"3d-animation"` → FLUX.2 Klein 4B + the 3D LoRA).
+    /// esh owns the backend/LoRA/prompt wiring so the consumer never hard-codes a model path. These run on the
+    /// managed-Python image engine; a sandboxed host that cannot run managed Python needs the native route.
+    public static func imageStyles() -> [MacImageStyle] { MacImageStyles.all() }
 }
 
 public extension EshRuntime {

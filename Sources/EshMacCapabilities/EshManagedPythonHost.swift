@@ -304,7 +304,28 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         case .advancedImageEdit:
             guard let img = firstFile(.image) else { throw CompatibilityError.executionFailed(reason: "image edit requires an image input") }
             dict["imagePath"] = img
-            dict["instruction"] = firstText()
+            var instruction = firstText()
+            // Named STYLE preset (rc.32): a consumer applies e.g. "3d-animation" by name — esh resolves the
+            // edit backend + style LoRA + curated prompt (FLUX.2 Klein 4B + Flux2_Klein_4B_3D2AI). This is the
+            // esh-web Imagine "3D animation" path, now first-class in the SDK.
+            if let styleID = strOpt("style"), let style = MacImageStyles.byID(styleID) {
+                dict["backend"] = style.backend
+                if let repo = style.loraRepoID {
+                    dict["lora"] = Self.resolveLoRAPath(repoID: repo, file: style.loraFile, root: root)
+                    dict["loraScale"] = style.loraScale
+                }
+                instruction = style.composedInstruction(userText: instruction)
+            }
+            // Direct passthroughs for advanced consumers (override the style/defaults). Only real bridge keys.
+            if let b = strOpt("backend") { dict["backend"] = b }
+            if let l = strOpt("lora") { dict["lora"] = l }
+            if let ls = dblOpt("loraScale") { dict["loraScale"] = ls }
+            if let q = intOpt("quantize") { dict["quantize"] = q }
+            if let g = dblOpt("guidance") { dict["guidance"] = g }
+            if let s = intOpt("steps") { dict["steps"] = s }
+            if let seed = intOpt("seed") { dict["seed"] = seed }
+            if let ms = intOpt("maxEditSide") { dict["maxEditSide"] = ms }
+            dict["instruction"] = instruction
             // Route FLUX/mflux weights to the configured image cache on the assets volume (external SSD).
             dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
         case .diarization:
@@ -376,6 +397,29 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             env[iso.envVar] = py
         }
         return env
+    }
+
+    /// Resolve a style LoRA to a local adapter path from the image HF cache, or fall back to the HF repo id
+    /// (mflux downloads it on first use). Belt-and-suspenders: we prefer the cached local file (fast, offline)
+    /// and only hand mflux the repo id when nothing is staged yet.
+    static func resolveLoRAPath(repoID: String, file: String?, root: PersistenceRoot) -> String {
+        let snapshots = root.pythonHFCacheURL(family: "image")
+            .appendingPathComponent("hub", isDirectory: true)
+            .appendingPathComponent("models--" + repoID.replacingOccurrences(of: "/", with: "--"), isDirectory: true)
+            .appendingPathComponent("snapshots", isDirectory: true)
+        let fm = FileManager.default
+        if let snaps = try? fm.contentsOfDirectory(at: snapshots, includingPropertiesForKeys: nil) {
+            for snap in snaps {
+                if let file {
+                    let f = snap.appendingPathComponent(file)
+                    if fm.fileExists(atPath: f.path) { return f.path }
+                } else if let files = try? fm.contentsOfDirectory(at: snap, includingPropertiesForKeys: nil),
+                          let st = files.first(where: { $0.pathExtension == "safetensors" && !$0.lastPathComponent.hasPrefix("._") }) {
+                    return st.path
+                }
+            }
+        }
+        return repoID   // not staged yet → mflux resolves the HF repo id itself
     }
 
     static func mime(for ext: String) -> String {

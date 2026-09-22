@@ -117,7 +117,10 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
     return (arts, failed)
 }
 
-@Suite struct CompatibilityRuntimeTests {
+// `.serialized`: a few tests mutate the PROCESS environment (via `withEnv` → setenv/unsetenv) to exercise
+// env-driven interpreter resolution, while others assert specific esh env vars are absent. swift-testing runs
+// a suite's tests in parallel by default, so those would race on the shared process env — serialize to isolate.
+@Suite(.serialized) struct CompatibilityRuntimeTests {
     // These tests inject a scriptable mock host to exercise the compat state machine. They must not be
     // coupled to the CI/dev machine's real free disk, so disable the in-SDK resource preflight here (the
     // preflight itself is covered by dedicated pure-function tests). Set once for the test process.
@@ -306,6 +309,64 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
             _ = try EshManagedPythonHost.bridgeRequest(.qwenImage21, req, outputPath: "/tmp/q.png",
                                                        root: PersistenceRoot(rootURL: tmpRoot()))
         }
+    }
+
+    // MARK: Image style presets (rc.32) — first-class "3D animation" (FLUX.2 Klein 4B + 3D LoRA)
+
+    @Test func imageStyleCatalogExposesThreeDAnimation() {
+        let styles = MacCapabilities.imageStyles()
+        let s = styles.first { $0.id == "3d-animation" }
+        #expect(s != nil)
+        #expect(s?.displayName == "3D Animation")
+        #expect(s?.backend == "flux2-klein")               // esh-web's actual stylizer backend
+        #expect(s?.loraRepoID == "Latentiq/Flux2_Klein_4B_3D2AI_LoRA")
+        #expect(s?.commercialUse == true)                  // Apache-2.0 → production-safe
+        #expect(MacImageStyles.byID("3D-Animation")?.id == "3d-animation")  // case-insensitive lookup
+        #expect(MacImageStyles.byID("nope") == nil)
+    }
+
+    @Test func styleComposesCuratedPromptWithUserText() {
+        let s = MacImageStyles.threeDAnimation
+        #expect(s.composedInstruction(userText: "").contains("3D animated"))          // curated only
+        let both = s.composedInstruction(userText: "keep the ocean background")
+        #expect(both.contains("3D animated") && both.contains("keep the ocean background"))
+    }
+
+    @Test func bridgeRequestImageEditResolvesStylePreset() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageEdit,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .image, uri: "file:///tmp/couple.png")), role: "source"),
+                     .text("keep the sea")],
+            output: OutputSpec(modality: .image),
+            options: ExecutionOptions(["style": .string("3d-animation")])))
+        let data = try EshManagedPythonHost.bridgeRequest(.advancedImageEdit, req, outputPath: "/tmp/o.png",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["imagePath"] as? String == "/tmp/couple.png")
+        #expect(dict["backend"] as? String == "flux2-klein")               // style → backend
+        #expect(dict["loraScale"] as? Double == 1.0)
+        // LoRA resolves to a local path when cached, else the HF repo id — both are acceptable, non-empty.
+        let lora = dict["lora"] as? String
+        #expect(lora?.contains("Flux2_Klein_4B_3D2AI") == true || lora == "Latentiq/Flux2_Klein_4B_3D2AI_LoRA")
+        #expect((dict["instruction"] as? String)?.contains("3D animated") == true)   // curated prompt
+        #expect((dict["instruction"] as? String)?.contains("keep the sea") == true)  // + user text
+    }
+
+    @Test func bridgeRequestImageEditForwardsDirectOverrides() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .imageEdit,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .image, uri: "file:///tmp/x.png")), role: "source"),
+                     .text("make it pop")],
+            output: OutputSpec(modality: .image),
+            options: ExecutionOptions(["backend": .string("qwen-edit"), "loraScale": .double(0.7),
+                                       "quantize": .int(4), "steps": .int(6)])))
+        let data = try EshManagedPythonHost.bridgeRequest(.advancedImageEdit, req, outputPath: "/tmp/o.png",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["backend"] as? String == "qwen-edit")       // explicit override honored
+        #expect(dict["quantize"] as? Int == 4)
+        #expect(dict["steps"] as? Int == 6)
+        #expect(dict["instruction"] as? String == "make it pop")  // no style → plain instruction
     }
 
     @Test func bridgeRequestVoiceCloneRejectsMissingReference() {
