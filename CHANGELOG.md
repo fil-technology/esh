@@ -39,11 +39,14 @@ Validated live on a 32 GB M1 Pro: ~11 GB weights, ~50 s for 30 s of audio at the
   gated), `commercialUse=true`, so ACE-Step IS eligible as an **Auto default** for `music.generate` — a higher-
   quality, commercial-safe replacement for the MusicGen path. Truthful license persisted in provenance.
 - **External uv runtime (no pip provisioning):** ACE-Step ships as a git project synced with `uv` — there is no
-  PyPI package, so esh does NOT provision it via pip/isolatedRuntime. The user clones the repo, runs `uv sync`,
-  downloads the checkpoints, and points esh at it via `ESH_ACESTEP_PYTHON` (the `.venv` python) + `ESH_ACESTEP_HOME`
-  (the checkout). The bridge's `music-generate-acestep` launcher (main venv) discovers those (env, then known
-  managed/SSD paths) and runs the isolated worker `esh_acestep.py` — the same JSON-stdin/stdout worker contract as
-  the AudioGen/voice-clone engines. A missing runtime surfaces a clear "clone + uv sync + set env" message.
+  PyPI package, so esh does NOT provision it via pip/isolatedRuntime. **`scripts/setup-acestep-runtime.sh`** does
+  the one-time provisioning: installs `uv` if needed, clones the repo to a path esh's bridge already probes,
+  `uv sync`s its `.venv`, and downloads the checkpoints via ACE-Step's own `ensure_main_model`/`ensure_lm_model`
+  (they own the repo→layout mapping) — defaulting the checkout + weights to the external SSD. The bridge's
+  `music-generate-acestep` launcher (main venv) then discovers the runtime via `ESH_ACESTEP_PYTHON` (the `.venv`
+  python) + `ESH_ACESTEP_HOME` (the checkout), or those default paths, and runs the isolated worker
+  `esh_acestep.py` — the same JSON-stdin/stdout worker contract as the AudioGen/voice-clone engines. A missing
+  runtime surfaces a clear "clone + uv sync + set env" message.
 - Checkpoints (`acestep-v15-turbo` DiT + `acestep-5Hz-lm-0.6B` LM) live on the configured assets volume (external
   SSD) via `ACESTEP_CHECKPOINTS_DIR` / `PersistenceRoot.acestepCheckpointsURL` — never the internal disk.
 - Validated live on a 32 GB M1 Pro **through the actual esh bridge command** (main venv → external uv venv worker):
