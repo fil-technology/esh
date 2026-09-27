@@ -369,6 +369,58 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(dict["instruction"] as? String == "make it pop")  // no style → plain instruction
     }
 
+    // MARK: Stable Audio Open (rc.33) — high-quality ambient/SFX, 44.1kHz stereo, gated/non-commercial
+
+    @Test func stableAudioManifestIsDeclared() {
+        let m = MacCapabilities.manifests().first { $0.id == .stableAudio }
+        #expect(m != nil)
+        #expect(m?.capabilities == [.audioGenerate])
+        #expect(m?.acceptedInputs == [.text])
+        #expect(m?.producedArtifactKind == .audio)
+        #expect(m?.licenseIdentifier == "LicenseRef-StabilityAI-Community")
+        #expect(m?.commercialUse == false)                    // gated → pin-only, never Auto default
+        // Runs in the SHARED venv (diffusers/torchsde), NOT an isolated one.
+        #expect(m?.isolatedRuntime == nil)
+        let mods = Set(m?.requiredModules.map { $0.module } ?? [])
+        #expect(mods.isSuperset(of: ["diffusers", "torchsde", "soundfile"]))
+    }
+
+    @Test func bridgeCommandForStableAudio() {
+        let (cmd, ext, kind) = EshManagedPythonHost.bridgeCommand(for: .stableAudio)
+        #expect(cmd == "stable-audio-generate")
+        #expect(ext == "wav")
+        #expect(kind == .audio)
+    }
+
+    @Test func bridgeRequestMapsStableAudio() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioGenerate, inputs: [.text("gentle ocean waves for meditation")],
+            output: OutputSpec(modality: .audio),
+            options: ExecutionOptions(["seconds": .double(30), "steps": .int(80), "seed": .int(11),
+                                       "negativePrompt": .string("crashing waves, music")])))
+        let data = try EshManagedPythonHost.bridgeRequest(.stableAudio, req, outputPath: "/tmp/a.wav",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["prompt"] as? String == "gentle ocean waves for meditation")
+        #expect(dict["seconds"] as? Double == 30)
+        #expect(dict["steps"] as? Int == 80)
+        #expect(dict["seed"] as? Int == 11)
+        #expect(dict["negativePrompt"] as? String == "crashing waves, music")
+        #expect((dict["hfCache"] as? String)?.contains("audio-models") == true)
+    }
+
+    @Test func stableAudioIsPinOnlyNotAutoDefault() {
+        // Non-commercial (gated) → excluded from Auto for audio.generate; AudioGen (or another commercial engine)
+        // remains the default. Reachable only by pinning "stable-audio".
+        var reg = CapabilityRegistry()
+        let sao = MacCapabilities.manifests().first { $0.id == .stableAudio }!
+        reg.register(CompatibilityCapabilityProvider(manifest: sao, host: MockHost(state: .ready), supported: true))
+        let auto = ExecutionRequest(capability: .audioGenerate, inputs: [.text("rain")], output: OutputSpec(modality: .audio), model: nil)
+        #expect(reg.candidates(for: auto).contains { $0.descriptor.id == "compat-stable-audio" } == false)
+        let pinned = ExecutionRequest(capability: .audioGenerate, inputs: [.text("rain")], output: OutputSpec(modality: .audio), model: "stable-audio")
+        #expect(reg.candidates(for: pinned).map { $0.descriptor.id } == ["compat-stable-audio"])
+    }
+
     @Test func bridgeRequestVoiceCloneRejectsMissingReference() {
         let req = ResolvedExecutionRequest(request: ExecutionRequest(
             capability: .audioCloneVoice, inputs: [.text("no reference here")],

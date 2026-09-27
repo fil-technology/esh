@@ -258,6 +258,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         switch id {
         case .music:             return ("music-generate", "wav", .audio)
         case .soundFX:           return ("audio-generate", "wav", .audio)
+        case .stableAudio:       return ("stable-audio-generate", "wav", .audio)
         case .imageGeneration:   return ("image-generate", "png", .image)
         case .advancedImageEdit: return ("image-edit", "png", .image)
         case .diarization:       return ("audio-diarize", "json", .json)
@@ -290,6 +291,15 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             dict["seed"] = intOpt("seed") ?? 0
             // Route Hugging Face weights to the configured audio cache on the assets volume (external SSD),
             // reusing previously downloaded MusicGen/AudioGen assets instead of the internal `~/.cache`.
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .stableAudio:
+            let prompt = firstText()
+            guard !prompt.isEmpty else { throw CompatibilityError.executionFailed(reason: "Stable Audio requires a text prompt") }
+            dict["prompt"] = prompt
+            dict["seconds"] = dblOpt("seconds") ?? 30.0     // 44.1 kHz stereo, up to ~47 s
+            dict["steps"] = intOpt("steps") ?? 100
+            dict["seed"] = intOpt("seed") ?? 0
+            if let np = strOpt("negativePrompt") { dict["negativePrompt"] = np }
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         case .imageGeneration:
             let prompt = firstText()

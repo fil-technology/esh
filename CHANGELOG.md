@@ -26,6 +26,28 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.33 (new audio engine: Stable Audio Open — 44.1 kHz stereo ambient/SFX, up to ~47 s)
+
+Adds **Stable Audio Open 1.0** (`stabilityai/stable-audio-open-1.0`) as a first-class `audio.generate` engine —
+the right tool for ambient / field-recording / soundscape prompts (meditation loops, nature beds). It renders
+**44.1 kHz STEREO up to ~47 s**, a large upgrade over the AudioGen SFX path (16 kHz mono, ~10 s). Runs on-device
+via diffusers `StableAudioPipeline` on Apple Silicon MPS and fits 32 GB comfortably (~1B params, ~5 GB weights).
+
+- New compat engine `stable-audio` (capability `audio.generate`). Runs in the **shared** managed venv
+  (torch/diffusers/torchsde/soundfile — no isolated venv; coexists with the existing audio stack). Options:
+  prompt, seconds (≤47), steps (100), seed, negativePrompt (the "no X" clauses map cleanly to a negative prompt).
+- **MPS fix baked in:** SAO's default `CosineDPMSolverMultistepScheduler` uses torchsde, whose brownian sampler
+  infinitely recurses at the final sigma boundary under MPS float32 — the bridge swaps it for a deterministic
+  `DPMSolverMultistepScheduler` and runs generation on a large-stack worker thread. Also loudness-normalizes the
+  output to a usable target peak (SAO can render near-silent audio for "soft/distant/sparse" ambient prompts).
+- **License gate:** Stability AI Community License — **gated** on Hugging Face (download needs an accepted HF
+  token) and commercial terms apply above a revenue threshold. `commercialUse=false` keeps it OUT of Auto
+  selection (pin the model id `"stable-audio"`); truthful license persisted in provenance.
+- Validated live on a 32 GB M1 Pro: real 30 s @ 44.1 kHz stereo (ocean/birds/gulls meditation prompts), ~3 min
+  at 100 steps on MPS. Tests: manifest/license wiring, bridge command + request translation, the pin-only gate.
+  Full regression + iOS build green. NOTE: this is a Python engine — it runs in the CLI/`esh web`/non-sandboxed
+  hosts; sandboxed Esh Studio must drop the App Sandbox (off-App-Store) or use a local-backend to run it.
+
 ### SDK — v2.4.0-rc.32 (image.edit style presets: first-class "3D animation" via FLUX.2 Klein 4B + LoRA)
 
 Surfaces esh-web's Imagine "3D animation" stylizer as a first-class, discoverable SDK feature. The stylizer is

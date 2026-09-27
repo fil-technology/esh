@@ -118,6 +118,31 @@ public enum MacCapabilities {
                 ],
                 modelAssets: [.init(id: "diarization", displayName: "Speaker diarization", approxBytes: 200_000_000)]),
 
+            // Stable Audio Open 1.0 (stabilityai/stable-audio-open-1.0) — high-quality ambient / SFX / field-
+            // recording generation at 44.1 kHz STEREO, up to ~47 s. Far better than the AudioGen SFX path
+            // (16 kHz mono, ~10 s) for meditation loops / soundscapes. Runs via diffusers StableAudioPipeline on
+            // MPS in the SHARED managed venv (torch/diffusers/torchsde/soundfile — no isolated venv needed; its
+            // pins coexist with the existing audio stack). ~1B params, ~5 GB weights → fits 32 GB comfortably.
+            //
+            // LICENSE: Stability AI Community License — GATED on Hugging Face (download needs an accepted HF
+            // token) and commercial terms apply above a revenue threshold. commercialUse=false keeps it OUT of
+            // Auto defaults (pin the model id "stable-audio"), so it never silently becomes a commercial default;
+            // the truthful license is persisted in provenance. The bridge swaps SAO's torchsde SDE scheduler for
+            // a deterministic one (the SDE sampler infinitely recurses at the final sigma boundary on MPS).
+            CompatibilityEngineManifest(
+                id: .stableAudio, version: "1", capabilities: [.audioGenerate],
+                acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [
+                    .init(module: "torch", pipPackage: "torch"),
+                    .init(module: "diffusers", pipPackage: "diffusers"),
+                    .init(module: "torchsde", pipPackage: "torchsde"),
+                    .init(module: "soundfile", pipPackage: "soundfile"),
+                ],
+                modelAssets: [.init(id: "stable-audio-open-1.0", displayName: "Stable Audio Open 1.0",
+                                    approxBytes: 5_300_000_000)],
+                licenseIdentifier: "LicenseRef-StabilityAI-Community", commercialUse: false),
+
             // Qwen-Image-2.1 (Qwen/Qwen-Image-2.1, Sep 2026) — a single-stream block-causal 7.1B DiT + 64-ch
             // causal VAE + Qwen3-VL text encoder, via MFLUX's MLX port (>=0.20.0, CLI mflux-generate-qwen-2.1).
             // Capabilities are ONLY what the port actually implements today: text->image (image.generate) and

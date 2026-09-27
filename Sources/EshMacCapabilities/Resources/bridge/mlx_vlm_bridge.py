@@ -2274,6 +2274,7 @@ def main() -> None:
             "image-upscale",
             "image-upscale-onnx",
             "audio-generate",
+            "stable-audio-generate",
             "music-generate",
             "voice-clone",
             "audio-diarize",
@@ -2320,6 +2321,8 @@ def main() -> None:
         image_upscale_onnx()
     elif args.command == "audio-generate":
         audio_or_music_generate(kind="sound")
+    elif args.command == "stable-audio-generate":
+        stable_audio_generate()
     elif args.command == "music-generate":
         audio_or_music_generate(kind="music")
     elif args.command == "voice-clone":
@@ -2613,6 +2616,79 @@ def voice_clone() -> None:
         _fail("voice cloning timed out")
     detail = f": {errtext}" if errtext else ""
     _fail(f"voice cloning failed{detail}")
+
+
+def stable_audio_generate() -> None:
+    """High-quality ambient / sound-effect / field-recording generation via Stable Audio Open 1.0 (diffusers
+    StableAudioPipeline) on Apple Silicon MPS. Reads {prompt, outputPath, seconds?(30, max 47), steps?(100),
+    seed?, negativePrompt?, minFreeMemMB?, hfCache?} and writes a 44.1 kHz STEREO WAV — far better than the
+    16 kHz-mono AudioGen SFX path for meditation loops / ambience.
+
+    License: Stability AI Community License (GATED on Hugging Face) — download requires an accepted HF token
+    (huggingface_hub reads HF_TOKEN or the standard hf cache). Fits 32 GB easily (1B params, ~5 GB weights).
+
+    NOTE: SAO's default CosineDPMSolverMultistepScheduler uses torchsde, whose brownian sampler infinitely
+    recurses at the final sigma boundary under MPS float32; we swap to a deterministic DPMSolverMultistepScheduler
+    (non-SDE) which renders cleanly on MPS. Generation runs on a large-stack worker thread for safety."""
+    import os, sys as _sys, threading
+    request = _load_json()
+    prompt = (request.get("prompt") or "").strip()
+    out_path = request["outputPath"]
+    if not prompt:
+        _fail("Stable Audio generation requires a non-empty prompt")
+    seconds = max(1.0, min(47.0, float(request.get("seconds") or 30.0)))   # SAO practical max ~47s
+    steps = int(request.get("steps") or 100)
+    seed = int(request.get("seed") or 0)
+    negative = request.get("negativePrompt")
+    min_free = float(request.get("minFreeMemMB") or 2000)
+    _route_hf_cache(request.get("hfCache"))
+
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"Stable Audio not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    _sys.setrecursionlimit(1_000_000)
+    try:
+        import torch  # noqa: F401
+        import soundfile as sf
+        import numpy as np
+        from diffusers import StableAudioPipeline, DPMSolverMultistepScheduler
+    except Exception as e:  # noqa: BLE001
+        _fail(f"Stable Audio backend unavailable (need diffusers/torch/torchsde/soundfile): {e}")
+
+    try:
+        dev = "mps" if torch.backends.mps.is_available() else "cpu"
+        pipe = StableAudioPipeline.from_pretrained("stabilityai/stable-audio-open-1.0", torch_dtype=torch.float32)
+        pipe = pipe.to(dev)
+        # Swap the torchsde SDE scheduler for a deterministic one (MPS-safe; see docstring).
+        pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++")
+        g = torch.Generator(dev).manual_seed(seed)
+        res = {}
+        def _run():
+            res["a"] = pipe(prompt, negative_prompt=(negative or None), num_inference_steps=steps,
+                            audio_end_in_s=seconds, num_waveforms_per_prompt=1, generator=g).audios
+        threading.stack_size(256 * 1024 * 1024)
+        th = threading.Thread(target=_run); th.start(); th.join()
+        arr = res["a"][0].T.float().cpu().numpy()   # (samples, channels)
+        sr = int(pipe.vae.sampling_rate)
+        # Loudness-normalize to a consistent target peak. SAO can render very quiet output for "soft/distant/
+        # sparse" ambient prompts (near-silent), so scale UP quiet results (and down loud ones) to a usable level.
+        import numpy as _np
+        raw_peak = float(_np.max(_np.abs(arr))) if getattr(arr, "size", 0) else 0.0
+        target = 0.9
+        if raw_peak > 1e-4:
+            arr = arr * (target / raw_peak)
+        peak, normalized = raw_peak, (raw_peak > 1e-4)
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        sf.write(out_path, arr, sr)
+        dur = arr.shape[0] / sr
+        channels = arr.shape[1] if arr.ndim > 1 else 1
+    except Exception as e:  # noqa: BLE001
+        _fail(f"Stable Audio generation failed: {type(e).__name__}: {e}")
+
+    _dump_json({"outputPath": out_path, "seconds": round(dur, 3), "sampleRate": sr, "channels": channels,
+                "steps": steps, "provider": "stable-audio-open-1.0", "license": "stabilityai-community-noncommercial-gate",
+                "peak": round(peak, 4), "normalized": normalized})
 
 
 def audio_or_music_generate(kind: str) -> None:

@@ -21,6 +21,7 @@ public enum CompatibilityEngineID: String, Sendable, Hashable, CaseIterable, Cod
     case diarization        = "diarization"
     case voiceClone         = "voice-clone"
     case qwenImage21        = "qwen-image-2.1"
+    case stableAudio        = "stable-audio"
 }
 
 /// A required Python module and the pip package that provides it. Preflight probes `module`; a missing one
