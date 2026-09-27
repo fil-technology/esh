@@ -42,6 +42,11 @@ public struct PersistenceRoot: Sendable {
     /// relocatable audio assets so they live on the configured storage volume.
     public var diarizationModelsURL: URL { audioURL.appendingPathComponent("diarization-models", isDirectory: true) }
 
+    /// Directory holding the ACE-Step 1.5 checkpoints (the DiT `acestep-v15-turbo` + the 5 Hz `acestep-5Hz-lm-0.6B`
+    /// LM), under the relocatable audio assets so the ~11 GB of weights live on the configured storage volume (the
+    /// external SSD), never the internal disk. Passed to the bridge as `ACESTEP_CHECKPOINTS_DIR`.
+    public var acestepCheckpointsURL: URL { audioURL.appendingPathComponent("ace-step/checkpoints", isDirectory: true) }
+
     /// True when assets are configured to live somewhere other than the internal state root.
     public var usesExternalAssets: Bool {
         rootURL.standardizedFileURL != assetsRootURL.standardizedFileURL

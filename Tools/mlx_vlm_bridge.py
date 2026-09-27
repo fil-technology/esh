@@ -2276,6 +2276,7 @@ def main() -> None:
             "audio-generate",
             "stable-audio-generate",
             "music-generate",
+            "music-generate-acestep",
             "voice-clone",
             "audio-diarize",
             "mlx-transcribe",
@@ -2325,6 +2326,8 @@ def main() -> None:
         stable_audio_generate()
     elif args.command == "music-generate":
         audio_or_music_generate(kind="music")
+    elif args.command == "music-generate-acestep":
+        music_generate_acestep()
     elif args.command == "voice-clone":
         voice_clone()
     elif args.command == "audio-diarize":
@@ -2432,6 +2435,46 @@ def _isolated_voiceclone_python() -> "str | None":
     for c in cand:
         if c and os.path.exists(c):
             return c
+    return None
+
+
+def _isolated_acestep_python() -> "str | None":
+    """Locate the ACE-Step 1.5 EXTERNAL runtime interpreter. ACE-Step ships as a git project synced with `uv`
+    (no PyPI package), so — unlike AudioGen/voice-clone — esh does NOT provision this venv; the user clones the
+    repo and runs `uv sync`, then exports ESH_ACESTEP_PYTHON (its .venv python). We honor that env override
+    first, then probe the known managed/SSD checkout locations."""
+    import os
+    cand = [os.environ.get("ESH_ACESTEP_PYTHON")]
+    home = os.environ.get("ESH_ACESTEP_HOME")
+    if home:
+        cand += [os.path.join(home, ".venv/bin/python3"), os.path.join(home, ".venv/bin/python")]
+    cand += [
+        os.path.expanduser("~/.esh/runtime/isolated/ace-step-1.5/.venv/bin/python3"),
+        "/Volumes/Sviat SSD/esh-runtime/ace-step-1.5/.venv/bin/python",
+    ]
+    for c in cand:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _acestep_home() -> "str | None":
+    """Locate the ACE-Step 1.5 checkout (the repo root imported as `acestep`). Env override, then known paths,
+    then infer it from the located interpreter (…/<checkout>/.venv/bin/python -> <checkout>)."""
+    import os
+    home = os.environ.get("ESH_ACESTEP_HOME")
+    if home and os.path.isdir(home):
+        return home
+    for c in [os.path.expanduser("~/.esh/runtime/isolated/ace-step-1.5"),
+              "/Volumes/Sviat SSD/esh-runtime/ace-step-1.5"]:
+        if os.path.isdir(os.path.join(c, "acestep")):
+            return c
+    py = _isolated_acestep_python()
+    if py:
+        # …/<checkout>/.venv/bin/python -> <checkout>
+        root = os.path.dirname(os.path.dirname(os.path.dirname(py)))
+        if os.path.isdir(os.path.join(root, "acestep")):
+            return root
     return None
 
 
@@ -2689,6 +2732,55 @@ def stable_audio_generate() -> None:
     _dump_json({"outputPath": out_path, "seconds": round(dur, 3), "sampleRate": sr, "channels": channels,
                 "steps": steps, "provider": "stable-audio-open-1.0", "license": "stabilityai-community-noncommercial-gate",
                 "peak": round(peak, 4), "normalized": normalized})
+
+
+def music_generate_acestep() -> None:
+    """Full-song music generation via ACE-Step 1.5 (MIT — commercial-safe) — the counterpart to Stable Audio Open
+    (ambient/SFX). Reads {caption/prompt, outputPath, lyrics?("[Instrumental]"), seconds?(30), steps?(8), seed?,
+    guidance?, language?, checkpointDir?} and writes a 48 kHz STEREO WAV (DiT on MPS + native MLX VAE decode +
+    the 5 Hz MLX LM). Fits a 32 GB M1 Pro (~11 GB weights, ~50 s for 30 s of audio at 8 turbo steps).
+
+    ACE-Step is a git project synced with `uv` (no PyPI package), so its heavy torch/torchcodec/torchao/MLX stack
+    lives in its OWN external venv — this launcher (main venv) only locates that interpreter + checkout and relays
+    the isolated worker's single JSON result (Tools/esh_acestep.py), exactly like the AudioGen/voice-clone path."""
+    import os
+    request = _load_json()
+    caption = (request.get("caption") or request.get("prompt") or "").strip()
+    out_path = request.get("outputPath")
+    if not caption:
+        _fail("ACE-Step music generation requires a text prompt")
+    if not out_path:
+        _fail("ACE-Step music generation requires an output path")
+
+    py = _isolated_acestep_python()
+    home = _acestep_home()
+    if not py or not home:
+        _fail("the ACE-Step 1.5 runtime is not installed — clone ace-step/ACE-Step-1.5, run `uv sync`, download "
+              "its checkpoints, and set ESH_ACESTEP_PYTHON (its .venv python) + ESH_ACESTEP_HOME (the checkout)")
+
+    min_free = float(request.get("minFreeMemMB") or 8000)   # DiT + 5Hz LM + VAE are memory-heavy
+    avail = _available_mem_mb()
+    if avail is not None and avail < min_free:
+        _fail(f"music generation not started: low memory (only {avail:.0f} MB free, need {min_free:.0f} MB)")
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "esh_acestep.py")
+    env = dict(os.environ)
+    env.update({"PYTHONUTF8": "1", "COPYFILE_DISABLE": "1", "TOKENIZERS_PARALLELISM": "false",
+                "ESH_ACESTEP_HOME": home})
+    ckpt = request.get("checkpointDir") or os.environ.get("ACESTEP_CHECKPOINTS_DIR")
+    if ckpt:
+        env["ACESTEP_CHECKPOINTS_DIR"] = ckpt
+
+    res, code, errtext = _run_sfx_worker(py, script, env, request)   # same JSON-stdin/JSON-stdout worker contract
+    if res is not None:
+        if res.get("error"):
+            _fail(res["error"])
+        _dump_json(res)
+        return
+    if code == "timeout":
+        _fail("music generation timed out")
+    detail = f": {errtext}" if errtext else ""
+    _fail(f"music generation failed{detail}")
 
 
 def audio_or_music_generate(kind: str) -> None:

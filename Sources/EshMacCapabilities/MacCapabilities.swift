@@ -143,6 +143,37 @@ public enum MacCapabilities {
                                     approxBytes: 5_300_000_000)],
                 licenseIdentifier: "LicenseRef-StabilityAI-Community", commercialUse: false),
 
+            // ACE-Step 1.5 (github ace-step/ACE-Step-1.5) — full-SONG music generation (vs Stable Audio Open's
+            // ambient/SFX): a diffusion DiT on MPS + a native MLX 5 Hz LM + native MLX VAE decode, producing
+            // 48 kHz STEREO songs (instrumental or with lyrics). Validated live on a 32 GB M1 Pro (~11 GB weights,
+            // ~50 s for 30 s of audio at the 8-step turbo config).
+            //
+            // EXTERNAL RUNTIME: ACE-Step ships as a git project synced with `uv` — there is NO PyPI package, so
+            // esh does NOT provision this via pip/isolatedRuntime. The user clones the repo, runs `uv sync`,
+            // downloads the checkpoints, and points esh at it via ESH_ACESTEP_PYTHON (the .venv python) +
+            // ESH_ACESTEP_HOME (the checkout); the bridge's music-generate-acestep launcher discovers those (env,
+            // then known managed/SSD paths) and runs the isolated worker (esh_acestep.py). Because the heavy stack
+            // lives outside the managed venv, the manifest's requiredModules are just the shared bridge deps; a
+            // missing ACE-Step runtime surfaces a clear "clone + uv sync + set env" message at execution.
+            //
+            // LICENSE: MIT — commercialUse=true, so unlike the non-commercial audio engines this one IS eligible
+            // as an Auto default for music.generate (it's higher quality + commercial-safe vs MusicGen's CC-NC).
+            CompatibilityEngineManifest(
+                id: .aceStep, version: "1", capabilities: [.musicGenerate],
+                acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base,
+                modelAssets: [.init(id: "ace-step-1.5", displayName: "ACE-Step 1.5 (DiT + 5Hz MLX LM)",
+                                    approxBytes: 11_000_000_000)],
+                licenseIdentifier: "MIT", commercialUse: true,
+                resourceProfile: CapabilityResourceProfile(
+                    estimatedPeakMemoryGB: 14,            // DiT + resident 5Hz LM + VAE decode
+                    modelDownloadBytes: 11_000_000_000,   // acestep-v15-turbo + acestep-5Hz-lm-0.6B
+                    installedBytes: 11_000_000_000,
+                    minimumSystemVolumeHeadroomGB: 8,
+                    minimumAssetsVolumeHeadroomGB: 12,
+                    qualityTier: 90, latencyClass: .moderate)),
+
             // Qwen-Image-2.1 (Qwen/Qwen-Image-2.1, Sep 2026) — a single-stream block-causal 7.1B DiT + 64-ch
             // causal VAE + Qwen3-VL text encoder, via MFLUX's MLX port (>=0.20.0, CLI mflux-generate-qwen-2.1).
             // Capabilities are ONLY what the port actually implements today: text->image (image.generate) and

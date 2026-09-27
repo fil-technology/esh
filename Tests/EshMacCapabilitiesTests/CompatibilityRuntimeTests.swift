@@ -431,6 +431,76 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         }
     }
 
+    @Test func aceStepManifestIsDeclared() {
+        let m = MacCapabilities.manifests().first { $0.id == .aceStep }
+        #expect(m != nil)
+        #expect(m?.capabilities == [.musicGenerate])
+        #expect(m?.acceptedInputs == [.text])
+        #expect(m?.producedArtifactKind == .audio)
+        #expect(m?.licenseIdentifier == "MIT")
+        #expect(m?.commercialUse == true)                     // MIT → eligible as an Auto default
+        // EXTERNAL uv runtime — esh does NOT pip-provision it, so there is NO isolatedRuntime; the shared bridge
+        // launcher only needs the base deps and discovers the ACE-Step venv via ESH_ACESTEP_PYTHON at run time.
+        #expect(m?.isolatedRuntime == nil)
+        #expect(m?.requiredModules.map { $0.module } == ["numpy", "mlx", "mlx_lm"])
+    }
+
+    @Test func bridgeCommandForAceStep() {
+        let (cmd, ext, kind) = EshManagedPythonHost.bridgeCommand(for: .aceStep)
+        #expect(cmd == "music-generate-acestep")
+        #expect(ext == "wav")
+        #expect(kind == .audio)
+    }
+
+    @Test func bridgeRequestMapsAceStep() throws {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .musicGenerate, inputs: [.text("warm lo-fi hip hop, jazzy piano, vinyl crackle")],
+            output: OutputSpec(modality: .audio),
+            options: ExecutionOptions(["seconds": .double(45), "steps": .int(10), "seed": .int(7),
+                                       "lyrics": .string("[Instrumental]")])))
+        let data = try EshManagedPythonHost.bridgeRequest(.aceStep, req, outputPath: "/tmp/song.wav",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["caption"] as? String == "warm lo-fi hip hop, jazzy piano, vinyl crackle")
+        #expect(dict["lyrics"] as? String == "[Instrumental]")
+        #expect(dict["seconds"] as? Double == 45)
+        #expect(dict["steps"] as? Int == 10)
+        #expect(dict["seed"] as? Int == 7)
+        #expect((dict["checkpointDir"] as? String)?.contains("ace-step/checkpoints") == true)
+    }
+
+    @Test func aceStepDefaultsAreInstrumental() throws {
+        // No options → lyrics default to "[Instrumental]", 30 s, 8 turbo steps, seed 42.
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .musicGenerate, inputs: [.text("ambient piano")], output: OutputSpec(modality: .audio)))
+        let data = try EshManagedPythonHost.bridgeRequest(.aceStep, req, outputPath: "/tmp/s.wav",
+                                                          root: PersistenceRoot(rootURL: tmpRoot()))
+        let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(dict["lyrics"] as? String == "[Instrumental]")
+        #expect(dict["seconds"] as? Double == 30)
+        #expect(dict["steps"] as? Int == 8)
+        #expect(dict["seed"] as? Int == 42)
+    }
+
+    @Test func aceStepRejectsEmptyPrompt() {
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .musicGenerate, inputs: [], output: OutputSpec(modality: .audio)))
+        #expect(throws: CompatibilityError.self) {
+            _ = try EshManagedPythonHost.bridgeRequest(.aceStep, req, outputPath: "/tmp/s.wav",
+                                                       root: PersistenceRoot(rootURL: tmpRoot()))
+        }
+    }
+
+    @Test func aceStepIsCommercialAutoCandidate() {
+        // MIT + commercialUse=true → ACE-Step IS eligible as an Auto default for music.generate (unlike the
+        // non-commercial audio engines which are pin-only).
+        var reg = CapabilityRegistry()
+        let ace = MacCapabilities.manifests().first { $0.id == .aceStep }!
+        reg.register(CompatibilityCapabilityProvider(manifest: ace, host: MockHost(state: .ready), supported: true))
+        let auto = ExecutionRequest(capability: .musicGenerate, inputs: [.text("lofi")], output: OutputSpec(modality: .audio), model: nil)
+        #expect(reg.candidates(for: auto).contains { $0.descriptor.id == "compat-ace-step" })
+    }
+
     @Test func cleanBootstrapInstallsThenProduces() async {
         let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
         let host = MockHost(state: .notInstalled, run: .artifact)

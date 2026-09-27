@@ -26,6 +26,32 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK — v2.4.0-rc.34 (new music engine: ACE-Step 1.5 — full 48 kHz stereo songs, MIT/commercial-safe)
+
+Adds **ACE-Step 1.5** (github `ace-step/ACE-Step-1.5`) as a first-class `music.generate` engine — the full-**song**
+counterpart to rc.33's Stable Audio Open (ambient/SFX). It generates **48 kHz STEREO** music (instrumental or with
+lyrics) on-device via a diffusion DiT on Apple Silicon MPS + a native **MLX 5 Hz LM** + native MLX VAE decode.
+Validated live on a 32 GB M1 Pro: ~11 GB weights, ~50 s for 30 s of audio at the 8-step turbo config.
+
+- New compat engine `ace-step` (capability `music.generate`). Options: prompt (musical description), `lyrics`
+  (defaults to `"[Instrumental]"`), seconds (30), steps (8, turbo), seed (42), guidance, language.
+- **MIT license → commercial-safe.** Unlike the non-commercial audio engines (MusicGen CC-NC, Stable Audio Open
+  gated), `commercialUse=true`, so ACE-Step IS eligible as an **Auto default** for `music.generate` — a higher-
+  quality, commercial-safe replacement for the MusicGen path. Truthful license persisted in provenance.
+- **External uv runtime (no pip provisioning):** ACE-Step ships as a git project synced with `uv` — there is no
+  PyPI package, so esh does NOT provision it via pip/isolatedRuntime. The user clones the repo, runs `uv sync`,
+  downloads the checkpoints, and points esh at it via `ESH_ACESTEP_PYTHON` (the `.venv` python) + `ESH_ACESTEP_HOME`
+  (the checkout). The bridge's `music-generate-acestep` launcher (main venv) discovers those (env, then known
+  managed/SSD paths) and runs the isolated worker `esh_acestep.py` — the same JSON-stdin/stdout worker contract as
+  the AudioGen/voice-clone engines. A missing runtime surfaces a clear "clone + uv sync + set env" message.
+- Checkpoints (`acestep-v15-turbo` DiT + `acestep-5Hz-lm-0.6B` LM) live on the configured assets volume (external
+  SSD) via `ACESTEP_CHECKPOINTS_DIR` / `PersistenceRoot.acestepCheckpointsURL` — never the internal disk.
+- Validated live on a 32 GB M1 Pro **through the actual esh bridge command** (main venv → external uv venv worker):
+  real 48 kHz stereo song. Tests: manifest/license wiring, bridge command + request translation (incl. instrumental
+  defaults + empty-prompt rejection), and the commercial Auto-candidate gate. Full regression + iOS build green.
+  NOTE: like the other Python audio engines it runs in the CLI/`esh web`/non-sandboxed hosts; sandboxed Esh Studio
+  must drop the App Sandbox (off-App-Store) or use a local backend to run it.
+
 ### SDK — v2.4.0-rc.33 (new audio engine: Stable Audio Open — 44.1 kHz stereo ambient/SFX, up to ~47 s)
 
 Adds **Stable Audio Open 1.0** (`stabilityai/stable-audio-open-1.0`) as a first-class `audio.generate` engine —

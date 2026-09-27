@@ -264,6 +264,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         case .diarization:       return ("audio-diarize", "json", .json)
         case .voiceClone:        return ("voice-clone", "wav", .audio)
         case .qwenImage21:       return ("image-generate-qwen21", "png", .image)
+        case .aceStep:           return ("music-generate-acestep", "wav", .audio)
         }
     }
 
@@ -369,6 +370,22 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             }
             if let m = strOpt("model") { dict["model"] = m }
             dict["hfCache"] = root.pythonHFCacheURL(family: "image").path
+        case .aceStep:
+            // Full-song music generation via ACE-Step 1.5 (MIT). The bridge launches an isolated worker in the
+            // ACE-Step uv venv; here we only translate the request. `caption` is the musical description, `lyrics`
+            // defaults to "[Instrumental]". Weights live on the assets volume (external SSD) via ACESTEP_CHECKPOINTS_DIR.
+            let prompt = firstText()
+            guard !prompt.isEmpty else { throw CompatibilityError.executionFailed(reason: "ACE-Step music generation requires a text prompt") }
+            dict["caption"] = prompt
+            dict["lyrics"] = strOpt("lyrics") ?? "[Instrumental]"
+            dict["seconds"] = dblOpt("seconds") ?? 30.0     // 48 kHz stereo full song
+            dict["steps"] = intOpt("steps") ?? 8            // turbo config default
+            dict["seed"] = intOpt("seed") ?? 42
+            if let g = dblOpt("guidance") { dict["guidance"] = g }
+            dict["language"] = strOpt("language") ?? "en"
+            // ACE-Step's DiT + 5 Hz LM checkpoints live on the configured audio-assets volume (external SSD).
+            dict["checkpointDir"] = root.acestepCheckpointsURL.path
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         case .voiceClone:
             let text = firstText()
             guard !text.isEmpty else { throw CompatibilityError.executionFailed(reason: "voice cloning requires text to speak") }
