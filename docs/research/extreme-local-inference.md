@@ -14,11 +14,30 @@ has been run yet — see "What is and isn't proven".
 
 ## What is and isn't proven
 
-- **Proven (MEASURED):** this machine's compute, memory bandwidth, and — critically — external-SSD cold read
-  behavior. See `benchmarks/hardware-profile.json`.
-- **NOT yet proven:** that any specific large model runs at a given tok/s/quality here. Every model tok/s in
-  this document is **THEORETICAL** (derived from the measured SSD/compute ceilings), to be confirmed in Phase C
-  by actually running the model through esh's guarded runtime. Do not read any model number below as success.
+- **Proven (MEASURED):** this machine's compute, memory bandwidth, external-SSD cold read behavior
+  (`benchmarks/hardware-profile.json`), AND the first model run — **Qwen3-30B-A3B-4bit at 28.7 tok/s, 17.3 GB,
+  swap-safe** (REPRODUCED; `benchmarks/model-results.json`).
+- **NOT yet proven:** the 80B-resident bet (deferred for safety — see Phase C below) and all other model tok/s,
+  which remain **THEORETICAL** until run. Do not read an unlabelled model number as success.
+
+## Phase C — first MEASURED model runs (2026-10-07)
+
+- **Qwen3-30B-A3B-4bit (MLX) — MEASURED / REPRODUCED:** generation **28.7 tok/s**, peak **17.3 GB**, swap-safe;
+  cold TTFT 5.7 s and prompt 6.9 tok/s include first-run Metal kernel compilation. Confirms the thesis: a
+  3B-active 30B MoE is comfortably *interactive* (≥10 tok/s) on this machine, fully resident. ✅
+- **Qwen3-Next-80B-A3B IQ2_XS (22.2 GB, llama.cpp b8660 Metal) — DEFERRED (safety, §29):** download reached
+  ~12 GB on the SSD (resumable) but the run was **killed before load**. Reason = the **binding memory-safety
+  finding below**. Metal reported `recommendedMaxWorkingSetSize = 26.8 GB` (~84% of RAM), so the model itself
+  would fit the GPU working set; the blocker is system-level swap/disk, not Metal.
+
+### MEASURED memory-safety ceiling (the real limit on this machine)
+
+The resident-model ceiling here is set by **internal-disk/swap headroom, not the 32 GB of RAM**. The boot APFS
+container is chronically ~full (user Data volume = **413 GB of 460 GB**), leaving **~310 MB free**, and swap was
+**~94% used (8.19/8.70 GB)**. A ~17 GB model is safe; a ~22 GB model is unsafe until space is freed or a reboot
+reclaims swap (~8 GB → container ~9–10 GB free). **This is the binding constraint for the >RAM / resident-80B
+strategy on this exact setup** — and a concrete instance of the brief's §29 stop condition. Retry path: reboot,
+then resume the IQ2_XS download and run with live memory monitoring + hard abort.
 
 ## Provenance / corrections (important)
 

@@ -1,0 +1,40 @@
+{
+  "machine": "Apple M1 Pro / 32 GB / external exFAT-USB SSD / macOS 26",
+  "date": "2026-10-07",
+  "results": [
+    {
+      "model": "mlx-community/Qwen3-30B-A3B-4bit",
+      "label": "MEASURED",
+      "runtime": "mlx-lm 0.31.3 (Metal)",
+      "quant": "MLX 4-bit",
+      "total_params_b": 30.5,
+      "active_params_b": 3.3,
+      "disk_gb": 17.2,
+      "peak_memory_gb": 17.27,
+      "generation_tps": 28.65,
+      "prompt_tps_cold": 6.85,
+      "ttft_s_cold": 5.71,
+      "ttft_note": "cold — includes first-run Metal kernel compilation; steady-state prefill is much faster",
+      "context": 4096,
+      "max_tokens": 160,
+      "swap_safe": true,
+      "performance_class": "interactive (>=10 tok/s)",
+      "verdict": "REPRODUCED thesis: a 3B-active 30B MoE is comfortably interactive on this machine, fully resident, ~17 GB."
+    },
+    {
+      "model": "bartowski/Qwen_Qwen3-Next-80B-A3B-Instruct-GGUF:IQ2_XS",
+      "label": "DEFERRED (safety stop, brief §29)",
+      "runtime": "llama.cpp b8660 (Metal)",
+      "quant": "GGUF IQ2_XS",
+      "disk_gb": 22.2,
+      "status": "download reached ~12 GB on SSD (resumable); run NOT executed",
+      "reason": "Internal APFS container had only ~310 MB free (user Data volume = 413 GB of 460 GB) and swap was ~94% used (8.19 of 8.70 GB). Loading a 22 GB-resident model would wire ~22-24 GB, squeeze macOS with swap already exhausted and no disk to grow into -> risk of system hang (not just a killed process). Killed before load.",
+      "metal_recommendedMaxWorkingSetSize_gb": 26.8,
+      "retry_requires": "reboot (reclaims the ~8.2 GB swap -> container ~9-10 GB free) OR user frees ~15-20 GB on the internal Data volume; then retry with live memory monitoring + hard abort."
+    }
+  ],
+  "machine_memory_safety_finding": {
+    "label": "MEASURED",
+    "note": "The real resident-model ceiling on THIS machine is set by internal-disk/swap headroom, NOT the 32 GB RAM. The boot APFS container is chronically ~full (user data = 413 GB), so macOS swap cannot grow and the safe wired set is well under 32 GB. A ~17 GB model (Qwen3-30B-A3B 4-bit) is safe; a ~22 GB model is unsafe until internal space is freed or swap is reclaimed by reboot. This is the binding constraint for the >RAM / resident-80B strategy on this exact setup."
+  }
+}
