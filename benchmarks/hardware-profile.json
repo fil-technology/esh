@@ -1,0 +1,64 @@
+{
+  "label": "MEASURED",
+  "date": "2026-10-07",
+  "machine": {
+    "model": "MacBookPro18,3",
+    "chip": "Apple M1 Pro",
+    "cpu": { "p_cores": 6, "e_cores": 2, "logical": 8 },
+    "unified_memory_bytes": 34359738368,
+    "unified_memory_gb": 32.0,
+    "page_size_bytes": 16384,
+    "os": "macOS 26.0 (build 26A428)",
+    "mlx_version": "0.32.2"
+  },
+  "storage": {
+    "internal": {
+      "mount": "/",
+      "size": "460Gi",
+      "free_gb_at_test": 9.6,
+      "note": "CRITICAL: macOS swap lives here. ~9.6 GB free means almost no swap headroom — any config that spills to swap is dangerous on this machine. The memory-safety ceiling is set by this, not by the 32 GB RAM alone."
+    },
+    "external_ssd": {
+      "mount": "/Volumes/Sviat SSD",
+      "filesystem": "ExFAT",
+      "protocol": "USB",
+      "size": "1.8Ti",
+      "free_gb_at_test": 456,
+      "note": "Holds all model weights/caches. exFAT cannot host a pip venv (AppleDouble ._* poisons pip metadata) — weights only."
+    }
+  },
+  "compute": {
+    "label": "MEASURED",
+    "cpu_memory_bandwidth_triad_GBps": 38.1,
+    "cpu_matmul_fp32_GFLOPs": 1524.6,
+    "gpu_mlx_matmul_fp16_GFLOPs": 3718.3,
+    "gpu_mlx_matmul_fp32_GFLOPs": 3222.0,
+    "gpu_mlx_matmul_bf16_GFLOPs": 3113.4,
+    "gpu_mlx_elementwise_bandwidth_GBps": 79.3,
+    "gpu_mlx_elementwise_bandwidth_note": "Measured floor from a single elementwise pass; M1 Pro spec peak is ~200 GB/s. Decode is bandwidth-bound, so the effective figure under real GEMV matters more than this microbench.",
+    "gpu_mlx_4bit_vecmat_4096_ms": 0.214,
+    "gpu_mlx_4bit_vecmat_effective_weight_read_GBps": 39.0,
+    "gpu_mlx_4bit_vecmat_note": "4096x4096 4-bit weight (~8.4 MB) vec-mat in 0.214 ms => ~39 GB/s effective resident 4-bit weight read during decode. This is the RESIDENT-weight decode ceiling to compare SSD streaming against."
+  },
+  "external_ssd_io": {
+    "label": "MEASURED (cold)",
+    "method": "F_NOCACHE is a no-op on the exFAT/USB driver and purge needs sudo, so cache was defeated structurally with a 40 GiB test file (> 32 GB RAM): random battery read first (earlier regions already evicted by the write stream), then a full sequential pass. A naive 4 GiB run reported 10-80 GB/s — that was the page cache, discarded.",
+    "sequential_write_GBps": 0.867,
+    "sequential_read_cold_GBps": 1.004,
+    "random_read_cold": [
+      { "block_MiB": 0.0625, "GBps": 0.311, "IOPS": 4739, "lat_ms_p50": 0.246, "lat_ms_p95": 0.413 },
+      { "block_MiB": 0.25, "GBps": 0.636, "IOPS": 2426, "lat_ms_p50": 0.498, "lat_ms_p95": 0.58 },
+      { "block_MiB": 1.0, "GBps": 0.894, "IOPS": 853, "lat_ms_p50": 1.489, "lat_ms_p95": 1.771 },
+      { "block_MiB": 4.0, "GBps": 0.98, "IOPS": 234, "lat_ms_p50": 5.065, "lat_ms_p95": 6.297 },
+      { "block_MiB": 16.0, "GBps": 1.097, "IOPS": 65, "lat_ms_p50": 19.069, "lat_ms_p95": 24.704 },
+      { "block_MiB": 64.0, "GBps": 0.991, "IOPS": 15, "lat_ms_p50": 75.8, "lat_ms_p95": 100.2 }
+    ],
+    "effective_ceiling_GBps": 1.0,
+    "effective_ceiling_note": "Random read saturates at ~1.0-1.1 GB/s for >=1 MiB blocks (USB SATA-class SSD). This is the HARD bound on MoE expert streaming: max tok/s = ~1.0e9 / (bytes read from SSD per token). Latency grows linearly with block size (1 MiB ~1.5 ms, 64 MiB ~76 ms) so many small expert reads per token stack up."
+  },
+  "implications": {
+    "ssd_streaming_bound": "At ~1 GB/s cold random read, a model that must fetch R bytes/token from SSD is capped at ~1.0e9/R tok/s. e.g. 1.7 GB/token (gpt-oss-120b MXFP4) => ~0.6 tok/s (below the 2 tok/s stop condition).",
+    "resident_vs_streamed_gap": "~39 GB/s resident 4-bit weight read vs ~1 GB/s SSD => resident is ~40x faster. The dominant lever is fitting the model in RAM (mixed quantization), not streaming.",
+    "swap_danger": "Only ~9.6 GB free on the internal swap volume => keep the wired/resident set well under ~22 GB and never drive into swap."
+  }
+}
