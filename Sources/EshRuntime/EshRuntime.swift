@@ -170,6 +170,10 @@ public enum EshRuntimeError: Error, Sendable, Equatable, LocalizedError {
     case modelLoadFailed(modelID: String, reason: String)
     /// Generation started but failed mid-stream (backend error, decode failure, or resource exhaustion).
     case generationFailed(reason: String)
+    /// A live memory-safety preflight rejected the load because the machine lacks the memory/swap headroom to
+    /// host the model safely RIGHT NOW. Transient by nature — freeing memory/disk and retrying resolves it; it
+    /// never requires a reboot. Carries the model id and a human-facing reason naming the shortfall.
+    case insufficientMemory(modelID: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -180,6 +184,7 @@ public enum EshRuntimeError: Error, Sendable, Equatable, LocalizedError {
         case let .unsupportedDevice(reason): return "This device cannot run the selected backend: \(reason)"
         case let .modelLoadFailed(id, reason): return "Failed to load model '\(id)': \(reason)"
         case let .generationFailed(reason): return "Generation failed: \(reason)"
+        case let .insufficientMemory(id, reason): return "Not enough memory to load '\(id)' right now: \(reason)"
         }
     }
 }
@@ -604,9 +609,28 @@ public actor EshRuntime {
 
     /// Load the runtime for a plan, mapping non-typed load failures to a typed `modelLoadFailed`.
     private func loadRuntime(_ plan: Plan) async throws -> any BackendRuntime {
+        try memorySafetyPreflight(plan)   // live, load-time safety gate (P0) — reject unsafe loads, never hang
         do { return try await plan.backend.loadRuntime(for: plan.install) }
         catch is CancellationError { throw CancellationError() }
         catch { throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: Self.reason(from: error)) }
+    }
+
+    /// LIVE memory-safety gate before loading a heavy model. Sizes the model from the catalog's MEASURED peak
+    /// when known, else from its on-disk weight size (a sound resident proxy for MLX/GGUF), and judges it against
+    /// a live host snapshot (available memory + swap/disk headroom). Rejects an unsafe load with a typed,
+    /// explained error instead of letting macOS swap-thrash. Small/unknown-size models are never gated, so
+    /// existing lightweight flows are unaffected. Reuses the existing `HostResourceProbe` + `MemorySafetyPreflight`.
+    private func memorySafetyPreflight(_ plan: Plan) throws {
+        let gb = 1_073_741_824.0
+        let catalog = RecommendedModelRegistry().resolve(alias: plan.install.id)
+        let diskProxyGB = Double(plan.install.sizeBytes) / gb * 1.05   // resident ≈ weights + small overhead
+        let requiredPeakGB = catalog?.measuredPeakMemoryGB
+            ?? max(catalog?.estimatedMemoryGB ?? 0, diskProxyGB)
+        guard requiredPeakGB >= MemorySafetyPreflight.smallModelFloorGB else { return }
+        let host = HostResourceProbe.snapshot(root: persistenceRootRef())
+        if case let .gated(reason, _, _) = MemorySafetyPreflight.evaluate(requiredPeakGB: requiredPeakGB, host: host) {
+            throw EshRuntimeError.insufficientMemory(modelID: plan.install.id, reason: reason)
+        }
     }
 
     /// Resolve `responseFormat`/`tools` against the selected backend (§5). Returns the (possibly augmented)
