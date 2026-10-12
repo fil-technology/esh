@@ -1,5 +1,5 @@
 {
-  "originHash" : "a5c6e8fb69576798f8f5608dee43015a87f627e38bc5e3dde599956895e3d4ce",
+  "originHash" : "ae4131f518792875775d4cac36699067048dff0a4528f22a053900ef90fa5d9f",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/fil-technology/mlx-audio-swift.git",
       "state" : {
-        "revision" : "4ee5deff5a7a49d5ad5358aa09944e540ac5761a",
-        "version" : "0.1.9-tts.1"
+        "revision" : "5c69f1fecc9ae347970fa291ef02a804ae1fd061",
+        "version" : "0.1.10-tts.1"
       }
     },
     {
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/fil-technology/TTSMLX.git",
       "state" : {
-        "revision" : "20f69034da87046a419659953f0300fe27e74288",
-        "version" : "0.3.6"
+        "revision" : "9fc884b7b40a3f7091ebc4779a8d516e7c5cb024",
+        "version" : "0.3.7"
       }
     },
     {
