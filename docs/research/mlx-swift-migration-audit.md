@@ -354,3 +354,62 @@ their *sources* all compile on 0.32.3. Toward a path-override-free release graph
 build only; (2) path-override-free resolve — blocked on pushing the examples + mlx-swift forks (not
 approved); (3) MLX text needs `mlx_lm` in the worker's Python (provisioning), else it falls back to a
 Python without mlx. No capability was removed.
+
+---
+
+## P5 — Reproducible dependency graph (prepared; fresh-checkout build is push-blocked)
+
+**Goal:** immutable references + compatible constraints, no SwiftPM path overrides, bg-safe preserved, no tag
+overwrites, no image-edit spike changes, both packages build from the prepared refs. **No push/tag/publish.**
+
+**Why a path override exists today:** three consumers declared *disjoint* mlx-swift ranges — mlx-swift-lm
+3.31.4 `[0.32.3,0.33)`, mlx-swift-examples `378f2449` `[0.31.4,0.32)`, mlx-swift-image-edit (now widened). Their
+*sources* all compile on 0.32.3, so the root uses `.package(path: "../mlx-swift")` to bypass the version math.
+
+**Prepared (committed locally, not pushed):**
+- `mlx-swift-image-edit` → mlx-swift range widened to `0.31.6..<0.33.0` (commit `ba05b90`, Package.swift only;
+  the pre-existing PhotoMaker/ip2p spike source is intentionally left *uncommitted* per "no unrelated spike
+  changes"). This removes image-edit as an override-forcing constraint.
+- `mlx-audio-swift` `8415df2`, `TTSMLX` `f5052ca` — the fork source/manifest migration commits.
+
+**Still required for a path-override-free, fresh-checkout build (each needs a push — NOT approved):**
+1. **`fil-technology/mlx-swift-examples` fork** at `378f2449` with mlx-swift widened to `0.31.6..<0.33.0` (the
+   source already builds on 0.32.3). Without it, examples' `<0.32` cap rejects 0.32.3 and the override is the
+   only way the graph resolves. This is the single hard blocker to dropping the override.
+2. **`fil-technology/mlx-swift` fork tag on 0.32.3 that re-bases the background-safety submodule repoint**
+   (the iOS background-permission fix) onto 0.32.3 — a **new** tag (e.g. `0.32.3-tts-bg-safe.1`), not an
+   overwrite of `0.31.5`. The bg-safe change is an mlx **C++ submodule** repoint, so it needs the
+   `fil-technology/mlx` C++ fork to carry that patch on mlx **v0.32.2**; that must be built + verified. For the
+   **macOS** build/validation the bg-safe patch is not required (it is an iOS concern), which is why the current
+   checkout is plain upstream 0.32.3.
+3. Re-point the esh root + macOS manifests from the two `.package(path:)` entries to the published fork
+   tags/commits, then `swift package resolve` from a clean clone + build both packages + run tests.
+
+**Reproducibility verified so far:** both packages build repeatedly from the **committed** manifests with the
+sibling forks present (not stale `.build` state) — root + macOS, 520/520. **Open item:** the esh build currently
+compiles the image-edit **working tree** (which still carries the uncommitted PhotoMaker/ip2p spike additions);
+before release, verify the build from image-edit's **committed** state (stash the spike, rebuild) so the graph
+does not depend on uncommitted spike source. The validated native gen/edit paths (SD 2.1, InstructPix2Pix) do
+not use the PhotoMaker tier, so this is expected to be clean, but it must be confirmed.
+
+**Net:** the dependency graph is **prepared** with compatible constraints and local commits; a fully
+immutable-reference, path-override-free, fresh-checkout build is **BLOCKED on pushing the two forks**
+(examples + mlx-swift bg-safe-on-0.32.3), which are outside the approved scope.
+
+## P6 — GGUF Metal shutdown fix: integration readiness
+
+Fix: `fix/gguf-metal-shutdown` (`c8da2c5` + `7654f85`). `LlamaContext.make` sets
+`setenv("GGML_METAL_NO_RESIDENCY","1",0)` **before** `llama_backend_init()`.
+
+- **Isolated:** one file (`Sources/EshLlamaCpp/LlamaCppEmbeddedBackend.swift`); absent from
+  `migration/mlx-swift-0.31`. **Compatible with the migration:** `EshLlamaCpp` is untouched by the mlx-swift
+  migration (it is the vendored llama.cpp path, no mlx-swift dependency), so there is no interaction or new
+  dependency conflict.
+- **Host override respected:** `overwrite=0` — a host that sets `GGML_METAL_NO_RESIDENCY` keeps its value.
+- **Placement correct:** before Metal init, so it takes effect for the process.
+- **No expensive re-benchmark needed:** the migration does not touch GGUF; the earlier 80B clean-exit result
+  stands. (Re-run only if the vendored `esh_llama.xcframework` is rebuilt.)
+- **Smallest safe integration sequence:** (1) land `migration/mlx-swift-0.31` first (larger surface); (2) rebase
+  `fix/gguf-metal-shutdown` onto it (expected trivial — disjoint file) and open a 1-file PR; (3) run the embedded
+  GGUF smoke (any small GGUF: clean rc 0 at exit) + full suite; (4) merge. Keep it a separate commit so it can be
+  reverted independently. Do not merge into the migration branch beforehand (keep the branches independent).

@@ -7,6 +7,122 @@ types are in `EshCore` / `EshRuntime` (portable, iOS + macOS). **No Studio-speci
 Status: research branch `research/extreme-local-inference` (not yet merged). Snapshot of findings:
 `docs/research/extreme-local-inference.md` + `benchmarks/`.
 
+---
+
+# VALIDATED RUNTIME CONTRACT (2026-10-12, post mlx-swift 0.32.3 migration)
+
+> This section is the **authoritative, real-weight-verified** contract for the Studio agent. Where it differs
+> from the older sections below, this section wins. Every item is tagged **[VALIDATED]** (exercised on-device
+> with real weights on an M1 Pro / 32 GB this date), **[DETERMINISTIC]** (covered by unit tests, not a real
+> model run), or **[PROPOSED]** (not implemented — do not integrate as if present). Branch:
+> `migration/mlx-swift-0.31`. Nothing here is pushed/tagged/merged yet.
+
+## Runtime architecture (so Studio does not guess)
+- **Text LLM (MLX)** runs in a **Python `mlx-serve` worker** (`mlx_lm`), spawned by esh. It is NOT the native
+  Swift mlx-swift stack. The worker's Python must have `mlx_lm` installed; esh resolves it via `ESH_PYTHON`
+  (or a repo `.venv`, or a bundled python), else falls back to `/usr/bin/python3` which has no mlx and fails.
+  **[VALIDATED]**
+- **Native Swift mlx-swift** powers **vision** (`EshVision` → mlx-swift-lm MLXVLM), **image generate/edit/restyle**
+  (`EshImageGen` → mlx-swift StableDiffusion / InstructPix2Pix / PhotoMaker / SDXL-Turbo), and **audio/TTS**
+  (`TTSMLX` / `mlx-audio-swift`). These are in-process, no Python. **[VALIDATED]**
+- **GGUF** (text) runs through the embedded `EshLlamaCpp` backend (vendored llama.cpp), unaffected by this
+  migration. **[VALIDATED earlier]**
+- esh owns inference; Ashex/Studio owns agent orchestration. No second inference runtime is introduced.
+
+## 1. Model discovery
+- **Catalog presets:** `RecommendedModelRegistry().list()` / `.recommend(...)` → `[RecommendedModel]`
+  (`id`, `repoID`, `backend`, `quantization`, `estimatedMemoryGB`, `measuredPeakMemoryGB?`, `status`, …). **[VALIDATED]**
+- **Installed models:** `await runtime.localModels()` → `[LocalModelStatus]`; CLI `esh model list`. **[VALIDATED]**
+- **Catalog id vs installed id:** a catalog preset carries a catalog `id` (e.g. `qwen-3-30b-a3b-mlx-4bit`). An
+  *installed* model's id is whatever it was imported/installed as (e.g. `qwen3-30b-a3b-4bit`) — it is the HF repo
+  lowercased with `/`→`--` for `esh model install <repo>`, or the `--id` given to `esh model import`. **These are
+  not interchangeable:** selection (§3) matches against *installed* ids/repos/display-names, not catalog ids.
+  Studio must select by an **installed** id (from `localModels()`), not a catalog id. **[VALIDATED]**
+
+## 2. Model install / import (no duplicate downloads)
+- `esh model install <repo>` downloads into esh's own store (`<assetsRoot>/models/installs/<id>/`). **[VALIDATED]**
+- `esh model import <path> [--id <id>]` registers already-downloaded weights. It now understands a **Hugging Face
+  cache snapshot** (weights are symlinks into a shared `blobs/` store): `detect`/`import` resolve symlinks and
+  copy the real content, leaving the shared cache intact — so a model already in the HF cache is registered with
+  **no network re-download**. It still copies into the store (esh installs are self-contained), so the store copy
+  is a local duplicate of the cache copy; esh never deletes the cache. **[VALIDATED]** (used to register the 30B).
+- `runtime.install(_:)` / `runtime.installStream(_:)` → `AsyncThrowingStream<DownloadState,Error>`;
+  `ModelDownloadHandle.pause()/resume()/cancel()`. **[DETERMINISTIC]**
+- Assets live on the configured volume (external SSD here) via `storage.json` / `ESH_ASSETS_HOME`; esh gates on
+  volume availability and fails cleanly if it is missing rather than writing to the internal disk. **[VALIDATED]**
+
+## 3. Explicit model selection — EXACT, never substituted
+- `esh infer --model <id>` / an `ExternalInferenceRequest.model` / `EshConstraints(pinnedModelID:)` is an
+  **exact selection**: esh runs that model or returns a clear error. It **no longer silently substitutes** a
+  different installed model (a prior defect ran an 8B GGUF for a 30B request). A default is chosen only when **no**
+  model is requested. Unknown explicit model → `StoreError.notFound("Requested model '…' is not installed …")`.
+  The result echoes the actual `modelID` + `backend` that ran — Studio should assert they match the request. **[VALIDATED]**
+- Example (verified): `esh infer --model qwen3-30b-a3b-4bit …` → result `backend="mlx"`,
+  `modelID="qwen3-30b-a3b-4bit"`, real tokens @ ~38 tok/s, peak ~17.2 GB.
+
+## 4. Backend selection
+- The backend is a property of the installed model (`RecommendedModel.backend` / the install's spec):
+  `.mlx` (text via Python mlx-serve), `.gguf` (embedded llama.cpp), `.apple` (Apple FM). Studio does not pick a
+  backend directly; it selects a model and reads the `backend` esh reports in the result/profile. **[VALIDATED]**
+
+## 5. Streaming, cancellation, bounded generation
+- **Streaming:** `runtime.stream(_:)` → `AsyncThrowingStream` of `.token`/`.textDelta`/`.reasoningDelta`/
+  `.progress`/`.artifactProduced`/`.completed`. **[VALIDATED]** (text, vision, image).
+- **Cancellation:** cancel the consuming `Task` (or stop iterating); esh stops generation promptly. Verified:
+  VLM cancel ~0.4 s, image-gen/edit cancel ~0.5 s. **[VALIDATED]**
+- **Bounded generation:** the VLM understand path honours a `maxTokens` request option and applies a safe default
+  (512) when none is given, so a model cannot run away into unbounded/degenerate output. Image gen/edit honour
+  `steps`/`width`/`height`/`seed`. **[VALIDATED]**
+
+## 6. Memory safety (errors Studio must surface)
+- Every load runs a live preflight. If a model cannot run safely it is **refused before loading** with a typed
+  gate, e.g. `.insufficientMemory(modelID:reason:)` (facade) or a `CapabilityResourceGate`
+  (`reason`, `requiredGB`, `availableGB`) on the capability path. The reason is user-ready. **[VALIDATED]** —
+  on-device, `image.edit` (≈12 GB peak) was correctly **refused** when only ~7.6 GB system-volume/swap headroom
+  was free, and **permitted** after headroom was freed. The guard keys on **system-volume/swap headroom**, not
+  just free RAM (macOS can swap; the internal volume being near-full is the real ceiling).
+- Studio must surface the reason and offer a smaller model or a retry after freeing space; never auto-substitute.
+
+## 7. Model lifecycle — NO warm-pool on the inference path (today)
+- Text `stream()`/`generate()` and the native capability providers **load per call and release at end of call.**
+  **`residentModels()` is empty after a turn and `unload(modelID:)` throws for a chat model.** Repeated requests
+  reload the weights. **Do not assume keep-warm.** `residentModels()`/`unload()` and `RuntimeLifecycleManager`
+  exist but are **[PROPOSED]** for the inference path — a scoped follow-up would route loads through the warm
+  pool. Studio must treat warm-pool reuse as **not available**. (In-process native engines DO reuse within a
+  single process for back-to-back calls — e.g. the VLM/image engines were ~100× faster on the 2nd call in one
+  process — but that is per-process, not the cross-request warm pool.)
+
+## 8. Capabilities — validated APIs + the models used
+| Capability | Facade | Backend | Validated model | Status |
+|---|---|---|---|---|
+| Text chat/generate (MLX) | `stream`/`generate`/`esh infer` | `.mlx` (Python mlx-serve) | `qwen3-30b-a3b-4bit` | **[VALIDATED]** |
+| Text chat (GGUF) | same | `.gguf` (embedded) | llama-3-8b / Qwen3-Next-80B IQ2 | **[VALIDATED earlier]** |
+| Image understanding (VLM) | `EshRuntime.makeWithVision()` → `.imageUnderstand` | `.mlx` native | `mlx-community/Qwen2-VL-2B-Instruct-4bit` | **[VALIDATED]** |
+| Image generation | `makeWithImageGen(selfHosted:)` → `.imageGenerate` | `.mlx` native | SD 2.1 base (self-hosted) | **[VALIDATED]** |
+| Image edit (instruct) | `makeWithImageEdit()` → `.imageEdit` | `.mlx` native | `timbrooks/instruct-pix2pix` (self-hosted) | **[VALIDATED]** |
+| Image edit (identity) | PhotoMaker tier → `.imageEdit` | `.mlx` native | PhotoMaker + SDXL | **[DETERMINISTIC]** |
+| Image restyle | `makeWithImageRestyle()` → `.imageRestyle` | `.mlx` native | SDXL-Turbo | **[DETERMINISTIC]** |
+| Audio / TTS | `esh audio speak` / TTS facade | `.mlx` native (TTSMLX) | `mlx-community/Soprano-80M-bf16` | **[VALIDATED]** |
+
+The `esh image edit` **CLI subcommand** is a *separate* MFLUX/Python path (`ImageEditBackend` =
+qwen-edit/flux2-klein/kontext) — distinct from the native `.imageEdit` capability above. Studio should drive the
+native capability via the facade, not the CLI subcommand, when it wants the in-process native tier.
+
+## 9. Known limitations (read before integrating)
+- **Warm-pool reuse is not available** on the inference path (§7). **[do not claim it]**
+- **MLX text needs `mlx_lm` in the worker's Python** (§ arch). If absent, text MLX fails; provision it or set
+  `ESH_PYTHON`. GGUF text and all native-Swift capabilities do not need Python.
+- **4-bit VLM quality:** a 4-bit VLM can emit degenerate/repetitive text on trivial synthetic images and may not
+  put multiple attributes in one short answer. Bounded generation prevents runaway; Studio should prefer focused
+  prompts and a sensible `maxTokens`.
+- **Reproducible packaging** still uses a local path override for mlx-swift (see the migration audit); a
+  push-free fresh-checkout build is pending fork publication. Treat the exact dependency tags as **[PROPOSED]**
+  until released.
+- **GGUF in-process backend** aborts at *process exit* unless the clean-shutdown fix is present; that fix lives on
+  `fix/gguf-metal-shutdown` and is not yet merged here.
+
+---
+
 ## The two configurations
 
 | Model id (catalog) | Backend | Quant | Measured peak | Speed (M1 Pro) | Status |
