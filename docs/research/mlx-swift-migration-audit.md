@@ -233,3 +233,54 @@ the portable compile stays swift-syntax-free in practice.
 Remaining: Phase 6 regression (test suite), Phase 5 real-weight validation (30B text, vision, image gen/edit,
 audio/TTS, GGUF backend), Phase 7 release artifacts. Fork re-tags / bg-safe re-base are release-prep (not required
 to build/validate locally; the branches are consumed by path).
+
+---
+
+## FINAL REPORT (2026-10-12) — Phases 5–7
+
+### Local commits (NOT pushed/tagged/merged — per approval scope)
+
+| Repo | Branch | Commit | Contents |
+|---|---|---|---|
+| esh (`Source`) | `migration/mlx-swift-0.31` | `f5de1ae` | manifests (root+macOS) + Package.resolved, EshVision 3.x VLM-load, audit doc |
+| `mlx-audio-swift` | `migration/mlx-swift-lm-3` | `8415df2` | MLXAudioCodecs Transformers dep, 6 `Tokenizer` qualifications, `loadTokenizer`→`AutoTokenizer.from` |
+| `TTSMLX` | `migration/mlx-swift-lm-3` | `f5052ca` | path forks + mlx-swift-lm 3.31.4 + swift-huggingface 0.9.x |
+| `mlx-swift` (fork) | *(detached)* | upstream `1960120` (tag `0.32.3`) | checkout only — no fork commit; bg-safe re-base is release-prep |
+| `mlx-swift-image-edit` | `spike/mlx-swift-0.31` | *(uncommitted, pre-existing spike)* | 0.31.6/transformers-1.3 manifest + PhotoMakerV1 — consumed by path, left as-is |
+
+### Compatibility / status matrix
+
+| Component | Resolution | Builds | Runtime-validated | Notes |
+|---|---|---|---|---|
+| mlx-swift | 0.32.3 (path) | ✅ (mlx C++ v0.32.2) | — | MLXLogger present; floor set by mlx-swift-lm 3.31.4 |
+| mlx-swift-lm | 3.31.4 | ✅ | — | 2.x→3.x major bump; own `Tokenizer`, macro-based HF loaders |
+| swift-transformers | 1.3.5 | ✅ | — | pulls yyjson (via `Hub`); fine once deps declared |
+| swift-huggingface | 0.9.x | ✅ | — | `HubClient` for EshVision; no swift-syntax |
+| mlx-audio-swift (fork) | path `8415df2` | ✅ | ⏳ not run | TTS; 3 source-level 3.x fixes |
+| TTSMLX (fork) | path `f5052ca` | ✅ | ⏳ not run | on-device TTS |
+| mlx-swift-image-edit | path (spike) | ✅ | ⏳ not run | image.edit (InstructPix2Pix/PhotoMaker/FLUX2) |
+| EshImageGen | — | ✅ | ⏳ not run | native mlx-swift StableDiffusion |
+| EshVision | — | ✅ | ⏳ not run | native mlx-swift-lm 3.x VLM (migrated this session) |
+| macOS `esh` CLI | — | ✅ runs | ✅ GGUF E2E | 126 MB arm64; `esh infer` produced correct output |
+| root test suite | — | ✅ | ✅ 520/520 | 0 failures |
+| MLX 30B **text** | — | n/a | n/a (Python) | esh macOS text MLX backend is a **Python `mlx-serve` worker** — NOT the native Swift mlx-swift stack. Unaffected by this migration. |
+
+### Validation status (honest)
+
+- **Proven:** both packages build+link against mlx-swift 0.32.3; 520/520 tests; esh CLI runs; end-to-end
+  inference through the migrated macOS runtime (store→route→generate→output) via the GGUF backend.
+- **Architecture finding:** the macOS **text** LLM path is Python (`mlx-serve`), so the native Swift mlx-swift /
+  mlx-swift-lm stack this migration touches is exercised by **image gen/edit, VLM, and audio/TTS** — not text.
+- **Not yet run (resource-heavy, GB-scale weight loads, minutes each):** native-MLX runtime of image.edit
+  (EshImageGen/image-edit), VLM (EshVision), and audio/TTS (forks). Recommended as the next validation step; each
+  needs its weights present (image-edit + VLM weights are cached on the SSD; the 30B MLX text model is cached but
+  runs via Python, so it does not validate the Swift migration).
+
+### Proposed publication order (for when push/tag/publish is approved — NOT done here)
+
+1. `mlx-swift` fork: re-base the bg-safe submodule repoint onto upstream 0.32.3; tag (e.g. `0.32.3-tts-bg-safe.1`).
+2. `mlx-swift-image-edit`: commit the 0.31.6/transformers-1.3 manifest; confirm it builds on 0.32.3; tag.
+3. `mlx-audio-swift` (`8415df2`) then `TTSMLX` (`f5052ca`): tag once their mlx-swift/mlx-swift-lm pins reference the published mlx-swift tag.
+4. esh (`f5de1ae`): repoint path deps → published tags; re-resolve; re-run build + tests; then merge/tag esh.
+
+Steps 1–4 require the NOT-approved actions (push, tag, publish, merge) and are listed as the plan only.
