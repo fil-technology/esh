@@ -63,8 +63,14 @@ public enum EshVision {
                             let tokenProvider: TokenProvider = token.map { .fixed(token: $0) } ?? .environment
                             let hubClient = HubClient(
                                 host: HubClient.defaultHost, tokenProvider: tokenProvider, cache: hubCache)
+                            // When a stored token is used, keep an explicitly-anonymous client so a stale
+                            // or insufficient token does not block an otherwise-public model (the bridge
+                            // retries anonymously on a 401/403). Gated models still need the token.
+                            let anonymousClient = token != nil
+                                ? HubClient(host: HubClient.defaultHost, tokenProvider: .none, cache: hubCache)
+                                : nil
                             container = try await VLMModelFactory.shared.loadContainer(
-                                from: EshHubDownloader(hubClient),
+                                from: EshHubDownloader(primary: hubClient, anonymousFallback: anonymousClient),
                                 using: EshTransformersTokenizerLoader(),
                                 configuration: ModelConfiguration(id: modelID))
                             await cache.store(modelID, container)
@@ -127,8 +133,12 @@ public extension EshRuntime {
 /// Bridges a swift-huggingface `HubClient` to MLXLMCommon's `Downloader`, downloading a repo
 /// snapshot into the client's (possibly SSD-rooted) cache. Mirrors `#hubDownloader`.
 private struct EshHubDownloader: MLXLMCommon.Downloader {
-    private let upstream: HubClient
-    init(_ upstream: HubClient) { self.upstream = upstream }
+    private let primary: HubClient
+    private let anonymousFallback: HubClient?
+    init(primary: HubClient, anonymousFallback: HubClient?) {
+        self.primary = primary
+        self.anonymousFallback = anonymousFallback
+    }
 
     func download(
         id: String,
@@ -140,11 +150,23 @@ private struct EshHubDownloader: MLXLMCommon.Downloader {
         guard let repoID = HuggingFace.Repo.ID(rawValue: id) else {
             throw EshVisionDownloadError.invalidRepositoryID(id)
         }
-        return try await upstream.downloadSnapshot(
-            of: repoID,
-            revision: revision ?? "main",
-            matching: patterns,
-            progressHandler: { @MainActor progress in progressHandler(progress) })
+        let rev = revision ?? "main"
+        do {
+            return try await primary.downloadSnapshot(
+                of: repoID, revision: rev, matching: patterns,
+                progressHandler: { @MainActor progress in progressHandler(progress) })
+        } catch let error as HuggingFace.HTTPClientError {
+            let status = error.statusCode
+            // A stale/insufficient stored token must not block a PUBLIC model: retry anonymously on
+            // an auth rejection. A non-auth failure (or a gated model with no fallback client) is
+            // surfaced with the real status + detail instead of an opaque error.
+            if let anonymousFallback, status == 401 || status == 403 {
+                return try await anonymousFallback.downloadSnapshot(
+                    of: repoID, revision: rev, matching: patterns,
+                    progressHandler: { @MainActor progress in progressHandler(progress) })
+            }
+            throw EshVisionDownloadError.downloadFailed(repo: id, status: status, detail: error.detail)
+        }
     }
 }
 
@@ -195,10 +217,14 @@ private struct EshTokenizerBridge: MLXLMCommon.Tokenizer {
 
 private enum EshVisionDownloadError: LocalizedError {
     case invalidRepositoryID(String)
+    case downloadFailed(repo: String, status: Int?, detail: String)
     var errorDescription: String? {
         switch self {
         case .invalidRepositoryID(let id):
             return "Invalid Hugging Face repository ID: '\(id)'. Expected 'namespace/name'."
+        case let .downloadFailed(repo, status, detail):
+            let code = status.map { " (HTTP \($0))" } ?? ""
+            return "Failed to download '\(repo)' from Hugging Face\(code): \(detail)"
         }
     }
 }

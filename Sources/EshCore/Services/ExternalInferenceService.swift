@@ -625,9 +625,18 @@ public struct ExternalInferenceService: Sendable {
             throw StoreError.notFound("No installed models found.")
         }
 
-        if let model = request.model,
-           let resolved = resolveInstall(identifier: model, installs: installs) {
-            return resolved
+        // An explicit model request is an exact-selection contract: resolve it or fail. Never
+        // silently substitute a different installed model for an id the caller asked for by name
+        // (previously an unresolved --model fell through to `installs.first`, so e.g. a request for
+        // the 30B could run an unrelated 8B). A default is only chosen when NO model was requested.
+        if let model = request.model {
+            if let resolved = resolveInstall(identifier: model, installs: installs) {
+                return resolved
+            }
+            throw StoreError.notFound(
+                "Requested model '\(model)' is not installed. Install or import it "
+                + "(esh model install/import), or request an installed model — esh will not "
+                + "substitute a different model for an explicit --model.")
         }
 
         if let cacheArtifactID = request.cacheArtifactID {

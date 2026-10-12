@@ -41,10 +41,17 @@ public struct LocalModelImportService: Sendable {
 
         let contents = (try? fileManager.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        let regularFiles = contents.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+        // Treat a symlink whose target is a regular file as a regular file. Hugging Face cache
+        // snapshots store weights as symlinks into a shared `blobs/` store, so a snapshot directory
+        // must still be detectable (and importable) as a model.
+        let regularFiles = contents.filter { entry in
+            if (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true { return true }
+            let resolved = entry.resolvingSymlinksInPath()
+            return (try? resolved.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
         let names = Set(regularFiles.map { $0.lastPathComponent.lowercased() })
 
         let ggufFiles = regularFiles.filter { $0.pathExtension.lowercased() == "gguf" }
@@ -90,14 +97,20 @@ public struct LocalModelImportService: Sendable {
             if fileManager.fileExists(atPath: destination.path) {
                 try? fileManager.removeItem(at: destination)
             }
-            if move {
+            // Resolve symlinks (e.g. a Hugging Face cache snapshot links weights into a shared
+            // `blobs/` store) so the install receives real file content, never a link that breaks
+            // when the shared cache changes. A symlinked source is always copied — never moved —
+            // to leave that shared cache intact.
+            let isSymlink = (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            let copySource = isSymlink ? file.resolvingSymlinksInPath() : file
+            if move && !isSymlink {
                 do {
-                    try fileManager.moveItem(at: file, to: destination)
+                    try fileManager.moveItem(at: copySource, to: destination)
                 } catch {
-                    try fileManager.copyItem(at: file, to: destination)
+                    try fileManager.copyItem(at: copySource, to: destination)
                 }
             } else {
-                try fileManager.copyItem(at: file, to: destination)
+                try fileManager.copyItem(at: copySource, to: destination)
             }
             relativeFiles.append(destination.lastPathComponent)
         }
