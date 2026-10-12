@@ -105,6 +105,16 @@ let package = Package(
         .library(
             name: "EshImageGen",
             targets: ["EshImageGen"]
+        ),
+        // Opt-in MLX TEXT backend (v2.4): the `MLXBackend` that drives a Python `mlx-serve` worker
+        // (via the shipped `mlx_vlm_bridge.py` + the managed venv's `mlx-lm`). Remote-consumable and
+        // lean — depends only on EshCore (no mlx-swift / swift-syntax / TTSMLX): MLX *text* runs in the
+        // Python worker, not native Swift. A consumer registers `MLXBackend()` into
+        // `EshRuntime.makeDefault(backends:)` and resolves the worker's python + bridge via
+        // `EshManagedPythonHost` (EshMacCapabilities). esh keeps backend/worker lifecycle + memory guards.
+        .library(
+            name: "EshMLXText",
+            targets: ["EshMLXText"]
         )
     ],
     // Opt-in heavy multimodal: the ONLY external dependency of the portable package, and only the opt-in
@@ -209,6 +219,18 @@ let package = Package(
         .testTarget(
             name: "EshImageGenTests",
             dependencies: ["EshImageGen"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        // MLX text backend — Python-worker-driven, EshCore-only (no mlx-swift). macOS only at run time
+        // (the providers no-op/report unsupported on iOS); the target itself is portable to compile.
+        .target(
+            name: "EshMLXText",
+            dependencies: ["EshCore"],
+            swiftSettings: quietDebugSwiftSettings
+        ),
+        .testTarget(
+            name: "EshMLXTextTests",
+            dependencies: ["EshMLXText"],
             swiftSettings: quietDebugSwiftSettings
         )
     ] + llamaTargets
