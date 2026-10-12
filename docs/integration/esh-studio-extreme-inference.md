@@ -278,3 +278,31 @@ is wired via `EshRuntime.withEmbeddedGGUF(root:)`.)
    smaller model.
 4. Treat `unload()`/`residentModels()` as warm-pool APIs that are not yet wired to chat (follow-up #4).
 5. For the 30B specifically, wait for follow-up #2 (mlx-swift conflict) before relying on the macOS MLX backend.
+
+---
+
+# RELEASE REFERENCE (stable, reproducible) — for Studio integration
+
+**esh tag:** `v2.4.0-rc.35` on `fil-technology/esh` (branch `migration/mlx-swift-0.31`). This is the stable,
+reproducible reference: it resolves and builds from immutable dependency tags with **no local path
+overrides, no SwiftPM mirror, and no uncommitted source dependencies**. Verified by a clean fresh-checkout
+build (root + macOS), CLI launch, and 520/520 regression.
+
+**Pinned dependency graph (all immutable):**
+
+| Package | Reference |
+|---|---|
+| ml-explore/mlx-swift | `0.32.3` (upstream; no fork — bg-safety handled by the 0.32.x refactor) |
+| ml-explore/mlx-swift-lm | `3.32.3` |
+| huggingface/swift-transformers | `1.3.5` (resolved; pinned `.upToNextMinor(1.3.0)`) |
+| huggingface/swift-huggingface | `1.0.0` (resolved; pinned `0.8.1..<2.0.0`) |
+| fil-technology/mlx-swift-examples | `0.1.0-mlx0.32` (fork of upstream 378f2449; mlx-swift range widened to admit 0.32.x) |
+| fil-technology/mlx-swift-image-edit | `0.2.1-mlx0.32` |
+| fil-technology/TTSMLX (macOS only) | `0.3.7` → fil-technology/mlx-audio-swift `0.1.10-tts.1` |
+
+**Included in this release:** the mlx-swift 0.29→0.32.3 migration, the native-capability validations
+(vision/image-gen/image-edit/audio), exact model selection, bounded VLM generation, and the embedded-GGUF
+clean-shutdown fix (`GGML_METAL_NO_RESIDENCY=1`, cherry-picked isolated — no research history).
+
+**iOS background safety:** PENDING device validation (see docs/research/ios-background-safety-mlx-0.32.md).
+Does not affect macOS Studio integration.
