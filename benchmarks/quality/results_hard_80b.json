@@ -1,0 +1,177 @@
+{
+  "model": "Qwen3-Next-80B-A3B-IQ2_XS",
+  "runtime": "llama-server (GGUF/Metal)",
+  "label": "MEASURED",
+  "temperature": 0,
+  "wall_s": 179.0,
+  "passed": 16,
+  "total": 16,
+  "by_category": {
+    "coding": [
+      6,
+      6
+    ],
+    "reasoning": [
+      5,
+      5
+    ],
+    "long_context": [
+      2,
+      2
+    ],
+    "tool_calling": [
+      2,
+      2
+    ],
+    "structured": [
+      1,
+      1
+    ]
+  },
+  "results": [
+    {
+      "id": "h_lru",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 138,
+      "gen_tps": 17.92,
+      "output_head": "```python\nclass LRUCache:\n    def __init__(self, capacity):\n        self.capacity = capacity\n        self.cache = {}\n        self.order = []\n\n    def get(self, key):\n        if key in self.cache:\n            self.order.remove(key)\n            self.order.append(key)\n            return self.cache[key]"
+    },
+    {
+      "id": "h_toposort",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 182,
+      "gen_tps": 19.18,
+      "output_head": "```python\ndef topo_order(n, edges):\n    # Build adjacency list and in-degree count\n    graph = [[] for _ in range(n)]\n    in_degree = [0] * n\n    \n    for u, v in edges:\n        graph[u].append(v)\n        in_degree[v] += 1\n    \n    # Initialize queue with nodes having zero in-degree\n    queue = [i f"
+    },
+    {
+      "id": "h_intervals",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 146,
+      "gen_tps": 19.31,
+      "output_head": "```python\ndef merge_intervals(intervals):\n    if not intervals:\n        return []\n    \n    # Sort intervals by start time\n    intervals.sort(key=lambda x: x[0])\n    \n    merged = []\n    current_start, current_end = intervals[0]\n    \n    for start, end in intervals[1:]:\n        if start <= current_en"
+    },
+    {
+      "id": "h_tokenizer",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 105,
+      "gen_tps": 17.92,
+      "output_head": "```python\ndef tokenize(expr):\n    tokens = []\n    i = 0\n    while i < len(expr):\n        char = expr[i]\n        if char == ' ':\n            i += 1\n            continue\n        elif char.isdigit():\n            num = ''\n            while i < len(expr) and expr[i].isdigit():\n                num += expr"
+    },
+    {
+      "id": "h_ratelimit",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 124,
+      "gen_tps": 18.33,
+      "output_head": "```python\nclass RateLimiter:\n    def __init__(self, max_calls, period):\n        self.max_calls = max_calls\n        self.period = period\n        self.calls = []\n\n    def allow(self, now):\n        # Remove calls older than the current window\n        self.calls = [t for t in self.calls if now - t < sel"
+    },
+    {
+      "id": "h_jsondiff",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 90,
+      "gen_tps": 18.02,
+      "output_head": "```python\ndef json_diff(a, b):\n    result = {}\n    all_keys = set(a.keys()) | set(b.keys())\n    for key in all_keys:\n        val_a = a.get(key) if key in a else None\n        val_b = b.get(key) if key in b else None\n        if val_a != val_b:\n            result[key] = [val_a, val_b]\n    return result"
+    },
+    {
+      "id": "r_trains",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got 'answer:270'",
+      "tokens": 368,
+      "gen_tps": 19.9,
+      "output_head": "We are given:\n\n- Two trains start 300 km apart, moving toward each other.\n- Train A (faster) speed: 60 km/h\n- Train B speed: 40 km/h\n- A bird starts from the faster train (Train A) and flies at 90 km/h toward the other train, then back and forth until the trains meet.\n\nWe are to find the **total dis"
+    },
+    {
+      "id": "r_ages",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '36'",
+      "tokens": 276,
+      "gen_tps": 19.92,
+      "output_head": "Let the son\u2019s current age be $ x $ years.  \nThen the father\u2019s current age is $ 3x $ years.\n\nIn 12 years:  \n- Son\u2019s age will be $ x + 12 $  \n- Father\u2019s age will be $ 3x + 12 $\n\nAccording to the problem, in 12 years, the father will be **twice** as old as his son:\n\n$$\n3x + 12 = 2(x + 12)\n$$\n\nSolve the"
+    },
+    {
+      "id": "r_grid",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got 'blue'",
+      "tokens": 448,
+      "gen_tps": 20.19,
+      "output_head": "We are given three houses in a row: House 1, House 2, and House 3. Each is a different color: red, green, or blue.\n\nConstraints:\n\n1. The green house is **not first** \u2192 So green \u2260 House 1.\n2. The red house is **immediately to the left** of the green house \u2192 So red must be directly left of green. That"
+    },
+    {
+      "id": "r_units",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '30'",
+      "tokens": 214,
+      "gen_tps": 19.62,
+      "output_head": "We are given:\n\n- Tank capacity = 1800 liters  \n- We want to fill **half** the tank \u2192 so target volume = 1800 \u00f7 2 = **900 liters**  \n- Flow rate = 500 mL/second  \n\nFirst, convert the target volume to milliliters since the flow rate is in mL:\n\n> 1 liter = 1000 mL  \n> So, 900 liters = 900 \u00d7 1000 = **90"
+    },
+    {
+      "id": "r_prob",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '2/5'",
+      "tokens": 284,
+      "gen_tps": 19.98,
+      "output_head": "We are given a bag with 3 red and 3 blue balls \u2014 total of 6 balls.\n\nWe draw two balls **without replacement**, and we want the probability that **both are the same color** \u2014 that is, both red or both blue.\n\n---\n\n### Step 1: Total number of ways to draw 2 balls from 6\n\nThis is the combination:  \n$$\n\\"
+    },
+    {
+      "id": "lc_allfacts",
+      "category": "long_context",
+      "passed": true,
+      "detail": "all needles",
+      "tokens": 39,
+      "gen_tps": 1.93,
+      "output_head": "A: the staging deploy key rotates every 14 days.  \nB: the canary cohort is 3 percent of traffic.  \nC: the rollback budget is 7 minutes."
+    },
+    {
+      "id": "lc_synth",
+      "category": "long_context",
+      "passed": true,
+      "detail": "got '21'",
+      "tokens": 122,
+      "gen_tps": 5.0,
+      "output_head": "The deploy key rotates every 14 days \u2014 so the key-rotation period is **14 days**.\n\nThe rollback budget is **7 minutes**.\n\nWe are asked for the **sum** of the key-rotation period (in days) and the rollback budget (in minutes), as a single number.\n\nSo:  \n14 (days) + 7 (minutes) = **21**\n\nNote: The uni"
+    },
+    {
+      "id": "t_plan",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got ['search_flights', 'book_flight', 'send_email']",
+      "tokens": 126,
+      "gen_tps": 18.28,
+      "output_head": "[\n  {\n    \"tool\": \"search_flights\",\n    \"args\": {\n      \"origin\": \"NYC\",\n      \"dest\": \"LON\",\n      \"date\": \"2026-12-01\"\n    }\n  },\n  {\n    \"tool\": \"book_flight\",\n    \"args\": {\n      \"flight_id\": \"first_result_flight_id\"\n    }\n  },\n  {\n    \"tool\": \"send_email\",\n    \"args\": {\n      \"to\": \"alice@x.com"
+    },
+    {
+      "id": "t_plan2",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got ['read_file', 'run_tests']",
+      "tokens": 48,
+      "gen_tps": 16.19,
+      "output_head": "[\n  {\n    \"tool\": \"read_file\",\n    \"args\": {\n      \"path\": \"src/app.py\"\n    }\n  },\n  {\n    \"tool\": \"run_tests\",\n    \"args\": {}\n  }\n]"
+    },
+    {
+      "id": "s_nested",
+      "category": "structured",
+      "passed": true,
+      "detail": "valid",
+      "tokens": 35,
+      "gen_tps": 14.97,
+      "output_head": "{\n  \"user\": {\n    \"name\": \"Mia Chen\",\n    \"roles\": [\"admin\", \"editor\"]\n  },\n  \"active\": true\n}"
+    }
+  ]
+}

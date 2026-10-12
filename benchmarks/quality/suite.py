@@ -114,10 +114,20 @@ def score(task, out):
             return (r.returncode == 0 and "OK" in r.stdout), (r.stderr.strip().splitlines()[-1] if r.returncode else "pass")
     if t == "exact":
         low = out.lower()
-        m = re.findall(r"answer:\s*([^\s].*?)\s*$", low, re.MULTILINE)
-        cand = (m[-1] if m else low).strip().strip(".")
-        ok = any(a.lower() in cand or a.lower() in low for a in task["answers"])
-        return ok, f"got '{cand[:40]}'"
+        # Match ONLY the answer region (after the last "answer:"), not the whole reasoning — otherwise a number
+        # that appears in the working (e.g. a speed "90 km/h") can falsely match the final answer. Normalize
+        # LaTeX/markdown so a correct answer like \frac{2}{5} or **36** is scored on content, not formatting.
+        def norm(s):
+            s = s.lower()
+            s = re.sub(r"\\d?frac\{(\d+)\}\{(\d+)\}", r"\1/\2", s)   # \frac{2}{5} / \dfrac{..} -> 2/5
+            s = re.sub(r"\\boxed\{([^}]*)\}", r"\1", s)
+            for ch in ["$", "*", "\\(", "\\)", "\\,", "\\!", "{", "}", " ", "\\"]:
+                s = s.replace(ch, "")
+            return s
+        m = re.findall(r"answer:\s*(.+)", low)
+        tail = norm((m[-1] if m else low[-60:]).strip().strip("."))
+        ok = any(norm(a) in tail for a in task["answers"])
+        return ok, f"got '{tail[:40]}'"
     if t == "json":
         j = _first_json(out)
         if not isinstance(j, dict): return False, "no JSON object"

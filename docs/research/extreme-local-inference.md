@@ -19,11 +19,13 @@ has been run yet — see "What is and isn't proven".
   and **Qwen3-Next-80B-A3B IQ2_XS (llama.cpp) at 21.1 tok/s, 21.2 GB** — both resident and swap-safe
   (`benchmarks/model-results.json`). The headline bet (80B-class, resident, interactive on 32 GB) is confirmed
   on speed + safety.
-- **Utility — MEASURED (objective suite, `benchmarks/quality/`):** both models score **9/9** on executable-code,
-  reasoning, structured-output, tool-call, instruction, and needle tasks. The suite does **not** discriminate
-  quality; the measured difference is **speed (30B ~2–3× faster) + safety (no reboot needed)**. The earlier
-  "80B subtly buggy" was a single non-representative sample (the objective Python debounce passed). Where IQ2
-  hurts / where 80B capacity helps is not yet shown — needs a harder task set. Other models' tok/s remain THEORETICAL.
+- **Utility — MEASURED (two objective suites, `benchmarks/quality/`):** both models score **9/9** on the smoke
+  suite AND **16/16** on the harder discriminating suite (6 executable-code, 5 multi-step reasoning, 2
+  long-context, 2 tool-plan, 1 nested-JSON). **Neither suite separates them** — the measured difference is
+  **speed (30B ~2–3× faster) + safety (no reboot needed)**, not quality. There is **no measured quality
+  advantage for the 80B IQ2**, so it is NOT labelled higher-quality. (Integrity: the first hard run's apparent
+  30B losses were all authoring bugs — miscalculated golden answers, a loose scorer, an under-constrained puzzle
+  — corrected + re-verified; the grader is validated against golden solutions.) Other models' tok/s remain THEORETICAL.
 
 ## Phase C — first MEASURED model runs (2026-10-07)
 

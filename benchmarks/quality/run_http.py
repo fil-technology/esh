@@ -3,7 +3,8 @@
 Temperature 0 for determinism. Usage: run_http.py <base_url> <out_json> <model_label>"""
 import sys, os, json, time, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import suite
+import os as _os, importlib as _il
+suite = _il.import_module(_os.environ.get('ESH_SUITE','suite'))
 
 base, out_json, label = sys.argv[1], sys.argv[2], sys.argv[3]
 

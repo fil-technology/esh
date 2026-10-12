@@ -1,0 +1,194 @@
+{
+  "model": "mlx-community/Qwen3-30B-A3B-4bit",
+  "runtime": "mlx-lm",
+  "label": "MEASURED",
+  "temperature": 0,
+  "peak_memory_gb": 18.32,
+  "wall_s": 102.9,
+  "passed": 16,
+  "total": 16,
+  "by_category": {
+    "coding": [
+      6,
+      6
+    ],
+    "reasoning": [
+      5,
+      5
+    ],
+    "long_context": [
+      2,
+      2
+    ],
+    "tool_calling": [
+      2,
+      2
+    ],
+    "structured": [
+      1,
+      1
+    ]
+  },
+  "results": [
+    {
+      "id": "h_lru",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 3.43,
+      "tokens": 171,
+      "gen_tps": 41.13,
+      "output_head": "```python\nfrom collections import OrderedDict\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.cache = OrderedDict()\n        self.capacity = capacity\n\n    def get(self, key: int) -> int:\n        if key in self.cache:\n            # Move the key to the end to mark it as most recent"
+    },
+    {
+      "id": "h_toposort",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.72,
+      "tokens": 146,
+      "gen_tps": 41.72,
+      "output_head": "```python\ndef topo_order(n, edges):\n    from collections import defaultdict, deque\n\n    graph = defaultdict(list)\n    in_degree = [0] * n\n\n    for u, v in edges:\n        graph[u].append(v)\n        in_degree[v] += 1\n\n    queue = deque([i for i in range(n) if in_degree[i] == 0])\n    result = []\n\n    w"
+    },
+    {
+      "id": "h_intervals",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.6,
+      "tokens": 119,
+      "gen_tps": 41.84,
+      "output_head": "```python\ndef merge_intervals(intervals):\n    if not intervals:\n        return []\n    \n    # Sort intervals based on start time\n    intervals.sort(key=lambda x: x[0])\n    \n    merged = [intervals[0]]\n    \n    for current in intervals[1:]:\n        last = merged[-1]\n        if current[0] <= last[1]:\n "
+    },
+    {
+      "id": "h_tokenizer",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.84,
+      "tokens": 101,
+      "gen_tps": 41.53,
+      "output_head": "```python\ndef tokenize(expr):\n    tokens = []\n    i = 0\n    while i < len(expr):\n        if expr[i].isspace():\n            i += 1\n        elif expr[i].isdigit():\n            j = i\n            while j < len(expr) and expr[j].isdigit():\n                j += 1\n            tokens.append(expr[i:j])\n     "
+    },
+    {
+      "id": "h_ratelimit",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.81,
+      "tokens": 104,
+      "gen_tps": 41.65,
+      "output_head": "```python\nclass RateLimiter:\n    def __init__(self, max_calls, period):\n        self.max_calls = max_calls\n        self.period = period\n        self.calls = []\n\n    def allow(self, now):\n        # Remove calls that are outside the current window\n        self.calls = [call for call in self.calls if c"
+    },
+    {
+      "id": "h_jsondiff",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.69,
+      "tokens": 80,
+      "gen_tps": 41.54,
+      "output_head": "```python\ndef json_diff(a, b):\n    result = {}\n    all_keys = set(a.keys()).union(set(b.keys()))\n    for key in all_keys:\n        val_a = a.get(key, None)\n        val_b = b.get(key, None)\n        if val_a != val_b:\n            result[key] = [val_a, val_b]\n    return result\n```"
+    },
+    {
+      "id": "r_trains",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '270'",
+      "ttft_s": 0.86,
+      "tokens": 346,
+      "gen_tps": 41.45,
+      "output_head": "We are given:\n\n- Two trains start **300 km apart**, moving **toward each other**.\n- Train A moves at **40 km/h**.\n- Train B moves at **60 km/h**.\n- A bird starts from **Train B** (the faster train) and flies at **90 km/h** toward Train A, then immediately turns around and flies back to Train B, and "
+    },
+    {
+      "id": "r_ages",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '36'",
+      "ttft_s": 0.69,
+      "tokens": 228,
+      "gen_tps": 41.97,
+      "output_head": "Let the current age of the son be $ x $ years.  \nThen the current age of the father is $ 3x $ years (since he is three times as old as his son).\n\nIn 12 years:\n- The son will be $ x + 12 $ years old.\n- The father will be $ 3x + 12 $ years old.\n\nWe are told that at that time, the father will be twice "
+    },
+    {
+      "id": "r_grid",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got 'blue'",
+      "ttft_s": 0.85,
+      "tokens": 414,
+      "gen_tps": 41.35,
+      "output_head": "We are given three houses in a row (1, 2, 3), each with a different color: red, green, or blue. We are also given the following constraints:\n\n1. The **green house is not first**.\n2. The **red house is immediately to the left of the green house**.\n3. **House 1 is not red**.\n\nWe are to determine: **Wh"
+    },
+    {
+      "id": "r_units",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '30'",
+      "ttft_s": 0.68,
+      "tokens": 176,
+      "gen_tps": 42.07,
+      "output_head": "First, convert the tank capacity to milliliters:\n\n$$\n1800 \\text{ liters} = 1800 \\times 1000 = 1,800,000 \\text{ mL}\n$$\n\nHalf the tank is:\n\n$$\n\\frac{1,800,000}{2} = 900,000 \\text{ mL}\n$$\n\nThe tap fills at 500 mL/second. To find the time in seconds:\n\n$$\n\\frac{900,000}{500} = 1800 \\text{ seconds}\n$$\n\nCo"
+    },
+    {
+      "id": "r_prob",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '2/5'",
+      "ttft_s": 0.68,
+      "tokens": 268,
+      "gen_tps": 41.92,
+      "output_head": "We are given a bag with 3 red and 3 blue balls, for a total of 6 balls. We draw 2 balls **without replacement**, and we want to find the probability that **both are the same color**.\n\n---\n\n### Step 1: Total number of ways to draw 2 balls from 6\n$$\n\\binom{6}{2} = 15\n$$\n\n---\n\n### Step 2: Number of way"
+    },
+    {
+      "id": "lc_allfacts",
+      "category": "long_context",
+      "passed": true,
+      "detail": "all needles",
+      "ttft_s": 16.24,
+      "tokens": 19,
+      "gen_tps": 29.87,
+      "output_head": "A: 14 days  \nB: 3 percent  \nC: 7 minutes"
+    },
+    {
+      "id": "lc_synth",
+      "category": "long_context",
+      "passed": true,
+      "detail": "got '21'",
+      "ttft_s": 16.39,
+      "tokens": 52,
+      "gen_tps": 30.54,
+      "output_head": "The key-rotation period is 14 days, and the rollback budget is 7 minutes.  \nThe sum of these values is:  \n14 (days) + 7 (minutes) = 21\n\nANSWER: 21"
+    },
+    {
+      "id": "t_plan",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got ['search_flights', 'book_flight', 'send_email']",
+      "ttft_s": 0.78,
+      "tokens": 89,
+      "gen_tps": 41.94,
+      "output_head": "[{\"tool\":\"search_flights\",\"args\":{\"origin\":\"NYC\",\"dest\":\"LON\",\"date\":\"2026-12-01\"}},{\"tool\":\"book_flight\",\"args\":{\"flight_id\":1}},{\"tool\":\"send_email\",\"args\":{\"to\":\"alice@x.com\",\"body\":\"Your flight from NYC to LON on 2026-12-01 has been booked.\"}}]"
+    },
+    {
+      "id": "t_plan2",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got ['read_file', 'run_tests']",
+      "ttft_s": 0.68,
+      "tokens": 27,
+      "gen_tps": 41.97,
+      "output_head": "[{\"tool\":\"read_file\",\"args\":{\"path\":\"src/app.py\"}},{\"tool\":\"run_tests\",\"args\":{}}]"
+    },
+    {
+      "id": "s_nested",
+      "category": "structured",
+      "passed": true,
+      "detail": "valid",
+      "ttft_s": 0.7,
+      "tokens": 35,
+      "gen_tps": 42.01,
+      "output_head": "{\n  \"user\": {\n    \"name\": \"Mia Chen\",\n    \"roles\": [\"admin\", \"editor\"]\n  },\n  \"active\": true\n}"
+    }
+  ]
+}

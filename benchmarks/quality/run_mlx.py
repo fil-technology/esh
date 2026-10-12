@@ -3,7 +3,8 @@
 Usage: run_mlx.py <hf_repo> <out_json>"""
 import sys, os, json, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import suite
+import os as _os, importlib as _il
+suite = _il.import_module(_os.environ.get('ESH_SUITE','suite'))
 import mlx.core as mx
 from mlx_lm import load
 from mlx_lm.sample_utils import make_sampler
