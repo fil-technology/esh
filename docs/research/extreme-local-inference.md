@@ -167,6 +167,27 @@ better default; the 80B is an opt-in `--max-quality` tier, not a silent default 
 headroom). Identity question (Qwen3-Next-80B vs Strata's "Qwen3.8-Flash-Next" 125B) is moot for `--best`: the
 public 80B at IQ2_XS is the one that runs. Full comparison: `benchmarks/quality/README.md`.
 
+## Quantization frontier for the resident 80B (Priority 2) — sizes FROM-SOURCE, ceilings MEASURED
+
+Can a higher-quality 80B quant fit safely? Evaluated against the two measured ceilings — Metal
+`recommendedMaxWorkingSetSize = 26.8 GB` (hard) and the swap-safe resident band **~22–23 GB** (post-reboot) —
+BEFORE downloading anything:
+
+| Quant | Size | Verdict on 32 GB M1 Pro |
+|---|---|---|
+| IQ2_XXS | 19.3 GB | safe; lower quality than XS |
+| **IQ2_XS** | **22.2 GB** | **tested — safe post-reboot, 9/9 quality** |
+| IQ2_S | 23.4 GB | ~1.2 GB above XS; likely safe post-reboot, only marginal headroom for KV — the *only* upgrade worth a single guarded experiment |
+| IQ2_M | 26.1 GB | at the 26.8 GB Metal cap → ~0.7 GB left for KV+compute → will OOM/swap. **Reject (no download).** |
+| Q2_K / Q2_K_L | 28.2 / 28.5 GB | exceed the 26.8 GB Metal working set → won't load on GPU. **Reject.** |
+| IQ3_* | ≥ ~27 GB | exceed the Metal ceiling. **Reject.** |
+
+**Conclusion:** the practical quality headroom above IQ2_XS is **only IQ2_S (23.4 GB)**; everything IQ3+ overruns
+the Metal/safety ceiling on 32 GB. Since IQ2_XS already scores 9/9 on the objective suite, there is **no measured
+evidence it is quality-limited**, so downloading IQ2_S now isn't justified (respects "evaluate sizes before
+downloading" + "one large experiment at a time"). Hold IQ2_S as a single guarded experiment *iff* a harder,
+discriminating task set later shows IQ2_XS failing where the 30B or a bigger quant would not.
+
 ## EXTREME MODEL FRONTIER (THEORETICAL)
 
 - **≥10 tok/s:** 3B-active MoE, resident (Qwen3-30B-A3B Q4, gpt-oss-20b).
