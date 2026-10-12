@@ -16,9 +16,9 @@ struct RecommendedModelRegistryTests {
             "deepseek-r1-qwen-7b"
         ]))
         #expect(ids.suffix(3).elementsEqual([
-            "qwen-3-5-27b-opus-distilled",
-            "deepseek-r1-qwen-32b",
-            "qwen-2-5-coder-32b"
+            "qwen-2-5-coder-32b",
+            "qwen-3-30b-a3b-mlx-4bit",
+            "qwen-3-next-80b-a3b-iq2xs-gguf"
         ]))
     }
 
@@ -32,8 +32,8 @@ struct RecommendedModelRegistryTests {
         let ggufIDs = registry.list(backend: .gguf).map(\.id)
 
         #expect(tierIDs == ["qwen-2-5-0-5b", "qwen-3-5-0-8b-optiq", "qwen-3-5-0-8b", "gemma-4-e2b-it"])
-        #expect(codingIDs == ["mistral-small-24b", "qwen-2-5-coder-7b", "qwen-2-5-coder-7b-gguf", "qwen-2-5-coder-32b"])
-        #expect(backendIDs.count == 19)
+        #expect(codingIDs == ["mistral-small-24b", "qwen-2-5-coder-7b", "qwen-2-5-coder-7b-gguf", "qwen-2-5-coder-32b", "qwen-3-30b-a3b-mlx-4bit"])
+        #expect(backendIDs.count == 20)   // +1: qwen-3-30b-a3b-mlx-4bit (research model, .mlx)
         #expect(ggufIDs == [
             "qwen-3-5-9b-gguf",
             "deepseek-r1-qwen-14b-gguf",
@@ -41,7 +41,8 @@ struct RecommendedModelRegistryTests {
             "qwen-2-5-coder-7b-gguf",
             "deepseek-r1-qwen-7b-gguf",
             "phi-4-mini-reasoning-gguf",
-            "phi-3-5-mini-instruct-gguf"
+            "phi-3-5-mini-instruct-gguf",
+            "qwen-3-next-80b-a3b-iq2xs-gguf"   // research model (.gguf, .max tier sorts last)
         ])
     }
 
@@ -96,6 +97,24 @@ struct RecommendedModelRegistryTests {
         #expect(registry.resolve(alias: "qwen-3-5-9b")?.repoID == "mlx-community/Qwen3.5-9B-MLX-4bit")
         #expect(registry.resolve(alias: "bartowski/Qwen_Qwen3.5-9B-GGUF")?.id == "qwen-3-5-9b-gguf")
     }
+
+    @Test
+    func researchModelsRegisteredAndSubFourBitQuantsSized() {
+        // Fit estimator must understand sub-4-bit IQ quants; without this an IQ2 80B is mis-sized at 4.5 bpw
+        // (~45 GB, unfittable) instead of ~24 GB. (extreme-local-inference research, MEASURED.)
+        #expect(ModelFitService.parseEffectiveBits("IQ2_XS") == 2.4)
+        #expect(ModelFitService.parseEffectiveBits("Q2_K") == 2.4)
+        #expect(ModelFitService.parseEffectiveBits("IQ3_XXS") == 3.4)
+        #expect(ModelFitService.parseEffectiveBits("4-bit") == 4.5)   // unchanged default
+        let registry = RecommendedModelRegistry()
+        let m30 = registry.resolve(alias: "qwen-3-30b-a3b-mlx-4bit")
+        #expect(m30?.backend == .mlx)
+        #expect(m30?.estimatedMemoryGB == 18.0)      // MEASURED, not param-count estimate
+        let m80 = registry.resolve(alias: "qwen-3-next-80b-a3b-iq2xs-gguf")
+        #expect(m80?.backend == .gguf)
+        #expect(m80?.quantization == "IQ2_XS")
+        #expect(m80?.estimatedMemoryGB == 22.0)      // MEASURED resident footprint
+    }
 }
 
 @Suite
@@ -118,7 +137,8 @@ struct ModelServiceRecommendedCatalogTests {
             "qwen-2-5-coder-7b-gguf",
             "deepseek-r1-qwen-7b-gguf",
             "phi-4-mini-reasoning-gguf",
-            "phi-3-5-mini-instruct-gguf"
+            "phi-3-5-mini-instruct-gguf",
+            "qwen-3-next-80b-a3b-iq2xs-gguf"
         ])
         #expect(service.resolveRecommended(alias: "qwen-2-5-0-5b")?.title == "Qwen 2.5 0.5B Instruct")
         #expect(service.resolveRecommended(alias: "qwen-3-5-9b")?.title == "Qwen 3.5 9B")

@@ -199,8 +199,13 @@ public struct ModelFitService: Sendable {
         if lower.contains("q8") || lower.contains("8-bit") || lower.contains("8bit") || lower == "8" { return 8 }
         if lower.contains("q6") || lower.contains("6-bit") || lower.contains("6bit") || lower == "6" { return 6.5 }
         if lower.contains("q5") || lower.contains("5-bit") || lower.contains("5bit") || lower == "5" { return 5.5 }
-        if lower.contains("q3") || lower.contains("3-bit") || lower.contains("3bit") || lower == "3" { return 3.5 }
         if lower.contains("q4") || lower.contains("4-bit") || lower.contains("4bit") || lower == "4" { return 4.5 }
+        // Sub-4-bit families (IQ3/IQ2/IQ1 + Q3/Q2). Checked before the bare digit defaults so e.g. "IQ2_XS" is
+        // not mis-sized as 4.5-bit. Effective bits-per-weight are the practical GGUF averages incl. overhead;
+        // MEASURED anchor: Qwen3-Next-80B-A3B IQ2_XS ≈ 2.2 GB/10B params ⇒ ~2.3 bpw.
+        if lower.contains("iq3") || lower.contains("q3") || lower.contains("3-bit") || lower.contains("3bit") || lower == "3" { return 3.4 }
+        if lower.contains("iq2") || lower.contains("q2") || lower.contains("2-bit") || lower.contains("2bit") || lower == "2" { return 2.4 }
+        if lower.contains("iq1") || lower.contains("q1") || lower.contains("1-bit") || lower.contains("1bit") || lower == "1" { return 2.1 }
         return 4.5  // default assumption: 4-bit-ish
     }
 

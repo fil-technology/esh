@@ -578,6 +578,46 @@ public struct RecommendedModelRegistry: Sendable {
             capabilities: [.chat],
             status: .recommended,
             sortOrder: 25
+        ),
+        // --- Extreme-local-inference research models (MEASURED on 32 GB M1 Pro, 2026-10-12). Both are MoE with
+        //     ~3B active params/token, so the naive params*bits estimate is wrong — estimatedMemoryGB/
+        //     totalDiskSizeGB below are MEASURED, not computed. See docs/research/extreme-local-inference.md.
+        //     Marked .experimental: validated on this build but MoE/hybrid arch support is version-sensitive. ---
+        RecommendedModel(
+            id: "qwen-3-30b-a3b-mlx-4bit",
+            title: "Qwen3-30B-A3B (MLX 4-bit)",
+            repoID: "mlx-community/Qwen3-30B-A3B-4bit",
+            parameterSize: "30B",              // MoE, ~3.3B active/token
+            quantization: "4-bit",
+            profile: .code,
+            tier: .max,
+            estimatedMemoryGB: 18.0,           // MEASURED peak 18.1 GB (M1 Pro); swap-safe anytime
+            totalDiskSizeGB: 17.2,             // MEASURED
+            tags: ["moe", "coding", "agentic", "measured-m1pro"],
+            summary: "MoE 30B (~3.3B active/token). MEASURED on 32 GB M1 Pro: ~28-40 tok/s, 18 GB resident, swap-safe, 9/9 on the objective quality suite. The recommended interactive/coding default for 32 GB Apple Silicon (esh run --best).",
+            backend: .mlx,
+            contextWindow: 262144,
+            capabilities: [.chat, .coding, .reasoning, .toolCalling],
+            status: .experimental,
+            sortOrder: 26
+        ),
+        RecommendedModel(
+            id: "qwen-3-next-80b-a3b-iq2xs-gguf",
+            title: "Qwen3-Next-80B-A3B (GGUF IQ2_XS)",
+            repoID: "bartowski/Qwen_Qwen3-Next-80B-A3B-Instruct-GGUF",
+            parameterSize: "80B",             // hybrid MoE (Gated-DeltaNet), ~3B active/token
+            quantization: "IQ2_XS",
+            profile: .code,
+            tier: .max,
+            estimatedMemoryGB: 22.0,           // MEASURED 21.2 GB resident on Metal + KV headroom; swap-safe on 32 GB ONLY with fresh headroom (post-reboot)
+            totalDiskSizeGB: 22.2,             // MEASURED
+            tags: ["moe", "gguf", "iq2", "max-quality", "measured-m1pro"],
+            summary: "80B-class hybrid MoE (~3B active) at ~2-bit IQ2_XS. MEASURED on 32 GB M1 Pro: ~21 tok/s, 21.2 GB resident, interactive, 9/9 on the objective suite. Opt-in max-quality tier only: IQ2 is lossy (verify correctness-sensitive output) and the footprint is swap-safe on 32 GB only with fresh memory headroom. Requires a llama.cpp build with Qwen3-Next support.",
+            backend: .gguf,
+            contextWindow: 262144,
+            capabilities: [.chat, .coding, .reasoning, .toolCalling],
+            status: .experimental,
+            sortOrder: 27
         )
     ]
 }
