@@ -1,5 +1,5 @@
 {
-  "originHash" : "ded853288c160e9b04fbad750722e101aef9921915bbd38a16b9046cfddf9982",
+  "originHash" : "a7a653192344d83c718a7f743bae71746594d37adeb04e7223d1d19072d1f502",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -20,11 +20,30 @@
       }
     },
     {
+      "identity" : "mlx-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ml-explore/mlx-swift.git",
+      "state" : {
+        "revision" : "19601207e9a0de51e03ee6ec0c3c5f3784275075",
+        "version" : "0.32.3"
+      }
+    },
+    {
       "identity" : "mlx-swift-examples",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift-examples",
+      "location" : "https://github.com/fil-technology/mlx-swift-examples.git",
       "state" : {
-        "revision" : "378f2449c257788c5067b9f8b086731d76b39b33"
+        "revision" : "f47bf661c68df53781735fd7c0ef05f7bcdebebb",
+        "version" : "0.1.0-mlx0.32"
+      }
+    },
+    {
+      "identity" : "mlx-swift-image-edit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/fil-technology/mlx-swift-image-edit.git",
+      "state" : {
+        "revision" : "ba05b90a08a2f1c2c138616ae0d4d98b0fde6c2b",
+        "version" : "0.2.1-mlx0.32"
       }
     },
     {
@@ -32,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift-lm.git",
       "state" : {
-        "revision" : "bd4b7434e6bdb588c7ef55706ff8904cb7fd4c57",
-        "version" : "3.31.4"
+        "revision" : "3b339ad6e3b3f44c8121ecff5131c7fd55e075e6",
+        "version" : "3.32.3"
       }
     },
     {

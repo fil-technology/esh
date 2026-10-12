@@ -41,7 +41,9 @@ let package = Package(
         // SyntaxVisitor API. Kept OUT of the portable root package so portable consumers never resolve it
         // (this is the rc.3 fix — see ../Package.swift and docs/SDK_PACKAGING.md).
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0"),
-        .package(path: "../../TTSMLX"),
+        // fil-technology/TTSMLX v0.3.6 — on-device TTS on mlx-swift-lm 3.32.3 + upstream mlx-swift 0.32.x
+        // (no fork/mirror). Immutable tag. Pulls the published fil-technology/mlx-audio-swift 0.1.9-tts.1.
+        .package(url: "https://github.com/fil-technology/TTSMLX.git", exact: "0.3.6"),
     ],
     targets: [
         // macOS-only runtime execution infrastructure (M9): MLX + spawned llama.cpp GGUF server +

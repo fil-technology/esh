@@ -113,8 +113,10 @@ let package = Package(
     // LLM.swift coexistence is preserved. Text/Create-only consumers link EshCore/EshRuntime and never build
     // this. (Core ML image generation, when added, needs no SwiftPM dependency.)
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift-examples", revision: "378f2449c257788c5067b9f8b086731d76b39b33"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "3.31.4"),
+        // fil-technology fork of mlx-swift-examples at upstream 378f2449 with the mlx-swift range widened to
+        // admit 0.32.x (upstream caps <0.32). Immutable tag. Provides StableDiffusion (EshImageGen) + MLXMNIST.
+        .package(url: "https://github.com/fil-technology/mlx-swift-examples.git", exact: "0.1.0-mlx0.32"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "3.32.3"),
         // swift-transformers' `Hub` product (already in the resolved graph transitively via mlx-swift-examples,
         // and verified to contain NO swift-syntax). Named directly so EshVision can construct a `HubApi` with
         // offline detection disabled — swift-transformers' NWPathMonitor delivers its first path callback
@@ -127,15 +129,14 @@ let package = Package(
         // so EshVision can reference the `HuggingFace` product directly. Range matches swift-transformers'
         // own pin (`0.8.1..<2.0.0`) to avoid introducing a new resolution constraint. No swift-syntax.
         .package(url: "https://github.com/huggingface/swift-huggingface", "0.8.1"..<"2.0.0"),
-        // mlx-swift's `MLX` product (already in the resolved graph transitively via mlx-swift-examples).
-        // Named directly so the opt-in EshImageGen product can `eval()`/decode latents during diffusion.
-        // Same version spec as mlx-swift-examples (upToNextMinor 0.29.1).
-        .package(path: "../mlx-swift"),
-        // Native, content-preserving INSTRUCT image editing (`image.edit`, InstructPix2Pix). Standalone,
-        // validated package pinned to an immutable tag. Its graph is mlx-swift (0.29.x) + swift-transformers
-        // `Hub` (1.0.x) — the SAME versions esh already resolves, and NO swift-syntax, so it introduces no new
-        // conflict and preserves the LLM.swift coexistence. Only the opt-in EshImageGen product links it.
-        .package(path: "../mlx-swift-image-edit"),
+        // mlx-swift's `MLX` product. Upstream ml-explore/mlx-swift pinned to 0.32.3 — the floor required by
+        // mlx-swift-lm 3.31.4. No fork: mlx 0.32.x's refactored Metal error path is background-safe without the
+        // old iOS patch (see docs/research/ios-background-safety-mlx-0.32.md; iOS background validation pending).
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.32.3"),
+        // Native, content-preserving INSTRUCT image editing (`image.edit`, InstructPix2Pix) + PhotoMaker identity
+        // tier. fil-technology fork pinned to an immutable tag; its mlx-swift range admits 0.32.x. Only the opt-in
+        // EshImageGen product links it.
+        .package(url: "https://github.com/fil-technology/mlx-swift-image-edit.git", exact: "0.2.1-mlx0.32"),
     ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,
