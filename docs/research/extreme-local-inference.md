@@ -19,8 +19,11 @@ has been run yet — see "What is and isn't proven".
   and **Qwen3-Next-80B-A3B IQ2_XS (llama.cpp) at 21.1 tok/s, 21.2 GB** — both resident and swap-safe
   (`benchmarks/model-results.json`). The headline bet (80B-class, resident, interactive on 32 GB) is confirmed
   on speed + safety.
-- **NOT yet proven:** *utility* — whether the IQ2 80B's quality beats the clean 4-bit 30B (IQ2 is lossy; the 80B
-  sample code was subtly buggy). That needs the §15 quality suite. Other models' tok/s remain THEORETICAL.
+- **Utility — MEASURED (objective suite, `benchmarks/quality/`):** both models score **9/9** on executable-code,
+  reasoning, structured-output, tool-call, instruction, and needle tasks. The suite does **not** discriminate
+  quality; the measured difference is **speed (30B ~2–3× faster) + safety (no reboot needed)**. The earlier
+  "80B subtly buggy" was a single non-representative sample (the objective Python debounce passed). Where IQ2
+  hurts / where 80B capacity helps is not yet shown — needs a harder task set. Other models' tok/s remain THEORETICAL.
 
 ## Phase C — first MEASURED model runs (2026-10-07)
 
@@ -158,9 +161,11 @@ MAX-BRAIN resident (when quality/size matters more than a bug-free first draft):
   Caveat:       IQ2 is lossy — sample code was fluent but subtly wrong; verify outputs
 ```
 
-Label: **MEASURED** for speed + memory-safety. **Utility ranking between the two is still open** — promote to
-VALIDATED once the §15 quality suite scores them. Note the identity question (Qwen3-Next-80B vs Strata's
-"Qwen3.8-Flash-Next" 125B) is moot for `--best` here: the public 80B at IQ2_XS is the one that runs.
+Label: **MEASURED** (speed + memory-safety + a 9/9 objective quality suite each). **Decision: default to the
+30B.** On measured utility — equal objective quality, ~2–3× faster, swap-safe anytime — the smaller model is the
+better default; the 80B is an opt-in `--max-quality` tier, not a silent default (IQ2 lossy; needs reboot
+headroom). Identity question (Qwen3-Next-80B vs Strata's "Qwen3.8-Flash-Next" 125B) is moot for `--best`: the
+public 80B at IQ2_XS is the one that runs. Full comparison: `benchmarks/quality/README.md`.
 
 ## EXTREME MODEL FRONTIER (THEORETICAL)
 

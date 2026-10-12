@@ -1,0 +1,118 @@
+{
+  "model": "Qwen3-Next-80B-A3B-IQ2_XS",
+  "runtime": "llama-server (GGUF/Metal)",
+  "label": "MEASURED",
+  "temperature": 0,
+  "wall_s": 44.6,
+  "passed": 9,
+  "total": 9,
+  "by_category": {
+    "coding": [
+      3,
+      3
+    ],
+    "reasoning": [
+      2,
+      2
+    ],
+    "structured": [
+      1,
+      1
+    ],
+    "instruction": [
+      1,
+      1
+    ],
+    "tool_calling": [
+      1,
+      1
+    ],
+    "long_context": [
+      1,
+      1
+    ]
+  },
+  "results": [
+    {
+      "id": "code_two_sum",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 55,
+      "gen_tps": 13.6,
+      "output_head": "```python\ndef two_sum(nums, target):\n    seen = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in seen:\n            return [seen[complement], i]\n        seen[num] = i\n```"
+    },
+    {
+      "id": "code_roman",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 138,
+      "gen_tps": 17.21,
+      "output_head": "```python\ndef roman_to_int(s):\n    roman_values = {\n        'I': 1,\n        'V': 5,\n        'X': 10,\n        'L': 50,\n        'C': 100,\n        'D': 500,\n        'M': 1000\n    }\n    total = 0\n    prev_value = 0\n    \n    for char in reversed(s):\n        current_value = roman_values[char]\n        if c"
+    },
+    {
+      "id": "code_debounce_min",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "tokens": 69,
+      "gen_tps": 16.68,
+      "output_head": "```python\nimport threading\n\nclass Debouncer:\n    def __init__(self, delay):\n        self.delay = delay\n        self.timer = None\n\n    def call(self, fn):\n        if self.timer is not None:\n            self.timer.cancel()\n        self.timer = threading.Timer(self.delay, fn)\n        self.timer.start()"
+    },
+    {
+      "id": "reason_math",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '30'",
+      "tokens": 87,
+      "gen_tps": 17.91,
+      "output_head": "Pipe A fills at 12 L/min, and pipe B drains at 4 L/min.  \nSo the **net fill rate** is:  \n12 L/min - 4 L/min = **8 L/min**\n\nThe tank holds 240 liters.  \nAt 8 L/min, time to fill = 240 \u00f7 8 = **30 minutes**\n\nANSWER: 30"
+    },
+    {
+      "id": "reason_logic",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '3'",
+      "tokens": 87,
+      "gen_tps": 18.37,
+      "output_head": "We are told:\n\n- There are five houses in a row, numbered 1 to 5 from left to right.\n- The **blue house is house 2**.\n- The **red house is immediately to the right** of the blue house.\n\nSince the blue house is house 2, the house immediately to its right is house 3.\n\nTherefore, the red house is house "
+    },
+    {
+      "id": "structured_json",
+      "category": "structured",
+      "passed": true,
+      "detail": "valid",
+      "tokens": 29,
+      "gen_tps": 14.31,
+      "output_head": "{\"name\": \"Dana Ruiz\", \"age\": 34, \"skills\": [\"Swift\", \"Python\", \"Rust\"]}"
+    },
+    {
+      "id": "instruction_3bullets",
+      "category": "instruction",
+      "passed": true,
+      "detail": "3 lines",
+      "tokens": 34,
+      "gen_tps": 15.32,
+      "output_head": "- Improves code quality by catching bugs early\n- Facilitates refactoring by ensuring existing functionality remains intact\n- Serves as documentation for expected behavior of functions"
+    },
+    {
+      "id": "tool_call",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got {\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}",
+      "tokens": 17,
+      "gen_tps": 11.41,
+      "output_head": "{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}"
+    },
+    {
+      "id": "needle",
+      "category": "long_context",
+      "passed": true,
+      "detail": "got 'pelican-7731'",
+      "tokens": 34,
+      "gen_tps": 2.72,
+      "output_head": "The emergency access code for the Rotterdam cold-storage facility is PELICAN-7731.\n\nANSWER: PELICAN-7731"
+    }
+  ]
+}

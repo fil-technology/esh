@@ -1,0 +1,128 @@
+{
+  "model": "mlx-community/Qwen3-30B-A3B-4bit",
+  "runtime": "mlx-lm",
+  "label": "MEASURED",
+  "temperature": 0,
+  "peak_memory_gb": 18.12,
+  "wall_s": 29.7,
+  "passed": 9,
+  "total": 9,
+  "by_category": {
+    "coding": [
+      3,
+      3
+    ],
+    "reasoning": [
+      2,
+      2
+    ],
+    "structured": [
+      1,
+      1
+    ],
+    "instruction": [
+      1,
+      1
+    ],
+    "tool_calling": [
+      1,
+      1
+    ],
+    "long_context": [
+      1,
+      1
+    ]
+  },
+  "results": [
+    {
+      "id": "code_two_sum",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 3.41,
+      "tokens": 63,
+      "gen_tps": 39.4,
+      "output_head": "```python\ndef two_sum(nums, target):\n    num_to_index = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in num_to_index:\n            return [num_to_index[complement], i]\n        num_to_index[num] = i\n```"
+    },
+    {
+      "id": "code_roman",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.73,
+      "tokens": 131,
+      "gen_tps": 41.82,
+      "output_head": "```python\ndef roman_to_int(s):\n    roman = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}\n    total = 0\n    prev_value = 0\n    for char in s:\n        current_value = roman[char]\n        if current_value > prev_value:\n            total += current_value - 2 * prev_value\n        else"
+    },
+    {
+      "id": "code_debounce_min",
+      "category": "coding",
+      "passed": true,
+      "detail": "pass",
+      "ttft_s": 0.84,
+      "tokens": 66,
+      "gen_tps": 31.28,
+      "output_head": "```python\nimport threading\n\nclass Debouncer:\n    def __init__(self, delay):\n        self.delay = delay\n        self.timer = None\n\n    def call(self, fn):\n        if self.timer:\n            self.timer.cancel()\n        self.timer = threading.Timer(self.delay, fn)\n        self.timer.start()\n```"
+    },
+    {
+      "id": "reason_math",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '30'",
+      "ttft_s": 0.83,
+      "tokens": 111,
+      "gen_tps": 41.98,
+      "output_head": "When both pipes are open, the net rate of filling is:\n\n$$\n12 \\, \\text{L/min} - 4 \\, \\text{L/min} = 8 \\, \\text{L/min}\n$$\n\nThe tank holds 240 liters, so the time to fill it is:\n\n$$\n\\frac{240 \\, \\text{L}}{8 \\, \\text{L/min}} = 30 \\, \\text{minutes}\n$$\n\nANSWER: 30"
+    },
+    {
+      "id": "reason_logic",
+      "category": "reasoning",
+      "passed": true,
+      "detail": "got '3'",
+      "ttft_s": 0.76,
+      "tokens": 36,
+      "gen_tps": 41.93,
+      "output_head": "The blue house is house 2.  \nThe red house is immediately to the right of the blue house, so it must be house 3.\n\nANSWER: 3"
+    },
+    {
+      "id": "structured_json",
+      "category": "structured",
+      "passed": true,
+      "detail": "valid",
+      "ttft_s": 0.71,
+      "tokens": 29,
+      "gen_tps": 41.63,
+      "output_head": "{\"name\": \"Dana Ruiz\", \"age\": 34, \"skills\": [\"Swift\", \"Python\", \"Rust\"]}"
+    },
+    {
+      "id": "instruction_3bullets",
+      "category": "instruction",
+      "passed": true,
+      "detail": "3 lines",
+      "ttft_s": 0.63,
+      "tokens": 37,
+      "gen_tps": 42.09,
+      "output_head": "- Improves code quality by catching bugs early  \n- Makes refactoring safer by ensuring existing functionality remains intact  \n- Facilitates better design by encouraging modular and decoupled code"
+    },
+    {
+      "id": "tool_call",
+      "category": "tool_calling",
+      "passed": true,
+      "detail": "got {\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}",
+      "ttft_s": 0.74,
+      "tokens": 17,
+      "gen_tps": 41.52,
+      "output_head": "{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}"
+    },
+    {
+      "id": "needle",
+      "category": "long_context",
+      "passed": true,
+      "detail": "got 'pelican-7731'",
+      "ttft_s": 8.58,
+      "tokens": 13,
+      "gen_tps": 32.61,
+      "output_head": "ANSWER: PELICAN-7731"
+    }
+  ]
+}
