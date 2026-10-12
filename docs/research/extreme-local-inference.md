@@ -42,6 +42,34 @@ has been run yet — see "What is and isn't proven".
   clean 4-bit 30B for correctness-sensitive work. `--best` needs the §15 quality suite to settle. First MLX-vs-
   llama.cpp, 30B-vs-80B utility datapoint.
 
+### Real-weight E2E through the esh facade (P0) — MEASURED
+
+Validated the two models through `EshRuntime` (not raw engines, not mocks), with these findings:
+
+- **Embedded-GGUF facade path (root package) — VALIDATED:** drove `EshRuntime` + the in-process llama.cpp
+  backend (`EshRuntime.withEmbeddedGGUF`) against a real GGUF: discovery (`localModels`), live memory preflight,
+  load, token streaming (real tokens, TTFT 2.36 s, ~81 tok/s on a 1.5B Q4), and mid-stream cancellation (stopped
+  at 105/500). The full lifecycle works with real weights through the facade.
+- **Live memory-safety gate — VALIDATED E2E:** pinning the real 80B (22 GB) through the facade on a busy machine
+  (~13 GB free) returned `EshRuntimeError.insufficientMemory("needs ~22 GB but only ~13 GB is free … internal
+  disk has ~9.2 GB for swap … (no reboot required)")` — a clean typed rejection, no crash, no hang. The gate is
+  real, not just unit-tested.
+- **macOS MLX path — BLOCKED (pre-existing, not my change):** the `macos` package (incl. the `esh` CLI and the
+  macOS `MLXBackend`) does not build — root pins `mlx-swift 0.29.1..<0.30` while `mlx-audio-swift` needs
+  `0.30.6+`. So the 30B could not be run *through the macOS runtime*; it is validated via the raw mlx-lm engine.
+  Scoped follow-up: align the mlx-swift versions.
+- **80B through the facade — not completed:** the live gate (correctly) refused it under current memory, and the
+  embedded llama.cpp pin's Qwen3-Next support is unconfirmed (gate rejected before arch parsing). The raw
+  Homebrew `llama-server` (b8660) runs it at ~21 tok/s. Scoped follow-up: confirm/bump the embedded llama.cpp, or
+  document the 80B as server-backend-only.
+- **Lifecycle finding:** chat `stream()`/`generate()` load a runtime **per call** and release on completion — no
+  warm-pool; `residentModels()`/`unload()` are not wired to chat, so **repeated requests reload weights** (costly
+  for a 22 GB model). Scoped follow-up: route load through `RuntimeLifecycleManager` for resident reuse.
+- **Teardown:** the in-process GGUF backend crashes in `ggml_metal_device_free` during process `exit()`
+  finalizers, AFTER inference — benign for results, a clean-shutdown follow-up.
+
+Contract for Studio: `docs/integration/esh-studio-extreme-inference.md`.
+
 ### MEASURED memory-safety ceiling (the real limit on this machine)
 
 The resident-model ceiling here is set by **internal-disk/swap headroom, not the 32 GB of RAM**. The boot APFS

@@ -24,7 +24,7 @@ private struct ChunkRuntime: BackendRuntime, @unchecked Sendable {
                 for ch in cs {
                     if Task.isCancelled { c.finish(throwing: CancellationError()); return }
                     c.yield(ch)
-                    try? await Task.sleep(nanoseconds: 20_000_000)   // 20ms per chunk so cancellation can interrupt
+                    try? await Task.sleep(nanoseconds: 10_000_000)   // 10ms per chunk so cancellation can interrupt
                 }
                 c.finish()
             }
@@ -94,16 +94,18 @@ private func pinned(_ id: String) -> EshGenerationRequest {
     @Test func cancellationStopsStream() async throws {
         let flags = Flags()
         let runtime = await EshRuntime.makeDefault(
-            backends: [.gguf: ChunkBackend(kind: .gguf, chunks: Array(repeating: "x", count: 200), flags: flags)],
+            backends: [.gguf: ChunkBackend(kind: .gguf, chunks: Array(repeating: "x", count: 600), flags: flags)],
             root: PersistenceRoot(rootURL: tmpRoot()),
             installProvider: StaticInstallProvider([install("small-gguf", backend: .gguf)]))
         let collected = Mutex(0)
         let task = Task { for try await e in runtime.stream(pinned("small-gguf")) { if case .token = e { collected.inc() } } }
-        try await Task.sleep(nanoseconds: 80_000_000)   // let a few chunks flow
+        // Wait long enough that tokens reliably flow even under CI load (chunks are 10ms apart; 600×10ms=6s total),
+        // then cancel well before completion. Robust against startup latency and scheduler jitter.
+        try await Task.sleep(nanoseconds: 600_000_000)   // 0.6s → ~tens of tokens expected
         task.cancel()
         _ = await task.result
         let n = collected.value
-        #expect(n > 0 && n < 200)   // some tokens, then cancelled before the full 200
+        #expect(n > 0 && n < 600)   // some tokens, then cancelled before the full 600
     }
 
     // Step: unload / residentModels API. FINDING: the text stream() path loads a runtime per-call and releases
