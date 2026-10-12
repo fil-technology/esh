@@ -78,6 +78,61 @@ unwired / incomplete".
 - The migration branch baseline is kept clean (Package.swift reverted); the attempted config is recorded above so
   it can be re-applied the moment a compatible examples/transformers/lm revision set is identified.
 
+## RESOLUTION FOUND (Option A/C) — `mlx-swift-lm` 3.31.4 escape hatch
+
+Deeper investigation (reading upstream manifests at exact commits/tags) found a safe path. The disjoint
+constraint only exists because the TTS stack pulls **`mlx-swift-lm` 2.31.3** (swift-transformers `[1.2.0,1.3.0)`).
+Findings:
+
+- **Option B is false on examples `378f2449`:** it is POST-split — its only products are `MLXMNIST` +
+  `StableDiffusion`; MLXVLM/MLXLLM/MLXLMCommon moved to `mlx-swift-lm`. `StableDiffusion` is the *sole* product
+  carrying a transformers pin, and it is `[1.3.0, 2.0.0)` — so there is no looser target to exploit.
+- **Option C:** the `<1.3.0` cap is **conservative, not a real API break** — swift-transformers 1.3.0 was a
+  packaging-only change (Xet trait), and `mlx-swift-lm` 3.x **drops the swift-transformers dependency entirely**.
+- **Escape hatch — `mlx-swift-lm` 3.31.4** (read from source): declares **no swift-transformers dependency**,
+  stays on **mlx-swift 0.31.x** (`.upToNextMinor(from: 0.31.4)`), still ships `MLXVLM` + `MLXLMCommon` (for
+  EshVision), swift-syntax `[602,604)`. Moving the TTS stack onto it removes the transformers constraint, so
+  swift-transformers floats to **1.3.x** for StableDiffusion → the graph resolves.
+
+### The compatible set
+
+| package | version/commit | transformers | mlx-swift |
+|---|---|---|---|
+| mlx-swift (fork) | re-tag **≥0.31.6** (image-edit needs it) | — | — |
+| mlx-swift-examples | main `378f2449` (commit; no 0.31.x tag) | `[1.3.0,2.0.0)` (StableDiffusion) | `[0.31.4,0.32)` |
+| swift-transformers | `.upToNextMinor(from: 1.3.0)` → 1.3.x | — | — |
+| **mlx-swift-lm** | **3.31.4** | **none** | `[0.31.4,0.32)` |
+| mlx-audio-swift (fil fork) | widen `mlx-swift-lm` cap to admit 3.31.4 | `[1.1.6,2.0)` ✓ | `[0.30.6,1.0)` ✓ |
+| TTSMLX (fil) | change `mlx-swift-lm` `exact 2.31.3` → `exact 3.31.4` (+ bump its mlx-audio pin) | — | — |
+| mlx-swift-image-edit | its 0.31 branch (needs mlx-swift ≥0.31.6) | `[1.3.0,…)` ✓ | `[0.31.6,…)` ✓ |
+
+### Required edits (multi-repo — these are the ONLY blockers; all in repos we own)
+
+1. **`fil-technology/TTSMLX`:** `mlx-swift-lm` `exact: "2.31.3"` → `exact: "3.31.4"` (or a 3.31.x range) + bump its
+   `mlx-audio-swift` fork pin.
+2. **`fil-technology/mlx-audio-swift`** (`0.1.7-tts.1`): widen `mlx-swift-lm .upToNextMajor(from: "2.30.3")`
+   (caps `<3.0`) to admit `3.31.4`.
+3. **`fil-technology/mlx-swift` fork:** re-tag/re-base to **≥0.31.6** (current `0.31.5` tag doesn't satisfy
+   image-edit / examples-main).
+4. **esh root `Package.swift`:** examples→`378f2449`, mlx-swift→0.31.x, swift-transformers→`upToNextMinor(1.3.0)`,
+   mlx-swift-image-edit→migrated version; **re-source `MLXVLM`/`MLXLMCommon` for EshVision from `mlx-swift-lm`**
+   and **relocate EshVision into the `macos/` package** (mlx-swift-lm's macro pulls swift-syntax; keep root
+   swift-syntax-free).
+5. **`Package.resolved`:** the published `mlx-swift-image-edit 0.2.0` (0.29.x) pin must be replaced by the
+   migrated tag.
+
+### Remaining RISK (why this is "present the plan", not "done")
+
+- **`mlx-swift-lm` 2.x→3.x is a MAJOR bump.** The fil forks' source consumes `MLXLMCommon`/`MLXLLM`; those
+  products still exist in 3.31.4 but a major bump may carry API changes — **requires an actual build of TTSMLX +
+  mlx-audio-swift against 3.31.4 to confirm** (the real risk, not the version math).
+- Spans 3 fork repos + re-tagging + an esh manifest change + EshVision relocation. Per the directive (Option D),
+  this is presented as the plan rather than force-applied across repos in one pass.
+
+**Verification status:** the version math is confirmed from upstream manifests; a full `swift package resolve` +
+build could not be run locally because the fork repos (TTSMLX, mlx-audio-swift) are not sibling checkouts and the
+required re-tags don't exist yet. The migration branch baseline stays clean pending the fork edits + re-tags.
+
 ## What this unblocks once solved
 
 - macOS `esh` CLI + macOS `MLXBackend` build → **real-weight 30B through the esh macOS runtime** (Phase C #5),
