@@ -78,6 +78,33 @@ unwired / incomplete".
 - The migration branch baseline is kept clean (Package.swift reverted); the attempted config is recorded above so
   it can be re-applied the moment a compatible examples/transformers/lm revision set is identified.
 
+## CORRECTION (2026-10-12) — `mlx-swift-lm` 3.31.4 requires mlx-swift **0.32.3**, not 0.31.x
+
+The "RESOLUTION FOUND" section below assumed `mlx-swift-lm` 3.31.4 stays on mlx-swift 0.31.x
+(`.upToNextMinor(from: 0.31.4)`). **That was read from the wrong tag.** The real 3.31.4 manifest
+declares `.package(url: ".../mlx-swift", .upToNextMinor(from: "0.32.3"))` → it needs **mlx-swift 0.32.3+**.
+
+- Confirmed empirically: 3.31.4's `MLXLMCommon/Chat.swift` uses `MLXLogger(label:)` from `import MLX`.
+  `MLXLogger` is defined in **mlx-swift 0.32.2+** (`Source/MLX/Logging.swift`, added in commit 1960120
+  "fix MLXLogger (#493)"), and is **absent from 0.31.6**. Building against 0.31.6 fails with
+  `cannot find 'MLXLogger' in scope`.
+- **Decision:** the migration target is **mlx-swift 0.32.3**, not 0.31.6. The branch name
+  (`migration/mlx-swift-0.31`) is retained but the resolved mlx-swift is 0.32.3.
+- `mlx-swift-image-edit` declares `.upToNextMinor(from: "0.31.6")` (= `[0.31.6,0.32)`) and
+  `mlx-swift-examples` `378f2449` declares `[0.31.4,0.32)` — both **exclude** 0.32.3 by *version*.
+  This is reconciled by the **local path override** of `mlx-swift` (`.package(path: "../mlx-swift")`):
+  a path dependency is unversioned and satisfies every transitive version requirement, so
+  `swift package resolve` on the macOS graph succeeds at rc=0 (mlx-swift-lm 3.31.4, swift-transformers
+  1.3.5, mlx-swift = local path @ 0.32.3). The remaining risk is **source compatibility**: whether
+  image-edit (StableDiffusion/PhotoMaker/InstructPix2Pix) and examples (StableDiffusion) *compile*
+  against the 0.31→0.32 mlx-swift API — verified by the full build (in progress).
+- **Fork/bg-safe note:** the `fil-technology/mlx-swift` fork's background-safe submodule repoint
+  (iOS background-permission fix, a 2-file change, no Swift) is currently *not* applied — the checkout
+  is upstream 0.32.3. Re-basing the bg-safe patch onto 0.32.3 (incl. the mlx C++ submodule) is a
+  **release-prep follow-up**, orthogonal to the macOS build/validation this branch delivers.
+
+---
+
 ## RESOLUTION FOUND (Option A/C) — `mlx-swift-lm` 3.31.4 escape hatch
 
 Deeper investigation (reading upstream manifests at exact commits/tags) found a safe path. The disjoint
@@ -137,3 +164,72 @@ required re-tags don't exist yet. The migration branch baseline stays clean pend
 
 - macOS `esh` CLI + macOS `MLXBackend` build → **real-weight 30B through the esh macOS runtime** (Phase C #5),
   plus the macOS server `LlamaCppBackend` path for the 80B.
+
+---
+
+## BUILD RESULT (2026-10-12) — macOS esh package **builds and links** against mlx-swift 0.32.3
+
+The full `macos` package (`EshMacRuntime` + `esh` CLI, incl. text/vision/image/audio/TTS backends) compiles and
+links with the compatible set above (mlx-swift **0.32.3** via local path, mlx-swift-lm 3.31.4, swift-transformers
+1.3.5, mlx-audio-swift + TTSMLX forks on the `migration/mlx-swift-lm-3` branches, mlx-swift-image-edit on
+`spike/mlx-swift-0.31`). `swift build` returns rc=0 ("Build complete!"); the `esh` CLI binary
+(`.build/out/Products/Debug/esh`, ~126 MB Mach-O arm64) runs (`esh --help` rc=0).
+
+### Source changes required by the 2.x→3.x bump (all in the `fil-technology/mlx-audio-swift` fork)
+
+Confirming the "real risk" noted above — the major bump did carry API changes. Each was the *smallest* change
+that restores the behavior, no feature/target removed:
+
+1. **`MLXAudioCodecs` target — add the `Transformers` product dependency.** The target's sources
+   `import Tokenizers` but the manifest never declared it; under mlx-swift-lm **2.x** this leaked in transitively
+   via `MLXLMCommon`'s swift-transformers dependency. 3.x drops that dependency, so the `Tokenizers→Hub→yyjson`
+   clang module stopped propagating into the target's compile and the build failed with
+   `unable to resolve module dependency: 'yyjson'` (swiftbuild) / `missing required module 'yyjson'` (native).
+   Declaring `.product(name: "Transformers", package: "swift-transformers")` restores the modulemap propagation.
+   *(yyjson itself is fine — swift-transformers' `Hub` builds standalone at rc=0; it was purely a missing
+   explicit dependency exposed by the 3.x dependency drop.)*
+2. **`Tokenizer` is now ambiguous — qualify as `Tokenizers.Tokenizer`.** mlx-swift-lm 3.x introduces its own
+   `public protocol Tokenizer: Sendable` in `MLXLMCommon`, colliding with swift-transformers' `Tokenizer`. The TTS
+   models use the HF tokenizer, so 6 property/parameter sites were qualified (`LlamaTTS`, `MarvisTTSModel` ×2,
+   `Qwen3`, `Qwen3TTS`, `Soprano`).
+3. **`loadTokenizer(configuration:hub:)` was removed → `AutoTokenizer.from(pretrained:hubApi:)`.** Per the
+   MLXLMCommon 3.x upgrade guide. One site (`MarvisTTSModel` convenience init); the other init in the same file
+   already used the new `AutoTokenizer.from(modelFolder:)`. `HubApi` is a single `Hub.HubApi` across the graph and
+   the return type is `Tokenizers.Tokenizer`, matching fix #2.
+
+### Build-system note
+
+`swift build` defaults to the new **swiftbuild** (Xcode Swift Build) system on this toolchain (macOS 27 / Xcode 27,
+MacOSX27.0.sdk, Swift 6). That is the system under which the package now builds cleanly. The deprecated
+`--build-system native` (llbuild) additionally failed to emit swift-transformers' `Hub` module under explicit
+modules; swiftbuild is the correct/only path here.
+
+### Root (portable/iOS) package — also builds (EshVision 3.x VLM-load migration)
+
+The root `Source` package (`EshCore`, `EshRuntime`, `EshImageGen`, `EshVision`, `EshLlamaCpp`) builds at rc=0.
+The one source change was `EshVision` (the **only** consumer of the 3.x model-load API in the entire codebase):
+
+- mlx-swift-lm 3.x replaced `VLMModelFactory.loadContainer(hub:configuration:)` with
+  `loadContainer(from: Downloader, using: TokenizerLoader, configuration:)`. The 3.x idiom is the
+  `MLXHuggingFace` macros (`#hubDownloader` / `#huggingFaceTokenizerLoader` / `#adaptHuggingFaceTokenizer`),
+  which (a) pull swift-syntax into the consumer and (b) default to `HubClient.default`, dropping EshVision's
+  custom external-SSD `downloadBase` + Keychain HF token.
+- To preserve both EshVision's **swift-syntax-free** design *and* its custom download location + token, the
+  macro expansions were replicated as plain Swift bridge types in `EshVision.swift`
+  (`EshHubDownloader: Downloader`, `EshTransformersTokenizerLoader: TokenizerLoader`,
+  `EshTokenizerBridge: Tokenizer`) and a custom `HubClient(host:tokenProvider:cache:)` is built from
+  `HubCache(cacheDirectory: downloadBase)` + `TokenProvider.fixed(token:)`.
+- Manifest: `EshVision` gains `Tokenizers` (swift-transformers) + `HuggingFace` (swift-huggingface, declared
+  as a direct root dep at `0.8.1..<2.0.0`, matching swift-transformers' own pin). Neither pulls swift-syntax.
+
+**swift-syntax note (not a regression):** swift-syntax now appears in the root `Package.resolved`, but it is
+declared **only by mlx-swift-lm** (its `MLXHuggingFaceMacros` target) — inherent to depending on mlx-swift-lm 3.x
+at all, *not* introduced by the swift-huggingface addition. It is **never compiled** in the root build (verified:
+no `Compiling SwiftSyntax`/macro-plugin in the build logs; only SwiftPM's *prebuilt* macro-support modules are
+fetched). EshVision depends on `MLXVLM`/`MLXLMCommon`, not `MLXHuggingFace`, so the macro plugin is not built and
+the portable compile stays swift-syntax-free in practice.
+
+**Status:** both packages **BUILD** against mlx-swift 0.32.3 (macOS esh CLI runs; root portable package compiles).
+Remaining: Phase 6 regression (test suite), Phase 5 real-weight validation (30B text, vision, image gen/edit,
+audio/TTS, GGUF backend), Phase 7 release artifacts. Fork re-tags / bg-safe re-base are release-prep (not required
+to build/validate locally; the branches are consumed by path).
