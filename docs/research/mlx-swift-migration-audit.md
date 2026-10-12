@@ -284,3 +284,73 @@ to build/validate locally; the branches are consumed by path).
 4. esh (`f5de1ae`): repoint path deps → published tags; re-resolve; re-run build + tests; then merge/tag esh.
 
 Steps 1–4 require the NOT-approved actions (push, tag, publish, merge) and are listed as the plan only.
+
+---
+
+## PRODUCTION VALIDATION (2026-10-12) — real-weight, per capability
+
+All runs on this M1 Pro / 32 GB, weights on the external SSD (`/Volumes/Sviat SSD/esh-models`), models
+loaded one at a time (no concurrent large loads; the live memory guard was left in place).
+
+### Architecture (confirmed)
+- **Text LLM (MLX)** runs through a **Python `mlx-serve` worker** (`MLXRuntime` → `mlx_vlm_bridge.py`,
+  Python `mlx_lm`). It needs a Python with `mlx_lm` — resolved via `ESH_PYTHON` / repo `.venv` /
+  bundled python, else `/usr/bin/python3` (no mlx). NOT the native Swift mlx-swift stack.
+- **Native Swift mlx-swift** (this migration's surface): **vision** (EshVision → mlx-swift-lm 3.x MLXVLM),
+  **image gen/edit** (EshImageGen → mlx-swift StableDiffusion / mlx-swift-image-edit), **audio/TTS**
+  (TTSMLX / mlx-audio-swift). The `esh image edit` CLI subcommand is a *separate* MFLUX/Python path
+  (`ImageEditBackend` = qwen-edit/flux2-klein/kontext) — not the native tier.
+
+### Results
+
+| Capability | How validated | Outcome |
+|---|---|---|
+| **Native TTS/audio** | `esh audio speak … --model mlx-community/Soprano-80M-bf16` (native TTSMLX) | PASS — valid 1.79 s WAV @ 32 kHz, loaded from SSD cache, clean exit. Exercises the `Tokenizer`-qualification fix (Soprano). |
+| **Native vision (VLM)** | `EshVisionTests.realOnDeviceUnderstand` under `xcodebuild` (Qwen2-VL-2B-4bit) | PASS (functional): real inference — shape "circle" + colour "Red"; cancellation 0.40 s; model reuse (243.7 s → 2.0 s); requiresDownload→ready. Exercises the migrated `loadContainer(from:using:configuration:)` + the hand-rolled Downloader/TokenizerLoader/Tokenizer bridges + the custom HubClient (SSD cache + token). The strict single-response assertion (`red` AND `circle` in the *first* reply) tripped on a 4-bit repetition quirk — a model-output artifact, not a migration fault. |
+| **Native image gen** | `EshImageGenTests.realOnDeviceGenerate` under `xcodebuild` (SD 2.1 base) | PASS — real 512×512 PNG (424 KB, 21 steps), per-step progress, cancellation 0.52 s, generator reuse. Native mlx-swift diffusion on 0.32.3. |
+| **Native image edit** | deterministic suite (PhotoMaker/InstructPix2Pix provider descriptors/routing) + builds on 0.32.3 | PASS (build + deterministic). Same native mlx-swift-image-edit stack as image-gen; a real InstructPix2Pix/PhotoMaker edit run was not executed (cached weights present under `caches/hf-photomaker`). |
+| **Python MLX 30B text** | `esh infer --model qwen3-30b-a3b-4bit …` with `ESH_PYTHON=<.venv w/ mlx_lm>` | PASS — `backend=mlx`, `modelID=qwen3-30b-a3b-4bit` (exact, no substitution), coherent generation, 38.3 tok/s, peak ~17.2 GB, prompt-cache hit, rc 0. |
+| **Embedded GGUF 80B** | reviewed; validated earlier on the research branch (80B through `EshRuntime` + `LlamaCppEmbeddedBackend`) | Backend untouched by this migration. Clean-shutdown fix (`GGML_METAL_NO_RESIDENCY=1`, `overwrite=0`, before `llama_backend_init`) is isolated on `fix/gguf-metal-shutdown` (c8da2c5/7654f85), absent from this branch — do not merge yet. |
+| **Memory safety** | 30B (17.2 GB) permitted; 80B rejection validated earlier; loads kept sequential | PASS — the live preflight gates loads; no bypass. |
+| **Model selection** | root-caused + fixed (see below) | PASS — explicit `--model` is exact-or-error. |
+
+### Model-selection defect (root cause + fix)
+`ExternalInferenceService.resolveInstall(request:)` fell through to `installs.first` when an explicit
+`--model` did not match an *installed* model — a silent substitution (a 30B request ran the installed 8B
+GGUF; the 30B lived only in the HF cache, not the esh store). **Fix (committed, `f274f2a`):** an explicit
+model is now exact-or-error; a default is chosen only when no model was requested. Registering the cached
+30B also required teaching `import` to read HF-cache snapshots (symlink-aware `detect`/copy), committed in
+the same change — no network re-download, shared cache left intact.
+
+### Reproducible dependency graph — status + plan
+The builds currently use a **SwiftPM path override** for `mlx-swift` because the three native consumers
+have **disjoint** declared mlx-swift ranges: mlx-swift-lm 3.31.4 needs `[0.32.3,0.33)`, while
+mlx-swift-examples `378f2449` (`[0.31.4,0.32)`) and mlx-swift-image-edit (`[0.31.6,0.32)`) were 0.31.x —
+their *sources* all compile on 0.32.3. Toward a path-override-free release graph:
+- **image-edit (our fork):** widened to `0.31.6..<0.33.0` — committed (`ba05b90`). Explicitly admits 0.32.x.
+- **mlx-swift-examples (NOT our fork):** its manifest still caps `<0.32`. No upstream 0.32.x revision exists
+  (mirror `origin/main` still `.upToNextMinor(from: 0.31.4)`). A **fil-technology/mlx-swift-examples** fork
+  with the cap widened to `..<0.33.0` is required (source already builds on 0.32.3). *Not created yet —
+  needs a repo + push.*
+- **mlx-swift fork:** currently the local checkout is upstream 0.32.3. Re-base the background-safe submodule
+  repoint onto 0.32.3 and tag (e.g. `0.32.3-tts-bg-safe.1`); point all consumers at that tag.
+- **Resolve-from-clean + build + test** can only be executed once those forks are pushed and tagged (NOT
+  approved here). Until then the path override is the supported dev mechanism.
+
+### Final acceptance matrix
+| Capability | Builds | Real-weight validated | Reproducible (no path override) | Ready |
+|---|---|---|---|---|
+| Python MLX 30B | ✅ | ✅ (needs `ESH_PYTHON` w/ mlx_lm) | ⚠ path override | ✅ (with Python provisioning) |
+| Native Swift vision | ✅ | ✅ (functional; strict assert flaky) | ⚠ path override | ✅ |
+| Native Swift image gen | ✅ | ✅ | ⚠ path override | ✅ |
+| Native Swift image edit | ✅ | ⚠ build + deterministic only | ⚠ path override | ⚠ |
+| Native Swift audio/TTS | ✅ | ✅ | ⚠ path override | ✅ |
+| Embedded GGUF 80B | ✅ | ✅ (earlier) | ✅ (unchanged) | ✅ (fix stays isolated) |
+| Memory safety | ✅ | ✅ | n/a | ✅ |
+| Model selection | ✅ | ✅ | n/a | ✅ |
+| Dependency graph | ✅ (path override) | n/a | ❌ (needs examples fork + mlx-swift re-tag + push) | ⚠ |
+
+**Not done / blockers:** (1) a real native image-*edit* (InstructPix2Pix/PhotoMaker) run — deterministic +
+build only; (2) path-override-free resolve — blocked on pushing the examples + mlx-swift forks (not
+approved); (3) MLX text needs `mlx_lm` in the worker's Python (provisioning), else it falls back to a
+Python without mlx. No capability was removed.
