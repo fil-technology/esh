@@ -54,19 +54,23 @@ Validated the two models through `EshRuntime` (not raw engines, not mocks), with
   (~13 GB free) returned `EshRuntimeError.insufficientMemory("needs ~22 GB but only ~13 GB is free … internal
   disk has ~9.2 GB for swap … (no reboot required)")` — a clean typed rejection, no crash, no hang. The gate is
   real, not just unit-tested.
-- **macOS MLX path — BLOCKED (pre-existing, not my change):** the `macos` package (incl. the `esh` CLI and the
-  macOS `MLXBackend`) does not build — root pins `mlx-swift 0.29.1..<0.30` while `mlx-audio-swift` needs
-  `0.30.6+`. So the 30B could not be run *through the macOS runtime*; it is validated via the raw mlx-lm engine.
-  Scoped follow-up: align the mlx-swift versions.
-- **80B through the facade — not completed:** the live gate (correctly) refused it under current memory, and the
-  embedded llama.cpp pin's Qwen3-Next support is unconfirmed (gate rejected before arch parsing). The raw
-  Homebrew `llama-server` (b8660) runs it at ~21 tok/s. Scoped follow-up: confirm/bump the embedded llama.cpp, or
-  document the 80B as server-backend-only.
+- **80B GGUF through the facade — VALIDATED:** the vendored embedded llama.cpp DOES support Qwen3-Next
+  (`qwen3next.cpp`, `llama_model_qwen3next`, gated-delta-net, QWEN3NEXT-MTP). The real 80B IQ2_XS loaded +
+  streamed through `EshRuntime` + the in-process backend at **~25.8 tok/s** (`general.architecture = qwen3next`,
+  843 tensors), once live memory permitted (~21 GB free). The gate correctly refuses it when the machine is busy
+  (validated both ways). The macOS `LlamaCppBackend` server path is blocked only by the macos build conflict.
+- **macOS MLX path — BLOCKED (migration, pre-existing):** the `macos` package (`esh` CLI + macOS `MLXBackend` +
+  macOS llama-server `LlamaCppBackend`) does not build — `TTSMLX ≥0.3.3` needs `mlx-swift ≥0.30.6`, root is
+  locked at `0.29.x` by `mlx-swift-examples` 2.29.1 + `mlx-swift-image-edit` 0.2.0. No small fix — a coordinated
+  `0.29→0.31.x` migration (proven-but-incomplete on `spike/mlx-swift-0.31-flux2`). The 30B is validated via raw
+  mlx-lm; through-macOS-runtime is gated on this migration. Scoped: ClickUp z8xxqw8y07 #1.
 - **Lifecycle finding:** chat `stream()`/`generate()` load a runtime **per call** and release on completion — no
-  warm-pool; `residentModels()`/`unload()` are not wired to chat, so **repeated requests reload weights** (costly
-  for a 22 GB model). Scoped follow-up: route load through `RuntimeLifecycleManager` for resident reuse.
-- **Teardown:** the in-process GGUF backend crashes in `ggml_metal_device_free` during process `exit()`
-  finalizers, AFTER inference — benign for results, a clean-shutdown follow-up.
+  warm-pool; `residentModels()`/`unload()` not wired to chat → **repeated requests reload weights** (costly for a
+  22 GB model). Scoped: route load through `RuntimeLifecycleManager`. ClickUp z8xxqw8y07 #3.
+- **Native shutdown crash — ROOT-CAUSED (not benign):** at process exit the global ggml-metal device destructor
+  asserts `ggml-metal-device.m:1025 [rsets->data count] == 0` → `ggml_abort`, because the residency-set
+  keep-alive (180 s) still holds Metal buffers. Process-exit-only, after successful inference, any GGUF model;
+  it's in the vendored llama.cpp build → fix = rebuilt `esh_llama.xcframework`. Scoped: ClickUp z8xxqw8y07 #4.
 
 Contract for Studio: `docs/integration/esh-studio-extreme-inference.md`.
 

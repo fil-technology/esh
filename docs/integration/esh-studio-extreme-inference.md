@@ -126,21 +126,31 @@ is wired via `EshRuntime.withEmbeddedGGUF(root:)`.)
 1. **esh version:** integrate against the merged tag of `research/extreme-local-inference` (TBD on merge). The
    two catalog ids above and `RecommendedModel.measuredPeakMemoryGB` + `EshRuntimeError.insufficientMemory` are
    the new public surface.
-2. **macOS MLX path currently blocked:** the `macos` package (and the `esh` CLI + macOS `MLXBackend`) does not
-   build on this branch due to a **pre-existing** dependency conflict — root pins `mlx-swift 0.29.1..<0.30`,
-   `mlx-audio-swift` requires `0.30.6+`. This blocks running the 30B (MLX) *through the macOS runtime* until the
-   `mlx-swift` versions are aligned. The 30B is validated via the raw mlx-lm engine; the portable facade + the
-   GGUF path build and run. **Scoped follow-up: resolve the mlx-swift / mlx-audio-swift version conflict.**
-3. **Embedded GGUF llama.cpp version:** the in-process backend links a pinned `esh_llama.xcframework`
-   (llama.cpp @ 4a89937). Whether that pin supports the very new **Qwen3-Next** architecture is unconfirmed (the
-   live memory gate correctly refused the 22 GB load before reaching arch parsing under current memory). The raw
-   Homebrew `llama-server` (b8660) runs the 80B at ~21 tok/s. **Scoped follow-up: confirm/bump the embedded
-   llama.cpp to a Qwen3-Next-capable build, or document that the 80B needs the server backend.**
+2. **macOS MLX path blocked by a dependency migration:** the `macos` package (the `esh` CLI + macOS
+   `MLXBackend` + macOS `LlamaCppBackend` server) does not build — `TTSMLX` (≥0.3.3, required for on-device
+   audio) hard-depends on `mlx-swift ≥0.30.6`, while the root graph is locked at `0.29.x` by `mlx-swift-examples`
+   2.29.1 + `mlx-swift-image-edit` 0.2.0. **There is no small pin tweak** — resolving it is a coordinated
+   `mlx-swift 0.29→0.31.x` migration (bump mlx-swift + mlx-swift-examples→main + swift-transformers→1.3, switch
+   `mlx-swift-image-edit` to a 0.31-compatible build, and move `EshVision` out of root). A proven-but-incomplete
+   config exists on branch `spike/mlx-swift-0.31-flux2`. **Until done, the 30B (MLX) runs only via the raw mlx-lm
+   engine, not through the macOS runtime.** Scoped follow-up: ClickUp `z8xxqw8y07` #1.
+3. **GGUF 80B — VALIDATED through the in-process backend.** The vendored `esh_llama.xcframework` **does** support
+   Qwen3-Next (`qwen3next.cpp`, `llama_model_qwen3next`, gated-delta-net kernels, QWEN3NEXT-MTP). The 80B
+   IQ2_XS loaded and streamed through `EshRuntime` + `LlamaCppEmbeddedBackend` at **~25.8 tok/s** (`general.
+   architecture = qwen3next`, 843 tensors), with the live memory gate correctly permitting/refusing by live
+   headroom. The macOS `LlamaCppBackend` (llama-server) is blocked only by #2's build conflict (the raw server,
+   b8660, also runs the 80B). No second GGUF engine introduced.
 4. **Warm-pool reuse (efficiency):** chat `stream()` reloads weights per request today (see §4). **Scoped
-   follow-up: route load through `RuntimeLifecycleManager` so repeated requests reuse a resident runtime**,
-   preserving the memory guard + `unload()`.
-5. **Teardown:** the in-process GGUF backend currently crashes in `ggml_metal_device_free` during process exit
-   (`__cxa_finalize`), AFTER inference completes — benign for correctness but a follow-up for clean shutdown.
+   follow-up (ClickUp `z8xxqw8y07` #3): route load through `RuntimeLifecycleManager` so repeated requests reuse a
+   resident runtime**, preserving the memory guard + `unload()`.
+5. **Native shutdown crash (not benign):** the in-process GGUF backend aborts at **process exit** via
+   `ggml-metal-device.m:1025 GGML_ASSERT([rsets->data count] == 0)` → `ggml_metal_device_free` →
+   `__cxa_finalize`. Root cause: the ggml-metal **residency-set keep-alive (180 s)** holds Metal buffers resident,
+   so the global device destructor finds a non-empty residency set at exit. It occurs **only at process
+   termination, after inference completes** (results unaffected, reproduces with any GGUF model incl. a 1.5B), and
+   is in the **vendored llama.cpp build** — the fix is a rebuilt `esh_llama.xcframework` (disable/flush the
+   residency-set keep-alive on teardown). Scoped follow-up: ClickUp `z8xxqw8y07` #4. Studio should not treat
+   process exit as clean until this lands.
 6. **Memory reality on 32 GB:** the 80B is swap-safe only with real headroom; the live preflight enforces this
    and will reject when the machine is busy. Studio should expect and surface `.insufficientMemory`.
 
