@@ -15,29 +15,37 @@ has been run yet — see "What is and isn't proven".
 ## What is and isn't proven
 
 - **Proven (MEASURED):** this machine's compute, memory bandwidth, external-SSD cold read behavior
-  (`benchmarks/hardware-profile.json`), AND the first model run — **Qwen3-30B-A3B-4bit at 28.7 tok/s, 17.3 GB,
-  swap-safe** (REPRODUCED; `benchmarks/model-results.json`).
-- **NOT yet proven:** the 80B-resident bet (deferred for safety — see Phase C below) and all other model tok/s,
-  which remain **THEORETICAL** until run. Do not read an unlabelled model number as success.
+  (`benchmarks/hardware-profile.json`), AND two model runs — **Qwen3-30B-A3B-4bit (MLX) at 28.7 tok/s, 17.3 GB**
+  and **Qwen3-Next-80B-A3B IQ2_XS (llama.cpp) at 21.1 tok/s, 21.2 GB** — both resident and swap-safe
+  (`benchmarks/model-results.json`). The headline bet (80B-class, resident, interactive on 32 GB) is confirmed
+  on speed + safety.
+- **NOT yet proven:** *utility* — whether the IQ2 80B's quality beats the clean 4-bit 30B (IQ2 is lossy; the 80B
+  sample code was subtly buggy). That needs the §15 quality suite. Other models' tok/s remain THEORETICAL.
 
 ## Phase C — first MEASURED model runs (2026-10-07)
 
 - **Qwen3-30B-A3B-4bit (MLX) — MEASURED / REPRODUCED:** generation **28.7 tok/s**, peak **17.3 GB**, swap-safe;
   cold TTFT 5.7 s and prompt 6.9 tok/s include first-run Metal kernel compilation. Confirms the thesis: a
   3B-active 30B MoE is comfortably *interactive* (≥10 tok/s) on this machine, fully resident. ✅
-- **Qwen3-Next-80B-A3B IQ2_XS (22.2 GB, llama.cpp b8660 Metal) — DEFERRED (safety, §29):** download reached
-  ~12 GB on the SSD (resumable) but the run was **killed before load**. Reason = the **binding memory-safety
-  finding below**. Metal reported `recommendedMaxWorkingSetSize = 26.8 GB` (~84% of RAM), so the model itself
-  would fit the GPU working set; the blocker is system-level swap/disk, not Metal.
+- **Qwen3-Next-80B-A3B IQ2_XS (22.2 GB, llama.cpp b8660 Metal) — MEASURED / VALIDATED (speed+safety):**
+  generation **21.1 tok/s**, prompt 25.8 tok/s; **21.2 GB resident on Metal** (25.6 of 26.8 GB, 3.7 GB headroom);
+  **swap-safe** (free RAM bottomed 1.7 GB, swap peaked 2.6 GB, 0 swaps, watchdog never fired). **An 80B-class
+  model runs resident and INTERACTIVE on a 32 GB M1 Pro.** Required a reboot first (see safety finding); unsafe
+  before it. Runtime note: this needs llama.cpp because the fit depends on the **GGUF IQ2 (~2-bit) quant** — the
+  lowest MLX quant is 4-bit (~40 GB, doesn't fit). **Quality caveat:** IQ2 is lossy — the sample Swift debounce
+  was fluent but subtly wrong (never cancels the prior task), so this 80B is NOT automatically better than the
+  clean 4-bit 30B for correctness-sensitive work. `--best` needs the §15 quality suite to settle. First MLX-vs-
+  llama.cpp, 30B-vs-80B utility datapoint.
 
 ### MEASURED memory-safety ceiling (the real limit on this machine)
 
 The resident-model ceiling here is set by **internal-disk/swap headroom, not the 32 GB of RAM**. The boot APFS
-container is chronically ~full (user Data volume = **413 GB of 460 GB**), leaving **~310 MB free**, and swap was
-**~94% used (8.19/8.70 GB)**. A ~17 GB model is safe; a ~22 GB model is unsafe until space is freed or a reboot
-reclaims swap (~8 GB → container ~9–10 GB free). **This is the binding constraint for the >RAM / resident-80B
-strategy on this exact setup** — and a concrete instance of the brief's §29 stop condition. Retry path: reboot,
-then resume the IQ2_XS download and run with live memory monitoring + hard abort.
+container is chronically ~full (user Data volume = **413 GB of 460 GB**). **Confirmed both ways:** the 22 GB
+80B IQ2_XS was **unsafe** when swap was ~94% used (310 MB container free) — killed before load (§29) — but
+**safe after a reboot** reclaimed ~8.2 GB of swap (ran at 21 tok/s, swap peaked 2.6 GB, 0 swaps). Practical
+`--best` fit-gating rule for this box: a resident model is safe to **~22–23 GB only with a fresh swap/disk
+state** (post-reboot or ≥10 GB internal free); otherwise cap **~17 GB**. Metal
+`recommendedMaxWorkingSetSize = 26.8 GB` is the hard upper bound regardless.
 
 ## Provenance / corrections (important)
 
@@ -134,21 +142,25 @@ Answerable now from Phase A/B (others deferred to Phase C/D, labelled pending):
 - What should `esh run --best` choose *today*: **PENDING** — provisionally Qwen3-30B-A3B (Q4) for interactive and
   Qwen3-Next-80B-A3B (IQ2) for best quality, to be set by Phase-C measurement.
 
-## BEST CURRENT CONFIGURATION (THEORETICAL — not yet run)
+## BEST CURRENT CONFIGURATION (MEASURED on speed+safety; utility pending §15)
+
+Two viable configs, pick by task until the quality suite decides:
 
 ```
-Model:            Qwen3-Next-80B-A3B        (confirm vs Strata's "Qwen3.8-Flash-Next" 125B variant)
-Total / active:   80B / ~3B per token
-Runtime:          MLX (mlx-lm)  [llama.cpp Metal as cross-check]
-Quantization:     IQ2 / mixed (2-bit experts, higher-precision attention+router+shared+embeddings)
-RAM:              ~23 GB resident  (leaves ~9 GB for macOS + KV; under the ~22 GB wired guidance)
-SSD:              none required at IQ2 (fits) — this is the point
-Context:          target 16–32K with Q8/Q4 KV
-Why this wins:    80B-class quality at 3B active, fully resident → avoids the ~1 GB/s SSD wall entirely
+INTERACTIVE / correctness-sensitive (today's safe default):
+  Model:        Qwen3-30B-A3B        Runtime: MLX 4-bit
+  Speed:        28.7 tok/s           Resident: 17.3 GB (swap-safe any time)
+  Why:          fast, clean 4-bit, fits with margin; fewer quant artifacts than IQ2
+
+MAX-BRAIN resident (when quality/size matters more than a bug-free first draft):
+  Model:        Qwen3-Next-80B-A3B   Runtime: llama.cpp IQ2_XS (GGUF ~2-bit)
+  Speed:        21.1 tok/s           Resident: 21.2 GB (swap-safe ONLY post-reboot / >=10 GB internal free)
+  Caveat:       IQ2 is lossy — sample code was fluent but subtly wrong; verify outputs
 ```
 
-Label: **THEORETICAL.** Promote to MEASURED → REPRODUCED → VALIDATED only after Phase C runs it through esh's
-guarded path and the quality suite (§15).
+Label: **MEASURED** for speed + memory-safety. **Utility ranking between the two is still open** — promote to
+VALIDATED once the §15 quality suite scores them. Note the identity question (Qwen3-Next-80B vs Strata's
+"Qwen3.8-Flash-Next" 125B) is moot for `--best` here: the public 80B at IQ2_XS is the one that runs.
 
 ## EXTREME MODEL FRONTIER (THEORETICAL)
 
