@@ -36,9 +36,15 @@ public enum EshVision {
     /// image + prompt. Cancelling the returned stream cancels generation. `downloadBase`, when provided,
     /// routes weight downloads to the configured storage volume (external SSD) instead of the internal
     /// default (`~/Documents/huggingface`).
+    /// Safe default output-token cap for image understanding when the caller supplies none. Bounds
+    /// generation so a model cannot run away into unbounded/degenerate output (e.g. repeating one token),
+    /// while still allowing a full descriptive answer. Callers may raise or lower it via the `maxTokens`
+    /// request option.
+    public static let defaultUnderstandMaxTokens = 512
+
     public static func mlxStream(modelID: String, cache: MLXModelCache = sharedCache,
                                  downloadBase: URL? = nil) -> VLMStreamFn {
-        { imagePath, prompt in
+        { imagePath, prompt, maxTokens in
             AsyncThrowingStream { continuation in
                 let task = Task {
                     do {
@@ -76,6 +82,11 @@ public enum EshVision {
                             await cache.store(modelID, container)
                         }
                         let session = ChatSession(container)
+                        // Bound generation: cap output tokens so a model cannot run away into unbounded or
+                        // degenerate (repetitive) output. Honors the caller's requested `maxTokens`, else a
+                        // safe default. Cancellation and streaming are unaffected (tokens still stream and
+                        // Task cancellation stops mid-stream).
+                        session.generateParameters.maxTokens = maxTokens ?? Self.defaultUnderstandMaxTokens
                         let url = URL(fileURLWithPath: imagePath)
                         for try await token in session.streamResponse(to: prompt, image: .url(url)) {
                             try Task.checkCancellation()

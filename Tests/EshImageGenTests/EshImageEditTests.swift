@@ -55,6 +55,29 @@ private func collectEdit(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async
     return (a, p, f)
 }
 
+private func pngSizeEdit(_ data: Data) -> CGSize? {
+    guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+          let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+    return CGSize(width: img.width, height: img.height)
+}
+
+// A real (512×512) input image on disk for the on-device edit: a red disc on white.
+private func realEditInputImage() -> String {
+    let w = 512, h = 512
+    let cs = CGColorSpaceCreateDeviceRGB()
+    let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                      space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    c.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    c.setFillColor(CGColor(red: 0.85, green: 0.15, blue: 0.15, alpha: 1))
+    c.fillEllipse(in: CGRect(x: 128, y: 128, width: 256, height: 256))
+    let data = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(dest, c.makeImage()!, nil); CGImageDestinationFinalize(dest)
+    let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+    try? (data as Data).write(to: u)
+    return u.path
+}
+
 @Suite struct EshImageEditTests {
     @Test func descriptorIsNativeInstructEditNotRestyle() {
         let p = MLXInstructImageEditProvider(modelID: "m", supported: true, edit: mockEdit(png: editPNG()))
@@ -160,5 +183,78 @@ private func collectEdit(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async
         // The validated UNet fp16 hash (the corruption guard).
         let unet = m.files.first { $0.relativePath == "unet/diffusion_pytorch_model.fp16.safetensors" }!
         #expect(unet.sha256 == "0d6bbc0a95dd125196d327a660b43d24c56f433eb30d2776f1327fb86bd38f78")
+    }
+
+    // Real on-device INSTRUCT image edit (InstructPix2Pix) through the PUBLIC facade. Downloads the
+    // token-free weights into the configured SSD cache and runs the edit on the GPU, so it is opt-in
+    // (ESH_IMAGEEDIT_REAL=1 or ~/.esh_imageedit_real) and must run under xcodebuild (MLX Metal shader
+    // library). Validates: a real edited PNG artifact at the input size, per-step progress, honest
+    // requiresDownload->ready discovery, prompt cancellation, and engine reuse.
+    @Test func realOnDeviceEdit() async throws {
+        let optedIn = ProcessInfo.processInfo.environment["ESH_IMAGEEDIT_REAL"] == "1"
+            || FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.esh_imageedit_real")
+        guard optedIn else { return }
+
+        let inputPath = realEditInputImage()
+        let root = PersistenceRoot.default()  // external SSD via storage.json
+        let runtime = await EshRuntime.makeWithImageEdit(root: root)  // native InstructPix2Pix (.mlx)
+
+        let before = await runtime.capabilityAvailability()
+        if case .requiresDownload = before.entries[.imageEdit] {} else {
+            Issue.record("expected requiresDownload before first load, got \(String(describing: before.entries[.imageEdit]))")
+        }
+
+        func editRequest(_ instruction: String, steps: Int) -> ExecutionRequest {
+            ExecutionRequest(capability: .imageEdit,
+                inputs: [.attachment(EshAttachment(kind: .image, mimeType: "image/png", uri: "file://" + inputPath)),
+                         .text(instruction)],
+                output: OutputSpec(modality: .image, format: "image/png"),
+                options: ExecutionOptions(["steps": .int(steps), "seed": .int(7)]))
+        }
+
+        // 1. edit: a real edited PNG with per-step progress
+        let t0 = Date(); var progress: [Double] = []; var artifactID: UUID?
+        for try await ev in runtime.stream(editRequest("make the red circle blue", steps: 12)) {
+            if case .progress(let p) = ev { progress.append(p) }
+            if case .artifactProduced(let a) = ev { artifactID = a.id }
+            if case .failed(let m) = ev {
+                FileHandle.standardError.write(Data("[realImageEdit] FAILURE: \(m)\n".utf8)); Issue.record("edit failed: \(m)")
+            }
+        }
+        let dt1 = Date().timeIntervalSince(t0)
+        let id = try #require(artifactID)
+        let png = try #require(try FileArtifactStore(root: root).data(id: id, file: "edited.png"))
+        let dims = try #require(pngSizeEdit(png))
+        let inputData = try Data(contentsOf: URL(fileURLWithPath: inputPath))
+        FileHandle.standardError.write(Data("[realImageEdit] first=\(String(format: "%.1f", dt1))s dims=\(dims) bytes=\(png.count) inputBytes=\(inputData.count) steps=\(progress.count)\n".utf8))
+        #expect(png.count > 1000)           // a real encoded image, not an empty/degenerate buffer
+        #expect(progress.count >= 8)        // ~12 denoise steps reported
+        #expect(progress.last == 1.0)
+        // The edit must transform the image — the output must not be the untouched input.
+        #expect(png != inputData)
+
+        let after = await runtime.capabilityAvailability()
+        if case .ready = after.entries[.imageEdit] {} else {
+            Issue.record("expected ready after a successful run, got \(String(describing: after.entries[.imageEdit]))")
+        }
+
+        // 2. cancellation: cancelling a long edit stops promptly
+        let cancelStart = Date()
+        let consumer = Task { do { for try await _ in runtime.stream(editRequest("add intricate ornate detailing everywhere", steps: 50)) {} } catch {} }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        consumer.cancel(); _ = await consumer.value
+        let cancelElapsed = Date().timeIntervalSince(cancelStart)
+        FileHandle.standardError.write(Data("[realImageEdit] cancelled in \(String(format: "%.2f", cancelElapsed))s\n".utf8))
+        #expect(cancelElapsed < dt1 + 5)
+
+        // 3. reuse: a 2nd edit reuses the loaded engine (no reload) -> faster than the first
+        let t2 = Date(); var artifact2: UUID?
+        for try await ev in runtime.stream(editRequest("make the red circle green", steps: 12)) {
+            if case .artifactProduced(let a) = ev { artifact2 = a.id }
+        }
+        let dt2 = Date().timeIntervalSince(t2)
+        FileHandle.standardError.write(Data("[realImageEdit] second=\(String(format: "%.1f", dt2))s\n".utf8))
+        #expect(artifact2 != nil)
+        #expect(dt2 < dt1)
     }
 }

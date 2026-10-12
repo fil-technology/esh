@@ -7,7 +7,9 @@ import EshRuntime
 // engine is injected (`VLMStreamFn`) so the provider's wiring (discovery/streaming/cancellation/errors) is
 // deterministically testable; the concrete MLX-backed engine (model load + reuse) lives in EshVision.swift.
 
-public typealias VLMStreamFn = @Sendable (_ imagePath: String, _ prompt: String) -> AsyncThrowingStream<String, Error>
+/// `maxTokens` is the caller-requested output-token cap (nil → the engine applies a safe default); it
+/// bounds generation so a model cannot emit unbounded/degenerate output, while cancellation still works.
+public typealias VLMStreamFn = @Sendable (_ imagePath: String, _ prompt: String, _ maxTokens: Int?) -> AsyncThrowingStream<String, Error>
 
 public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
@@ -47,6 +49,14 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
         let attachment = request.request.inputs.compactMap { i -> EshAttachment? in
             if case .attachment(let a) = i.payload, a.kind == .image { return a }; return nil
         }.first
+        // Caller-provided output-token cap (option "maxTokens"); nil lets the engine apply its safe default.
+        let maxTokens: Int? = {
+            switch request.request.options.values["maxTokens"] {
+            case .int(let i): return i
+            case .double(let d): return Int(d)
+            default: return nil
+            }
+        }()
         let stream = self.stream
         let supported = self.supported
         let stateBox = self.stateBox
@@ -68,7 +78,7 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
                 do {
                     continuation.yield(.status("loading vision model"))
                     var produced = false
-                    for try await token in stream(imagePath, effectivePrompt) {
+                    for try await token in stream(imagePath, effectivePrompt, maxTokens) {
                         try Task.checkCancellation()
                         if !produced { produced = true; stateBox.set(.ready) }
                         continuation.yield(.textDelta(token))
