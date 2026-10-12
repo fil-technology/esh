@@ -110,10 +110,27 @@ struct RecommendedModelRegistryTests {
         let m30 = registry.resolve(alias: "qwen-3-30b-a3b-mlx-4bit")
         #expect(m30?.backend == .mlx)
         #expect(m30?.estimatedMemoryGB == 18.0)      // MEASURED, not param-count estimate
+        #expect(m30?.measuredPeakMemoryGB == 18.0)   // measured precedence over param heuristic
         let m80 = registry.resolve(alias: "qwen-3-next-80b-a3b-iq2xs-gguf")
         #expect(m80?.backend == .gguf)
         #expect(m80?.quantization == "IQ2_XS")
         #expect(m80?.estimatedMemoryGB == 22.0)      // MEASURED resident footprint
+        #expect(m80?.measuredPeakMemoryGB == 22.0)
+        #expect(m80?.tags.contains("max-quality") == false)   // product: NOT labelled max-quality until benchmarked
+    }
+
+    @Test
+    func measuredProfileOverridesParamHeuristicInFit() {
+        // The 80B MoE's param-count heuristic (80B * 2.4bpw * 1.18 runtime ≈ 28 GB) would read .tight on a
+        // 32 GB Mac; the MEASURED 22 GB peak must take precedence and read .fits. Other models (no measurement)
+        // keep the heuristic unchanged.
+        let registry = RecommendedModelRegistry()
+        let m80 = registry.resolve(alias: "qwen-3-next-80b-a3b-iq2xs-gguf")!
+        let host = HostMachineProfile(totalMemoryGB: 32, availableMemoryGB: 24)
+        let fit = ModelFitService().assess(recommendedModel: m80, contextTokens: 4096, host: host,
+                                           root: PersistenceRoot(rootURL: FileManager.default.temporaryDirectory))
+        #expect(fit.estimatedPeakMemoryGB == 22.0)   // measured peak used, not the ~28 GB heuristic
+        #expect(fit.fitClass == .fits || fit.fitClass == .comfortable)
     }
 }
 

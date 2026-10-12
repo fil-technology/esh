@@ -26,6 +26,10 @@ public struct ModelFitService: Sendable {
         public var otherResidentGB: Double
         public var ttsReserveGB: Double
         public var speculativeDraftGB: Double
+        /// MEASURED peak runtime memory (GB), when known. Takes precedence over the param-count heuristic —
+        /// the correct number for MoE models whose TOTAL parameter count misleads a dense estimate. `nil`
+        /// falls back to the architecture/param estimate (unchanged behavior for all other models).
+        public var measuredPeakMemoryGB: Double?
 
         public init(
             parameterCountB: Double?,
@@ -39,7 +43,8 @@ public struct ModelFitService: Sendable {
             diskRequiredBytes: Int64? = nil,
             otherResidentGB: Double = 0,
             ttsReserveGB: Double = 0,
-            speculativeDraftGB: Double = 0
+            speculativeDraftGB: Double = 0,
+            measuredPeakMemoryGB: Double? = nil
         ) {
             self.parameterCountB = parameterCountB
             self.effectiveBits = effectiveBits
@@ -53,6 +58,7 @@ public struct ModelFitService: Sendable {
             self.otherResidentGB = otherResidentGB
             self.ttsReserveGB = ttsReserveGB
             self.speculativeDraftGB = speculativeDraftGB
+            self.measuredPeakMemoryGB = measuredPeakMemoryGB
         }
     }
 
@@ -87,7 +93,19 @@ public struct ModelFitService: Sendable {
             format: input.format
         )
 
-        guard let runtimeGB = estimate.runtimeGB, let weightsGB = estimate.weightsGB else {
+        // Fit precedence: a MEASURED runtime peak wins over the param-count heuristic (which overestimates MoE,
+        // whose total params >> active/resident footprint). When measured, derive weights for the breakdown from
+        // the estimate if available, else approximate. Only when NEITHER a measurement NOR an estimate exists do
+        // we fall back to honest "unknown". Models without a measurement keep the exact prior behavior.
+        let runtimeGB: Double
+        let weightsGB: Double
+        if let measured = input.measuredPeakMemoryGB, measured > 0 {
+            runtimeGB = measured
+            weightsGB = estimate.weightsGB ?? measured * 0.92   // ~weights share of a measured resident peak
+        } else if let r = estimate.runtimeGB, let w = estimate.weightsGB {
+            runtimeGB = r
+            weightsGB = w
+        } else {
             // Not enough metadata: honest "unknown" — allow deliberate override.
             return ModelFitAssessment(
                 fitClass: .unknown,
@@ -180,7 +198,8 @@ public struct ModelFitService: Sendable {
             architectureSupported: model.status != .incompatible,
             contextTokens: contextTokens ?? min(model.contextWindow ?? 8192, 8192),
             diskRequiredBytes: Int64(model.totalDiskSizeGB * 1.1 * 1_073_741_824),
-            otherResidentGB: otherResidentGB
+            otherResidentGB: otherResidentGB,
+            measuredPeakMemoryGB: model.measuredPeakMemoryGB   // precedence #1 when the catalog has a MEASURED profile
         )
         return assess(input: input, host: host, root: root)
     }

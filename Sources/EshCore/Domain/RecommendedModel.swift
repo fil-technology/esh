@@ -64,6 +64,11 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
     public var tier: Tier
     public var estimatedMemoryGB: Double
     public var totalDiskSizeGB: Double
+    /// MEASURED peak runtime memory (GB) on reference hardware, when known. Overrides the param-count heuristic
+    /// in `ModelFitService` (precedence: measured > metadata > architecture estimate > param heuristic). `nil`
+    /// for models whose footprint is only estimated — those keep the existing param-count behavior unchanged.
+    /// This is a RUNTIME figure (weights + KV + compute + overhead), distinct from `totalDiskSizeGB` (weights on disk).
+    public var measuredPeakMemoryGB: Double?
     public var tags: [String]
     public var summary: String
     public var backend: BackendKind
@@ -104,6 +109,7 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
         tier: Tier,
         estimatedMemoryGB: Double,
         totalDiskSizeGB: Double,
+        measuredPeakMemoryGB: Double? = nil,
         tags: [String],
         summary: String,
         backend: BackendKind = .mlx,
@@ -121,6 +127,7 @@ public struct RecommendedModel: Identifiable, Codable, Hashable, Sendable {
         self.tier = tier
         self.estimatedMemoryGB = estimatedMemoryGB
         self.totalDiskSizeGB = totalDiskSizeGB
+        self.measuredPeakMemoryGB = measuredPeakMemoryGB
         self.tags = tags
         self.summary = summary
         self.backend = backend

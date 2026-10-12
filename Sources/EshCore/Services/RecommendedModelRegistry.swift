@@ -593,6 +593,7 @@ public struct RecommendedModelRegistry: Sendable {
             tier: .max,
             estimatedMemoryGB: 18.0,           // MEASURED peak 18.1 GB (M1 Pro); swap-safe anytime
             totalDiskSizeGB: 17.2,             // MEASURED
+            measuredPeakMemoryGB: 18.0,        // MEASURED runtime peak — overrides the param-count heuristic (MoE)
             tags: ["moe", "coding", "agentic", "measured-m1pro"],
             summary: "MoE 30B (~3.3B active/token). MEASURED on 32 GB M1 Pro: ~28-40 tok/s, 18 GB resident, swap-safe, 9/9 on the objective quality suite. The recommended interactive/coding default for 32 GB Apple Silicon (esh run --best).",
             backend: .mlx,
@@ -611,8 +612,9 @@ public struct RecommendedModelRegistry: Sendable {
             tier: .max,
             estimatedMemoryGB: 22.0,           // MEASURED 21.2 GB resident on Metal + KV headroom; swap-safe on 32 GB ONLY with fresh headroom (post-reboot)
             totalDiskSizeGB: 22.2,             // MEASURED
-            tags: ["moe", "gguf", "iq2", "max-quality", "measured-m1pro"],
-            summary: "80B-class hybrid MoE (~3B active) at ~2-bit IQ2_XS. MEASURED on 32 GB M1 Pro: ~21 tok/s, 21.2 GB resident, interactive, 9/9 on the objective suite. Opt-in max-quality tier only: IQ2 is lossy (verify correctness-sensitive output) and the footprint is swap-safe on 32 GB only with fresh memory headroom. Requires a llama.cpp build with Qwen3-Next support.",
+            measuredPeakMemoryGB: 22.0,        // MEASURED runtime peak — overrides the param-count heuristic (80B total ≠ resident)
+            tags: ["moe", "gguf", "iq2", "experimental-large", "measured-m1pro"],
+            summary: "Experimental large model: 80B-class hybrid MoE (~3B active) at ~2-bit IQ2_XS. MEASURED on 32 GB M1 Pro: ~21 tok/s, 21.2 GB resident, interactive. Opt-in only — IQ2 is lossy so quality vs the 30B default is NOT yet benchmarked (do not assume higher), and the footprint is swap-safe on 32 GB only with fresh memory headroom. Requires a llama.cpp build with Qwen3-Next support.",
             backend: .gguf,
             contextWindow: 262144,
             capabilities: [.chat, .coding, .reasoning, .toolCalling],
