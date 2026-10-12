@@ -169,6 +169,13 @@ actor LlamaContext {
     }
 
     static func make(modelPath: String, config: LlamaCppConfig) async throws -> LlamaContext {
+        // Clean-shutdown fix: ggml-metal's residency-set keep-alive (180 s) leaves Metal buffers resident, so at
+        // process exit the global device destructor trips `GGML_ASSERT([rsets->data count] == 0)` in
+        // `ggml_metal_device_free` (`__cxa_finalize`) — a native abort AFTER inference completes (reproduced with
+        // any GGUF model). Disabling residency sets makes termination clean. Measured throughput impact is
+        // negligible (~2% on a 1.5B Q4; 48.1 vs 49.2 tok/s). `overwrite = 0` so a host that has deliberately set
+        // this env (e.g. to keep residency for a memory-tight large model, accepting the exit abort) wins.
+        setenv("GGML_METAL_NO_RESIDENCY", "1", 0)
         llama_backend_init()
         var mparams = llama_model_default_params()
         mparams.n_gpu_layers = Int32(config.gpuLayers)
