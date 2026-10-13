@@ -1,7 +1,7 @@
 import Foundation
 import EshCore
 
-public final class MLXRuntime: BackendRuntime, @unchecked Sendable {
+final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     public let backend: BackendKind = .mlx
     public let modelID: String
 

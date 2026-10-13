@@ -23,7 +23,7 @@ private struct MLXServeGenerateRequest: Encodable, Sendable {
 ///
 /// `RuntimeLifecycleManager` owns instances of this type; eviction/idle/pressure handling and bounded
 /// concurrency live there, not here (no parallel runtime manager).
-public final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, @unchecked Sendable {
+final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, @unchecked Sendable {
     public let backend: BackendKind = .mlx
     public let modelID: String
 
