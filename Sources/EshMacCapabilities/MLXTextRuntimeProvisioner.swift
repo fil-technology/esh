@@ -39,6 +39,20 @@ public enum MLXTextRuntimeProvisioner {
     /// a repair that finds only `mlx` missing can reinstall it directly.
     static let pipPackages = ["mlx", "mlx-lm"]
 
+    /// The deterministic managed paths for the MLX text runtime, resolved with **cheap FS checks only** (no
+    /// subprocess, no import probe) — safe to call on a hot path such as runtime assembly. Returns the paths
+    /// when the managed venv interpreter and the esh-shipped bridge both exist on disk, else `nil`. This does
+    /// NOT guarantee `mlx_lm` is importable (that is verified by `probe()` / enforced at first model load and
+    /// healed by `ensure()`); it only decides whether `.mlx` can be meaningfully registered without blocking.
+    public static func resolvedPaths(root: PersistenceRoot = .default()) -> MLXTextRuntimeProvision? {
+        let python = ManagedPythonRuntime(root: root).venvPythonPath
+        guard FileManager.default.isExecutableFile(atPath: python) else { return nil }
+        guard let bridgeDir = EshManagedPythonHost.bundledBridgeDir() else { return nil }
+        let bridge = bridgeDir + "/mlx_vlm_bridge.py"
+        guard FileManager.default.fileExists(atPath: bridge) else { return nil }
+        return MLXTextRuntimeProvision(pythonExecutablePath: python, bridgeScriptPath: bridge)
+    }
+
     /// Is the MLX text runtime ready RIGHT NOW without provisioning? Adopts an already-provisioned managed
     /// venv and probes the modules against it. Never downloads or installs. `nil` bridge dir / unprovisioned
     /// venv / missing module all return `false` — the honest "not ready yet" answer.
