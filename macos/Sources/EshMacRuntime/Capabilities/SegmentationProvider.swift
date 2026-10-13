@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR, Stage 2 — background removal / segmentation (image → image). The first image-OUTPUT
 // provider: proves a typed IMAGE artifact end-to-end (acceptance Extension C, edit-image class). Uses

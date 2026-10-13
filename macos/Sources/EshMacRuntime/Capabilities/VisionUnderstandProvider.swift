@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR, Stage 2 — vision understanding (image + text → text) via mlx-vlm. This is the first real
 // non-text INPUT modality: images now actually reach the model (the bridge gained an mlx-vlm image path;

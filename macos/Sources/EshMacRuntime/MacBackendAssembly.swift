@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // macOS backend assembly (M9).
 //

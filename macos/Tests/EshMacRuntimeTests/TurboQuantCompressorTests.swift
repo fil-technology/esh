@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import EshCore
 @testable import EshMacRuntime
+import EshMLXText
 
 @Suite
 struct TurboQuantCompressorTests {

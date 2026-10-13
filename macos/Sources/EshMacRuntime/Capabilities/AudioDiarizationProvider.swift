@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR, Stage 3 — speaker diarization (audio → structured). Labels anonymous speaker CLUSTERS
 // (speaker_0, speaker_1, …) with time ranges via sherpa-onnx (onnxruntime, torch-free); optionally merges

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 import EshMacRuntime
 
 enum CacheLoadCommand {

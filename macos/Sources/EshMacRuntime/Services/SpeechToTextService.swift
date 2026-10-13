@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 /// On-device speech-to-text (M10) via mlx_audio, invoked through the MLX bridge. Symmetric with the
 /// MLX TTS path: local, no cloud. The model (e.g. parakeet) is fetched/cached by mlx_audio.

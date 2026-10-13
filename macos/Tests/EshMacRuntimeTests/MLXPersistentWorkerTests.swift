@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import EshCore
 @testable import EshMacRuntime
+import EshMLXText
 
 /// Real-runtime integration tests for the persistent MLX worker. These spawn a live Python worker and
 /// load a real model, so they run ONLY when explicitly enabled:

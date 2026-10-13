@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 /// Owns a persistent STT worker (M12) so the speech-to-text model stays resident across requests
 /// instead of reloading Python + weights every call (~4–6 s → warm). Lazily starts a worker for the

@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 public struct ChatModelValidator: Sendable {
     private let backendRegistry: InferenceBackendRegistry

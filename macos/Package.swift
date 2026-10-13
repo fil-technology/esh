@@ -54,6 +54,9 @@ let package = Package(
             name: "EshMacRuntime",
             dependencies: [
                 .product(name: "EshCore", package: "esh"),
+                // Single-source the MLX text backend: EshMacRuntime consumes the remote-consumable
+                // EshMLXText product instead of carrying its own duplicate copy of the MLX files.
+                .product(name: "EshMLXText", package: "esh"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
                 .product(name: "SwiftSyntax", package: "swift-syntax")
             ],
@@ -63,6 +66,7 @@ let package = Package(
             name: "esh",
             dependencies: [
                 .product(name: "EshCore", package: "esh"),
+                .product(name: "EshMLXText", package: "esh"),
                 "EshMacRuntime",
                 .product(name: "TTSMLX", package: "TTSMLX")
             ],
@@ -70,7 +74,7 @@ let package = Package(
         ),
         .testTarget(
             name: "EshMacRuntimeTests",
-            dependencies: ["EshMacRuntime"],
+            dependencies: ["EshMacRuntime", .product(name: "EshMLXText", package: "esh")],
             swiftSettings: quietDebugSwiftSettings
         ),
         .testTarget(

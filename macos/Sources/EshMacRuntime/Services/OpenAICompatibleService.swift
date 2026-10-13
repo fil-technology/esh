@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 public enum OpenAICompatibleError: LocalizedError, Sendable {
     case invalidRequest(String)

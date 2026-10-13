@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR — instruction-based image editing (image + instruction → image). A first-class capability
 // behind the Universal Capability Runtime, NOT a frontend trick. One coherent `image.edit` provider whose

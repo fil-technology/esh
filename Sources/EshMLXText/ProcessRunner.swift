@@ -1,10 +1,10 @@
 import Foundation
 import EshCore
 
-public struct ProcessOutput: Sendable {
-    public var stdout: Data
-    public var stderr: Data
-    public var exitCode: Int32
+struct ProcessOutput: Sendable {
+    var stdout: Data
+    var stderr: Data
+    var exitCode: Int32
 
     public init(stdout: Data, stderr: Data, exitCode: Int32) {
         self.stdout = stdout
@@ -13,7 +13,7 @@ public struct ProcessOutput: Sendable {
     }
 }
 
-public enum ProcessRunner {
+enum ProcessRunner {
     public static func run(
         executableURL: URL,
         arguments: [String],

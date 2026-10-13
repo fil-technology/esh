@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 public final class EngineOrchestratorService {
     private let root: PersistenceRoot

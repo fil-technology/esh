@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR — image super-resolution / upscale (image → image). A SEPARATE typed capability
 // (image.upscale), not folded into a vague image.edit.

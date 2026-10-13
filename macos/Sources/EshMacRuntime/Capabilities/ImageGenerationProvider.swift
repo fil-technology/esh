@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR, Stage 3 — text → image generation. Produces a typed IMAGE artifact from a text prompt
 // via mflux's Z-Image Turbo CLI (Apache-2.0, ~8 steps) through the `image-generate` bridge op. mflux is

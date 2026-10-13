@@ -1,5 +1,6 @@
 import Foundation
 import EshCore
+import EshMLXText
 
 // esh 2.1 UCMR — audio.generate (non-speech SFX / ambience / Foley). Two provider paths behind ONE capability,
 // chosen by the scheduler/classifier (proving esh schedules CAPABILITIES, not just models):
