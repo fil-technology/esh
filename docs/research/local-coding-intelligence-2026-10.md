@@ -189,6 +189,33 @@ Reuse esh's own harness (`esh benchmark lab`, `benchmarks/bench_mlx_lm.py`, `ben
 
 ---
 
+## 11. Phase A verification addendum (2026-10-14) — VERIFIED against the installed runtime
+
+Zero-download validation against the esh worker runtime (`~/.esh/runtime/python`): **mlx 0.32.2 · mlx_lm 0.31.3 · mlx_vlm 0.5.0 · transformers 5.17.0 · tokenizers 0.23.2**.
+
+**Validation ladder (these are DIFFERENT levels — do not conflate):**
+1. **Architecture recognized** — `model_type` maps to an mlx_lm module.
+2. **Metadata compatible** — quant block, tokenizer, chat_template all present & loadable (text-only metadata inspected; no weights).
+3. **Model successfully loaded** — weights load into the managed runtime.
+4. **Inference successfully completed** — generation + streaming + cancel + unload/reload under the memory gate.
+5. **Benchmark successfully completed** — full coding suite scored head-to-head.
+
+As of this addendum, Phase A reached **levels 1–2** for the text coders; levels 3–5 are Phase B (gated on storage — see below). No model has been downloaded, loaded, or benchmarked yet.
+
+| Finding | Evidence | Ladder level reached |
+|---|---|---|
+| **Installed mlx_lm arch support** | mlx_lm 0.31.3 ships 118 arch modules incl. `qwen3_moe`, `qwen3_5`/`qwen3_5_moe`, `glm4_moe`/`glm4_moe_lite`, `gpt_oss`, `seed_oss`, `deepseek_v3`/`v32`. The catalog's `qwen3.5 .incompatible` flag is **STALE** (that arch is supported in 0.31.3). | — |
+| **GLM-4.7-Flash** `lmstudio-community/GLM-4.7-Flash-MLX-4bit` | `model_type=glm4_moe_lite` (module ✓), quant 4-bit g64, ctx 202752, **chat_template PRESENT** (3.1k), tokenizer `TokenizersBackend`, eos `<\|endoftext\|>`. MIT. | **2 (metadata compatible)** |
+| **gpt-oss-20b** `mlx-community/gpt-oss-20b-MXFP4-Q4` | `model_type=gpt_oss` (module ✓), quant 4-bit g32 (MXFP4→MLX), ctx 131072, **chat_template PRESENT** (harmony, 16.7k), eos `<\|return\|>`. Apache-2.0. | **2 (metadata compatible)** |
+| **Qwen3-Coder-30B-A3B** `mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit` | `model_type=qwen3_moe` (module ✓), quant 4-bit g64, ctx 262144, **chat_template ABSENT in this MLX artifact** (base repo has it), tokenizer `Qwen2Tokenizer`. Apache-2.0. | **1 (arch recognized); blocked at 2** — must supply the chat_template or use a template-bearing MLX conversion |
+| **Qwen3.6-35B-A3B** `lmstudio-community/Qwen3.6-35B-A3B-MLX-4bit` | `architectures=Qwen3_5MoeForConditionalGeneration`; config carries `vision_config` + `image_token_id` + `video_token_id`; text tower `qwen3_5_moe_text` (40L / 256E / 8A / ctx 262144). **MULTIMODAL (vision+video), not a plain text coder.** | **n/a for text path** — routes through the VLM path, not esh's `mlx_lm` text worker. **The "best high-quality text coder" pick is revised to Qwen3-Coder-30B-A3B / GLM-4.7-Flash (or dense Devstral-24B, SWE-bench Verified 68.0).** |
+
+**Current memory-safety limitation (MEASURED):** esh's `MemorySafetyPreflight` (ported into the coding harness runner) **refuses any > 4 GB model load on this machine right now** — not for lack of RAM (20+ GB available) but because **internal-disk free (~2 GB) is below the 3 GB swap floor** (the reboot-prevention guard; swap cannot grow safely). The ~16 GB staged macOS 27.0.1 update is the main consumer. Download-to-SSD is unaffected (SSD ~378 GB free); only *running* weights is gated until internal disk is reclaimed to ≥ ~5–8 GB.
+
+**Grader/harness status:** the committed coding harness (`benchmarks/coding/`) is validated 10/10 against the real toolchains (swiftc 6.4, node 26 TS type-strip) via `validate_graders.py`.
+
+---
+
 ## Stop point
 Per your instructions this is research only. **I will not download weights, run new-weight benchmarks, change the catalog/runtime, or merge/publish anything until you approve.** Awaiting your call on §10 (and whether to keep this report in `docs/research/` under version control).
 
