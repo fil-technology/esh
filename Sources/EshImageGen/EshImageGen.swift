@@ -244,6 +244,23 @@ public actor SDEngine {
 
     public var isLoaded: Bool { loaded }
 
+    /// True only while a generation is in flight (across its internal awaits). The actor is REENTRANT at
+    /// `await` points, so actor isolation alone does not prevent an `unload()` from running mid-generation;
+    /// this flag does.
+    private var active = false
+
+    /// Release the resident SD pipeline AND the MLX GPU allocator cache. Idempotent; a no-op while a
+    /// generation is active (so an unload/generate race can never tear down the pipeline mid-run, and a
+    /// shared cache is never cleared while another MLX op is in flight). Dropping `generator` alone is
+    /// insufficient — MLX keeps freed Metal buffers in its allocator cache until `Memory.clearCache()`,
+    /// which is the bulk of the retained IOAccelerator footprint, so we clear it here when idle.
+    public func unload() {
+        guard !active else { return }
+        generator = nil
+        loaded = false
+        MLX.Memory.clearCache()
+    }
+
     private func makeGenerator(hub: HubApi, onProgress: @Sendable (Double) -> Void) async throws -> any TextToImageGenerator {
         if let generator { return generator }
         let config = preset.configuration
@@ -265,6 +282,8 @@ public actor SDEngine {
     /// Run the diffusion loop for one image and return PNG bytes. `onProgress` is called per denoise step.
     func run(prompt: String, params: EshImageGenParams, hub: HubApi,
              onProgress: @Sendable (Double) -> Void) async throws -> Data {
+        active = true
+        defer { active = false }
         let g = try await makeGenerator(hub: hub, onProgress: onProgress)
         var p = preset.configuration.defaultParameters()
         p.prompt = prompt
@@ -364,7 +383,8 @@ public enum EshImageGen {
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXImageGenerateProvider(modelID: modelID, supported: isSupportedPlatform,
                                          generate: mlxGenerate(engine: engine, downloadBase: downloadBase),
-                                         readyProbe: readyProbe)]
+                                         readyProbe: readyProbe,
+                                         unload: { await engine.unload() })]
     }
 }
 

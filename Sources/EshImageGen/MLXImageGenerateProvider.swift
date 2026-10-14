@@ -31,20 +31,28 @@ public enum ImageGenChunk: Sendable {
 public typealias ImageGenFn = @Sendable (_ prompt: String, _ params: EshImageGenParams)
     -> AsyncThrowingStream<ImageGenChunk, Error>
 
-public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, ResourceStateReporting, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let modelID: String
     private let generate: ImageGenFn
     private let supported: Bool
     private let readyProbe: (@Sendable () -> Bool)?
+    private let unloadFn: (@Sendable () async -> Void)?
     private let stateBox: StateBox
+    /// Truthful runtime residency, mirrored into resource telemetry: `warm` flips true once the SD pipeline
+    /// is resident (first produced image) and false on `unload()`; `active` is true only while serving a
+    /// request. Without this, the retained native engine was invisible to `residentModels()` → "nothing
+    /// loaded" while ~19 GB stayed resident.
+    private let runtimeState = ProviderStateBox()
 
     public init(modelID: String, supported: Bool, generate: @escaping ImageGenFn,
-                readyProbe: (@Sendable () -> Bool)? = nil) {
+                readyProbe: (@Sendable () -> Bool)? = nil,
+                unload: (@Sendable () async -> Void)? = nil) {
         self.modelID = modelID
         self.supported = supported
         self.generate = generate
         self.readyProbe = readyProbe
+        self.unloadFn = unload
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
             id: "mlx-image-generate", capabilities: [.imageGenerate],
@@ -81,8 +89,11 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
         let stateBox = self.stateBox
         let store = context.artifactStore
         let providerID = descriptor.id
+        let runtimeState = self.runtimeState
         return AsyncThrowingStream { continuation in
             let task = Task {
+                runtimeState.setActive(true)
+                defer { runtimeState.setActive(false) }
                 guard supported else {
                     continuation.yield(.failed(message: "image generation is not supported on this platform")); continuation.finish(); return
                 }
@@ -116,6 +127,7 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
                                 let saved = try store.save(artifact, files: ["generated.png": png])
                                 produced = true
                                 stateBox.set(.ready)
+                                runtimeState.setWarm(true)   // pipeline is now resident → visible to residentModels()
                                 continuation.yield(.artifactProduced(saved))   // streamed as each variant completes
                             }
                         }
@@ -137,7 +149,16 @@ public final class MLXImageGenerateProvider: CapabilityProvider, CapabilityAvail
         }
     }
 
-    public func unload() async {}
+    /// Live residency for resource telemetry + idle-eviction (`ResourceStateReporting`).
+    public var resourceState: ProviderRuntimeState { runtimeState.state }
+
+    /// Release the resident SD pipeline + MLX GPU cache (via the injected engine `unload`) and mark not-warm.
+    /// `EshRuntime.unload(modelID:)` refuses an active model before reaching here; the engine also no-ops a
+    /// mid-generation unload defensively.
+    public func unload() async {
+        await unloadFn?()
+        runtimeState.setWarm(false)
+    }
 
     /// Resolve generation parameters from request options; dimensions are snapped to multiples of 8 (the
     /// diffusion latent factor) and clamped to a sane range.

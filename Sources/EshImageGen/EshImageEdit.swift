@@ -2,6 +2,7 @@ import Foundation
 import EshCore
 import EshRuntime
 import Hub
+import MLX
 import MLXImageEdit
 #if canImport(CoreGraphics)
 import CoreGraphics
@@ -59,8 +60,10 @@ public actor InstructImageEditEngine {
 
     public var isLoaded: Bool { editor != nil }
 
-    /// Release the resident pipeline (frees in-process weights); staged files on disk are kept.
-    public func unload() { editor = nil }
+    /// Release the resident pipeline (frees in-process weights) AND the MLX GPU allocator cache; staged
+    /// files on disk are kept. Only called via the provider's unload, which `EshRuntime.unload(modelID:)`
+    /// gates on not-active, so clearing the shared cache here never races a live edit.
+    public func unload() { editor = nil; MLX.Memory.clearCache() }
 
     /// Stage weights (once), run the instruct edit for one image, and return PNG bytes. `onProgress` is
     /// called during download (0…1) and then per denoise step (0…1).

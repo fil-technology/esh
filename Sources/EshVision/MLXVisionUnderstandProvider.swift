@@ -11,19 +11,25 @@ import EshRuntime
 /// bounds generation so a model cannot emit unbounded/degenerate output, while cancellation still works.
 public typealias VLMStreamFn = @Sendable (_ imagePath: String, _ prompt: String, _ maxTokens: Int?) -> AsyncThrowingStream<String, Error>
 
-public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, ResourceStateReporting, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let modelID: String
     private let stream: VLMStreamFn
     private let supported: Bool
     private let readyProbe: (@Sendable () -> Bool)?
+    private let unloadFn: (@Sendable () async -> Void)?
     private let stateBox: StateBox
+    /// Live residency mirrored into telemetry; warm once a VLM container is resident, false on unload.
+    private let runtimeState = ProviderStateBox()
 
-    public init(modelID: String, supported: Bool, stream: @escaping VLMStreamFn, readyProbe: (@Sendable () -> Bool)? = nil) {
+    public init(modelID: String, supported: Bool, stream: @escaping VLMStreamFn,
+                readyProbe: (@Sendable () -> Bool)? = nil,
+                unload: (@Sendable () async -> Void)? = nil) {
         self.modelID = modelID
         self.supported = supported
         self.stream = stream
         self.readyProbe = readyProbe
+        self.unloadFn = unload
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
             id: "mlx-vision-understand", capabilities: [.imageUnderstand],
@@ -60,8 +66,11 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
         let stream = self.stream
         let supported = self.supported
         let stateBox = self.stateBox
+        let runtimeState = self.runtimeState
         return AsyncThrowingStream { continuation in
             let task = Task {
+                runtimeState.setActive(true)
+                defer { runtimeState.setActive(false) }
                 guard supported else {
                     continuation.yield(.failed(message: "image understanding is not supported on this platform")); continuation.finish(); return
                 }
@@ -80,7 +89,7 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
                     var produced = false
                     for try await token in stream(imagePath, effectivePrompt, maxTokens) {
                         try Task.checkCancellation()
-                        if !produced { produced = true; stateBox.set(.ready) }
+                        if !produced { produced = true; stateBox.set(.ready); runtimeState.setWarm(true) }
                         continuation.yield(.textDelta(token))
                     }
                     try Task.checkCancellation()
@@ -97,7 +106,13 @@ public final class MLXVisionUnderstandProvider: CapabilityProvider, CapabilityAv
         }
     }
 
-    public func unload() async {}
+    public var resourceState: ProviderRuntimeState { runtimeState.state }
+
+    /// Evict the resident VLM container(s) + MLX GPU cache (via the injected cache unload) and mark not-warm.
+    public func unload() async {
+        await unloadFn?()
+        runtimeState.setWarm(false)
+    }
 
     static func imagePath(from attachment: EshAttachment?) -> String? {
         guard let attachment else { return nil }

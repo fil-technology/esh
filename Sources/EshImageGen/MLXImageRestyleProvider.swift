@@ -28,20 +28,25 @@ public struct EshImageRestyleParams: Sendable {
 public typealias ImageRestyleFn = @Sendable (_ imagePath: String, _ prompt: String, _ params: EshImageRestyleParams)
     -> AsyncThrowingStream<ImageGenChunk, Error>
 
-public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, ResourceStateReporting, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let modelID: String
     private let edit: ImageRestyleFn
     private let supported: Bool
     private let readyProbe: (@Sendable () -> Bool)?
+    private let unloadFn: (@Sendable () async -> Void)?
     private let stateBox: StateBox
+    /// Live residency mirrored into telemetry; warm on first produced image, false on unload; active while serving.
+    private let runtimeState = ProviderStateBox()
 
     public init(modelID: String, supported: Bool, edit: @escaping ImageRestyleFn,
-                readyProbe: (@Sendable () -> Bool)? = nil) {
+                readyProbe: (@Sendable () -> Bool)? = nil,
+                unload: (@Sendable () async -> Void)? = nil) {
         self.modelID = modelID
         self.supported = supported
         self.edit = edit
         self.readyProbe = readyProbe
+        self.unloadFn = unload
         self.stateBox = StateBox(supported ? .requiresDownload(modelID: nil, bytes: nil) : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
             id: "mlx-image-restyle", capabilities: [.imageRestyle],
@@ -72,8 +77,11 @@ public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvaila
         let stateBox = self.stateBox
         let store = context.artifactStore
         let providerID = descriptor.id
+        let runtimeState = self.runtimeState
         return AsyncThrowingStream { continuation in
             let task = Task {
+                runtimeState.setActive(true)
+                defer { runtimeState.setActive(false) }
                 guard supported else {
                     continuation.yield(.failed(message: "image restyle is not supported on this platform")); continuation.finish(); return
                 }
@@ -103,6 +111,7 @@ public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvaila
                             let saved = try store.save(artifact, files: ["restyled.png": png])
                             produced = true
                             stateBox.set(.ready)
+                            runtimeState.setWarm(true)
                             continuation.yield(.artifactProduced(saved))
                         }
                     }
@@ -123,7 +132,12 @@ public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvaila
         }
     }
 
-    public func unload() async {}
+    public var resourceState: ProviderRuntimeState { runtimeState.state }
+
+    public func unload() async {
+        await unloadFn?()
+        runtimeState.setWarm(false)
+    }
 
     /// The filesystem path of the first image input, resolving a `file://` URI (which may be percent-encoded).
     static func imageInputPath(_ inputs: [CapabilityInput]) -> String? {

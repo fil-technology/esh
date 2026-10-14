@@ -3,6 +3,7 @@ import EshCore
 import EshRuntime
 import Hub
 import HuggingFace
+import MLX
 import MLXLMCommon
 import MLXVLM
 import Tokenizers
@@ -20,6 +21,10 @@ public actor MLXModelCache {
     func cached(_ id: String) -> ModelContainer? { containers[id] }
     func store(_ id: String, _ container: ModelContainer) { containers[id] = container }
     func isLoaded(_ id: String) -> Bool { containers[id] != nil }
+    var isEmpty: Bool { containers.isEmpty }
+    /// Evict all resident VLM containers AND clear the MLX GPU allocator cache. Dropping the containers
+    /// alone leaves MLX's freed Metal buffers in its cache, so we clear it here (idempotent).
+    func unloadAll() { containers.removeAll(); MLX.Memory.clearCache() }
 }
 
 public enum EshVision {
@@ -112,7 +117,8 @@ public enum EshVision {
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXVisionUnderstandProvider(modelID: modelID, supported: isSupportedPlatform,
                                             stream: mlxStream(modelID: modelID, cache: cache, downloadBase: downloadBase),
-                                            readyProbe: readyProbe)]
+                                            readyProbe: readyProbe,
+                                            unload: { await cache.unloadAll() })]
     }
 }
 

@@ -29,6 +29,19 @@ public actor SDImageRestyleEngine {
 
     public var isLoaded: Bool { loaded }
 
+    /// True only while a restyle is in flight (across awaits); guards the reentrant-actor unload/generate race.
+    private var active = false
+
+    /// Release the resident img2img pipeline + the MLX GPU allocator cache. Idempotent; no-op while active
+    /// (so a shared cache is never cleared mid-op). `generator = nil` alone is insufficient — MLX retains
+    /// freed Metal buffers until `Memory.clearCache()`.
+    public func unload() {
+        guard !active else { return }
+        generator = nil
+        loaded = false
+        MLX.Memory.clearCache()
+    }
+
     private func makeGenerator(hub: HubApi, onProgress: @Sendable (Double) -> Void) async throws -> any ImageToImageGenerator {
         if let generator { return generator }
         let config = preset.configuration
@@ -49,6 +62,8 @@ public actor SDImageRestyleEngine {
     /// Run the img2img loop for one image and return PNG bytes. `onProgress` is called per denoise step.
     func run(imagePath: String, prompt: String, params: EshImageRestyleParams, hub: HubApi,
              onProgress: @Sendable (Double) -> Void) async throws -> Data {
+        active = true
+        defer { active = false }
         let g = try await makeGenerator(hub: hub, onProgress: onProgress)
         // Load the source image and normalize to [-1, 1] (the autoencoder's expected input range).
         let src = try Image(url: URL(fileURLWithPath: imagePath), maximumEdge: params.maximumEdge)
@@ -138,7 +153,8 @@ public enum EshImageRestyle {
         let readyProbe: @Sendable () -> Bool = { false }  // conservative: requiresDownload until first load
         return [MLXImageRestyleProvider(modelID: modelID, supported: isSupportedPlatform,
                                      edit: mlxRestyle(engine: engine, downloadBase: downloadBase),
-                                     readyProbe: readyProbe)]
+                                     readyProbe: readyProbe,
+                                     unload: { await engine.unload() })]
     }
 }
 
