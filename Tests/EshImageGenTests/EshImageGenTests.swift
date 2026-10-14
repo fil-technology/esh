@@ -262,4 +262,77 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
         #expect(params.steps == 100)   // clamped
         #expect(params.seed == 42)
     }
+
+    // ---- Native memory lifecycle (P0 fix) — mock engine, NO model load (not gated by the 8 GB rule) ----
+
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock(); private var n = 0
+        func fire() { lock.lock(); n += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+    }
+
+    /// Poll a condition briefly so async state transitions (defer-driven) don't make the test flaky.
+    private func eventually(_ timeoutMs: Int = 1000, _ cond: @Sendable () -> Bool) async -> Bool {
+        var waited = 0
+        while waited < timeoutMs {
+            if cond() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000); waited += 20
+        }
+        return cond()
+    }
+
+    @Test func lifecycleColdWarmUnloadCold() async {
+        let unloaded = Flag()
+        let p = MLXImageGenerateProvider(modelID: "m", supported: true, generate: mockEngine(png: tinyPNG()),
+                                         unload: { unloaded.fire() })
+        #expect(p.resourceState.warm == false)       // cold
+        #expect(p.resourceState.active == false)
+        let out = await collect(p.execute(req(), context: ctx()))
+        #expect(out.artifacts == 1)
+        #expect(p.resourceState.warm == true)         // warm after a produced image
+        #expect(p.resourceState.active == false)      // not serving once complete
+        await p.unload()
+        #expect(unloaded.count == 1)                  // engine unload actually invoked (was a no-op before)
+        #expect(p.resourceState.warm == false)        // cold again — telemetry no longer says "nothing loaded" falsely
+    }
+
+    @Test func repeatedUnloadIsIdempotent() async {
+        let unloaded = Flag()
+        let p = MLXImageGenerateProvider(modelID: "m", supported: true, generate: mockEngine(png: tinyPNG()),
+                                         unload: { unloaded.fire() })
+        _ = await collect(p.execute(req(), context: ctx()))
+        await p.unload(); await p.unload(); await p.unload()
+        #expect(unloaded.count == 3)                  // safe to call repeatedly; no false success/crash
+        #expect(p.resourceState.warm == false)
+    }
+
+    @Test func cancellationLeavesInactiveValidState() async {
+        let p = MLXImageGenerateProvider(modelID: "m", supported: true, generate: hangEngine())
+        let task = Task { await collect(p.execute(req(), context: ctx())) }
+        #expect(await eventually { p.resourceState.active == true })   // became active
+        task.cancel()
+        _ = await task.value
+        #expect(await eventually { p.resourceState.active == false })  // defer reset active → valid, reusable
+        #expect(p.resourceState.warm == false)                         // never produced → not warm
+    }
+
+    @Test func concurrentRequestsAreHandledSafely() async {
+        let p = MLXImageGenerateProvider(modelID: "m", supported: true, generate: mockEngine(png: tinyPNG()))
+        async let a = collect(p.execute(req(), context: ctx()))
+        async let b = collect(p.execute(req(), context: ctx()))
+        let (ra, rb) = await (a, b)
+        #expect(ra.artifacts == 1 && rb.artifacts == 1)
+        #expect(await eventually { p.resourceState.active == false })  // both finished
+        #expect(p.resourceState.warm == true)
+    }
+
+    @Test func engineUnloadOnIdleIsSafeAndIdempotent() async {
+        // Exercises the REAL SDEngine.unload() path (generator = nil + MLX.Memory.clearCache()) with NO model
+        // loaded — validates the clear is callable/idempotent on an idle engine without downloading weights.
+        let e = SDEngine()
+        #expect(await e.isLoaded == false)
+        await e.unload()
+        await e.unload()
+        #expect(await e.isLoaded == false)
+    }
 }
