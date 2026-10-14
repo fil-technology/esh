@@ -1,0 +1,102 @@
+{
+  "label": "GRADER VALIDATION (golden in/out, real toolchains)",
+  "toolchains": {
+    "swiftc": "/usr/bin/swiftc",
+    "node": "/opt/homebrew/bin/node"
+  },
+  "all_graders_discriminate": true,
+  "passed": 10,
+  "total": 10,
+  "results": [
+    {
+      "id": "swift_compiler_fix",
+      "category": "swift",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "exit -5",
+      "discriminates": true
+    },
+    {
+      "id": "swift_impl_func",
+      "category": "swift",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "exit -5",
+      "discriminates": true
+    },
+    {
+      "id": "swift_concurrency_actor",
+      "category": "concurrency",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "exit -5",
+      "discriminates": true
+    },
+    {
+      "id": "ts_impl_fn",
+      "category": "typescript",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "Node.js v26.3.0",
+      "discriminates": true
+    },
+    {
+      "id": "ts_bugfix",
+      "category": "typescript",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "Node.js v26.3.0",
+      "discriminates": true
+    },
+    {
+      "id": "multifile_edit",
+      "category": "multifile",
+      "golden_correct_pass": true,
+      "detail_correct": "pass",
+      "golden_wrong_pass": false,
+      "detail_wrong": "Node.js v26.3.0",
+      "discriminates": true
+    },
+    {
+      "id": "tool_call_single",
+      "category": "tool_calling",
+      "golden_correct_pass": true,
+      "detail_correct": "valid tool_call",
+      "golden_wrong_pass": false,
+      "detail_wrong": "arg dir=None",
+      "discriminates": true
+    },
+    {
+      "id": "tool_call_select",
+      "category": "tool_calling",
+      "golden_correct_pass": true,
+      "detail_correct": "valid tool_call",
+      "golden_wrong_pass": false,
+      "detail_wrong": "name=read_file",
+      "discriminates": true
+    },
+    {
+      "id": "structured_nested",
+      "category": "structured",
+      "golden_correct_pass": true,
+      "detail_correct": "valid+correct",
+      "golden_wrong_pass": false,
+      "detail_wrong": "breaking=True != False",
+      "discriminates": true
+    },
+    {
+      "id": "agent_recovery",
+      "category": "agent_recovery",
+      "golden_correct_pass": true,
+      "detail_correct": "valid tool_call",
+      "golden_wrong_pass": false,
+      "detail_wrong": "arg path='README'",
+      "discriminates": true
+    }
+  ]
+}

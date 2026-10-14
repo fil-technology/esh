@@ -1,0 +1,11 @@
+{
+  "total_ram_gb": 34.4,
+  "available_ram_gb": 20.6,
+  "system_volume_free_gb": 2.46,
+  "required_peak_gb": 17.3,
+  "swap_before": "total = 4864.00M  used = 3437.69M  free = 1426.31M  (encrypted)",
+  "decision": "REFUSE",
+  "reason": "system-volume free 2.46 GB < deficit 0.0 + swap floor 3.0 (cannot grow swap safely)",
+  "model": "mlx-community/Qwen3-30B-A3B-4bit (installed)",
+  "allowed": false
+}
