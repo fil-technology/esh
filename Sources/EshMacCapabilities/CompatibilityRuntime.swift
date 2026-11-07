@@ -23,6 +23,12 @@ public enum CompatibilityEngineID: String, Sendable, Hashable, CaseIterable, Cod
     case qwenImage21        = "qwen-image-2.1"
     case stableAudio        = "stable-audio"
     case aceStep            = "ace-step"
+    /// mlx_audio speech-to-text (audio.transcribe) — runs in the SHARED managed venv (no conflicting pins).
+    /// Parakeet default; any mlx_audio STT repo (e.g. a Whisper MLX model) via the `model` option.
+    case speechTranscribe   = "mlx-speech-stt"
+    /// mlx_audio text-to-speech (audio.synthesizeSpeech) — SHARED managed venv. Kokoro default; CSM/Dia or
+    /// any mlx_audio TTS repo via the `model` option. A SELECTABLE alternative to the Apple-native voice.
+    case speechSynthesize   = "mlx-speech-tts"
 }
 
 /// A required Python module and the pip package that provides it. Preflight probes `module`; a missing one

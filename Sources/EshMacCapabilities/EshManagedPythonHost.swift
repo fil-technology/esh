@@ -265,6 +265,8 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         case .voiceClone:        return ("voice-clone", "wav", .audio)
         case .qwenImage21:       return ("image-generate-qwen21", "png", .image)
         case .aceStep:           return ("music-generate-acestep", "wav", .audio)
+        case .speechTranscribe:  return ("speech-transcribe", "txt", .text)
+        case .speechSynthesize:  return ("speech-synthesize", "wav", .audio)
         }
     }
 
@@ -395,6 +397,32 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             dict["language"] = strOpt("language") ?? "en"
             // XTTS weights + coqui-tts model store live on the configured audio-assets volume (external SSD).
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .speechTranscribe:
+            // mlx_audio STT: transcribe an audio input to text. `model` selects the STT repo (Parakeet default;
+            // a Whisper MLX repo or any mlx_audio STT model via the option). The bridge writes the transcript
+            // to outputPath (a .txt the host turns into a .text artifact).
+            guard let audio = firstFile(.audio) else {
+                throw CompatibilityError.executionFailed(reason: "transcription requires an audio input")
+            }
+            dict["audioPath"] = audio
+            dict["model"] = strOpt("model") ?? "mlx-community/parakeet-tdt-0.6b-v2"
+            if let lang = strOpt("language") { dict["language"] = lang }
+            // mlx_audio fetches/caches the STT model into the configured audio cache on the assets volume.
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
+        case .speechSynthesize:
+            // mlx_audio TTS: synthesize `text` to a WAV. `model` selects the TTS repo (Kokoro default; CSM/Dia
+            // or any mlx_audio TTS model via the option); `voice`/`language`/`speed` are optional knobs the
+            // underlying generator consumes when supported.
+            let text = firstText()
+            guard !text.isEmpty else {
+                throw CompatibilityError.executionFailed(reason: "speech synthesis requires a text prompt")
+            }
+            dict["text"] = text
+            dict["model"] = strOpt("model") ?? "prince-canuma/Kokoro-82M"
+            if let voice = strOpt("voice") { dict["voice"] = voice }
+            if let lang = strOpt("language") { dict["language"] = lang }
+            if let speed = dblOpt("speed") { dict["speed"] = speed }
+            dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         }
         return try JSONSerialization.data(withJSONObject: dict)
     }
@@ -450,7 +478,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     }
 
     static func mime(for ext: String) -> String {
-        switch ext { case "wav": return "audio/wav"; case "png": return "image/png"; case "json": return "application/json"; default: return "application/octet-stream" }
+        switch ext { case "wav": return "audio/wav"; case "png": return "image/png"; case "json": return "application/json"; case "txt": return "text/plain; charset=utf-8"; default: return "application/octet-stream" }
     }
 
     /// A clean one-line reason from stderr — never the whole multiline traceback.
