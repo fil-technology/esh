@@ -941,6 +941,95 @@ def mlx_transcribe() -> None:
     _dump_json({"text": text})
 
 
+def speech_transcribe() -> None:
+    """Compat STT (audio.transcribe) via mlx_audio, SHARED venv. Reads {audioPath, model?, language?,
+    outputPath} and WRITES the transcript text to outputPath (the EshMacCapabilities host turns that file
+    into a `.text` artifact). `model` selects the STT repo (parakeet default; a Whisper MLX repo works too).
+    Distinct from `mlx-transcribe` (which returns text only on stdout for the CLI/server path)."""
+    request = _load_json()
+    out_path = request.get("outputPath")
+    audio = request.get("audioPath")
+    if not out_path or not audio:
+        _fail("speech-transcribe requires 'audioPath' and 'outputPath'")
+    model = request.get("model") or "mlx-community/parakeet-tdt-0.6b-v2"
+    try:
+        from mlx_audio.stt.generate import generate_transcription
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"mlx_audio STT is not available: {exc}")
+    import tempfile
+    base = tempfile.mktemp()
+    kwargs = {}
+    if request.get("language"):
+        kwargs["language"] = request["language"]
+    try:
+        generate_transcription(model=model, audio=audio, output_path=base, format="txt", **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"transcription failed: {exc}")
+    produced = base + ".txt"
+    text = ""
+    if Path(produced).exists():
+        text = Path(produced).read_text(encoding="utf-8").strip()
+        try:
+            Path(produced).unlink()
+        except OSError:
+            pass
+    # The compat host reads the OUTPUT FILE; write the transcript there (and mirror it to stdout for the CLI).
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(text, encoding="utf-8")
+    _dump_json({"outputPath": out_path, "text": text, "provider": "mlx-audio-stt", "model": model})
+
+
+def speech_synthesize() -> None:
+    """Compat TTS (audio.synthesizeSpeech) via mlx_audio, SHARED venv. Reads {text, model?, voice?,
+    language?, speed?, outputPath} and WRITES a WAV to outputPath (the host turns it into an `.audio`
+    artifact). `model` selects the TTS repo (Kokoro default; CSM/Dia or any mlx_audio TTS repo). Mirrors the
+    validated generate_audio() call shape (keyword-adaptive so it tracks mlx_audio API drift)."""
+    request = _load_json()
+    out_path = request.get("outputPath")
+    text = (request.get("text") or "").strip()
+    if not out_path or not text:
+        _fail("speech-synthesize requires 'text' and 'outputPath'")
+    model = request.get("model") or "prince-canuma/Kokoro-82M"
+    try:
+        import inspect as _inspect
+        from mlx_audio.tts.generate import generate_audio
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"mlx_audio TTS is not available: {exc}")
+    import tempfile, glob, shutil
+    prefix = tempfile.mktemp()
+    sig = set(_inspect.signature(generate_audio).parameters)
+    kw: dict[str, Any] = {"text": text}
+    kw["model_path" if "model_path" in sig else "model"] = model
+    if request.get("voice") and "voice" in sig:
+        kw["voice"] = request["voice"]
+    if request.get("language") and "lang_code" in sig:
+        kw["lang_code"] = request["language"]
+    if request.get("speed") is not None and "speed" in sig:
+        try:
+            kw["speed"] = float(request["speed"])
+        except (TypeError, ValueError):
+            pass
+    for k, v in (("file_prefix", prefix), ("audio_format", "wav"), ("join_audio", True),
+                 ("verbose", False), ("play", False)):
+        if k in sig:
+            kw[k] = v
+    try:
+        generate_audio(**kw)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"speech synthesis failed: {exc}")
+    produced = sorted(glob.glob(prefix + "*.wav"), key=os.path.getmtime)
+    if not produced:
+        _fail("speech synthesis produced no audio")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(produced[0], out_path)
+    for leftover in glob.glob(prefix + "*"):
+        try:
+            os.remove(leftover)
+        except OSError:
+            pass
+    _dump_json({"outputPath": out_path, "provider": "mlx-audio-tts", "model": model})
+
+
 def _extract_vlm_text(result: Any) -> str:
     """mlx-vlm's generate() returns a str across versions, or a (text, usage) tuple, or an object with
     a .text attribute. Normalize to a string."""
@@ -2281,6 +2370,8 @@ def main() -> None:
             "audio-diarize",
             "mlx-transcribe",
             "speech-serve",
+            "speech-transcribe",
+            "speech-synthesize",
             "mlx-validate-model",
             "mlx-validate-config",
             "mlx-export-cache",
@@ -2336,6 +2427,10 @@ def main() -> None:
         mlx_transcribe()
     elif args.command == "speech-serve":
         speech_serve()
+    elif args.command == "speech-transcribe":
+        speech_transcribe()
+    elif args.command == "speech-synthesize":
+        speech_synthesize()
     elif args.command == "mlx-build-cache":
         mlx_build_cache()
     elif args.command == "mlx-validate-model":

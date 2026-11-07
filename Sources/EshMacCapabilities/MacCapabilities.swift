@@ -205,6 +205,37 @@ public enum MacCapabilities {
                     minimumSystemVolumeHeadroomGB: 24,    // large internal swap headroom for the resident TE
                     minimumAssetsVolumeHeadroomGB: 8,
                     qualityTier: 95, latencyClass: .slow)),
+
+            // Non-Apple speech via mlx_audio, in the SHARED managed venv (mlx_audio is pure-MLX and coexists
+            // with the LLM/VLM stack — no conflicting pins, so NO isolated venv, unlike voice-clone/AudioGen).
+            // These are SELECTABLE ALTERNATIVES to the always-on Apple-native speech providers (AppleSpeech*):
+            // because these compat engines are `.python` (out-of-process) and Apple's are `.native`
+            // (in-process), the capability router keeps Apple as the zero-download Auto DEFAULT; a caller opts
+            // into mlx by pinning `request.model` to "compat-mlx-speech-stt"/"compat-mlx-speech-tts" (the
+            // provider id) or "mlx-speech-stt"/"mlx-speech-tts" (the modelFamily). The specific STT/TTS model
+            // repo + voice/language are passed via `options` (model/voice/language), defaulting to Parakeet / Kokoro.
+
+            // Speech-to-text (audio.transcribe). Default Parakeet; any mlx_audio STT repo (e.g. a Whisper MLX
+            // model) via options["model"]. Output = the transcript as a text artifact.
+            CompatibilityEngineManifest(
+                id: .speechTranscribe, version: "1", capabilities: [.audioTranscribe],
+                acceptedInputs: [.audio], producedOutputs: [.text], producedArtifactKind: .text,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [.init(module: "mlx_audio", pipPackage: "mlx-audio")],
+                modelAssets: [.init(id: "parakeet-tdt-0.6b-v2", displayName: "Parakeet TDT 0.6B v2 (STT)",
+                                    approxBytes: 600_000_000)],
+                licenseIdentifier: "cc-by-4.0", commercialUse: true),
+
+            // Text-to-speech (audio.synthesizeSpeech). Default Kokoro-82M; CSM/Dia or any mlx_audio TTS repo
+            // via options["model"] (+ optional voice/language/speed). Output = a WAV audio artifact.
+            CompatibilityEngineManifest(
+                id: .speechSynthesize, version: "1", capabilities: [.audioSynthesizeSpeech],
+                acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
+                runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
+                requiredModules: base + [.init(module: "mlx_audio", pipPackage: "mlx-audio")],
+                modelAssets: [.init(id: "kokoro-82m", displayName: "Kokoro-82M (TTS)",
+                                    approxBytes: 350_000_000)],
+                licenseIdentifier: "apache-2.0", commercialUse: true),
         ]
     }
 

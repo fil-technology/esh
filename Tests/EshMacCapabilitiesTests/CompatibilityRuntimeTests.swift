@@ -742,4 +742,154 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         let state = snap.state(for: .musicGenerate)
         if case .comingLater = state { Issue.record("music should be exposed via compat provider, got comingLater") }
     }
+
+    // MARK: mlx_audio speech — STT (audio.transcribe) + TTS (audio.synthesizeSpeech), SELECTABLE vs Apple native
+
+    private func sttManifest() -> CompatibilityEngineManifest { MacCapabilities.manifests().first { $0.id == .speechTranscribe }! }
+    private func ttsManifest() -> CompatibilityEngineManifest { MacCapabilities.manifests().first { $0.id == .speechSynthesize }! }
+
+    @Test func mlxSpeechSttManifestIsDeclared() {
+        let m = sttManifest()
+        #expect(m.capabilities == [.audioTranscribe])
+        #expect(m.acceptedInputs == [.audio])
+        #expect(m.producedOutputs == [.text])
+        #expect(m.producedArtifactKind == .text)
+        // mlx_audio runs in the SHARED managed venv (no conflicting pins) → required in the main venv, NO isolation.
+        #expect(m.requiredModules.contains { $0.module == "mlx_audio" })
+        #expect(m.isolatedRuntime == nil)
+        #expect(m.modelAssets.contains { $0.id == "parakeet-tdt-0.6b-v2" })   // default STT model declared
+    }
+
+    @Test func mlxSpeechTtsManifestIsDeclared() {
+        let m = ttsManifest()
+        #expect(m.capabilities == [.audioSynthesizeSpeech])
+        #expect(m.acceptedInputs == [.text])
+        #expect(m.producedOutputs == [.audio])
+        #expect(m.producedArtifactKind == .audio)
+        #expect(m.requiredModules.contains { $0.module == "mlx_audio" })
+        #expect(m.isolatedRuntime == nil)
+        #expect(m.modelAssets.contains { $0.id == "kokoro-82m" })             // default TTS model declared
+    }
+
+    @Test func mlxSpeechProviderDescriptorsAreSharedVenvPythonAndPinnable() {
+        let stt = CompatibilityCapabilityProvider(manifest: sttManifest(), host: MockHost(state: .ready), supported: true).descriptor
+        #expect(stt.id == "compat-mlx-speech-stt")
+        #expect(stt.modelFamily == "mlx-speech-stt")       // the pin key
+        #expect(stt.backend == .python)                    // out-of-process → stays behind Apple native in Auto
+        #expect(stt.capabilities == [.audioTranscribe])
+        let tts = CompatibilityCapabilityProvider(manifest: ttsManifest(), host: MockHost(state: .ready), supported: true).descriptor
+        #expect(tts.id == "compat-mlx-speech-tts")
+        #expect(tts.modelFamily == "mlx-speech-tts")
+        #expect(tts.backend == .python)
+        #expect(tts.capabilities == [.audioSynthesizeSpeech])
+    }
+
+    @Test func bridgeCommandForSpeechEngines() {
+        let s = EshManagedPythonHost.bridgeCommand(for: .speechTranscribe)
+        #expect(s.command == "speech-transcribe"); #expect(s.outputExt == "txt"); #expect(s.artifact == .text)
+        let t = EshManagedPythonHost.bridgeCommand(for: .speechSynthesize)
+        #expect(t.command == "speech-synthesize"); #expect(t.outputExt == "wav"); #expect(t.artifact == .audio)
+    }
+
+    @Test func bridgeRequestMapsSttDefaultAndCustomModel() throws {
+        // Default model (no option) → Parakeet; audio file:// resolved; language forwarded; outputPath + hfCache set.
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioTranscribe,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/clip one.wav")))],
+            output: OutputSpec(modality: .text),
+            options: ExecutionOptions(["language": .string("en")])))
+        let dict = try #require(try JSONSerialization.jsonObject(
+            with: EshManagedPythonHost.bridgeRequest(.speechTranscribe, req, outputPath: "/tmp/t.txt",
+                                                     root: PersistenceRoot(rootURL: tmpRoot()))) as? [String: Any])
+        #expect(dict["audioPath"] as? String == "/tmp/clip one.wav")          // percent-encoded file:// resolved
+        #expect(dict["model"] as? String == "mlx-community/parakeet-tdt-0.6b-v2")
+        #expect(dict["language"] as? String == "en")
+        #expect(dict["outputPath"] as? String == "/tmp/t.txt")
+        #expect((dict["hfCache"] as? String)?.isEmpty == false)
+
+        // Custom STT repo (e.g. a Whisper MLX model) via options["model"].
+        let custom = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioTranscribe,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .audio, uri: "/tmp/x.wav")))],
+            output: OutputSpec(modality: .text),
+            options: ExecutionOptions(["model": .string("mlx-community/whisper-large-v3-mlx")])))
+        let cdict = try #require(try JSONSerialization.jsonObject(
+            with: EshManagedPythonHost.bridgeRequest(.speechTranscribe, custom, outputPath: "/tmp/t.txt",
+                                                     root: PersistenceRoot(rootURL: tmpRoot()))) as? [String: Any])
+        #expect(cdict["model"] as? String == "mlx-community/whisper-large-v3-mlx")
+    }
+
+    @Test func bridgeRequestMapsTtsTextAndOptions() throws {
+        // Default model (no option) → Kokoro; text from the input; voice/speed/language forwarded.
+        let req = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioSynthesizeSpeech, inputs: [.text("hello from esh")],
+            output: OutputSpec(modality: .audio)))
+        let d = try #require(try JSONSerialization.jsonObject(
+            with: EshManagedPythonHost.bridgeRequest(.speechSynthesize, req, outputPath: "/tmp/s.wav",
+                                                     root: PersistenceRoot(rootURL: tmpRoot()))) as? [String: Any])
+        #expect(d["text"] as? String == "hello from esh")
+        #expect(d["model"] as? String == "prince-canuma/Kokoro-82M")
+        #expect(d["outputPath"] as? String == "/tmp/s.wav")
+        #expect((d["hfCache"] as? String)?.isEmpty == false)
+
+        let opts = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioSynthesizeSpeech, inputs: [.text("custom voice line")],
+            output: OutputSpec(modality: .audio),
+            options: ExecutionOptions(["model": .string("mlx-community/csm-1b"),
+                                       "voice": .string("af_heart"), "speed": .double(1.1), "language": .string("en")])))
+        let od = try #require(try JSONSerialization.jsonObject(
+            with: EshManagedPythonHost.bridgeRequest(.speechSynthesize, opts, outputPath: "/tmp/s.wav",
+                                                     root: PersistenceRoot(rootURL: tmpRoot()))) as? [String: Any])
+        #expect(od["model"] as? String == "mlx-community/csm-1b")
+        #expect(od["voice"] as? String == "af_heart")
+        #expect(od["speed"] as? Double == 1.1)
+        #expect(od["language"] as? String == "en")
+    }
+
+    @Test func mlxSpeechEnginesExecuteToArtifact() async {
+        let tmp = tmpRoot(); defer { try? FileManager.default.removeItem(at: tmp) }
+        let stt = CompatibilityCapabilityProvider(manifest: sttManifest(), host: MockHost(state: .ready, run: .artifact), supported: true)
+        let sttReq = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioTranscribe,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/a.wav")))],
+            output: OutputSpec(modality: .text)))
+        let sttOut = await collect(stt.execute(sttReq, context: ctx(tmp)))
+        #expect(sttOut.failed == nil)
+        #expect(sttOut.artifacts.contains { $0.kind == .text })
+
+        let tts = CompatibilityCapabilityProvider(manifest: ttsManifest(), host: MockHost(state: .ready, run: .artifact), supported: true)
+        let ttsReq = ResolvedExecutionRequest(request: ExecutionRequest(
+            capability: .audioSynthesizeSpeech, inputs: [.text("say this")], output: OutputSpec(modality: .audio)))
+        let ttsOut = await collect(tts.execute(ttsReq, context: ctx(tmp)))
+        #expect(ttsOut.failed == nil)
+        #expect(ttsOut.artifacts.contains { $0.kind == .audio })
+    }
+
+    @Test func appleSpeechStaysDefaultAndMlxIsPinOnly() {
+        // The core selection contract: the always-on Apple NATIVE providers remain the Auto default for both
+        // speech capabilities; the mlx_audio compat engines are reachable only by explicitly pinning them.
+        var reg = CapabilityRegistry()
+        reg.register(AppleSpeechTranscribeProvider())                       // native, zero-download default
+        reg.register(AppleSpeechSynthesizeProvider())
+        reg.register(CompatibilityCapabilityProvider(manifest: sttManifest(), host: MockHost(state: .ready), supported: true))
+        reg.register(CompatibilityCapabilityProvider(manifest: ttsManifest(), host: MockHost(state: .ready), supported: true))
+
+        // STT: Auto → Apple first (native-first ordering); explicit pin → only the mlx engine.
+        let sttAuto = ExecutionRequest(capability: .audioTranscribe,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/a.wav")))],
+            output: OutputSpec(modality: .text), model: nil)
+        #expect(reg.candidates(for: sttAuto).first?.descriptor.id == "apple-speech-stt")
+        let sttPin = ExecutionRequest(capability: .audioTranscribe,
+            inputs: [.init(payload: .attachment(EshAttachment(kind: .audio, uri: "file:///tmp/a.wav")))],
+            output: OutputSpec(modality: .text), model: "mlx-speech-stt")
+        #expect(reg.candidates(for: sttPin).map { $0.descriptor.id } == ["compat-mlx-speech-stt"])
+
+        // TTS: same contract. Pin may use either the descriptor id or the modelFamily.
+        let ttsAuto = ExecutionRequest(capability: .audioSynthesizeSpeech, inputs: [.text("hi")],
+            output: OutputSpec(modality: .audio), model: nil)
+        #expect(reg.candidates(for: ttsAuto).first?.descriptor.id == "apple-speech-tts")
+        let ttsPin = ExecutionRequest(capability: .audioSynthesizeSpeech, inputs: [.text("hi")],
+            output: OutputSpec(modality: .audio), model: "compat-mlx-speech-tts")
+        #expect(reg.candidates(for: ttsPin).map { $0.descriptor.id } == ["compat-mlx-speech-tts"])
+    }
 }
