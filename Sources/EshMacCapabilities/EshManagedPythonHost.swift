@@ -206,6 +206,8 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     let stdin = Pipe(); let stdout = Pipe(); let stderr = Pipe()
                     proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
                     procBox.set(proc)
+                    let exit = ExitLatch()
+                    exit.arm(proc)
                     try proc.run()
                     stdin.fileHandleForWriting.write(requestJSON)
                     try? stdin.fileHandleForWriting.close()
@@ -213,7 +215,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     // Drain pipes off-thread so a large model can't deadlock on a full pipe buffer.
                     let errData = try await Self.readAll(stderr.fileHandleForReading)
                     _ = try await Self.readAll(stdout.fileHandleForReading)
-                    proc.waitUntilExit()
+                    await exit.wait()
 
                     if Task.isCancelled { continuation.finish(throwing: CancellationError()); return }
                     guard proc.terminationStatus == 0 else {
@@ -589,6 +591,38 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         private let lock = NSLock(); private var proc: Process?
         func set(_ p: Process) { lock.lock(); proc = p; lock.unlock() }
         func terminate() { lock.lock(); let p = proc; lock.unlock(); p?.terminate() }
+    }
+
+    /// Awaits a child's exit WITHOUT `Process.waitUntilExit()`. That call spins the current thread's run loop
+    /// waiting for the termination source; on a detached/cooperative thread with no run loop it can block
+    /// forever after the child has already exited and been reaped (observed: the live speech smoke hung for
+    /// 14 min with no child process alive). Install with `arm(_:)` BEFORE `run()`; `wait()` is race-free
+    /// whether the exit lands before or after it is awaited.
+    final class ExitLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var exited = false
+        private var waiter: CheckedContinuation<Void, Never>?
+
+        func arm(_ proc: Process) {
+            proc.terminationHandler = { [self] _ in signal() }
+        }
+
+        func signal() {
+            lock.lock()
+            exited = true
+            let w = waiter; waiter = nil
+            lock.unlock()
+            w?.resume()
+        }
+
+        func wait() async {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if exited { lock.unlock(); c.resume(); return }
+                waiter = c
+                lock.unlock()
+            }
+        }
     }
 }
 
