@@ -2,9 +2,8 @@
 
 **For:** the esh Studio coding agent (macOS + iOS). **Prepared:** 2026-11-14.
 
-- **Code state:** esh `main` at `1f7f195` (merges #23, #24, #25 and #26).
-- **Unmerged:** PR fil-technology/esh#27 (`feat/live-default-persistent-mlx`, `3535f0c`).
-- **Paths:** relative to the esh repo root; line numbers are on `1f7f195` unless marked `#27`.
+- **Code state:** esh `main` at `7a64af6`. That includes #23, #24, #25 and #26 (`1f7f195`) plus #27, the `live` default for the persistent MLX worker, merged as `7a64af6`.
+- **Paths:** relative to the esh repo root. Line numbers are pinned to `1f7f195` unless marked `#27`; #27 shifts some bridge and EshCore line numbers on `main`, so search by symbol name there.
 - **Scope:** this document only describes esh. It changes no defaults and no Studio code.
 - **Evidence:** `docs/research/ghost-infer-2026-11/` (A–H). Read **H** (final readiness) and **G** (hardening) for the measurements.
 
@@ -37,8 +36,8 @@
 
 | Label | Meaning |
 |---|---|
-| **Merged** | On esh `main` (`1f7f195`) |
-| **Unmerged** | Implemented in an open PR (#27); not on `main` |
+| **Merged** | On esh `main` (`7a64af6`) |
+| **Unmerged** | Implemented in an open PR; not on `main` (no capability in this document is in that state any more) |
 | **Validated (macOS, serve)** | Measured on real models on an M1 Pro, through `esh serve` / `esh infer` / the bridge worker |
 | **Validated (macOS, SDK)** | Exercised through the `EshRuntime` facade on macOS |
 | **Validated (iOS)** | Exercised on iOS. **Nothing in this document is.** iOS CI only *builds* `EshCore`/`EshRuntime` and the embedded-GGUF probe apps (`.github/workflows/ci.yml:70-147`) |
@@ -53,13 +52,13 @@ A PR existing does not make a feature production-ready. Studio-facing readiness 
 |---|---|---|---|---|
 | Model-load safety gate | **Merged** · Validated (macOS, serve) | ✅ facade runs it (`EshRuntime.swift:612`) | ✅ | Code compiles (EshCore). **Not validated** on iOS |
 | Token-exact prefix caching (`tokens`) | **Merged**, default · Validated (macOS, serve) | ⚠️ active, but **no cross-call reuse** (new runtime and state file per call) | ✅ | Unsupported (MLX bridge) |
-| Persistent `live` KV caching | **Unmerged** (#27) as default; opt-in on `main` · Validated (macOS, serve) | ❌ (no pool; a persistent worker per call would be wrong) | ✅ with `ESH_MLX_PERSISTENT=1` | Unsupported |
+| Persistent `live` KV caching | **Merged** (#27, `7a64af6`): default **only** in the persistent MLX worker · Validated (macOS, serve) | ❌ (no pool; a persistent worker per call would be wrong) | ✅ with `ESH_MLX_PERSISTENT=1` | Unsupported |
 | Runtime memory accounting (caches in the pool budget) | **Merged** · Validated (macOS, serve) | ❌ | ✅ | Code compiles; no iOS runtime reports caches |
 | KV-growth protection | **Merged** · Validated (macOS, serve) | ⚠️ worker-side check only (MLX bridge); **no pool-level guard** (facade bypasses `ExternalInferenceService`) | ✅ pool + worker | Unsupported on the MLX path; embedded GGUF is bounded by `n_ctx` |
 | Cache eviction (idle caches, pressure) | **Merged** · Validated (macOS, serve; pressure events via unit tests only) | ❌ | ✅ | Unsupported |
 | Model switching | **Merged** · Validated (macOS, serve) | ⚠️ works, but each call reloads; nothing unloads | ✅ pool keeps up to 3 resident, LRU | Embedded GGUF: per-call load (see the leak above) |
 | Streaming and cancellation | **Merged** (pre-existing; unchanged) | ✅ | ✅ | ✅ Apple FM / embedded GGUF (build-only CI) |
-| Runtime metrics (new fields) | **Merged** (+2 fields in #27) · Validated (macOS, serve) | ✅ `EshGenerationResult.metrics` passes them through (`EshRuntime.swift:99`) | ✅ plus `GET /v1/runtime` (serve only) | Fields exist; MLX-only fields stay nil |
+| Runtime metrics (new fields) | **Merged** (including #27's `prefixCacheMode`/`prefixCacheFallback`) · Validated (macOS, serve) | ✅ `EshGenerationResult.metrics` passes them through (`EshRuntime.swift:99`) | ✅ plus `GET /v1/runtime` (serve only) | Fields exist; MLX-only fields stay nil |
 | GGUF tuning (`ngram-simple`, KV type) | **Merged** · **Experimental** · Validated (macOS, serve) | ❌ (applies to `llama-server` only; the facade's GGUF is embedded) | ✅ `esh serve` llama-server only | Unsupported |
 | Speculative decoding (MLX lookup) | **Merged** · **Experimental** · Validated (macOS, bridge) | ⚠️ env-driven inside the bridge; applies to any MLX request | ✅ | Unsupported |
 | Model capability metadata (`modelOptions(for:)`) | **Merged** · Validated (macOS, mlx_audio speech) | ✅ `EshRuntime.swift:793` | ✅ | Returns `.unsupportedOnPlatform` for macOS-only families (`EshRuntime.swift:777`) |
@@ -116,8 +115,7 @@ Each subsection gives the implementation, public interface, platforms, configura
   - The worker loop `mlx_serve` :2805 handles the `drop-caches` op :2872.
   - Swift side: `MLXPersistentRuntime` (`Sources/EshMLXText/MLXPersistentRuntime.swift`, `releaseCaches` :140) and `MLXWorkerProcess.dropCaches`.
 - **Status:**
-  - On `main`: opt-in (`ESH_MLX_PREFIX_CACHE=live`).
-  - **#27 (unmerged)** makes it the default **only inside the persistent worker** (`ESH_MLX_PERSISTENT=1`, pool-owned). One-shot paths stay `tokens` even if `live` is requested.
+  - **Merged (#27, `7a64af6`):** the default **only inside the persistent worker** (`ESH_MLX_PERSISTENT=1`, pool-owned). One-shot paths stay `tokens` even if `live` is requested.
   - Rollback: `ESH_MLX_PREFIX_CACHE=tokens`.
   - If `live` can't hold a session, it falls back to the token-exact snapshot (#27).
 - **Behavior:**
@@ -296,7 +294,7 @@ Everything below is public on `main`, but the composition is **not provided or v
 | MLX state files moved to `<tmp>/esh-mlx-state/` | #25 | None, unless Studio inspected those files. |
 | `tokens` prefix cache is the default | #25 | Behavior change for the MLX bridge only. Rollback: `ESH_MLX_PREFIX_CACHE=legacy`. |
 | `--kv-bits` / `kvBits` on bf16 models no longer crashes | #25 | Bug fix. |
-| `live` default in the persistent worker | #27 (unmerged) | Only affects pooled persistent MLX. |
+| `live` default in the persistent worker | #27 (merged, `7a64af6`) | Only affects pooled persistent MLX. Rollback: `ESH_MLX_PREFIX_CACHE=tokens`. |
 
 ## 6. Required consumer behavior (checklist)
 
@@ -327,7 +325,7 @@ Everything below is public on `main`, but the composition is **not provided or v
 
 1. A warm pool in the `EshRuntime` text path, with a `shutdown()` API (§4.2 A).
 2. Unload or `deinit` for embedded llama contexts; settle the suspected leak.
-3. Merge #27 (`live` default in the persistent worker) once CI is green.
+3. ~~Merge #27~~: done (`7a64af6`).
 4. `EshMLXText` is not iOS-buildable: gate it with `#if os(macOS)` or document it as macOS-only in `Package.swift`.
 5. Fix the wrong doc comment at `EshRuntime.swift:273-274` and the outdated "no external dependencies" comment at `Package.swift:8-9`.
 6. Ashex ↔ `esh serve` structured-output integration: a separate workstream, blocked on disk space. See H §8.
