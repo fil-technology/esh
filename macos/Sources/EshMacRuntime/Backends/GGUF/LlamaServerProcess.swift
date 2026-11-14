@@ -28,7 +28,8 @@ final class LlamaServerProcess: @unchecked Sendable {
     var isAlive: Bool { lock.lock(); defer { lock.unlock() }; return alive && process.isRunning }
     private func setAlive(_ value: Bool) { lock.lock(); alive = value; lock.unlock() }
 
-    init(executableURL: URL, modelPath: String, contextLength: Int = 8192, gpuLayers: Int = 999) throws {
+    init(executableURL: URL, modelPath: String, contextLength: Int = 8192, gpuLayers: Int = 999,
+         tuning: LlamaServerTuning = .fromEnvironment()) throws {
         self.port = try Self.reserveFreePort()
         self.baseURL = URL(string: "http://127.0.0.1:\(port)")!
         let cfg = URLSessionConfiguration.ephemeral
@@ -48,7 +49,7 @@ final class LlamaServerProcess: @unchecked Sendable {
             "--reasoning-format", "none",    // keep <think> tags inline in content (esh parses them)
             "--no-webui",
             "-np", "1"
-        ]
+        ] + tuning.arguments   // EXPERIMENTAL opt-in (ESH_LLAMA_SPEC_TYPE / _DRAFT_MAX / _KV_TYPE); empty by default
         process.standardOutput = FileHandle.nullDevice
         process.standardError = stderrPipe
         // Drain stderr into a small capped tail so a full pipe never blocks the server, while still
