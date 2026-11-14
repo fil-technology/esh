@@ -90,6 +90,16 @@ private func runtime(_ ledger: Ledger, installs: [ModelInstall], lifecycle: EshR
                installProvider: StaticInstallProvider(installs), lifecycle: lifecycle)
 }
 
+/// Wait (bounded) for a condition instead of a fixed sleep: CI runners execute suites in parallel and are much slower.
+private func eventually(timeout: Double = 10, _ condition: @Sendable () async -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return await condition()
+}
+
 private func ask(_ id: String, _ text: String = "hi", maxTokens: Int = 32) -> EshGenerationRequest {
     EshGenerationRequest(prompt: text, constraints: .pinned(id), config: GenerationConfig(maxTokens: maxTokens))
 }
@@ -113,8 +123,7 @@ private func ask(_ id: String, _ text: String = "hi", maxTokens: Int = 32) -> Es
         let rt = runtime(ledger, installs: [install("a")], lifecycle: .oneShot, chunks: 200, delay: 5_000_000)
         let task = Task { var n = 0; for try await _ in rt.stream(ask("a")) { n += 1; if n == 3 { break } } }
         _ = await task.result
-        try await Task.sleep(nanoseconds: 100_000_000)
-        #expect(await ledger.unloadCount("a") == 1)
+        #expect(await eventually { await ledger.unloadCount("a") == 1 })
     }
 
     // Managed — one load, reused for every turn, through both generate and stream.
@@ -150,9 +159,7 @@ private func ask(_ id: String, _ text: String = "hi", maxTokens: Int = 32) -> Es
                          chunks: 400, delay: 5_000_000)
         let task = Task { var n = 0; for try await _ in rt.stream(ask("a")) { n += 1; if n == 3 { break } } }
         _ = await task.result
-        try await Task.sleep(nanoseconds: 200_000_000)
-        let pool = try #require(await rt.runtimeStatus().pool)
-        #expect(pool.activeRequests == 0)
+        #expect(await eventually { await rt.runtimeStatus().pool?.activeRequests == 0 })
         #expect(await ledger.unloadCount("a") == 0)
         // The single concurrency slot is free again: a follow-up completes.
         let r = try await rt.generate(ask("a", "next"))
@@ -176,8 +183,7 @@ private func ask(_ id: String, _ text: String = "hi", maxTokens: Int = 32) -> Es
         let rt = runtime(ledger, installs: [install("a"), install("b", .mlx)], lifecycle: .managed(.init(maxResidentModels: 1)))
         _ = try await rt.generate(ask("a"))
         _ = try await rt.generate(ask("b"))
-        try await Task.sleep(nanoseconds: 50_000_000)
-        #expect(await ledger.unloadCount("a") == 1)            // LRU eviction on switch
+        #expect(await eventually { await ledger.unloadCount("a") == 1 })   // LRU eviction on switch
         #expect(await rt.runtimeStatus().pool?.residents.map(\.modelID) == ["b"])
         _ = try await rt.generate(ask("a"))
         #expect(await ledger.loadCount("a") == 2)
@@ -206,12 +212,11 @@ private func ask(_ id: String, _ text: String = "hi", maxTokens: Int = 32) -> Es
         let ledger = Ledger()
         let rt = runtime(ledger, installs: [install("a")], lifecycle: .managed(), chunks: 100, delay: 5_000_000)
         let long = Task { try await rt.generate(ask("a")) }
-        try await Task.sleep(nanoseconds: 60_000_000)
+        #expect(await eventually { await rt.runtimeStatus().pool?.residents.first?.activeRequests == 1 })
         await #expect(throws: UnloadError.modelActive("a")) { try await rt.unload(modelID: "a") }
         _ = try await long.value
         try await rt.unload(modelID: "a")
-        try await Task.sleep(nanoseconds: 50_000_000)
-        #expect(await ledger.unloadCount("a") == 1)
+        #expect(await eventually { await ledger.unloadCount("a") == 1 })
         #expect(await rt.runtimeStatus().pool?.residents.isEmpty == true)
     }
 
