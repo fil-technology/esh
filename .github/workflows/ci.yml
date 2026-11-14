@@ -42,11 +42,24 @@ jobs:
           done
           cmp Sources/EshMacCapabilities/Resources/bridge/mlx_vlm_bridge.py Tools/mlx_vlm_bridge.py
 
+      # Build separately so the test steps below can carry a tight wall-clock limit: a hung test process
+      # fails within minutes with every thread's backtrace (scripts/ci-swift-test.sh) instead of silently
+      # burning the 45-minute job timeout.
+      - name: Build portable Swift tests (root package — EshCore/EshRuntime)
+        timeout-minutes: 20
+        run: swift build --build-tests
+
       - name: Run portable Swift tests (root package — EshCore/EshRuntime)
-        run: swift test
+        timeout-minutes: 12
+        run: ./scripts/ci-swift-test.sh 600 --skip-build
+
+      - name: Build macOS Swift tests (CLI + runtime package)
+        timeout-minutes: 20
+        run: swift build --build-tests --package-path macos
 
       - name: Run macOS Swift tests (CLI + runtime package)
-        run: swift test --package-path macos
+        timeout-minutes: 12
+        run: ./scripts/ci-swift-test.sh 600 --skip-build --package-path macos
 
       - name: Verify environment
         run: ./esh doctor
