@@ -13,10 +13,12 @@ private final class HardeningRuntime: BackendRuntime, CacheMemoryReporting, @unc
     private var _cacheReleases = 0
     let unloadDelayNanos: UInt64
     let onUnload: (@Sendable () -> Void)?
+    let onReleaseCaches: (@Sendable () -> Void)?
 
-    init(modelID: String, cacheBytes: Int64 = 0, unloadDelayNanos: UInt64 = 0, onUnload: (@Sendable () -> Void)? = nil) {
+    init(modelID: String, cacheBytes: Int64 = 0, unloadDelayNanos: UInt64 = 0, onUnload: (@Sendable () -> Void)? = nil,
+         onReleaseCaches: (@Sendable () -> Void)? = nil) {
         self.modelID = modelID; self._cacheBytes = cacheBytes
-        self.unloadDelayNanos = unloadDelayNanos; self.onUnload = onUnload
+        self.unloadDelayNanos = unloadDelayNanos; self.onUnload = onUnload; self.onReleaseCaches = onReleaseCaches
     }
 
     var metrics: Metrics { get async { Metrics(memoryBytes: 1_000, residentCacheBytes: residentCacheBytesNow) } }
@@ -26,7 +28,7 @@ private final class HardeningRuntime: BackendRuntime, CacheMemoryReporting, @unc
     func setCache(_ bytes: Int64) { lock.withLock { _cacheBytes = bytes } }
 
     func residentCacheBytes() async -> Int64 { residentCacheBytesNow }
-    func releaseCaches() async { lock.withLock { _cacheBytes = 0; _cacheReleases += 1 } }
+    func releaseCaches() async { lock.withLock { _cacheBytes = 0; _cacheReleases += 1 }; onReleaseCaches?() }
 
     func prepare(session: ChatSession) async throws {}
     func generate(session: ChatSession, config: GenerationConfig) -> AsyncThrowingStream<String, Error> {
@@ -164,5 +166,107 @@ private func install(_ id: String, gib: Double = 1) -> ModelInstall {
         #expect(slow.unloaded)          // returned only after the slow teardown finished
         #expect(fast.unloaded)
         #expect(await mgr.residentModelIDs().isEmpty)
+    }
+}
+
+/// A growth gate that "fits" once enough memory was reclaimed (caches released or models unloaded).
+private final class ReclaimLedger: @unchecked Sendable {
+    private let lock = NSLock(); private var freedGB = 0.0
+    func free(_ gb: Double) { lock.withLock { freedGB += gb } }
+    var freed: Double { lock.withLock { freedGB } }
+}
+
+@Suite struct ContextGrowthGuardTests {
+    private let gib: Int64 = 1_073_741_824
+
+    private func gate(availableGB: Double, ledger: ReclaimLedger) -> RuntimeLifecycleManager.GrowthGate {
+        { needGB in
+            let avail = availableGB + ledger.freed
+            return needGB <= avail ? .fits : .gated(reason: String(format: "%.1f GB available", avail), requiredGB: needGB, availableGB: avail)
+        }
+    }
+
+    @Test func fitsWithoutReclaiming() async throws {
+        let ledger = ReclaimLedger()
+        let a = HardeningRuntime(modelID: "a", cacheBytes: 2 * gib)
+        let mgr = RuntimeLifecycleManager(loader: { _ in a }, growthGate: gate(availableGB: 8, ledger: ledger))
+        try await mgr.withRuntime(install: install("a")) { _ in }
+        try await mgr.ensureHeadroom(forAdditionalBytes: 4 * gib, modelID: "other")
+        #expect(a.cacheReleases == 0)
+        #expect(!a.unloaded)
+    }
+
+    @Test func releasesIdleCachesBeforeEvictingModels() async throws {
+        let ledger = ReclaimLedger()
+        let idle = HardeningRuntime(modelID: "idle", cacheBytes: 3 * gib, onReleaseCaches: { ledger.free(3) })
+        let mgr = RuntimeLifecycleManager(loader: { $0.id == "idle" ? idle : HardeningRuntime(modelID: $0.id) },
+                                          growthGate: gate(availableGB: 2, ledger: ledger))
+        try await mgr.withRuntime(install: install("idle")) { _ in }
+        _ = try await mgr.acquire(install: install("busy"))          // the requesting model, active
+        try await mgr.ensureHeadroom(forAdditionalBytes: 4 * gib, modelID: "busy")
+        #expect(idle.cacheReleases == 1)
+        #expect(!idle.unloaded)                                       // caches were enough; model kept
+        await mgr.release(modelID: "busy")
+    }
+
+    @Test func evictsIdleModelsWhenCachesAreNotEnough() async throws {
+        let ledger = ReclaimLedger()
+        let idle = HardeningRuntime(modelID: "idle", onUnload: { ledger.free(10) })
+        let busy = HardeningRuntime(modelID: "busy")
+        let mgr = RuntimeLifecycleManager(loader: { $0.id == "idle" ? idle : busy },
+                                          growthGate: gate(availableGB: 2, ledger: ledger))
+        try await mgr.withRuntime(install: install("idle")) { _ in }
+        _ = try await mgr.acquire(install: install("busy"))
+        try await mgr.ensureHeadroom(forAdditionalBytes: 6 * gib, modelID: "busy")
+        #expect(idle.unloaded)
+        #expect(!busy.unloaded)
+        #expect(await mgr.residentModelIDs() == ["busy"])
+        await mgr.release(modelID: "busy")
+    }
+
+    @Test func refusesWithAnActionableErrorAndLeavesActiveWorkAlone() async throws {
+        let ledger = ReclaimLedger()
+        let busy = HardeningRuntime(modelID: "busy", cacheBytes: 2 * gib)
+        let mgr = RuntimeLifecycleManager(loader: { _ in busy }, growthGate: gate(availableGB: 1, ledger: ledger))
+        _ = try await mgr.acquire(install: install("busy"))
+        await #expect(throws: RuntimeLifecycleError.self) {
+            try await mgr.ensureHeadroom(forAdditionalBytes: 20 * gib, modelID: "busy")
+        }
+        do { try await mgr.ensureHeadroom(forAdditionalBytes: 20 * gib, modelID: "busy") }
+        catch { #expect(error.localizedDescription.contains("Shorten the conversation")) }
+        #expect(!busy.unloaded)
+        #expect(busy.cacheReleases == 0)                              // an active request's cache is never released
+        await mgr.release(modelID: "busy")
+    }
+}
+
+@Suite struct KVCacheEstimatorTests {
+    @Test func llamaStyleConfig() {
+        // Llama-3-8B: 32 layers, 8 kv heads, 4096/32 = 128 head dim -> 128 KiB per token
+        let c: [String: Any] = ["num_hidden_layers": 32, "num_attention_heads": 32, "num_key_value_heads": 8, "hidden_size": 4096]
+        #expect(KVCacheEstimator.bytesPerToken(config: c) == 131_072)
+    }
+
+    @Test func explicitHeadDimAndNestedTextConfig() {
+        let inner: [String: Any] = ["num_hidden_layers": 28, "num_attention_heads": 16, "num_key_value_heads": 8, "head_dim": 128]
+        let c: [String: Any] = ["text_config": inner]
+        let got = KVCacheEstimator.bytesPerToken(config: c)
+        #expect(got == Int64(114_688))   // 28 layers x 8 kv heads x 128 dim x 2 tensors x 2 bytes
+    }
+
+    @Test func unknownConfigIsNil() {
+        #expect(KVCacheEstimator.bytesPerToken(config: ["vocab_size": 10]) == nil)
+    }
+
+    @Test func growthCountsPromptAndMaxTokens() {
+        let g = KVCacheEstimator.growthBytes(bytesPerToken: 1000, promptCharacters: 3000, messages: 2, maxTokens: 500)
+        #expect(g == Int64(1000 + 32 + 64 + 500) * 1000)
+    }
+
+    @Test func growthModePreflightHasNoSmallModelFloor() {
+        let host = HostResources(totalMemoryGB: 32, availableMemoryGB: 1, systemVolumeFreeGB: 1, assetsVolumeFreeGB: 100,
+                                 assetsVolumeAvailable: true, residentHeavyMemoryGB: 0, memoryCritical: false)
+        #expect(MemorySafetyPreflight.evaluate(requiredPeakGB: 3, host: host).fits)                                  // model floor
+        #expect(!MemorySafetyPreflight.evaluate(requiredPeakGB: 3, host: host, applySmallModelFloor: false).fits)    // growth
     }
 }

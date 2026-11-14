@@ -63,14 +63,26 @@ public actor RuntimeLifecycleManager {
     private var externalReservationGB: Double = 0
     private var externalReclaim: (@Sendable () async -> Void)?
 
+    /// Judges whether `additionalGB` more memory (KV-cache growth of a loaded model) is safe RIGHT NOW. Defaults to
+    /// `MemorySafetyPreflight` on a live host snapshot without the small-model floor; injectable for tests.
+    public typealias GrowthGate = @Sendable (_ additionalGB: Double) -> ResourceFitVerdict
+    private let growthGate: GrowthGate
+
+    public static let liveGrowthGate: GrowthGate = { gb in
+        MemorySafetyPreflight.evaluate(requiredPeakGB: gb, host: HostResourceProbe.snapshot(root: .default()),
+                                       applySmallModelFloor: false, subject: "this request's context")
+    }
+
     public init(
         config: RuntimeLifecycleConfig = .init(),
         usableBudgetGB: Double? = nil,
         estimator: @escaping @Sendable (ModelInstall) -> Double? = { _ in nil },
         loader: @escaping Loader,
         residencyProbe: @escaping @Sendable (ModelInstall) -> RuntimeResidency = { _ in .handleCached },
-        clock: @escaping @Sendable () -> Date = { Date() }
+        clock: @escaping @Sendable () -> Date = { Date() },
+        growthGate: @escaping GrowthGate = RuntimeLifecycleManager.liveGrowthGate
     ) {
+        self.growthGate = growthGate
         self.config = config
         self.usableBudgetGB = usableBudgetGB
         self.estimator = estimator
@@ -241,6 +253,34 @@ public actor RuntimeLifecycleManager {
         guard let usable = usableBudgetGB else { return false }
         let others = residents.values.filter { $0.install.id != modelID }.reduce(0) { $0 + $1.budgetGB }
         return others + (estimatedGB ?? 0) + effectiveExternalReserveGB() > usable
+    }
+
+    // MARK: - Context (KV-cache) growth guard
+
+    /// Make room for a request that will grow `modelID`'s KV cache by `additionalBytes` (its prompt + max new tokens),
+    /// BEFORE generation starts. Order of reclamation, re-judging after each step: (1) idle residents' caches,
+    /// (2) idle models, least-recently-used first. Active requests — including `modelID`'s own in-flight cache — are
+    /// never touched. Throws `insufficientMemoryForContext` with the reason when it still cannot fit, so the caller
+    /// fails fast with an actionable error instead of swapping.
+    public func ensureHeadroom(forAdditionalBytes additionalBytes: Int64, modelID: String) async throws {
+        guard additionalBytes > 0 else { return }
+        let gb = Double(additionalBytes) / 1_073_741_824
+        var verdict = growthGate(gb)
+        if verdict.fits { return }
+
+        if await releaseIdleCaches() > 0 {
+            verdict = growthGate(gb)
+            if verdict.fits { return }
+        }
+        while let victim = evictionCandidate(excluding: modelID) {
+            unloadResident(victim)
+            for unload in Array(pendingUnloads.values) { await unload.value }   // let the memory actually go
+            verdict = growthGate(gb)
+            if verdict.fits { return }
+        }
+        if case let .gated(reason, _, _) = verdict {
+            throw RuntimeLifecycleError.insufficientMemoryForContext(modelID: modelID, neededGB: gb, reason: reason)
+        }
     }
 
     // MARK: - Resident caches (persistent KV/prefix caches)

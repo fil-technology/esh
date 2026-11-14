@@ -136,6 +136,9 @@ public enum RuntimeLifecycleError: Error, LocalizedError, Equatable {
     case overBudget(modelID: String, neededGB: Double, usableGB: Double)
     case cancelled
     case loadFailed(modelID: String, reason: String)
+    /// A request's KV-cache growth (prompt + max new tokens) cannot fit safely even after idle caches and idle models
+    /// were reclaimed. Nothing active was touched; the caller should shorten the context or free memory.
+    case insufficientMemoryForContext(modelID: String, neededGB: Double, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -145,6 +148,8 @@ public enum RuntimeLifecycleError: Error, LocalizedError, Equatable {
             return "The request was cancelled."
         case let .loadFailed(modelID, reason):
             return "Failed to load \(modelID): \(reason)"
+        case let .insufficientMemoryForContext(modelID, needed, reason):
+            return String(format: "Not enough memory to run this request on %@: its context needs ~%.1f GB more KV cache (%@). Shorten the conversation or max_tokens, close other apps, or use a smaller model.", modelID, needed, reason)
         }
     }
 }

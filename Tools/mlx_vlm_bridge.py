@@ -1218,6 +1218,76 @@ def _snapshot_skip_reason(state_path: str, raw_bytes: int, mode: str) -> str | N
     return None
 
 
+# KV-growth guard (worker side). The warm pool already judged the request's estimated growth before dispatch
+# (RuntimeLifecycleManager.ensureHeadroom); here the worker knows the EXACT tokens it is about to prefill and the
+# model's real KV dimensions, so it re-checks before prefill (dropping its own idle session caches if needed) and
+# watches pressure while generating, stopping cleanly instead of pushing the machine into swap.
+_KV_GUARD_CHECK_EVERY = 256          # generated tokens between pressure checks
+_KV_GUARD_SWAP_FLOOR_BYTES = 3 * 1024 ** 3
+
+
+def _kv_bytes_per_token(model) -> int | None:
+    args = getattr(model, "args", None)
+    if args is None:
+        return None
+    if getattr(args, "text_config", None) and isinstance(args.text_config, dict):
+        g = args.text_config.get
+    else:
+        def g(k, d=None):
+            return getattr(args, k, d)
+    layers = g("num_hidden_layers")
+    heads = g("num_attention_heads")
+    if not layers or not heads:
+        return None
+    kv_heads = g("num_key_value_heads") or heads
+    head_dim = g("head_dim") or (g("hidden_size") // heads if g("hidden_size") else None)
+    if not head_dim:
+        return None
+    return int(layers) * int(kv_heads) * int(head_dim) * 2 * 2
+
+
+def _kv_growth_refusal(growth_bytes: int) -> str | None:
+    """Same rule as MemorySafetyPreflight (no small-model floor): fits in available memory, or the deficit is small
+    and the internal (swap) volume keeps its 3 GB floor. Returns a reason when unsafe, else None."""
+    import os
+    import shutil
+
+    avail_mb = _available_mem_mb()
+    if avail_mb is None or growth_bytes <= 0:
+        return None
+    avail = avail_mb * 1e6
+    if growth_bytes <= avail:
+        return None
+    deficit = growth_bytes - avail
+    try:
+        swap_free = shutil.disk_usage(tempfile.gettempdir()).free
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if swap_free < deficit + _KV_GUARD_SWAP_FLOOR_BYTES or deficit > total * 0.4:
+        return (f"context needs ~{growth_bytes / 1e9:.1f} GB of KV cache but only ~{avail / 1e9:.1f} GB is available "
+                f"and ~{swap_free / 1e9:.1f} GB of internal disk is free for swap")
+    return None
+
+
+def _ensure_kv_headroom(model, new_tokens: int, max_new_tokens: int) -> dict:
+    """Pre-prefill check with exact token counts. Drops this worker's idle session caches if that makes it fit;
+    raises an actionable error otherwise. Returns diagnostics for the metrics."""
+    per_token = _kv_bytes_per_token(model)
+    if not per_token:
+        return {}
+    growth = per_token * (max(0, new_tokens) + max(0, max_new_tokens))
+    reason = _kv_growth_refusal(growth)
+    freed = 0
+    if reason and _LIVE_PREFIX_CACHES:
+        freed = _drop_live_caches()
+        reason = _kv_growth_refusal(growth)
+    if reason:
+        raise RuntimeError(f"Not enough memory for this request's context ({reason}). Shorten the conversation or "
+                           f"max_tokens, close other apps, or use a smaller model.")
+    return {"kvGrowthBytes": int(growth), "kvBytesPerToken": int(per_token), "kvGuardFreedBytes": int(freed)}
+
+
 _LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
 _PREFIX_REUSE_MIN_TOKENS = 8
 
@@ -1501,6 +1571,7 @@ def _generate_with_loaded_model(
 
     _KV_MODE_FALLBACKS.clear()
     effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)
+    kv_guard = _ensure_kv_headroom(model, len(prompt_tokens), int(config.get("maxTokens") or 0))
 
     prompt_token_count = len(prompt_tokens)
     reply_parts = []
@@ -1527,11 +1598,17 @@ def _generate_with_loaded_model(
         )
 
     generated_ids: list[int] = []
+    memory_stop = False
     for response in responses:
         last_response = response
         token_id = getattr(response, "token", None)
         if token_id is not None:
             generated_ids.append(int(token_id))
+            if len(generated_ids) % _KV_GUARD_CHECK_EVERY == 0 and _mem_pressure_critical():
+                # release idle session caches first; if the system is still critical, stop growing this KV cache
+                if not (_LIVE_PREFIX_CACHES and _drop_live_caches() and not _mem_pressure_critical()):
+                    memory_stop = True
+                    break
         if response.text:
             pending += response.text
             # Stop at the model's turn/EOS special token so it can't run away into a
@@ -1625,7 +1702,9 @@ def _generate_with_loaded_model(
             int(last_response.generation_tokens) if last_response is not None else None
         ),
         "finishReason": (
-            "cancelled"
+            "memory_pressure"
+            if memory_stop
+            else "cancelled"
             if cancelled
             else (last_response.finish_reason if last_response is not None else None)
         ),
@@ -1638,6 +1717,8 @@ def _generate_with_loaded_model(
             float(last_response.prompt_tps) if last_response is not None and last_response.prompt_tps else None
         ),
     }
+    if kv_guard:
+        metrics.update(kv_guard)
     if spec_stats:
         metrics["draftTokens"] = int(spec_stats.get("drafted") or 0)
         metrics["draftAcceptedTokens"] = int(spec_stats.get("accepted") or 0)

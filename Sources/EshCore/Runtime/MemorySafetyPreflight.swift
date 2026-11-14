@@ -18,12 +18,16 @@ public enum MemorySafetyPreflight: Sendable {
     /// keeps room to operate. The pre-reboot near-miss (≈0.3 GB free, swap ~maxed) is exactly what this catches.
     public static let swapDiskFloorGB: Double = 3.0
 
-    public static func evaluate(requiredPeakGB: Double, host: HostResources) -> ResourceFitVerdict {
-        guard requiredPeakGB >= smallModelFloorGB else { return .fits }
+    /// `applySmallModelFloor: false` judges ANY amount (used for KV-cache growth of an already-loaded model, where
+    /// a few GB on top of resident weights is exactly what can tip the machine into swap).
+    public static func evaluate(requiredPeakGB: Double, host: HostResources,
+                                applySmallModelFloor: Bool = true, subject: String = "model") -> ResourceFitVerdict {
+        if applySmallModelFloor { guard requiredPeakGB >= smallModelFloorGB else { return .fits } }
+        guard requiredPeakGB > 0 else { return .fits }
 
         let total = host.totalMemoryGB
         if total > 0, requiredPeakGB > total * 0.98 {
-            return .gated(reason: String(format: "model needs ~%.0f GB, more than this Mac's %.0f GB of memory",
+            return .gated(reason: String(format: "%@ needs ~%.0f GB, more than this Mac's %.0f GB of memory", subject,
                                          requiredPeakGB, total),
                           requiredGB: requiredPeakGB, availableGB: total)
         }
