@@ -440,7 +440,7 @@ def _mx_array_from_tensor(tensor: dict[str, Any]):
     return mx.array(_decode_tensor(tensor))
 
 
-def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[str, Any]:
+def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_tensor_list: bool = True) -> dict[str, Any]:
     from mlx_lm.models.cache import save_prompt_cache
 
     tensors = []
@@ -461,6 +461,10 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
             continue
         if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
             can_save_prompt_cache = False
+        if not include_tensor_list and type(cache).__name__ in {"KVCache", "RotatingKVCache"}:
+            # the safetensors blob below is the restore path; skip the duplicate base64 tensor list
+            total_bytes += int(keys.nbytes + values.nbytes)
+            continue
         key_array = _snapshot_numpy_array(keys)
         value_array = _snapshot_numpy_array(values)
         total_bytes += int(key_array.nbytes + value_array.nbytes)
@@ -727,6 +731,457 @@ def _find_earliest_stop_marker(text: str) -> int | None:
     return earliest
 
 
+# ----------------------------------------------------------------------------------------------------------------
+# Prompt-lookup speculative decoding (EXPERIMENTAL, off by default: ESH_MLX_LOOKUP_SPEC=1).
+#
+# Adapted from the technique in ghost-infer (github.com/affifuddin-hazam/ghost-infer @ 2f2a985, src/lookup.rs —
+# MIT OR Apache-2.0): agent turns re-emit text that is already in the context (whole-file edits, tool-call
+# arguments copied from a file, repeated identifiers), so the conversation itself is a free "draft model". The
+# last tokens are looked up in a pair index over prompt+output; what followed the most recent earlier occurrence
+# is proposed and verified in ONE batched forward pass; the KV cache is trimmed to the accepted prefix.
+#
+# Apple-Silicon specifics (not in ghost-infer): plain steps stay pipelined like mlx-lm's generate_step (the next
+# forward is queued before the current token is read), and the FIRST proposed token is checked against that
+# already-in-flight step for free, so a wrong guess costs only a pipeline bubble, never a wasted verify pass.
+# An adaptive controller (ghost-infer's `Pace` idea) sizes drafts from recent acceptance and suspends speculation
+# with exponential back-off whenever it measures slower than plain decoding (e.g. MoE, where verifying k tokens
+# pulls the union of k tokens' experts through memory).
+#
+# Greedy only (temperature 0, no logits processors, trimmable cache): verification picks the same argmax a plain
+# step would, so output matches plain greedy decoding up to floating-point differences between the batched
+# verify matmul and the single-token one (both are reported by the benchmark, never assumed).
+# ----------------------------------------------------------------------------------------------------------------
+
+_LOOKUP_MAX_MATCH = 24
+_LOOKUP_MAX_CANDIDATES = 48
+
+
+class _LookupIndex:
+    """Token-pair index over the history (ghost-infer's pair index). `propose()` takes the occurrences of the
+    current tail pair (most recent `_LOOKUP_MAX_CANDIDATES`, never the tail itself), extends each match backwards
+    up to `_LOOKUP_MAX_MATCH` tokens, keeps the best (longest match, then longest continuation, then most recent)
+    and returns what followed it plus the match length (longer matches are accepted more often; the controller
+    keys its statistics on it)."""
+
+    def __init__(self, tokens: list[int]):
+        self.tokens: list[int] = []
+        self.pairs: dict[tuple[int, int], list[int]] = {}
+        for t in tokens:
+            self.append(t)
+
+    def append(self, token: int) -> None:
+        self.tokens.append(token)
+        n = len(self.tokens)
+        if n >= 3:  # register the pair ending at n-2 (one behind the tail, so the tail never matches itself)
+            occ = self.pairs.setdefault((self.tokens[n - 3], self.tokens[n - 2]), [])
+            occ.append(n - 2)
+            if len(occ) > 2 * _LOOKUP_MAX_CANDIDATES:
+                del occ[:-_LOOKUP_MAX_CANDIDATES]
+
+    def propose(self, max_draft: int, min_match: int) -> tuple[list[int], int]:
+        t = self.tokens
+        n = len(t)
+        if n < 3 or max_draft <= 0:
+            return [], 0
+        occ = self.pairs.get((t[n - 2], t[n - 1]))
+        if not occ:
+            return [], 0
+        best_key, best_pos, best_len = None, -1, 0
+        for pos in reversed(occ[-_LOOKUP_MAX_CANDIDATES:]):
+            match = 2
+            while match < _LOOKUP_MAX_MATCH and pos - match >= 0 and t[pos - match] == t[n - 1 - match]:
+                match += 1
+            # rank: match length (saturating at 8 — beyond it acceptance barely improves), then how much
+            # continuation is available (an occurrence hugging the tail can only propose 1-2 tokens), then recency
+            key = (min(match, 8), min(n - pos - 1, max_draft), pos)
+            if best_key is None or key > best_key:
+                best_key, best_pos, best_len = key, pos, match
+        if best_len < min_match:
+            return [], 0
+        return t[best_pos + 1: min(best_pos + 1 + max_draft, n)], best_len
+
+
+class _LookupPace:
+    """ghost-infer's `Pace` idea, adapted to esh's pipelined MLX loop.
+
+    * Acceptance: per match-length bucket, a fading estimate of q = P(next draft token accepted | previous ones
+      were), with optimistic priors so new buckets get tried.
+    * Cost: s = EMA of a pipelined plain step; c(L) = EMA of a verify pass that feeds L tokens (prior s*(1+0.06L)).
+    * Decision: after the FREE first-token hit, verifying k more drafts yields 2 + q + ... + q^k tokens
+      (first + accepted + bonus) for s + c(k+1) seconds; plain yields 1/s. Verify the k with the best rate, only
+      if it beats plain by > 5%.
+    * Safety net: realized speculative throughput is compared with plain over windows; when it loses, drafting is
+      suspended for a doubling 16..512 tokens.
+    """
+
+    BUCKETS = (2, 3, 4, 6, 10, 16)
+    PRIOR_Q = (0.35, 0.5, 0.6, 0.7, 0.8, 0.85)
+
+    def __init__(self, max_draft: int):
+        self.max_draft = max(1, max_draft)
+        self.acc = [[q * 4.0, 4.0] for q in self.PRIOR_Q]  # [accepted, trials] faded
+        self.step_s = None
+        self.verify_s: dict[int, float] = {}
+        self.suspended_until = 0
+        self.backoff = 16
+        self.win_tokens = 0
+        self.win_time = 0.0
+        self.win_rounds = 0
+
+    def _bucket(self, match_len: int) -> int:
+        b = 0
+        for i, lo in enumerate(self.BUCKETS):
+            if match_len >= lo:
+                b = i
+        return b
+
+    def q(self, match_len: int) -> float:
+        a, n = self.acc[self._bucket(match_len)]
+        return min(0.98, a / n) if n > 0 else 0.5
+
+    def active(self, produced: int) -> bool:
+        return produced >= self.suspended_until
+
+    def note_plain(self, seconds: float) -> None:
+        if 0 < seconds < 5:
+            self.step_s = seconds if self.step_s is None else 0.9 * self.step_s + 0.1 * seconds
+
+    def cost(self, fed: int) -> float:
+        s = self.step_s or 0.03
+        if fed in self.verify_s:
+            return self.verify_s[fed]
+        known = sorted(self.verify_s)
+        if known:  # scale the nearest measured point linearly in the extra tokens
+            near = min(known, key=lambda k: abs(k - fed))
+            return self.verify_s[near] * (1 + 0.06 * fed) / (1 + 0.06 * near)
+        return s * (1 + 0.06 * fed)
+
+    def choose(self, available: int, match_len: int) -> int:
+        """How many drafts AFTER the free first token to verify (0 = don't verify)."""
+        s = self.step_s
+        if s is None or available <= 0:
+            return min(available, 3)  # no timing yet: a small probe
+        q = self.q(match_len)
+        best_k, best_rate = 0, 1.0 / s
+        expected, qi = 2.0, 1.0
+        for k in range(1, min(available, self.max_draft - 1) + 1):
+            qi *= q
+            expected += qi
+            rate = expected / (s + self.cost(k + 1))
+            if rate > best_rate * 1.05:
+                best_k, best_rate = k, rate
+        return best_k
+
+    def note_verify(self, fed: int, seconds: float, match_len: int, verified: int, accepted: int,
+                    emitted: int, produced: int) -> None:
+        if seconds > 0:
+            old = self.verify_s.get(fed)
+            self.verify_s[fed] = seconds if old is None else 0.8 * old + 0.2 * seconds
+        # geometric acceptance: `accepted` successes then (if accepted < verified) one failure
+        b = self._bucket(match_len)
+        a, n = self.acc[b]
+        trials = accepted + (1 if accepted < verified else 0)
+        self.acc[b] = [a * 0.9 + accepted, n * 0.9 + trials]
+        # realized-throughput safety net
+        self.win_tokens += emitted
+        self.win_time += (self.step_s or 0) + seconds
+        self.win_rounds += 1
+        if self.win_rounds >= 8 and self.step_s:
+            spec_rate = self.win_tokens / self.win_time if self.win_time > 0 else 0
+            if spec_rate < 0.98 / self.step_s:
+                self.suspended_until = produced + self.backoff
+                self.backoff = min(self.backoff * 2, 512)
+            else:
+                self.backoff = 16
+            self.win_tokens, self.win_time, self.win_rounds = 0, 0.0, 0
+
+
+def _lookup_spec_settings(config: dict[str, Any], prompt_cache, mx) -> dict | None:
+    """Return the speculation settings when it is enabled AND exact for this request, else None."""
+    import os
+
+    mode = str(config.get("speculative") or os.environ.get("ESH_MLX_LOOKUP_SPEC", "")).lower()
+    if mode not in {"1", "true", "lookup", "on"}:
+        return None
+    temperature = config.get("temperature")
+    if temperature is None or float(temperature) > 0.0 or config.get("repetitionPenalty") is not None:
+        return None  # sampled / penalised decoding is not exact under greedy verification — fall back
+    try:
+        from mlx_lm.models.cache import can_trim_prompt_cache
+        if not can_trim_prompt_cache(prompt_cache):
+            return None
+    except Exception:
+        return None
+    return {
+        "maxDraft": int(os.environ.get("ESH_MLX_LOOKUP_MAX_DRAFT", "16")),
+        "minMatch": int(os.environ.get("ESH_MLX_LOOKUP_MIN_MATCH", "3")),
+        "adaptive": os.environ.get("ESH_MLX_LOOKUP_ADAPTIVE", "1") != "0",
+    }
+
+
+def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], history: list[int], max_tokens: int,
+                            prompt_cache, settings: dict, stats: dict):
+    """Drop-in for mlx_lm.stream_generate (same response fields the bridge reads) using prompt-lookup
+    speculation. `history` is the FULL token context (cached prefix + new prompt) the lookup searches."""
+    from types import SimpleNamespace
+    from mlx_lm.generate import generation_stream, wired_limit
+    from mlx_lm.models.cache import trim_prompt_cache
+
+    eos = set(getattr(tokenizer, "eos_token_ids", []) or [])
+    detok = tokenizer.detokenizer
+    detok.reset()
+    index = _LookupIndex(history)
+    pace = _LookupPace(settings["maxDraft"])
+    min_match = settings["minMatch"]
+    stats.update({"mode": "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
+                  "verifySteps": 0, "suspensions": 0})
+
+    def fwd(tokens_array):
+        with mx.stream(generation_stream):
+            logits = model(tokens_array[None], cache=prompt_cache)
+            return mx.argmax(logits[0], axis=-1)
+
+    prompt = mx.array(prompt_tokens, mx.uint32)
+    produced = 0
+    finish = None
+    tic = time.perf_counter()
+    prompt_tps = 0.0
+    gen_tic = tic
+
+    def response(text, token, reason=None):
+        elapsed = max(time.perf_counter() - gen_tic, 1e-9)
+        return SimpleNamespace(text=text, token=token, logprobs=None, from_draft=False,
+                               prompt_tokens=prompt.size, prompt_tps=prompt_tps, generation_tokens=produced,
+                               generation_tps=produced / elapsed, peak_memory=mx.get_peak_memory() / 1e9,
+                               finish_reason=reason)
+
+    with wired_limit(model, [generation_stream]):
+        # prefill all but the last prompt token in chunks (as mlx-lm does), then predict the first token
+        y = prompt
+        with mx.stream(generation_stream):
+            while y.size > 1:
+                n = min(2048, y.size - 1)
+                model(y[:n][None], cache=prompt_cache)
+                mx.eval([c.state for c in prompt_cache])
+                y = y[n:]
+                mx.clear_cache()
+        nxt = fwd(y)[-1]
+        mx.async_eval(nxt)
+        cur = nxt  # lazy token not yet read
+        last_mark = None
+        was_suspended = False
+        while True:
+            pending = fwd(cur.reshape(1))[-1]   # queue the NEXT step before reading the current token
+            mx.async_eval(pending)
+            tok = int(cur.item())
+            now = time.perf_counter()
+            if produced == 0:
+                prompt_tps = prompt.size / max(now - tic, 1e-9)
+                gen_tic = now
+            elif last_mark is not None:
+                pace.note_plain(now - last_mark)
+            last_mark = now
+            if tok in eos:
+                finish = "stop"
+                break
+            produced += 1
+            index.append(tok)
+            detok.add_token(tok)
+            if produced >= max_tokens:
+                finish = "length"
+                break
+            yield response(detok.last_segment, tok)
+
+            active = pace.active(produced) if settings["adaptive"] else True
+            if not active:
+                was_suspended = True
+                cur = pending
+                continue
+            if was_suspended:
+                stats["suspensions"] += 1
+                was_suspended = False
+            draft, match_len = index.propose(min(settings["maxDraft"], max_tokens - produced), min_match)
+            if not draft:
+                cur = pending
+                continue
+
+            # free check: `pending` is the model's prediction after `tok` — the first draft token's verdict
+            stats["freeChecks"] += 1
+            first = int(pending.item())
+            if first != draft[0] or first in eos:
+                cur = pending
+                continue
+            stats["freeHits"] += 1
+            k = pace.choose(len(draft) - 1, match_len) if settings["adaptive"] else len(draft) - 1
+            rest = draft[1: 1 + k]
+            if not rest:
+                cur = pending
+                continue
+            t0 = time.perf_counter()
+            preds = fwd(mx.array([first] + rest, mx.uint32)).tolist()
+            verify_s = time.perf_counter() - t0
+            stats["verifySteps"] += 1
+            accepted = 0
+            while accepted < len(rest) and preds[accepted] == rest[accepted]:
+                accepted += 1
+            trim_prompt_cache(prompt_cache, len(rest) - accepted)
+            stats["drafted"] += len(rest)
+            stats["accepted"] += accepted
+            # emit first + accepted drafts; the bonus token preds[accepted] becomes the next current token
+            emit = [first] + rest[:accepted]
+            stopped = False
+            for i, t in enumerate(emit):
+                if t in eos:
+                    trim_prompt_cache(prompt_cache, len(emit) - 1 - i)
+                    finish, stopped = "stop", True
+                    break
+                produced += 1
+                index.append(t)
+                detok.add_token(t)
+                if produced >= max_tokens:
+                    trim_prompt_cache(prompt_cache, len(emit) - 1 - i)
+                    finish, stopped = "length", True
+                    break
+                yield response(detok.last_segment, t)
+            if stopped:
+                break
+            pace.note_verify(1 + len(rest), verify_s, match_len, len(rest), accepted, len(emit) + 1, produced)
+            cur = mx.array(preds[accepted], mx.uint32)
+            last_mark = time.perf_counter()
+
+        detok.finalize()
+        if finish == "stop":
+            produced += 1  # mlx-lm's stream_generate counts the EOS step in generation_tokens; match it
+        stats["acceptanceRate"] = round(stats["accepted"] / stats["drafted"], 3) if stats["drafted"] else None
+        yield response(detok.last_segment, None, finish or "stop")
+
+
+# ----------------------------------------------------------------------------------------------------------------
+# Token-exact prefix reuse (EXPERIMENTAL: ESH_MLX_PREFIX_CACHE=tokens|live; unset = legacy string-prefix logic).
+#
+# The legacy path reuses the previous KV snapshot only when the re-rendered previous conversation is a STRING prefix
+# of the new prompt, then replays the last 2 tokens without trimming the restored cache. Measured on 2026-11-14 it
+# never hits for Llama-3 (its template appends an assistant header even with add_generation_prompt=False) or Qwen3
+# (the latest assistant turn keeps an empty <think></think> block that history turns drop), and where it does hit
+# the untrimmed cache can hold the overlap tokens twice. Like llama.cpp's slots and ghost-infer's session reuse,
+# this mode records the EXACT token ids held by the KV cache, reuses the longest common token prefix with the new
+# prompt, trims the cache to it and prefills only the remainder — template quirks then cost a few tokens, not the
+# whole history.
+#   tokens : snapshot still written to the state file (works for one-shot and persistent runtimes)
+#   live   : persistent worker keeps the last ESH_MLX_LIVE_PREFIX_SLOTS (default 1) session caches in memory and
+#            skips the per-turn snapshot serialization (the cache's memory stays resident between turns)
+# ----------------------------------------------------------------------------------------------------------------
+
+# Disk-budget guard for KV snapshots (ALL modes). The state file and the safetensors staging file live in the
+# system temp dir, i.e. the INTERNAL volume that also holds swap. Measured 2026-11-14: an 8K-token session's legacy
+# snapshot filled the internal disk (ENOSPC, request failed) and a 32K one drove memory pressure critical; a worker
+# killed mid-save leaked a 3.1 GB staging file. When the encoded snapshot would not fit while keeping
+# MemorySafetyPreflight's 3 GB swap floor, the snapshot is skipped: the next turn is a cache miss, not a failure.
+_SNAPSHOT_DISK_FLOOR_BYTES = 3 * 1024 ** 3
+_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 2.5}  # staging + base64 blob (+ base64 tensor list for legacy)
+
+
+def _kv_raw_bytes(prompt_cache) -> int:
+    total = 0
+    for cache in prompt_cache or []:
+        state = getattr(cache, "state", None)
+        if isinstance(state, tuple) and len(state) == 2 and state[0] is not None and state[1] is not None:
+            try:
+                total += int(state[0].nbytes + state[1].nbytes)
+            except Exception:  # noqa: BLE001
+                pass
+    return total
+
+
+def _snapshot_skip_reason(state_path: str, raw_bytes: int, mode: str) -> str | None:
+    import os
+    import shutil
+
+    needed = int(raw_bytes * _SNAPSHOT_ENCODING_FACTOR.get(mode, 3.8))
+    try:
+        free = min(shutil.disk_usage(os.path.dirname(os.path.abspath(state_path)) or ".").free,
+                   shutil.disk_usage(tempfile.gettempdir()).free)
+    except Exception:  # noqa: BLE001
+        return None
+    if free - needed < _SNAPSHOT_DISK_FLOOR_BYTES:
+        return (f"KV snapshot skipped: ~{needed / 1e9:.1f} GB to write, {free / 1e9:.1f} GB free on the "
+                f"temp volume (keeps a {_SNAPSHOT_DISK_FLOOR_BYTES / 1024 ** 3:.0f} GB swap floor)")
+    return None
+
+
+_LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
+_PREFIX_REUSE_MIN_TOKENS = 8
+
+
+def _prefix_cache_mode() -> str:
+    import os
+
+    mode = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
+    return mode if mode in {"tokens", "live"} else "legacy"
+
+
+def _common_prefix_len(a: list[int], b: list[int]) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache):
+    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)"""
+    from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
+
+    cache, tokens = None, None
+    if mode == "live" and state_path in _LIVE_PREFIX_CACHES:
+        tokens, cache = _LIVE_PREFIX_CACHES.pop(state_path)
+    elif state_payload is not None and state_payload.get("cache_tokens") and state_payload.get("snapshot"):
+        try:
+            cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
+            tokens = [int(t) for t in state_payload["cache_tokens"]]
+        except Exception:  # noqa: BLE001 — an unreadable snapshot is just a miss
+            cache, tokens = None, None
+    if cache is not None and tokens is not None and can_trim_prompt_cache(cache):
+        offset = _cache_offset(cache, -1)
+        if offset == len(tokens):
+            reuse = min(_common_prefix_len(tokens, full_prompt_tokens), len(full_prompt_tokens) - 1)
+            if reuse >= _PREFIX_REUSE_MIN_TOKENS:
+                trim_prompt_cache(cache, offset - reuse)
+                return cache, full_prompt_tokens[reuse:], True, reuse
+    return make_prompt_cache(model), full_prompt_tokens, False, 0
+
+
+def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict) -> dict:
+    """Align the cache with the exact token list it holds, persist it per `mode`, return the state payload."""
+    from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
+
+    offset = _cache_offset(prompt_cache, len(cache_tokens))
+    if offset > len(cache_tokens) and can_trim_prompt_cache(prompt_cache):
+        trim_prompt_cache(prompt_cache, offset - len(cache_tokens))  # drop the in-flight token we never read
+    cache_tokens = cache_tokens[: _cache_offset(prompt_cache, len(cache_tokens))]
+    if mode == "live":
+        import os
+
+        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "1")))
+        _LIVE_PREFIX_CACHES[state_path] = (cache_tokens, prompt_cache)
+        while len(_LIVE_PREFIX_CACHES) > slots:
+            _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
+        raw = 0
+        for c in prompt_cache:
+            st = getattr(c, "state", None)
+            if isinstance(st, tuple) and len(st) == 2 and st[0] is not None:
+                raw += int(st[0].nbytes + st[1].nbytes)
+        return {"cache_tokens": cache_tokens, "live": True,
+                "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+    raw = _kv_raw_bytes(prompt_cache)
+    skip = _snapshot_skip_reason(state_path, raw, "tokens")
+    if skip:
+        return {"cache_tokens": cache_tokens, "snapshot": None, "snapshotSkipped": skip,
+                "metadata": {**metadata, "raw_bytes": str(raw)}}
+    snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
+    return {"cache_tokens": cache_tokens, "snapshot": snapshot}
+
+
 def _generate_with_loaded_model(
     mx,
     stream_generate,
@@ -767,13 +1222,19 @@ def _generate_with_loaded_model(
         if previous_prompt:
             previous_prompt_tokens = _tokenize_prompt(tokenizer, previous_prompt)
     resume_overlap_tokens = int(
-        state_payload.get("snapshot", {}).get("metadata", {}).get("resume_overlap_tokens", MLX_RESUME_OVERLAP_TOKENS)
+        (state_payload.get("snapshot") or {}).get("metadata", {}).get("resume_overlap_tokens", MLX_RESUME_OVERLAP_TOKENS)
     ) if state_payload is not None else MLX_RESUME_OVERLAP_TOKENS
 
     cache_hit = False
     cached_tokens = 0
-    if (
+    prefix_mode = _prefix_cache_mode()
+    if prefix_mode != "legacy":
+        prompt_cache, prompt_tokens, cache_hit, cached_tokens = _token_prefix_reuse(
+            prefix_mode, request["stateFilePath"], state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+        )
+    elif (
         state_payload is not None
+        and state_payload.get("snapshot")
         and full_prompt.startswith(previous_prompt)
         and full_prompt_tokens[: len(previous_prompt_tokens)] == previous_prompt_tokens
     ):
@@ -795,15 +1256,29 @@ def _generate_with_loaded_model(
     stop_hit = False
     pending = ""  # buffered tail that could be the start of a split stop marker
 
-    for response in stream_generate(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=prompt_tokens,
-        max_tokens=config["maxTokens"],
-        prompt_cache=prompt_cache,
-        **_mlx_stream_generation_kwargs(stream_generate, mx, config),
-    ):
+    spec_settings = _lookup_spec_settings(config, prompt_cache, mx)
+    spec_stats: dict = {}
+    if spec_settings is not None:
+        responses = _lookup_stream_generate(
+            mx, model, tokenizer, prompt_tokens, full_prompt_tokens, config["maxTokens"],
+            prompt_cache, spec_settings, spec_stats,
+        )
+    else:
+        responses = stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt_tokens,
+            max_tokens=config["maxTokens"],
+            prompt_cache=prompt_cache,
+            **_mlx_stream_generation_kwargs(stream_generate, mx, config),
+        )
+
+    generated_ids: list[int] = []
+    for response in responses:
         last_response = response
+        token_id = getattr(response, "token", None)
+        if token_id is not None:
+            generated_ids.append(int(token_id))
         if response.text:
             pending += response.text
             # Stop at the model's turn/EOS special token so it can't run away into a
@@ -841,20 +1316,39 @@ def _generate_with_loaded_model(
     rendered_with_reply = _render_prompt(
         tokenizer, updated_messages, add_generation_prompt=False, config=config
     )
-    snapshot = _prompt_cache_to_snapshot(
-        prompt_cache,
-        metadata={
-            "rendered_prompt": rendered_with_reply,
-            "message_count": len(updated_messages),
-            "model_id": request["modelID"],
-            "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
-            "kv_mode": effective_kv_mode,
-        },
-    )
-    _save_state_file(
-        request["stateFilePath"],
-        {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
-    )
+    snapshot_metadata = {
+        "rendered_prompt": rendered_with_reply,
+        "message_count": len(updated_messages),
+        "model_id": request["modelID"],
+        "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
+        "kv_mode": effective_kv_mode,
+    }
+    if prefix_mode != "legacy":
+        reused_prefix = full_prompt_tokens[: len(full_prompt_tokens) - len(prompt_tokens)]
+        state = _finish_token_prefix(
+            prefix_mode, request["stateFilePath"], prompt_cache,
+            reused_prefix + list(prompt_tokens) + generated_ids, snapshot_metadata,
+        )
+        snapshot = state["snapshot"] or {"metadata": state["metadata"]}
+        _save_state_file(
+            request["stateFilePath"],
+            {**{k: v for k, v in state.items() if k != "metadata"}, "rendered_prompt": rendered_with_reply},
+        )
+    else:
+        raw = _kv_raw_bytes(prompt_cache)
+        skip = _snapshot_skip_reason(request["stateFilePath"], raw, "legacy")
+        if skip:
+            snapshot = {"metadata": {**snapshot_metadata, "raw_bytes": str(raw)}}
+            _save_state_file(
+                request["stateFilePath"],
+                {"snapshot": None, "snapshotSkipped": skip, "rendered_prompt": rendered_with_reply},
+            )
+        else:
+            snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=snapshot_metadata)
+            _save_state_file(
+                request["stateFilePath"],
+                {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
+            )
 
     metrics = {
         "contextTokens": _cache_offset(prompt_cache, prompt_token_count),
@@ -885,6 +1379,8 @@ def _generate_with_loaded_model(
         "cacheHit": cache_hit,
         "cachedTokens": cached_tokens,
     }
+    if spec_stats:
+        metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
 
 
@@ -2177,11 +2673,16 @@ def mlx_validate_config() -> None:
 def mlx_export_cache() -> None:
     request = _load_json()
     state_payload = _load_state_file(request["stateFilePath"])
-    snapshot = state_payload["snapshot"] if state_payload else {
+    snapshot = (state_payload or {}).get("snapshot") or {
         "format": "mlx-cache-snapshot-v1",
         "metadata": {"model_id": request["modelID"]},
         "tensors": [],
     }
+    if not snapshot.get("tensors") and snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64"):
+        # token-exact prefix mode stores only the safetensors blob; rebuild the tensor list for export
+        from mlx_lm.models.cache import KVCache as _KVCache
+
+        snapshot = _prompt_cache_to_snapshot(_snapshot_to_prompt_cache(snapshot, _KVCache), snapshot["metadata"])
     metrics = {
         "contextTokens": None,
         "ttftMilliseconds": None,
