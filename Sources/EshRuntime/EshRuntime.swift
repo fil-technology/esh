@@ -790,7 +790,11 @@ public extension EshRuntime {
     /// and a one-line note — exactly what a model pill renders. Only providers that run several models report
     /// (today: the mlx_audio speech engines); others contribute nothing. Sorted by provider, then rank.
     /// Choose one with `request.model = providerID` + `options["model"] = option.id`.
-    func modelOptions(for capability: CapabilityID) async -> [ModelOptionAvailability] {
+    ///
+    /// Public so external consumers (e.g. esh Studio's model pill) can render live readiness without
+    /// duplicating the catalog/probe logic. All types in the signature are already public
+    /// (`CapabilityID`, `ModelOptionAvailability`); this only widens the method's visibility.
+    public func modelOptions(for capability: CapabilityID) async -> [ModelOptionAvailability] {
         var rows: [ModelOptionAvailability] = []
         for provider in capabilityRegistry?.all ?? [] where provider.descriptor.capabilities.contains(capability) {
             if let reporting = provider as? ModelOptionReporting {
