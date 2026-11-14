@@ -26,8 +26,13 @@ import EshCore
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("esh-speech-smoke-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: state) }
-        let assets = env["ESH_MLX_SPEECH_SMOKE_ASSETS"].map { URL(fileURLWithPath: $0) } ?? state
-        let root = PersistenceRoot(stateRootURL: state, assetsRootURL: assets)
+        var root = PersistenceRoot(stateRootURL: state, assetsRootURL: state)
+        if let assets = env["ESH_MLX_SPEECH_SMOKE_ASSETS"], !assets.isEmpty {
+            // Register the external assets dir exactly as `esh storage` does (volume marker + storage.json in this
+            // throwaway state root), so the host's storage-availability gate accepts it. An existing marker on a
+            // real volume is reused, never replaced.
+            root = try StorageService().setAssetsRoot(assets, migrateExisting: false, root: root)
+        }
         let host = EshManagedPythonHost(pythonPath: python, bridgeScriptsDir: nil, root: root)   // bundled bridge
         let context = ExecutionContext(root: root, artifactStore: FileArtifactStore(root: root))
         let manifests = MacCapabilities.manifests()
