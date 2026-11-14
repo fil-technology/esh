@@ -412,12 +412,91 @@ def _restore_turboquant_codecs(mx, cache: Any, layer: dict[str, Any], keys_state
     cache._ensure_codecs(dummy_keys, dummy_values)
 
 
+# Crash-safe temp files. Bridge staging (safetensors written before base64-encoding / read back) and esh's MLX
+# state files live in owner-named directories (`<pid>-...`). A worker killed mid-save (SIGKILL by a watchdog or the
+# OS) cannot run its own cleanup — measured: a 3.1 GB staging file leaked — so every bridge process sweeps entries
+# whose owner pid is gone when it starts. Live owners (including other esh processes) are never touched.
+_STAGING_DIR_NAME = "esh-mlx-staging"
+_STATE_DIR_NAME = "esh-mlx-state"
+
+
+def _pid_alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+
+
+def _sweep_dead_owner_entries(directory: str) -> list[str]:
+    import os
+    import shutil
+
+    removed = []
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return removed
+    for name in names:
+        head = name.split("-", 1)[0]
+        if not head.isdigit():
+            continue
+        pid = int(head)
+        if pid == os.getpid() or _pid_alive(pid):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            removed.append(name)
+        except OSError:
+            pass
+    return removed
+
+
+def _sweep_stale_temp_files() -> None:
+    import os
+
+    for name in (_STAGING_DIR_NAME, _STATE_DIR_NAME):
+        _sweep_dead_owner_entries(os.path.join(tempfile.gettempdir(), name))
+
+
+class _StagingDir:
+    """`tempfile.TemporaryDirectory` replacement whose directory is owner-tagged so a crash leak is sweepable."""
+
+    def __enter__(self) -> str:
+        import os
+
+        root = os.path.join(tempfile.gettempdir(), _STAGING_DIR_NAME)
+        os.makedirs(root, exist_ok=True)
+        self.path = tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=root)
+        return self.path
+
+    def __exit__(self, *exc) -> None:
+        import shutil
+
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
 def _snapshot_to_prompt_cache(snapshot: dict[str, Any], kv_cache_type):
+    sidecar = snapshot.get("path") if snapshot.get("format") == "mlx-cache-sidecar-v1" else None
+    if sidecar:
+        from mlx_lm.models.cache import load_prompt_cache
+
+        return load_prompt_cache(sidecar)
     prompt_cache_blob = snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64")
     if prompt_cache_blob:
         from mlx_lm.models.cache import load_prompt_cache
 
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with _StagingDir() as temporary_directory:
             cache_file = f"{temporary_directory}/prompt-cache.safetensors"
             with open(cache_file, "wb") as handle:
                 handle.write(base64.b64decode(prompt_cache_blob))
@@ -475,7 +554,7 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_te
     metadata = {str(k): str(v) for k, v in metadata.items()}
     metadata["raw_bytes"] = str(total_bytes)
     if can_save_prompt_cache:
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with _StagingDir() as temporary_directory:
             cache_file = f"{temporary_directory}/prompt-cache.safetensors"
             try:
                 save_prompt_cache(cache_file, prompt_cache, metadata)
@@ -1078,7 +1157,7 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
 # killed mid-save leaked a 3.1 GB staging file. When the encoded snapshot would not fit while keeping
 # MemorySafetyPreflight's 3 GB swap floor, the snapshot is skipped: the next turn is a cache miss, not a failure.
 _SNAPSHOT_DISK_FLOOR_BYTES = 3 * 1024 ** 3
-_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 2.5}  # staging + base64 blob (+ base64 tensor list for legacy)
+_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 1.1}  # legacy: staging + 2x base64; tokens: one sidecar
 
 
 def _kv_raw_bytes(prompt_cache) -> int:
@@ -1228,6 +1307,7 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
                 len(_LIVE_PREFIX_CACHES) > 1 and _live_cache_resident_bytes() > budget
             ):
                 _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
+        _remove_kv_sidecars(state_path)
         payload = {"cache_tokens": cache_tokens, "live": True,
                    "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
         if retained_reason:
@@ -1235,10 +1315,58 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
         return payload
     skip = _snapshot_skip_reason(state_path, raw, "tokens")
     if skip:
+        _remove_kv_sidecars(state_path)
         return {"cache_tokens": cache_tokens, "snapshot": None, "snapshotSkipped": skip,
                 "metadata": {**metadata, "raw_bytes": str(raw)}}
-    snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
+    snapshot = _write_kv_sidecar(state_path, prompt_cache, {**metadata, "raw_bytes": str(raw)})
+    if snapshot is None:  # cache type safetensors cannot hold -> legacy inline snapshot
+        snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
     return {"cache_tokens": cache_tokens, "snapshot": snapshot}
+
+
+def _kv_sidecar_paths(state_path: str) -> list[str]:
+    import glob
+
+    return glob.glob(glob.escape(state_path) + ".*.kv.safetensors*")
+
+
+def _remove_kv_sidecars(state_path: str, keep: str | None = None) -> None:
+    import os
+
+    for path in _kv_sidecar_paths(state_path):
+        if path != keep:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _write_kv_sidecar(state_path: str, prompt_cache, metadata: dict) -> dict | None:
+    """Write the KV cache ONCE, as safetensors next to the state file (no staging copy, no base64 JSON — the
+    legacy snapshot wrote ~2.3x the KV size per turn). Versioned name + atomic rename, and the state JSON only
+    ever references a fully written file; older sidecars are removed after the new one is in place."""
+    import os
+    import uuid
+
+    from mlx_lm.models.cache import save_prompt_cache
+
+    if any(type(c).__name__ not in {"KVCache", "RotatingKVCache"} for c in prompt_cache):
+        return None
+    final = f"{state_path}.{uuid.uuid4().hex[:12]}.kv.safetensors"
+    partial = final + ".partial"
+    try:
+        save_prompt_cache(partial, prompt_cache, {str(k): str(v) for k, v in metadata.items()})
+        written = partial if os.path.exists(partial) else partial + ".safetensors"
+        os.replace(written, final)
+    except Exception:  # noqa: BLE001 — a failed sidecar is just a future cache miss
+        for leftover in (partial, partial + ".safetensors"):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+        return None
+    _remove_kv_sidecars(state_path, keep=final)
+    return {"format": "mlx-cache-sidecar-v1", "path": final, "metadata": metadata}
 
 
 def _generate_with_loaded_model(
@@ -2747,7 +2875,7 @@ def mlx_export_cache() -> None:
         "metadata": {"model_id": request["modelID"]},
         "tensors": [],
     }
-    if not snapshot.get("tensors") and snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64"):
+    if not snapshot.get("tensors") and (snapshot.get("path") or snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64")):
         # token-exact prefix mode stores only the safetensors blob; rebuild the tensor list for export
         from mlx_lm.models.cache import KVCache as _KVCache
 
@@ -3023,6 +3151,7 @@ def speech_serve() -> None:
 
 
 def main() -> None:
+    _sweep_stale_temp_files()   # reclaim staging/state files of owners that crashed or were killed
     _install_child_reaper()   # bridge cancellation must reclaim any long-running worker groups (no orphans)
     parser = argparse.ArgumentParser()
     parser.add_argument(

@@ -41,8 +41,7 @@ final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, CacheMemor
         bridge: MLXBridge,
         install: ModelInstall,
         readyInfo: MLXWorkerProcess.ReadyInfo,
-        stateFileURL: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("esh-persistent-\(UUID().uuidString).json")
+        stateFileURL: URL = MLXStateFiles.newStateFileURL()
     ) {
         self.worker = worker
         self.install = install
@@ -157,7 +156,7 @@ final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, CacheMemor
 
     public func unload() async {
         worker.shutdown()
-        try? FileManager.default.removeItem(at: stateFileURL)
+        MLXStateFiles.remove(stateFileURL)
     }
 }
 

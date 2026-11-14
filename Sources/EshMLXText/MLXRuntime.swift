@@ -13,8 +13,7 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     public init(
         bridge: MLXBridge,
         install: ModelInstall,
-        stateFileURL: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("esh-runtime-\(UUID().uuidString).json"),
+        stateFileURL: URL = MLXStateFiles.newStateFileURL(),
         metrics: Metrics = .init()
     ) {
         self.bridge = bridge
@@ -172,7 +171,7 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     }
 
     public func unload() async {
-        try? FileManager.default.removeItem(at: stateFileURL)
+        MLXStateFiles.remove(stateFileURL)
     }
 
     private func bridgePythonExecutableURL() -> URL {

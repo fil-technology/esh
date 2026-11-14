@@ -41,6 +41,26 @@ class CommonPrefixTests(unittest.TestCase):
             del os.environ["ESH_MLX_PREFIX_CACHE"]
 
 
+class CrashSafeTempFileTests(unittest.TestCase):
+    def test_sweep_removes_only_dead_owners(self):
+        import subprocess
+        d = tempfile.mkdtemp()
+        dead = subprocess.Popen(["true"]); dead.wait()          # a pid that has exited
+        live = os.getppid()
+        for name in (f"{dead.pid}-old.json", f"{live}-other.json", f"{os.getpid()}-mine.json", "notes.txt"):
+            open(os.path.join(d, name), "w").close()
+        os.makedirs(os.path.join(d, f"{dead.pid}-stagingdir"))
+        removed = bridge._sweep_dead_owner_entries(d)
+        self.assertEqual(sorted(removed), sorted([f"{dead.pid}-old.json", f"{dead.pid}-stagingdir"]))
+        self.assertEqual(sorted(os.listdir(d)), sorted([f"{live}-other.json", f"{os.getpid()}-mine.json", "notes.txt"]))
+
+    def test_staging_dirs_are_owner_tagged_and_removed(self):
+        with bridge._StagingDir() as path:
+            self.assertTrue(os.path.basename(path).startswith(f"{os.getpid()}-"))
+            self.assertTrue(os.path.isdir(path))
+        self.assertFalse(os.path.exists(path))
+
+
 class SnapshotDiskGuardTests(unittest.TestCase):
     def _with_free(self, free_bytes):
         import shutil
@@ -202,6 +222,21 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
     def test_session_cache_key(self):
         self.assertEqual(bridge._session_cache_key({"session": {"id": "abc"}, "stateFilePath": "/s"}), "session:abc")
         self.assertEqual(bridge._session_cache_key({"session": {}, "stateFilePath": "/s"}), "state:/s")
+
+    def test_tokens_mode_keeps_exactly_one_sidecar_referenced_by_the_state(self):
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        cache = make_prompt_cache(self.model)
+        turn = list(range(10, 40))
+        gen = self._greedy(turn, cache, n=4)
+        first = bridge._finish_token_prefix("tokens", state, cache, turn + gen, {})
+        second = bridge._finish_token_prefix("tokens", state, cache, turn + gen, {})
+        sidecars = bridge._kv_sidecar_paths(state)
+        self.assertEqual(sidecars, [second["snapshot"]["path"]])
+        self.assertNotEqual(first["snapshot"]["path"], second["snapshot"]["path"])
+        self.assertNotIn("mlx_prompt_cache_safetensors_base64", second["snapshot"]["metadata"])
+        # switching the same state file to live mode drops the now-meaningless sidecar
+        bridge._finish_token_prefix("live", state, cache, turn + gen, {}, cache_key="session:Z")
+        self.assertEqual(bridge._kv_sidecar_paths(state), [])
 
     def test_short_overlap_is_a_miss(self):
         state = os.path.join(tempfile.mkdtemp(), "state.json")
