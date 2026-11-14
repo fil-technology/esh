@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -90,4 +91,6 @@ import EshCore
         return Double(exp.filter { have.contains($0) }.count) / Double(exp.count)
     }
 }
+#endif
+
 #endif

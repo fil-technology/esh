@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -241,3 +242,5 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
         func set(_ newValue: CompatibilityEngineState) { lock.lock(); value = newValue; lock.unlock() }
     }
 }
+
+#endif

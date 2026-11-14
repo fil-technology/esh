@@ -1,3 +1,4 @@
+#if os(macOS)
 import Testing
 import EshCore
 @testable import EshMLXText
@@ -10,3 +11,5 @@ struct EshMLXTextTests {
         #expect(backend.kind == .mlx)
     }
 }
+
+#endif

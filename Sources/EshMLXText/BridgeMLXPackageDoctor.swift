@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -38,3 +39,5 @@ private struct BridgeDoctorResponse: Codable {
     var numpyVersion: String
     var safetensorsVersion: String
 }
+
+#endif

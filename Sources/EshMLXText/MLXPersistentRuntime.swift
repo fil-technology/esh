@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -160,3 +161,5 @@ final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, CacheMemor
     }
 }
 
+
+#endif

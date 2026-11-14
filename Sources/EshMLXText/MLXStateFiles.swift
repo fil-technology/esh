@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Where MLX runtimes keep their bridge state files (prompt-cache metadata and, in the experimental token-exact
@@ -51,3 +52,5 @@ enum MLXStateFiles {
         return errno == EPERM   // exists but owned by someone else
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -169,3 +170,5 @@ private struct MLXCompatibilityChecker: CompatibilityChecking, Sendable {
     }
 }
 
+
+#endif

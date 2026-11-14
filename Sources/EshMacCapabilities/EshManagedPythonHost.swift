@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -701,5 +702,7 @@ extension EshManagedPythonHost: CompatibilityModelHost {
         }
     }
 }
+
+#endif
 
 #endif

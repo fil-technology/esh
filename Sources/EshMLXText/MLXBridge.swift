@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -82,3 +83,5 @@ public struct MLXBridge: Sendable {
     }
 }
 
+
+#endif
