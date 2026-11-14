@@ -343,6 +343,19 @@ public actor RuntimeLifecycleManager {
         }
     }
 
+    /// Clean, AWAITED shutdown for a host process that is about to exit (`esh serve` on SIGINT/SIGTERM): unload
+    /// every resident and wait for each teardown, including unloads already in flight. `unloadAll()` is fire-and-
+    /// forget, so a process exiting right after it could leave a llama-server child running (an orphan holding the
+    /// model's memory) — the MLX worker exits on stdin EOF, llama-server does not.
+    public func shutdown() async {
+        unloadAll()
+        while let next = pendingUnloads.first {
+            await next.value.value
+            pendingUnloads[next.key] = nil
+        }
+        if let reclaim = externalReclaim { await reclaim() }
+    }
+
     /// Free memory for a heavy NON-LLM task (e.g. an image diffusion run) and AWAIT the teardown so the
     /// memory is actually released before the caller spawns the heavy work. Unlike `unloadAll` (fire-and-
     /// forget) and `reclaimForPressure` (needs size estimates), this evicts every warm, non-active resident

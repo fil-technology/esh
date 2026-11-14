@@ -152,3 +152,17 @@ private func install(_ id: String, gib: Double = 1) -> ModelInstall {
         #expect(a.cacheReleases == 1)
     }
 }
+
+@Suite struct RuntimeLifecycleShutdownTests {
+    @Test func shutdownAwaitsEveryUnload() async throws {
+        let slow = HardeningRuntime(modelID: "slow", unloadDelayNanos: 120_000_000)
+        let fast = HardeningRuntime(modelID: "fast")
+        let mgr = RuntimeLifecycleManager(loader: { $0.id == "slow" ? slow : fast })
+        try await mgr.withRuntime(install: install("slow")) { _ in }
+        try await mgr.withRuntime(install: install("fast")) { _ in }
+        await mgr.shutdown()
+        #expect(slow.unloaded)          // returned only after the slow teardown finished
+        #expect(fast.unloaded)
+        #expect(await mgr.residentModelIDs().isEmpty)
+    }
+}

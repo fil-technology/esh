@@ -161,6 +161,8 @@ enum ServeCommand {
         let signalHandler = SignalHandler()
         signalHandler.wait()
         server.stop()
+        // Unload resident models and WAIT for their processes to exit, so no llama-server child outlives esh.
+        await pool.shutdown()
     }
 
     private static func resolvePort(arguments: [String]) throws -> UInt16 {
