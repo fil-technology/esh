@@ -94,7 +94,8 @@ public struct ExternalInferenceService: Sendable {
                     }
                     let manager = lifecycleManager
                     defer {
-                        if let manager { let id = install.id; Task { let m = await runtime.metrics; await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes) } }
+                        if let manager { let id = install.id; Task { let m = await runtime.metrics; await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes,
+                                          prefixCacheMode: m.prefixCacheMode) } }
                         else { Task { await runtime.unload() } }
                     }
 
@@ -182,7 +183,8 @@ public struct ExternalInferenceService: Sendable {
                 let id = install.id
                 Task {
                     let m = await runtime.metrics
-                    await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes)
+                    await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes,
+                                          prefixCacheMode: m.prefixCacheMode)
                 }
             } else {
                 Task { await runtime.unload() }

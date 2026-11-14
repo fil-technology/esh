@@ -31,15 +31,37 @@ class CommonPrefixTests(unittest.TestCase):
         self.assertEqual(bridge._common_prefix_len([], [1]), 0)
         self.assertEqual(bridge._common_prefix_len([1, 2], [1, 2, 3]), 2)
 
-    def test_mode_defaults_to_tokens_and_legacy_is_an_explicit_opt_out(self):
+    def _mode(self, env_value, in_worker, budget=None):
+        from unittest import mock
         os.environ.pop("ESH_MLX_PREFIX_CACHE", None)
-        self.assertEqual(bridge._prefix_cache_mode(), "tokens")
-        for value, expected in (("bogus", "tokens"), ("legacy", "legacy"), ("LIVE", "live"), (" tokens ", "tokens")):
-            os.environ["ESH_MLX_PREFIX_CACHE"] = value
-            try:
-                self.assertEqual(bridge._prefix_cache_mode(), expected)
-            finally:
-                del os.environ["ESH_MLX_PREFIX_CACHE"]
+        if env_value is not None:
+            os.environ["ESH_MLX_PREFIX_CACHE"] = env_value
+        patches = [mock.patch.object(bridge, "_IN_PERSISTENT_WORKER", in_worker)]
+        if budget is not None:
+            patches.append(mock.patch.object(bridge, "_live_cache_budget_bytes", return_value=budget))
+        try:
+            for p in patches:
+                p.start()
+            return bridge._prefix_cache_mode()
+        finally:
+            for p in patches:
+                p.stop()
+            os.environ.pop("ESH_MLX_PREFIX_CACHE", None)
+
+    def test_one_shot_paths_default_to_tokens_and_never_run_live(self):
+        self.assertEqual(self._mode(None, False), "tokens")
+        self.assertEqual(self._mode("bogus", False), "tokens")
+        self.assertEqual(self._mode("LIVE", False), "tokens")      # live needs a process that outlives the request
+        self.assertEqual(self._mode("legacy", False), "legacy")
+
+    def test_persistent_worker_defaults_to_live_with_explicit_rollback(self):
+        self.assertEqual(self._mode(None, True), "live")
+        self.assertEqual(self._mode(" bogus ", True), "live")
+        self.assertEqual(self._mode("tokens", True), "tokens")     # rollback
+        self.assertEqual(self._mode("legacy", True), "legacy")     # pre-2026-11 path
+
+    def test_live_without_a_cache_budget_runs_token_exact(self):
+        self.assertEqual(self._mode(None, True, budget=0), "tokens")
 
 
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")
@@ -47,6 +69,12 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
     def setUp(self):
         ensure_real_mlx_lm()
         mx.random.seed(3)
+        # These tests exercise snapshot behavior, not the host's free disk: the disk guard (tested on its own in
+        # SnapshotDiskGuardTests) would otherwise skip snapshots on a nearly full development machine.
+        from unittest import mock
+        patcher = mock.patch.object(bridge, "_snapshot_skip_reason", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         args = llama.ModelArgs(model_type="llama", hidden_size=64, num_hidden_layers=2, intermediate_size=128,
                                num_attention_heads=4, rms_norm_eps=1e-5, vocab_size=97, num_key_value_heads=2)
         self.model = llama.Model(args)
@@ -187,6 +215,28 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
             self.assertEqual(list(bridge._LIVE_PREFIX_CACHES), ["session:B", "session:C"])
         finally:
             del os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"]
+
+    def test_live_that_cannot_retain_falls_back_to_a_token_exact_snapshot(self):
+        os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"] = "1"
+        try:
+            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            cache = make_prompt_cache(self.model)
+            turn = list(range(10, 40))
+            gen = self._greedy(turn, cache, n=4)
+            payload = bridge._finish_token_prefix("live", state, cache, turn + gen, {"model_id": "m"})
+            self.assertIn("exceeds the live-cache budget", payload["liveNotRetained"])
+            self.assertEqual(payload["snapshot"]["format"], "mlx-cache-sidecar-v1")   # fell back to tokens
+            bridge._save_state_file(state, {k: v for k, v in payload.items() if k != "metadata"})
+            # the next live turn misses the (empty) live slots but reuses the token-exact snapshot
+            reused, to_prefill, hit, n = bridge._token_prefix_reuse(
+                "live", state, bridge._load_state_file(state), turn + gen + [1, 2], make_prompt_cache, self.model,
+                KVCache, model_id="m")
+            self.assertTrue(hit)
+            self.assertEqual(n, len(turn + gen))
+            self.assertEqual(self._greedy(to_prefill, reused, n=4),
+                             self._greedy(turn + gen + [1, 2], make_prompt_cache(self.model), n=4))
+        finally:
+            del os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"]
 
     def test_non_trimmable_caches_are_not_retained(self):
         from mlx_lm.models.cache import RotatingKVCache

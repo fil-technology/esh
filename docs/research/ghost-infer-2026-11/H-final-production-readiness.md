@@ -115,7 +115,7 @@ Earlier, on Qwen3-0.6B through `esh serve` (see G): `live` cut the agent session
 | Setting | State | Recommendation |
 |---|---|---|
 | `ESH_MLX_PREFIX_CACHE=tokens` | **default (applied)** | Keep. It's the fallback for one-shot execution. |
-| `live` for **persistent MLX workers** (`esh serve` with `ESH_MLX_PERSISTENT=1`) | opt-in | **Proposed for approval.** Fastest of the three, and correct in every scenario above. Memory is accounted, capped, released under pressure and on shutdown, and guarded against growth. Its cost is the resident cache (0.2–0.25 GB per session at about 1.7K tokens; capped). |
+| `live` for **persistent MLX workers** (`esh serve` with `ESH_MLX_PERSISTENT=1`) | **default (approved 2026-11-14)** | **Applied** on branch `feat/live-default-persistent-mlx`. Rollback: `ESH_MLX_PREFIX_CACHE=tokens` (or `legacy`). Fastest of the three, and correct in every scenario above. Memory is accounted, capped, released under pressure and on shutdown, and guarded against growth. Its cost is the resident cache (0.2–0.25 GB per session at about 1.7K tokens; capped). |
 | Load gate, KV-growth guard, temp-file safety, disk guard, one-shot double-load fix, awaited shutdown, metrics, bug fixes | default (applied) | Merge. |
 | MLX lookup speculation / GGUF `ngram-simple` | opt-in | Keep opt-in (§7). |
 | Exact lookup, `ngram-mod`/`ngram-map-k`, q8_0 KV | experimental | Don't recommend. |

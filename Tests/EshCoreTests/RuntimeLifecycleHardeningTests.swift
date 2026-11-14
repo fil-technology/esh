@@ -270,3 +270,22 @@ private final class ReclaimLedger: @unchecked Sendable {
         #expect(!MemorySafetyPreflight.evaluate(requiredPeakGB: 3, host: host, applySmallModelFloor: false).fits)    // growth
     }
 }
+
+@Suite struct PrefixCacheDiagnosticsTests {
+    @Test func poolStatusReportsTheEffectiveCacheModeAndResidentCache() async throws {
+        let r = HardeningRuntime(modelID: "m")
+        let mgr = RuntimeLifecycleManager(loader: { _ in r })
+        _ = try await mgr.acquire(install: install("m"))
+        await mgr.release(modelID: "m", residentCacheBytes: 2048, prefixCacheMode: "live")
+        let info = try #require(await mgr.status().residents.first)
+        #expect(info.prefixCacheMode == "live")
+        #expect(info.residentCacheBytes == 2048)
+    }
+
+    @Test func metricsDecodeTheBridgeDiagnostics() throws {
+        let json = #"{"prefixCacheMode":"tokens","prefixCacheFallback":"session cache exceeds the live-cache budget","residentCacheBytes":0}"#
+        let m = try JSONDecoder().decode(Metrics.self, from: Data(json.utf8))
+        #expect(m.prefixCacheMode == "tokens")
+        #expect(m.prefixCacheFallback?.contains("budget") == true)
+    }
+}

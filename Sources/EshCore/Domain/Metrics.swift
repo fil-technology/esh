@@ -27,6 +27,10 @@ public struct Metrics: Codable, Hashable, Sendable {
     /// Set when the runtime silently degraded a requested capability (e.g. the automatic KV mode fell back from
     /// TurboQuant to a raw cache because its Python dependency is missing) — never nil-and-quiet anymore.
     public var kvModeFallback: String?
+    /// Effective prompt-prefix cache mode for this request ("live", "tokens" or "legacy") and, when live caching
+    /// could not hold the session, why it fell back to the token-exact snapshot.
+    public var prefixCacheMode: String?
+    public var prefixCacheFallback: String?
 
     public init(
         contextTokens: Int? = nil,
