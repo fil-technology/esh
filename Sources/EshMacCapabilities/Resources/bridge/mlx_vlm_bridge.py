@@ -440,7 +440,7 @@ def _mx_array_from_tensor(tensor: dict[str, Any]):
     return mx.array(_decode_tensor(tensor))
 
 
-def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[str, Any]:
+def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_tensor_list: bool = True) -> dict[str, Any]:
     from mlx_lm.models.cache import save_prompt_cache
 
     tensors = []
@@ -461,6 +461,10 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any]) -> dict[st
             continue
         if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
             can_save_prompt_cache = False
+        if not include_tensor_list and type(cache).__name__ in {"KVCache", "RotatingKVCache"}:
+            # the safetensors blob below is the restore path; skip the duplicate base64 tensor list
+            total_bytes += int(keys.nbytes + values.nbytes)
+            continue
         key_array = _snapshot_numpy_array(keys)
         value_array = _snapshot_numpy_array(values)
         total_bytes += int(key_array.nbytes + value_array.nbytes)
@@ -1052,6 +1056,90 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
         yield response(detok.last_segment, None, finish or "stop")
 
 
+# ----------------------------------------------------------------------------------------------------------------
+# Token-exact prefix reuse (EXPERIMENTAL: ESH_MLX_PREFIX_CACHE=tokens|live; unset = legacy string-prefix logic).
+#
+# The legacy path reuses the previous KV snapshot only when the re-rendered previous conversation is a STRING prefix
+# of the new prompt, then replays the last 2 tokens without trimming the restored cache. Measured on 2026-11-14 it
+# never hits for Llama-3 (its template appends an assistant header even with add_generation_prompt=False) or Qwen3
+# (the latest assistant turn keeps an empty <think></think> block that history turns drop), and where it does hit
+# the untrimmed cache can hold the overlap tokens twice. Like llama.cpp's slots and ghost-infer's session reuse,
+# this mode records the EXACT token ids held by the KV cache, reuses the longest common token prefix with the new
+# prompt, trims the cache to it and prefills only the remainder — template quirks then cost a few tokens, not the
+# whole history.
+#   tokens : snapshot still written to the state file (works for one-shot and persistent runtimes)
+#   live   : persistent worker keeps the last ESH_MLX_LIVE_PREFIX_SLOTS (default 1) session caches in memory and
+#            skips the per-turn snapshot serialization (the cache's memory stays resident between turns)
+# ----------------------------------------------------------------------------------------------------------------
+
+_LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
+_PREFIX_REUSE_MIN_TOKENS = 8
+
+
+def _prefix_cache_mode() -> str:
+    import os
+
+    mode = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
+    return mode if mode in {"tokens", "live"} else "legacy"
+
+
+def _common_prefix_len(a: list[int], b: list[int]) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache):
+    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)"""
+    from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
+
+    cache, tokens = None, None
+    if mode == "live" and state_path in _LIVE_PREFIX_CACHES:
+        tokens, cache = _LIVE_PREFIX_CACHES.pop(state_path)
+    elif state_payload is not None and state_payload.get("cache_tokens") and state_payload.get("snapshot"):
+        try:
+            cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
+            tokens = [int(t) for t in state_payload["cache_tokens"]]
+        except Exception:  # noqa: BLE001 — an unreadable snapshot is just a miss
+            cache, tokens = None, None
+    if cache is not None and tokens is not None and can_trim_prompt_cache(cache):
+        offset = _cache_offset(cache, -1)
+        if offset == len(tokens):
+            reuse = min(_common_prefix_len(tokens, full_prompt_tokens), len(full_prompt_tokens) - 1)
+            if reuse >= _PREFIX_REUSE_MIN_TOKENS:
+                trim_prompt_cache(cache, offset - reuse)
+                return cache, full_prompt_tokens[reuse:], True, reuse
+    return make_prompt_cache(model), full_prompt_tokens, False, 0
+
+
+def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict) -> dict:
+    """Align the cache with the exact token list it holds, persist it per `mode`, return the state payload."""
+    from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
+
+    offset = _cache_offset(prompt_cache, len(cache_tokens))
+    if offset > len(cache_tokens) and can_trim_prompt_cache(prompt_cache):
+        trim_prompt_cache(prompt_cache, offset - len(cache_tokens))  # drop the in-flight token we never read
+    cache_tokens = cache_tokens[: _cache_offset(prompt_cache, len(cache_tokens))]
+    if mode == "live":
+        import os
+
+        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "1")))
+        _LIVE_PREFIX_CACHES[state_path] = (cache_tokens, prompt_cache)
+        while len(_LIVE_PREFIX_CACHES) > slots:
+            _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
+        raw = 0
+        for c in prompt_cache:
+            st = getattr(c, "state", None)
+            if isinstance(st, tuple) and len(st) == 2 and st[0] is not None:
+                raw += int(st[0].nbytes + st[1].nbytes)
+        return {"cache_tokens": cache_tokens, "live": True,
+                "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+    snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
+    return {"cache_tokens": cache_tokens, "snapshot": snapshot}
+
+
 def _generate_with_loaded_model(
     mx,
     stream_generate,
@@ -1092,13 +1180,19 @@ def _generate_with_loaded_model(
         if previous_prompt:
             previous_prompt_tokens = _tokenize_prompt(tokenizer, previous_prompt)
     resume_overlap_tokens = int(
-        state_payload.get("snapshot", {}).get("metadata", {}).get("resume_overlap_tokens", MLX_RESUME_OVERLAP_TOKENS)
+        (state_payload.get("snapshot") or {}).get("metadata", {}).get("resume_overlap_tokens", MLX_RESUME_OVERLAP_TOKENS)
     ) if state_payload is not None else MLX_RESUME_OVERLAP_TOKENS
 
     cache_hit = False
     cached_tokens = 0
-    if (
+    prefix_mode = _prefix_cache_mode()
+    if prefix_mode != "legacy":
+        prompt_cache, prompt_tokens, cache_hit, cached_tokens = _token_prefix_reuse(
+            prefix_mode, request["stateFilePath"], state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+        )
+    elif (
         state_payload is not None
+        and state_payload.get("snapshot")
         and full_prompt.startswith(previous_prompt)
         and full_prompt_tokens[: len(previous_prompt_tokens)] == previous_prompt_tokens
     ):
@@ -1137,8 +1231,12 @@ def _generate_with_loaded_model(
             **_mlx_stream_generation_kwargs(stream_generate, mx, config),
         )
 
+    generated_ids: list[int] = []
     for response in responses:
         last_response = response
+        token_id = getattr(response, "token", None)
+        if token_id is not None:
+            generated_ids.append(int(token_id))
         if response.text:
             pending += response.text
             # Stop at the model's turn/EOS special token so it can't run away into a
@@ -1176,20 +1274,30 @@ def _generate_with_loaded_model(
     rendered_with_reply = _render_prompt(
         tokenizer, updated_messages, add_generation_prompt=False, config=config
     )
-    snapshot = _prompt_cache_to_snapshot(
-        prompt_cache,
-        metadata={
-            "rendered_prompt": rendered_with_reply,
-            "message_count": len(updated_messages),
-            "model_id": request["modelID"],
-            "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
-            "kv_mode": effective_kv_mode,
-        },
-    )
-    _save_state_file(
-        request["stateFilePath"],
-        {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
-    )
+    snapshot_metadata = {
+        "rendered_prompt": rendered_with_reply,
+        "message_count": len(updated_messages),
+        "model_id": request["modelID"],
+        "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
+        "kv_mode": effective_kv_mode,
+    }
+    if prefix_mode != "legacy":
+        reused_prefix = full_prompt_tokens[: len(full_prompt_tokens) - len(prompt_tokens)]
+        state = _finish_token_prefix(
+            prefix_mode, request["stateFilePath"], prompt_cache,
+            reused_prefix + list(prompt_tokens) + generated_ids, snapshot_metadata,
+        )
+        snapshot = state["snapshot"] or {"metadata": state["metadata"]}
+        _save_state_file(
+            request["stateFilePath"],
+            {**{k: v for k, v in state.items() if k != "metadata"}, "rendered_prompt": rendered_with_reply},
+        )
+    else:
+        snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=snapshot_metadata)
+        _save_state_file(
+            request["stateFilePath"],
+            {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
+        )
 
     metrics = {
         "contextTokens": _cache_offset(prompt_cache, prompt_token_count),
@@ -2514,11 +2622,16 @@ def mlx_validate_config() -> None:
 def mlx_export_cache() -> None:
     request = _load_json()
     state_payload = _load_state_file(request["stateFilePath"])
-    snapshot = state_payload["snapshot"] if state_payload else {
+    snapshot = (state_payload or {}).get("snapshot") or {
         "format": "mlx-cache-snapshot-v1",
         "metadata": {"model_id": request["modelID"]},
         "tensors": [],
     }
+    if not snapshot.get("tensors") and snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64"):
+        # token-exact prefix mode stores only the safetensors blob; rebuild the tensor list for export
+        from mlx_lm.models.cache import KVCache as _KVCache
+
+        snapshot = _prompt_cache_to_snapshot(_snapshot_to_prompt_cache(snapshot, _KVCache), snapshot["metadata"])
     metrics = {
         "contextTokens": None,
         "ttftMilliseconds": None,

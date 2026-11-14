@@ -168,6 +168,17 @@ def workloads(selected: list[str], contexts: list[int]) -> list[dict]:
             "max_tokens": 400,
             "json": True,
         }],
+        "agent-session": [{
+            # Ashex-shaped: a large fixed context (file + failing test) re-sent every turn, short follow-ups.
+            "turns": [
+                "You are a coding agent working in this repository.\n\n```swift\n" + code + "\n```\n\n" + tools
+                + "\n\nFirst: in one sentence, what does `SessionStore.compact(to:)` do?",
+                "Which method would you change to fix the failing test? Answer with just the method name.",
+                "Write the one-line fix for that method's guard statement.",
+                "Does `append(_:to:)` enforce the byte quota before or after writing? One sentence.",
+            ],
+            "max_tokens": 120,
+        }],
         "multi-turn": [{
             "turns": [
                 "You are helping refactor a Swift package. First: list three risks of moving a model cache from "
