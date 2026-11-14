@@ -216,10 +216,25 @@ public struct StaticInstallProvider: EshInstallProviding {
 // MARK: - The facade
 
 public actor EshRuntime {
-    private let registry: InferenceBackendRegistry
+    let registry: InferenceBackendRegistry
     private let installProvider: EshInstallProviding
-    private let deviceProfileProvider: DeviceProfileProviding
+    let deviceProfileProvider: DeviceProfileProviding
     private let localModelManager: LocalModelManager
+    /// One-shot (default) or managed (warm pool). See `EshRuntimeLifecycle`.
+    let lifecycle: EshRuntimeLifecycle
+    /// The managed warm pool — created lazily on first use; nil for one-shot runtimes.
+    var pool: RuntimeLifecycleManager?
+    /// Background work owned by the pool (pressure monitor, idle sweep); cancelled by `shutdown()`.
+    var poolTasks: [Task<Void, Never>] = []
+    var isShutDown = false
+
+    /// A runtime dropped without `shutdown()` still stops its pool's background work (pressure monitor, idle sweep).
+    /// The pool itself is released with the runtime, which releases its runtimes: native llama contexts are freed by
+    /// their owner's `deinit`, and a persistent MLX worker exits when its stdin closes. Prefer an explicit, awaited
+    /// `shutdown()` on app teardown.
+    deinit {
+        for task in poolTasks { task.cancel() }
+    }
     // Multimodal (UCMR) facade wiring. Populated by `makeDefault(...)` / `withEmbeddedGGUF(...)` (or an
     // advanced host via `attachCapabilities`); nil on a bare `EshRuntime()` (text-only, unchanged rc.5 API).
     private var capabilityService: CapabilityExecutionService?
@@ -268,15 +283,20 @@ public actor EshRuntime {
     func localModelManagerRef() -> LocalModelManager { localModelManager }
     /// The configured persistence root (honors the external assets volume via `.default()`), for the HF facade.
     func persistenceRootRef() -> PersistenceRoot { persistenceRoot ?? .default() }
+    func installProviderRef() -> EshInstallProviding { installProvider }
     func deviceProfileProviderRef() -> DeviceProfileProviding { deviceProfileProvider }
 
-    /// Default construction: the platform backend assembly (iOS → Apple Foundation Models only; macOS →
-    /// MLX + GGUF + Apple), the on-disk model store, and the system device-profile provider.
+    /// Default construction: Apple Foundation Models only (the portable `InferenceBackendRegistry()` — on iOS
+    /// AND macOS), the on-disk model store, and the system device-profile provider. Downloaded models need their
+    /// backend wired explicitly: `EshRuntime.withEmbeddedGGUF(...)` for in-process GGUF (iOS + macOS), or the
+    /// dependency-injected `init(registry:...)` with `MLXBackend` (EshMLXText, macOS) and/or
+    /// `LlamaCppEmbeddedBackend` (EshLlamaCpp). One-shot lifecycle.
     public init() {
         self.registry = InferenceBackendRegistry()
         self.installProvider = FileInstallProvider()
         self.deviceProfileProvider = SystemDeviceProfileProvider()
         self.localModelManager = LocalModelManager()
+        self.lifecycle = .oneShot
     }
 
     /// Dependency-injected construction for tests and advanced hosts. Provide the backend assembly, the
@@ -285,12 +305,14 @@ public actor EshRuntime {
         registry: InferenceBackendRegistry,
         installProvider: EshInstallProviding = StaticInstallProvider([]),
         deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
-        localModelManager: LocalModelManager = LocalModelManager()
+        localModelManager: LocalModelManager = LocalModelManager(),
+        lifecycle: EshRuntimeLifecycle = .oneShot
     ) {
         self.registry = registry
         self.installProvider = installProvider
         self.deviceProfileProvider = deviceProfileProvider
         self.localModelManager = localModelManager
+        self.lifecycle = lifecycle
     }
 
     /// A read-only snapshot of the device/runtime conditions esh is running under (memory, storage,
@@ -358,12 +380,29 @@ public actor EshRuntime {
 
     // MARK: Generation
 
-    /// One-shot generation. Selects a backend (Auto or pinned), enforces `localOnly`, runs the request
-    /// through the existing backend runtime, and returns the assembled text plus selection + metrics.
+    /// Generate to completion. Selects a backend (Auto or pinned), enforces `localOnly`, runs the request through
+    /// the backend runtime, and returns the assembled text plus selection + metrics. One-shot runtimes load the
+    /// model for this call and release it when it ends; managed runtimes reuse a resident model from the pool.
     public func generate(_ request: EshGenerationRequest) async throws -> EshGenerationResult {
         let plan = try plan(for: request)
         let resolved = try resolveCapabilities(for: request, backend: plan.selection.backend)
-        let runtime = try await loadRuntime(plan)
+        let lease = try await lease(plan)
+        var metrics: Metrics?
+        do {
+            let result = try await generate(plan: plan, resolved: resolved, request: request, lease: lease)
+            metrics = result.metrics
+            await endLease(lease, metrics: metrics)
+            return result
+        } catch {
+            await endLease(lease, metrics: nil)
+            throw error
+        }
+    }
+
+    private func generate(plan: Plan, resolved: (messages: [Message], config: GenerationConfig, resolution: CapabilityResolution?),
+                          request: EshGenerationRequest, lease: Lease) async throws -> EshGenerationResult {
+        let runtime = lease.runtime
+        try await guardContextGrowth(plan, lease: lease, messages: resolved.messages, maxTokens: resolved.config.maxTokens)
         let session = Self.session(install: plan.install, messages: resolved.messages)
         var text = ""
         do {
@@ -445,13 +484,16 @@ public actor EshRuntime {
                 do {
                     let plan = try await self.plan(for: request)
                     let resolved = try await self.resolveCapabilities(for: request, backend: plan.selection.backend)
-                    let runtime = try await self.loadRuntime(plan)
+                    let lease = try await self.lease(plan)
+                    let runtime = lease.runtime
                     let session = EshRuntime.session(install: plan.install, messages: resolved.messages)
                     let thinking = request.config.enableThinking == true
                     var splitter = ReasoningStreamSplitter()
                     var visibleAll = ""
                     var rawAll = ""
                     do {
+                        try await self.guardContextGrowth(plan, lease: lease, messages: resolved.messages,
+                                                          maxTokens: resolved.config.maxTokens)
                         for try await chunk in runtime.generate(session: session, config: resolved.config) {
                             try Task.checkCancellation()
                             rawAll += chunk
@@ -471,13 +513,19 @@ public actor EshRuntime {
                         }
                         try Task.checkCancellation()
                     } catch is CancellationError {
+                        await self.endLease(lease, metrics: nil)
                         throw CancellationError()
                     } catch let e as EshRuntimeError {
+                        await self.endLease(lease, metrics: nil)
                         throw e
                     } catch {
+                        await self.endLease(lease, metrics: nil)
                         throw EshRuntimeError.generationFailed(reason: EshRuntime.reason(from: error))
                     }
                     let metrics = await runtime.metrics
+                    // Release (pool) / unload (one-shot) BEFORE `.completed`, so a host that starts its next turn on
+                    // `.completed` finds the model warm and the concurrency slot free.
+                    await self.endLease(lease, metrics: metrics)
                     // Authoritative split for the final result — handles explicit AND implicit-open formats.
                     var finalText = visibleAll
                     var finalReasoning: String? = nil
@@ -501,7 +549,7 @@ public actor EshRuntime {
 
     // MARK: - Selection (thin, over the existing registry — NOT a parallel router)
 
-    private struct Plan {
+    struct Plan {
         let install: ModelInstall
         let backend: any InferenceBackend
         let selection: EshSelection
@@ -510,7 +558,7 @@ public actor EshRuntime {
     /// Resolve the request to a concrete (install, backend) using the existing registry + install store.
     /// Honors an explicit pin (never substituted), Auto (Apple-first zero-download, then installed models),
     /// and the hard `localOnly` constraint. Actor-isolated and synchronous (capability reports are sync).
-    private func plan(for request: EshGenerationRequest) throws -> Plan {
+    func plan(for request: EshGenerationRequest) throws -> Plan {
         if let pinned = request.constraints.pinnedModelID {
             return try planPinned(pinned, constraints: request.constraints)
         }
@@ -608,7 +656,7 @@ public actor EshRuntime {
     }
 
     /// Load the runtime for a plan, mapping non-typed load failures to a typed `modelLoadFailed`.
-    private func loadRuntime(_ plan: Plan) async throws -> any BackendRuntime {
+    func loadRuntime(_ plan: Plan) async throws -> any BackendRuntime {
         try memorySafetyPreflight(plan)   // live, load-time safety gate (P0) — reject unsafe loads, never hang
         do { return try await plan.backend.loadRuntime(for: plan.install) }
         catch is CancellationError { throw CancellationError() }
@@ -814,7 +862,8 @@ public extension EshRuntime {
 
     /// The heavy models/runtimes esh is currently keeping resident, with truthful per-model facts. Reports
     /// only what esh genuinely knows: providers that publish runtime state (the native image tiers today).
-    /// LLM/text residency is not tracked at this layer, so those are omitted rather than guessed;
+    /// Text (LLM) models are not listed here: a managed runtime reports them, with state, residency and
+    /// measured memory, in `runtimeStatus().pool` (one-shot runtimes keep none resident). Nothing is guessed;
     /// `measuredMemoryBytes` is nil unless esh has a real measurement.
     func residentModels() -> [ResidentModel] {
         capabilityRegistry?.residentModels() ?? []
@@ -838,10 +887,16 @@ public extension EshRuntime {
                                         systemVolumeFreeBytes: systemFree, assetsVolumeFreeBytes: assetsFree)
     }
 
-    /// Explicitly unload one resident model by its id (the pinning id from `residentModels()`). An **active**
+    /// Explicitly unload one resident model by its id (the pinning id from `residentModels()`, or a managed text
+    /// model's id from `runtimeStatus().pool`). An **active**
     /// model is never force-unloaded — it throws `UnloadError.modelActive`. Unknown ids throw
     /// `.unknownModel`; a model that is already not resident is a no-op (idempotent).
     func unload(modelID: String) async throws {
+        // Managed text models (the warm pool) first: same contract — never force-unload an active model.
+        if let pool, await pool.residentModelIDs().contains(modelID) {
+            guard await pool.unload(modelID: modelID) else { throw UnloadError.modelActive(modelID) }
+            return
+        }
         guard let registry = capabilityRegistry,
               let provider = registry.all.first(where: { $0.descriptor.id == modelID }) else {
             throw UnloadError.unknownModel(modelID)
@@ -857,6 +912,7 @@ public extension EshRuntime {
     /// Release every resident model that is warm/idle but not currently serving a request. Active models are
     /// left untouched. Best-effort memory reclaim for low-headroom situations.
     func unloadIdleRuntimes() async {
+        if let pool { _ = await pool.reclaimForHeavyTask() }   // evicts every non-active resident, awaited
         guard let registry = capabilityRegistry else { return }
         let idle = Set(registry.idleUnloadableProviderIDs())
         for provider in registry.all where idle.contains(provider.descriptor.id) {
@@ -875,13 +931,15 @@ public extension EshRuntime {
         installProvider: EshInstallProviding = FileInstallProvider(),
         deviceProfileProvider: DeviceProfileProviding = SystemDeviceProfileProvider(),
         localModelManager: LocalModelManager = LocalModelManager(),
-        additionalProviders: [any CapabilityProvider] = []
+        additionalProviders: [any CapabilityProvider] = [],
+        lifecycle: EshRuntimeLifecycle = .oneShot
     ) async -> EshRuntime {
         let runtime = EshRuntime(
             registry: InferenceBackendRegistry(backends: backends),
             installProvider: installProvider,
             deviceProfileProvider: deviceProfileProvider,
-            localModelManager: localModelManager
+            localModelManager: localModelManager,
+            lifecycle: lifecycle
         )
         let infer: @Sendable (ExternalInferenceRequest) async throws -> ExternalInferenceResponse = { [weak runtime] req in
             guard let runtime else { throw CapabilityError.failed("EshRuntime was released before inference.") }

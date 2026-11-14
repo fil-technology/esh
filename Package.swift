@@ -4,10 +4,12 @@ import Foundation
 
 // esh — PORTABLE SDK package (v2.4.0-rc.3).
 //
-// This root manifest is the remote-consumable SwiftPM package. It exposes ONLY the portable products
-// (EshCore, EshRuntime, and — when a llama binary is available — EshLlamaCpp) and declares NO external
-// package dependencies. That is deliberate: a remote consumer that adds `esh` must not be forced to
-// resolve dependencies used only by the macOS CLI / dev tooling (swift-syntax, TTSMLX, mlx-audio).
+// This root manifest is the remote-consumable SwiftPM package. Its core products are portable (EshCore,
+// EshRuntime, and — when a llama binary is available — EshLlamaCpp); the opt-in products (EshMLXText,
+// EshMacCapabilities, EshVision, EshImageGen) add macOS execution. The only external dependencies are the
+// mlx-swift graph used by the opt-in EshVision/EshImageGen products (verified swift-syntax-free). That is
+// deliberate: a remote consumer that adds `esh` must not be forced to resolve dependencies used only by the
+// macOS CLI / dev tooling (swift-syntax, TTSMLX, mlx-audio).
 //
 // Why the split (rc.3 root cause): SwiftPM resolves the *package-level* dependency graph regardless of
 // which products a consumer selects. When swift-syntax (603.x) was declared here — even though only the
@@ -61,7 +63,10 @@ let llamaTargets: [Target] = {
         ? .binaryTarget(name: "EshCLlama", path: "Vendor/esh_llama.xcframework")
         : .binaryTarget(name: "EshCLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
     return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "EshCLlama"],
-                            swiftSettings: quietDebugSwiftSettings)]
+                            swiftSettings: quietDebugSwiftSettings),
+            // Embedded GGUF lifecycle/memory tests. Real-model tests are env-gated (ESH_GGUF_TEST_MODEL).
+            .testTarget(name: "EshLlamaCppTests", dependencies: ["EshLlamaCpp", "EshRuntime", "EshCore", "EshMLXText"],
+                        swiftSettings: quietDebugSwiftSettings)]
 }()
 
 let package = Package(
@@ -112,6 +117,7 @@ let package = Package(
         // Python worker, not native Swift. A consumer registers `MLXBackend()` into
         // `EshRuntime.makeDefault(backends:)` and resolves the worker's python + bridge via
         // `EshManagedPythonHost` (EshMacCapabilities). esh keeps backend/worker lifecycle + memory guards.
+        // On iOS the module compiles to an unavailable `MLXBackend` stub (explicit unsupported report).
         .library(
             name: "EshMLXText",
             targets: ["EshMLXText"]
@@ -221,8 +227,8 @@ let package = Package(
             dependencies: ["EshImageGen"],
             swiftSettings: quietDebugSwiftSettings
         ),
-        // MLX text backend — Python-worker-driven, EshCore-only (no mlx-swift). macOS only at run time
-        // (the providers no-op/report unsupported on iOS); the target itself is portable to compile.
+        // MLX text backend — Python-worker-driven, EshCore-only (no mlx-swift). macOS only: every source is
+        // `#if os(macOS)`; on iOS the module provides an `MLXBackend` stub that reports unavailable.
         .target(
             name: "EshMLXText",
             dependencies: ["EshCore"],

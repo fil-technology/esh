@@ -1,3 +1,6 @@
+#if os(macOS)
+// macOS only: the MLX text backend drives a Python bridge through `Process` (one-shot subprocess or persistent
+// worker), which iOS does not allow. On iOS this module provides only an unavailable `MLXBackend` (see MLXBackendUnavailable.swift).
 import Foundation
 import EshCore
 
@@ -169,3 +172,32 @@ private struct MLXCompatibilityChecker: CompatibilityChecking, Sendable {
     }
 }
 
+
+extension MLXBackend: BackendLifecycleDescribing {
+    /// The effective prefix-reuse mode, using the same rule as the bridge's `_prefix_cache_mode()`: `live` by default
+    /// in a persistent worker, `tokens` everywhere else, `ESH_MLX_PREFIX_CACHE=tokens|live|legacy` overrides, and
+    /// `live` never applies outside a persistent worker or with a zero live-cache budget.
+    public static func effectivePrefixReuse(persistent: Bool,
+                                            environment: [String: String] = ProcessInfo.processInfo.environment)
+        -> BackendLifecycleTraits.PrefixReuse {
+        let requested = environment["ESH_MLX_PREFIX_CACHE"]?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        let mode = ["tokens", "live", "legacy"].contains(requested) ? requested : (persistent ? "live" : "tokens")
+        let zeroBudget = environment["ESH_MLX_LIVE_PREFIX_MAX_BYTES"].flatMap(Int64.init).map { $0 <= 0 } ?? false
+        switch mode {
+        case "live": return (persistent && !zeroBudget) ? .live : .persistedTokens
+        case "legacy": return .none
+        default: return .persistedTokens
+        }
+    }
+
+    /// Python bridge (macOS only). Persistent: one weights-resident worker process per model, owned by the runtime
+    /// and stopped by `unload()`. One-shot: a subprocess per request (weights reloaded every call). The worker
+    /// handles one request at a time; KV growth is judged per request by esh's growth guard (not bounded at load).
+    public var lifecycleTraits: BackendLifecycleTraits {
+        BackendLifecycleTraits(residency: persistent ? .weightsResident : .handleCached, inProcess: false,
+                               prefixReuse: Self.effectivePrefixReuse(persistent: persistent),
+                               serializesRequestsPerModel: true, contextBoundedAtLoad: false,
+                               cancelsDuringPrefill: false, supportsIOS: false)
+    }
+}
+#endif

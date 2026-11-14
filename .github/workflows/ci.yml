@@ -94,6 +94,12 @@ jobs:
         run: >-
           xcodebuild build -scheme EshRuntime
           -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation
+      # The MLX text backend is macOS-only (Python worker via Process); on iOS it must still compile, to an
+      # explicit "unavailable" MLXBackend, so cross-platform hosts can register it unconditionally.
+      - name: Build EshMLXText for iOS Simulator (unavailable stub)
+        run: >-
+          xcodebuild build -scheme EshMLXText
+          -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation
 
   ios-embedded-integration:
     name: iOS Embedded GGUF + Clean-Room Integration

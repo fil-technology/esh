@@ -694,21 +694,10 @@ public struct ExternalInferenceService: Sendable {
     /// instead of letting a long context push the machine into swap. GGUF is bounded at load (llama-server `-c`).
     private func guardContextGrowth(install: ModelInstall, runtime: BackendRuntime,
                                     messages: [ExternalInferenceMessage], maxTokens: Int) async throws {
-        guard install.spec.backend == .mlx,
-              let perToken = KVCacheEstimator.bytesPerToken(modelDirectory: URL(fileURLWithPath: install.installPath))
-        else { return }
-        let characters = messages.reduce(0) { $0 + $1.text.count }
-        let growth = KVCacheEstimator.growthBytes(bytesPerToken: perToken, promptCharacters: characters,
-                                                  messages: messages.count, maxTokens: maxTokens)
-        if let manager = lifecycleManager {
-            try await manager.ensureHeadroom(forAdditionalBytes: growth, modelID: install.id)
-            return
-        }
-        let growthGB = Double(growth) / 1_073_741_824
-        let weightsGB = runtime.prepareBeforeGenerateIsRedundant ? ModelLoadSafetyGate.requiredPeakGB(for: install) : 0
-        if case let .gated(reason, _, _) = RuntimeLifecycleManager.liveGrowthGate(growthGB + weightsGB) {
-            throw RuntimeLifecycleError.insufficientMemoryForContext(modelID: install.id, neededGB: growthGB, reason: reason)
-        }
+        try await ContextGrowthGuard.check(
+            install: install, promptCharacters: messages.reduce(0) { $0 + $1.text.count },
+            messageCount: messages.count, maxTokens: maxTokens, pool: lifecycleManager,
+            weightsNotYetLoaded: runtime.prepareBeforeGenerateIsRedundant)
     }
 
     private func resolveSession(

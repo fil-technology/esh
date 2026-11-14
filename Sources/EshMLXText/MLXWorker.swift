@@ -1,3 +1,6 @@
+#if os(macOS)
+// macOS only: the MLX text backend drives a Python bridge through `Process` (one-shot subprocess or persistent
+// worker), which iOS does not allow. On iOS this module provides only an unavailable `MLXBackend` (see MLXBackendUnavailable.swift).
 import Foundation
 import EshCore
 
@@ -296,3 +299,4 @@ final class MLXWorkerProcess: @unchecked Sendable {
     }
 }
 
+#endif
