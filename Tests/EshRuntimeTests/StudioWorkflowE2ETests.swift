@@ -98,10 +98,18 @@ private func pinned(_ id: String) -> EshGenerationRequest {
             root: PersistenceRoot(rootURL: tmpRoot()),
             installProvider: StaticInstallProvider([install("small-gguf", backend: .gguf)]))
         let collected = Mutex(0)
-        let task = Task { for try await e in runtime.stream(pinned("small-gguf")) { if case .token = e { collected.inc() } } }
-        // Wait long enough that tokens reliably flow even under CI load (chunks are 10ms apart; 600×10ms=6s total),
-        // then cancel well before completion. Robust against startup latency and scheduler jitter.
-        try await Task.sleep(nanoseconds: 600_000_000)   // 0.6s → ~tens of tokens expected
+        let (firstToken, signal) = AsyncStream<Void>.makeStream()
+        let task = Task {
+            defer { signal.finish() }   // stream ended or threw before any token: stop waiting, don't hang
+            for try await e in runtime.stream(pinned("small-gguf")) {
+                if case .token = e { collected.inc(); signal.yield() }
+            }
+        }
+        // Cancel once tokens are flowing, not after a fixed sleep: on a loaded CI runner startup can exceed any
+        // fixed delay (0.6s produced zero tokens on a 3-core macos-26 runner). 600 chunks × 10ms = 6s leaves
+        // ample room to cancel well before completion.
+        var tokens = firstToken.makeAsyncIterator()
+        _ = await tokens.next()
         task.cancel()
         _ = await task.result
         let n = collected.value
