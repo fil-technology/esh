@@ -1,39 +1,7 @@
 import Foundation
-import Network
 import Testing
 import EshCore
 @testable import EshRuntime
-
-// A tiny localhost HTTP server for deterministic download tests (no external network).
-private final class TestHTTPServer: @unchecked Sendable {
-    private let listener: NWListener
-    let port: UInt16
-    private let body: Data
-    private let contentLengthOverride: Int?   // if set, advertise this Content-Length (to force size mismatch)
-
-    init(body: Data, contentLengthOverride: Int? = nil) throws {
-        self.body = body
-        self.contentLengthOverride = contentLengthOverride
-        let params = NWParameters.tcp
-        listener = try NWListener(using: params, on: .any)
-        listener.newConnectionHandler = { [body, contentLengthOverride] conn in
-            conn.start(queue: .global())
-            conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
-                let len = contentLengthOverride ?? body.count
-                let header = "HTTP/1.1 200 OK\r\nContent-Length: \(len)\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n"
-                var out = Data(header.utf8); out.append(body)
-                conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
-            }
-        }
-        let sem = DispatchSemaphore(value: 0)
-        listener.stateUpdateHandler = { if case .ready = $0 { sem.signal() } }
-        listener.start(queue: .global())
-        sem.wait()
-        port = listener.port!.rawValue
-    }
-    func url(path: String = "/model.gguf") -> URL { URL(string: "http://127.0.0.1:\(port)\(path)")! }
-    func stop() { listener.cancel() }
-}
 
 private struct FixedProfile: DeviceProfileProviding {
     let storage: UInt64?
@@ -168,7 +136,7 @@ struct LocalModelManagerTests {
 
     @Test func downloadVerifiesAndInstalls_thenRemoves() async throws {
         let payload = Data((0..<200_000).map { UInt8($0 % 251) })
-        let server = try TestHTTPServer(body: payload); defer { server.stop() }
+        let server = try await LoopbackHTTPServer.start(body: payload); defer { server.stop() }
         let root = tempRoot()
         let mgr = LocalModelManager(root: root, deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 8 << 30))
         let d = descriptor(url: server.url(), bytes: Int64(payload.count), sha: sha256Hex(payload))
@@ -193,7 +161,7 @@ struct LocalModelManagerTests {
 
     @Test func checksumMismatchIsRejected() async throws {
         let payload = Data((0..<50_000).map { UInt8($0 % 251) })
-        let server = try TestHTTPServer(body: payload); defer { server.stop() }
+        let server = try await LoopbackHTTPServer.start(body: payload); defer { server.stop() }
         let mgr = LocalModelManager(root: tempRoot(), deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 8 << 30))
         // Correct length, WRONG sha → checksum mismatch, not installed.
         let d = descriptor(url: server.url(), bytes: Int64(payload.count), sha: String(repeating: "a", count: 64))
@@ -204,7 +172,7 @@ struct LocalModelManagerTests {
     @Test func contentLengthMismatchIsRejected() async throws {
         let payload = Data((0..<50_000).map { UInt8($0 % 251) })
         // Advertise more bytes than we send → size mismatch.
-        let server = try TestHTTPServer(body: payload, contentLengthOverride: payload.count + 10_000); defer { server.stop() }
+        let server = try await LoopbackHTTPServer.start(body: payload, contentLengthOverride: payload.count + 10_000); defer { server.stop() }
         let mgr = LocalModelManager(root: tempRoot(), deviceProfileProvider: FixedProfile(storage: 8 << 30, physical: 8 << 30))
         let d = descriptor(url: server.url(), bytes: Int64(payload.count) + 10_000, sha: sha256Hex(payload))
         await #expect(throws: Error.self) { _ = try await mgr.install(d) }
