@@ -1292,14 +1292,26 @@ _LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
 _PREFIX_REUSE_MIN_TOKENS = 8
 
 
+_IN_PERSISTENT_WORKER = False   # set by mlx_serve: the managed, pool-owned persistent worker (ESH_MLX_PERSISTENT=1)
+
+
 def _prefix_cache_mode() -> str:
-    """`tokens` by default. The legacy string-prefix path never hit on Llama-3/Qwen3 templates and duplicated KV
-    tokens on Mistral's (benchmarks/validate_prefix_cache.py), so it is only used when explicitly requested with
-    ESH_MLX_PREFIX_CACHE=legacy (rollback). Unknown values fall back to the default."""
+    """Effective prefix-cache mode for this request.
+
+    * persistent MLX worker (`mlx-serve`, owned by esh's RuntimeLifecycleManager): `live` by default (approved
+      2026-11-14) — session KV stays resident, budgeted, pressure-released, guarded against growth.
+    * every other path (one-shot `mlx-generate`, cache tools): `tokens` — live caching needs a process that outlives
+      the request, so it is never enabled there, even if requested.
+    * ESH_MLX_PREFIX_CACHE=tokens|legacy|live overrides (rollback: `tokens`, or `legacy` for the pre-2026-11 path);
+      unknown values fall back to the default. `live` with a zero cache budget runs as `tokens`.
+    """
     import os
 
-    mode = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
-    return mode if mode in {"tokens", "live", "legacy"} else "tokens"
+    requested = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
+    mode = requested if requested in {"tokens", "live", "legacy"} else ("live" if _IN_PERSISTENT_WORKER else "tokens")
+    if mode == "live" and (not _IN_PERSISTENT_WORKER or _live_cache_budget_bytes() <= 0):
+        return "tokens"
+    return mode
 
 
 def _common_prefix_len(a: list[int], b: list[int]) -> int:
@@ -1387,7 +1399,7 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
         if slot is not None:
             tokens, cache = _LIVE_PREFIX_CACHES.pop(slot)
             _LAST_LIVE_SLOT = slot
-    elif (
+    if cache is None and (
         state_payload is not None
         and state_payload.get("cache_tokens")
         and state_payload.get("snapshot")
@@ -1441,11 +1453,13 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
                 len(_LIVE_PREFIX_CACHES) > 1 and _live_cache_resident_bytes() > budget
             ):
                 _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
-        _remove_kv_sidecars(state_path)
-        payload = {"cache_tokens": cache_tokens, "live": True,
-                   "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
-        if retained_reason:
-            payload["liveNotRetained"] = retained_reason
+            _remove_kv_sidecars(state_path)
+            return {"cache_tokens": cache_tokens, "live": True,
+                    "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+        # Live caching could not hold this session safely: fall back to the token-exact snapshot (subject to the
+        # disk guard) so the next turn still reuses its prefix instead of re-prefilling everything.
+        payload = _finish_token_prefix("tokens", state_path, prompt_cache, cache_tokens, metadata)
+        payload["liveNotRetained"] = retained_reason
         return payload
     skip = _snapshot_skip_reason(state_path, raw, "tokens")
     if skip:
@@ -1653,6 +1667,7 @@ def _generate_with_loaded_model(
         "resume_overlap_tokens": MLX_RESUME_OVERLAP_TOKENS,
         "kv_mode": effective_kv_mode,
     }
+    state: "dict | None" = None
     if prefix_mode != "legacy":
         reused_prefix = full_prompt_tokens[: len(full_prompt_tokens) - len(prompt_tokens)]
         state = _finish_token_prefix(
@@ -1713,6 +1728,7 @@ def _generate_with_loaded_model(
         "cachedTokens": cached_tokens,
         # session caches the (persistent) worker keeps resident between requests — the warm pool budgets this
         "residentCacheBytes": int(_live_cache_resident_bytes()),
+        "prefixCacheMode": prefix_mode,
         "promptTokensPerSecond": (
             float(last_response.prompt_tps) if last_response is not None and last_response.prompt_tps else None
         ),
@@ -1724,6 +1740,8 @@ def _generate_with_loaded_model(
         metrics["draftAcceptedTokens"] = int(spec_stats.get("accepted") or 0)
     if _KV_MODE_FALLBACKS:
         metrics["kvModeFallback"] = "; ".join(_KV_MODE_FALLBACKS)
+    if state and state.get("liveNotRetained"):
+        metrics["prefixCacheFallback"] = state["liveNotRetained"]
     if spec_stats:
         metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
@@ -2817,6 +2835,8 @@ def mlx_serve() -> None:
     """
     import queue as _queue
 
+    global _IN_PERSISTENT_WORKER
+    _IN_PERSISTENT_WORKER = True   # live prefix caching is only ever enabled in this long-lived worker
     mx, _, stream_generate, KVCache, make_prompt_cache, load = _import_mlx_lm()
 
     init_line = sys.stdin.readline()

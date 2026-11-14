@@ -18,7 +18,7 @@ Implementation (branch `perf/ghost-infer-learnings`; everything is **opt-in**, d
 |---|---|---|
 | `ESH_MLX_LOOKUP_SPEC=1` (+ `ESH_MLX_LOOKUP_MAX_DRAFT`, `_MIN_MATCH`, `_ADAPTIVE`) | MLX prompt-lookup speculative decoding, greedy only | `51fc115` |
 | `ESH_LLAMA_SPEC_TYPE=ngram-simple` (+ `ESH_LLAMA_DRAFT_MAX`, `ESH_LLAMA_KV_TYPE`) | Upstream llama.cpp n-gram speculation and KV type, allow-listed | `cda03db` |
-| `ESH_MLX_PREFIX_CACHE=tokens\|live\|legacy` (+ `ESH_MLX_LIVE_PREFIX_SLOTS`) | Token-exact prefix reuse, **`tokens` is the default** since 2026-11-14; `live` adds an in-memory session cache in the persistent worker (opt-in); `legacy` is the rollback | `b9c8d0c` |
+| `ESH_MLX_PREFIX_CACHE=tokens\|live\|legacy` (+ `ESH_MLX_LIVE_PREFIX_SLOTS`, `ESH_MLX_LIVE_PREFIX_MAX_BYTES`) | Prefix reuse. Defaults: **`live` in the persistent MLX worker** (`ESH_MLX_PERSISTENT=1`); **`tokens` everywhere else**, since live is never enabled on one-shot paths. `tokens` / `legacy` are the explicit rollbacks. The effective mode is reported as `Metrics.prefixCacheMode` and in `/v1/runtime` residents | `b9c8d0c` |
 | (always on) | Skip KV snapshots that would exhaust the internal/swap volume | `4c6813c` |
 
 Reproduce: `~/.esh/runtime/py311/venv/bin/python benchmarks/esh_infer_bench.py --help`, then

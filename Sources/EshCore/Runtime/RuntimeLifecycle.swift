@@ -89,8 +89,14 @@ public struct ResidentModelInfo: Codable, Sendable, Equatable {
     public var activeRequests: Int
     public var loadCount: Int
     public var lastUsedISO8601: String?
+    /// Effective prompt-prefix cache mode the runtime last reported ("live" for the persistent MLX worker by default,
+    /// "tokens" for one-shot paths); nil until it served a request or for backends without one.
+    public var prefixCacheMode: String?
+    /// Resident session-cache memory this runtime reported (persistent KV caches), in bytes.
+    public var residentCacheBytes: Int64?
 
-    public init(modelID: String, backend: BackendKind, state: String, residency: String, estimatedMemoryGB: Double?, measuredMemoryBytes: Int64?, activeRequests: Int, loadCount: Int, lastUsedISO8601: String?) {
+    public init(modelID: String, backend: BackendKind, state: String, residency: String, estimatedMemoryGB: Double?, measuredMemoryBytes: Int64?, activeRequests: Int, loadCount: Int, lastUsedISO8601: String?,
+                prefixCacheMode: String? = nil, residentCacheBytes: Int64? = nil) {
         self.modelID = modelID
         self.backend = backend
         self.state = state
@@ -100,6 +106,8 @@ public struct ResidentModelInfo: Codable, Sendable, Equatable {
         self.activeRequests = activeRequests
         self.loadCount = loadCount
         self.lastUsedISO8601 = lastUsedISO8601
+        self.prefixCacheMode = prefixCacheMode
+        self.residentCacheBytes = residentCacheBytes
     }
 }
 

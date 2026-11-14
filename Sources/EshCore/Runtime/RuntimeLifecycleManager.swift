@@ -16,6 +16,7 @@ public actor RuntimeLifecycleManager {
         var measuredBytes: Int64?
         /// Last reported resident cache memory (persistent KV/prefix caches) — budgeted on top of weights.
         var cacheBytes: Int64 = 0
+        var prefixCacheMode: String?
         var activeRequests: Int = 0
         var loadCount: Int = 0
         var lastUsed: Date
@@ -114,11 +115,13 @@ public actor RuntimeLifecycleManager {
 
     /// Release a request's hold on a model. Records measured memory (from the generation Metrics),
     /// marks the model warm, and admits the next waiter.
-    public func release(modelID: String, measuredMemoryBytes: Int64? = nil, residentCacheBytes: Int64? = nil) {
+    public func release(modelID: String, measuredMemoryBytes: Int64? = nil, residentCacheBytes: Int64? = nil,
+                        prefixCacheMode: String? = nil) {
         if let resident = residents[modelID] {
             resident.activeRequests = max(0, resident.activeRequests - 1)
             if let measuredMemoryBytes { resident.measuredBytes = measuredMemoryBytes }
             if let residentCacheBytes { resident.cacheBytes = max(0, residentCacheBytes) }
+            if let prefixCacheMode { resident.prefixCacheMode = prefixCacheMode }
             resident.lastUsed = clock()
             if resident.activeRequests == 0 { resident.state = .warm }
         }
@@ -131,7 +134,8 @@ public actor RuntimeLifecycleManager {
         do {
             let result = try await body(runtime)
             let metrics = await runtime.metrics
-            release(modelID: install.id, measuredMemoryBytes: metrics.memoryBytes, residentCacheBytes: metrics.residentCacheBytes)
+            release(modelID: install.id, measuredMemoryBytes: metrics.memoryBytes, residentCacheBytes: metrics.residentCacheBytes,
+                    prefixCacheMode: metrics.prefixCacheMode)
             return result
         } catch {
             release(modelID: install.id, measuredMemoryBytes: nil)
@@ -518,7 +522,8 @@ public actor RuntimeLifecycleManager {
                 residency: residencyFor(r).rawValue,
                 estimatedMemoryGB: r.estimatedGB, measuredMemoryBytes: r.measuredBytes,
                 activeRequests: r.activeRequests, loadCount: r.loadCount,
-                lastUsedISO8601: formatter.string(from: r.lastUsed)
+                lastUsedISO8601: formatter.string(from: r.lastUsed),
+                prefixCacheMode: r.prefixCacheMode, residentCacheBytes: r.cacheBytes > 0 ? r.cacheBytes : nil
             )
         }.sorted { $0.modelID < $1.modelID }
         let estUsage = residents.values.reduce(0.0) { $0 + $1.budgetGB }
