@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import CoreGraphics
 import ImageIO
@@ -258,3 +259,5 @@ private func realEditInputImage() -> String {
         #expect(dt2 < dt1)
     }
 }
+
+#endif

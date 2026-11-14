@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import CoreGraphics
 import CryptoKit
@@ -263,3 +264,5 @@ private func collect(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async -> 
         #expect(params.seed == 42)
     }
 }
+
+#endif

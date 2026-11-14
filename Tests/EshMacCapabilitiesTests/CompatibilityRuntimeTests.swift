@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -893,3 +894,5 @@ private func collect(_ stream: AsyncThrowingStream<CapabilityEvent, Error>) asyn
         #expect(reg.candidates(for: ttsPin).map { $0.descriptor.id } == ["compat-mlx-speech-tts"])
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -128,3 +129,5 @@ enum ProcessRunner {
     }
 }
 
+
+#endif

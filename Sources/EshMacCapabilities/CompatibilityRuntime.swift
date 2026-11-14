@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -207,3 +208,5 @@ public protocol CompatibilityModelHost: CompatibilityEngineHost {
     /// Make sure a specific model's extra packages (from the validated catalog) are installed before it runs.
     func prepareModel(_ manifest: CompatibilityEngineManifest, modelID: String) async throws
 }
+
+#endif

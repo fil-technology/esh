@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -13,3 +14,5 @@ public struct MLXModelLocator: Sendable {
     }
 }
 
+
+#endif

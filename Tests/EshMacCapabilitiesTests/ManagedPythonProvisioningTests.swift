@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -173,4 +174,6 @@ import Darwin   // setxattr / getxattr — exercise the real in-process quaranti
         #expect(py2 == py)
     }
 }
+#endif
+
 #endif

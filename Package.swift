@@ -204,15 +204,20 @@ let package = Package(
             dependencies: ["EshVision"],
             swiftSettings: quietDebugSwiftSettings
         ),
+        // Image generation / edit providers. The MLX image stack (StableDiffusion, MLXImageEdit)
+        // runs macOS-only; those two packages declare `.iOS(.v16)` yet transitively require MLX at
+        // `.iOS(.v17)`, which breaks the iOS SwiftPM graph. They are scoped to macOS, and the target's
+        // sources are `#if os(macOS)` (empty module on iOS — the providers report unsupported there,
+        // mirroring EshMLXText). MLX + Hub stay unconditional (both are iOS-17-clean).
         .target(
             name: "EshImageGen",
             dependencies: [
                 "EshCore", "EshRuntime",
-                .product(name: "StableDiffusion", package: "mlx-swift-examples"),
+                .product(name: "StableDiffusion", package: "mlx-swift-examples", condition: .when(platforms: [.macOS])),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hub", package: "swift-transformers"),
                 // Native instruct image edit (`image.edit`): the standalone InstructPix2Pix engine.
-                .product(name: "MLXImageEdit", package: "mlx-swift-image-edit"),
+                .product(name: "MLXImageEdit", package: "mlx-swift-image-edit", condition: .when(platforms: [.macOS])),
             ],
             swiftSettings: quietDebugSwiftSettings
         ),

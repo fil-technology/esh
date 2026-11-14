@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -208,3 +209,5 @@ enum ModelOptionNotes {
         return what
     }
 }
+
+#endif

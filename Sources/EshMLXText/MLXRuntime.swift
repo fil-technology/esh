@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -287,3 +288,5 @@ private final class MLXProcessBox: @unchecked Sendable {
         }
     }
 }
+
+#endif

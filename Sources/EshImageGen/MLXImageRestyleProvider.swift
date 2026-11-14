@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -161,3 +162,5 @@ public final class MLXImageRestyleProvider: CapabilityProvider, CapabilityAvaila
         func set(_ v: CapabilityAvailability) { lock.lock(); value = v; lock.unlock() }
     }
 }
+
+#endif

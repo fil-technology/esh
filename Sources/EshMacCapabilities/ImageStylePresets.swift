@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -64,3 +65,5 @@ public enum MacImageStyles {
         return all().first { $0.id.lowercased() == key }
     }
 }
+
+#endif

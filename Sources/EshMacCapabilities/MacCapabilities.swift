@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -297,3 +298,5 @@ public extension EshRuntime {
             additionalProviders: MacCapabilities.providers(host: host))
     }
 }
+
+#endif

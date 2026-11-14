@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import CoreGraphics
 import ImageIO
@@ -186,3 +187,5 @@ private func collectEdit(_ s: AsyncThrowingStream<CapabilityEvent, Error>) async
         #expect((try? String(contentsOf: dest, encoding: .utf8)) == "FP16-CONTENT")
     }
 }
+
+#endif

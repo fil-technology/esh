@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 
@@ -110,5 +111,7 @@ public enum MLXTextRuntimeProvisioner {
         return MLXTextRuntimeProvision(pythonExecutablePath: python, bridgeScriptPath: bridgeScript)
     }
 }
+
+#endif
 
 #endif
