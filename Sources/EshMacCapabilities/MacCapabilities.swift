@@ -30,6 +30,8 @@ public enum MacCapabilities {
             .init(module: "mlx", pipPackage: "mlx"),
             .init(module: "mlx_lm", pipPackage: "mlx-lm"),
         ]
+        let mlxAudio = CompatibilityModule(module: "mlx_audio", pipPackage: mlxAudioRequirement)
+        let kokoroG2P = kokoroG2PModules
         return [
             CompatibilityEngineManifest(
                 id: .music, version: "1", capabilities: [.musicGenerate],
@@ -215,15 +217,19 @@ public enum MacCapabilities {
             // provider id) or "mlx-speech-stt"/"mlx-speech-tts" (the modelFamily). The specific STT/TTS model
             // repo + voice/language are passed via `options` (model/voice/language), defaulting to Parakeet / Kokoro.
 
+            // The mlx_audio pin matches the version the validated model catalog was produced against
+            // (Resources/catalog/validated-models.json, re-run via scripts/model-catalog/validate.py) — an
+            // unpinned install silently drifted to an API the bridge was never exercised on.
+
             // Speech-to-text (audio.transcribe). Default Parakeet; any mlx_audio STT repo (e.g. a Whisper MLX
             // model) via options["model"]. Output = the transcript as a text artifact.
             CompatibilityEngineManifest(
                 id: .speechTranscribe, version: "1", capabilities: [.audioTranscribe],
                 acceptedInputs: [.audio], producedOutputs: [.text], producedArtifactKind: .text,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: base + [.init(module: "mlx_audio", pipPackage: "mlx-audio")],
+                requiredModules: base + [mlxAudio],
                 modelAssets: [.init(id: "parakeet-tdt-0.6b-v2", displayName: "Parakeet TDT 0.6B v2 (STT)",
-                                    approxBytes: 600_000_000)],
+                                    approxBytes: 2_470_000_000)],   // measured first-run download
                 licenseIdentifier: "cc-by-4.0", commercialUse: true),
 
             // Text-to-speech (audio.synthesizeSpeech). Default Kokoro-82M; CSM/Dia or any mlx_audio TTS repo
@@ -232,12 +238,36 @@ public enum MacCapabilities {
                 id: .speechSynthesize, version: "1", capabilities: [.audioSynthesizeSpeech],
                 acceptedInputs: [.text], producedOutputs: [.audio], producedArtifactKind: .audio,
                 runtimeVersion: "esh-compat-1", minimumOS: "macOS 14",
-                requiredModules: base + [.init(module: "mlx_audio", pipPackage: "mlx-audio")],
+                // Kokoro (the default) needs misaki's English G2P stack — a bare `mlx-audio` install is NOT
+                // enough (the e4fff2d live smoke failed on exactly this). Declared module-by-module so preflight
+                // reports the precise missing piece as `.repairRequired` and repair installs only that.
+                requiredModules: base + [mlxAudio] + kokoroG2P,
                 modelAssets: [.init(id: "kokoro-82m", displayName: "Kokoro-82M (TTS)",
                                     approxBytes: 350_000_000)],
                 licenseIdentifier: "apache-2.0", commercialUse: true),
         ]
     }
+
+    /// The `mlx-audio` requirement the speech engines provision — pinned to the line the validated catalog was
+    /// produced against (see `ValidatedModelCatalog.bundled().generatedWith`).
+    public static let mlxAudioRequirement = "mlx-audio>=0.6.5,<0.7"
+
+    /// Kokoro's English text→phoneme stack. `misaki[en]` would also drag in `spacy-curated-transformers` →
+    /// torch (~565 MB) which only the `trf` spaCy model needs; Kokoro uses `en_core_web_sm`, so the extra is
+    /// spelled out without it. `en_core_web_sm` is not on PyPI — misaki would otherwise try `spacy download` at
+    /// FIRST SYNTHESIS (a hidden network install that needs `pip` in the venv), so provisioning installs the
+    /// pinned wheel up front. NOTE (direct distribution): `phonemizer-fork` + the espeak-ng library bundled by
+    /// `espeakng-loader` are GPL-3.0 — they are pip-installed into the user's managed venv at runtime, never
+    /// shipped inside an app bundle.
+    public static let kokoroG2PModules: [CompatibilityModule] = [
+        .init(module: "misaki", pipPackage: "misaki>=0.9.4"),
+        .init(module: "espeakng_loader", pipPackage: "espeakng-loader"),
+        .init(module: "phonemizer", pipPackage: "phonemizer-fork"),
+        .init(module: "num2words", pipPackage: "num2words"),
+        .init(module: "spacy", pipPackage: "spacy>=3.8,<3.9"),
+        .init(module: "en_core_web_sm", pipPackage:
+            "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"),
+    ]
 
     /// Build the compatibility capability providers for a host. Pass to `makeDefault(additionalProviders:)`.
     public static func providers(host: CompatibilityEngineHost) -> [any CapabilityProvider] {

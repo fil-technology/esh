@@ -943,67 +943,153 @@ def mlx_transcribe() -> None:
 
 def speech_transcribe() -> None:
     """Compat STT (audio.transcribe) via mlx_audio, SHARED venv. Reads {audioPath, model?, language?,
-    outputPath} and WRITES the transcript text to outputPath (the EshMacCapabilities host turns that file
-    into a `.text` artifact). `model` selects the STT repo (parakeet default; a Whisper MLX repo works too).
+    outputPath, hfCache?} and WRITES the transcript text to outputPath (the EshMacCapabilities host turns that
+    file into a `.text` artifact). `model` selects the STT repo (parakeet default; a Whisper MLX repo works too).
     Distinct from `mlx-transcribe` (which returns text only on stdout for the CLI/server path)."""
+    import contextlib
+    import io
+    import os
+    import tempfile
+
     request = _load_json()
     out_path = request.get("outputPath")
     audio = request.get("audioPath")
     if not out_path or not audio:
         _fail("speech-transcribe requires 'audioPath' and 'outputPath'")
     model = request.get("model") or "mlx-community/parakeet-tdt-0.6b-v2"
+    # Weights must land in the configured assets cache (external SSD), never the internal ~/.cache.
+    _route_hf_cache(request.get("hfCache"))
     try:
         from mlx_audio.stt.generate import generate_transcription
     except Exception as exc:  # noqa: BLE001
         _fail(f"mlx_audio STT is not available: {exc}")
-    import tempfile
-    base = tempfile.mktemp()
-    kwargs = {}
+    base = os.path.join(tempfile.mkdtemp(prefix="esh-stt-"), "transcript")
+    kwargs: dict[str, Any] = {}
     if request.get("language"):
         kwargs["language"] = request["language"]
+    captured = io.StringIO()  # mlx_audio prints progress to stdout — keep it off the bridge's JSON channel.
     try:
-        generate_transcription(model=model, audio=audio, output_path=base, format="txt", **kwargs)
+        with contextlib.redirect_stdout(captured):
+            result = generate_transcription(model=model, audio=audio, output_path=base, format="txt", **kwargs)
     except Exception as exc:  # noqa: BLE001
-        _fail(f"transcription failed: {exc}")
+        _fail(f"transcription failed: {_mlx_audio_reason(str(exc), captured.getvalue())}")
+    text = (getattr(result, "text", None) or "").strip()
     produced = base + ".txt"
-    text = ""
-    if Path(produced).exists():
+    if not text and Path(produced).exists():
         text = Path(produced).read_text(encoding="utf-8").strip()
-        try:
-            Path(produced).unlink()
-        except OSError:
-            pass
+    with contextlib.suppress(OSError):
+        Path(produced).unlink()
     # The compat host reads the OUTPUT FILE; write the transcript there (and mirror it to stdout for the CLI).
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(text, encoding="utf-8")
     _dump_json({"outputPath": out_path, "text": text, "provider": "mlx-audio-stt", "model": model})
 
 
+# Known-good per-family TTS defaults (validated by scripts/model-catalog/validate.py and recorded in the
+# shipped catalog). Applied only when the caller leaves the knob unset; keyed by a lowercase substring of the
+# repo id. Kokoro REQUIRES a voice — without one mlx_audio has nothing to condition on.
+_TTS_FAMILY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "kokoro": {"voice": "af_heart", "lang_code": "a"},
+}
+
+
+def _tts_family_defaults(model: str) -> dict[str, Any]:
+    lowered = model.lower()
+    for key, defaults in _TTS_FAMILY_DEFAULTS.items():
+        if key in lowered:
+            return dict(defaults)
+    return {}
+
+
+def _mlx_audio_reason(primary: str, captured: str) -> str:
+    """The real reason from mlx_audio's output. Its generators SWALLOW exceptions and print them to stdout
+    ("Import error: Kokoro requires the optional 'misaki' package ..."), so a failed run otherwise looks like a
+    silent no-op. A missing optional package is rephrased as `No module named 'X'` so the EshMacCapabilities host
+    classifies it as a repairable dependency issue rather than an opaque execution failure."""
+    import re
+
+    text = "\n".join(part for part in (primary, captured) if part)
+    gated = re.search(r"(?:Cannot access gated repo|GatedRepoError)[^\n]*?huggingface\.co/([\w.-]+/[\w.-]+)", text)
+    if gated:
+        return (f"needs access to the gated Hugging Face repo '{gated.group(1)}' "
+                "(sign in and accept its license on huggingface.co)")
+    optional = re.search(r"requires the optional '([^']+)' package", text)
+    if optional:
+        return f"No module named '{optional.group(1)}' (required by this model)"
+    missing = re.search(r"No module named '[^']+'", text)
+    if missing:
+        return missing.group(0)
+    for line in reversed(text.splitlines()):
+        line = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+        if line.startswith(("Import error:", "Error loading model:")) or "Error" in line.split(":")[0]:
+            return line[:400]
+    return (primary or "no output").strip()[:400]
+
+
+def _ensure_short_espeak_data_path(limit: int = 120) -> None:
+    """espeak-ng (bundled by `espeakng-loader`, used by misaki/Kokoro's G2P fallback) copies its data dir into a
+    fixed ~160-byte buffer: a longer path (a deep venv, a sandboxed app container) overflows and espeak aborts
+    the WHOLE process with "Error processing file '.../phontab'". When the path is long, copy the ~19 MB data
+    once to a short temp dir and re-point espeakng_loader at it BEFORE misaki imports it. No-op otherwise."""
+    import os
+    import shutil
+    import tempfile
+
+    try:
+        import espeakng_loader
+    except Exception:  # noqa: BLE001 — not a Kokoro venv; nothing to do
+        return
+    try:
+        source = espeakng_loader.get_data_path()
+        if len(str(source)) <= limit:
+            return
+        short = os.path.join(tempfile.gettempdir(), "esh-espeak", "espeak-ng-data")
+        if len(short) > limit:
+            short = os.path.join("/tmp", "esh-espeak", "espeak-ng-data")
+        if not os.path.exists(os.path.join(short, "phontab")):
+            shutil.rmtree(short, ignore_errors=True)
+            shutil.copytree(source, short)
+        espeakng_loader.get_data_path = lambda: short
+    except Exception:  # noqa: BLE001 — best effort; synthesis reports its own error if espeak still fails
+        pass
+
+
 def speech_synthesize() -> None:
     """Compat TTS (audio.synthesizeSpeech) via mlx_audio, SHARED venv. Reads {text, model?, voice?,
-    language?, speed?, outputPath} and WRITES a WAV to outputPath (the host turns it into an `.audio`
-    artifact). `model` selects the TTS repo (Kokoro default; CSM/Dia or any mlx_audio TTS repo). Mirrors the
+    language?, speed?, outputPath, hfCache?} and WRITES a WAV to outputPath (the host turns it into an `.audio`
+    artifact). `model` selects the TTS repo (Kokoro default; CSM/Dia/Bark or any mlx_audio TTS repo). Mirrors the
     validated generate_audio() call shape (keyword-adaptive so it tracks mlx_audio API drift)."""
+    import contextlib
+    import glob
+    import inspect as _inspect
+    import io
+    import os
+    import shutil
+    import tempfile
+
     request = _load_json()
     out_path = request.get("outputPath")
     text = (request.get("text") or "").strip()
     if not out_path or not text:
         _fail("speech-synthesize requires 'text' and 'outputPath'")
     model = request.get("model") or "prince-canuma/Kokoro-82M"
+    _route_hf_cache(request.get("hfCache"))
     try:
-        import inspect as _inspect
         from mlx_audio.tts.generate import generate_audio
     except Exception as exc:  # noqa: BLE001
         _fail(f"mlx_audio TTS is not available: {exc}")
-    import tempfile, glob, shutil
-    prefix = tempfile.mktemp()
+    work_dir = tempfile.mkdtemp(prefix="esh-tts-")
+    prefix = os.path.join(work_dir, "speech")
     sig = set(_inspect.signature(generate_audio).parameters)
+    defaults = _tts_family_defaults(model)
     kw: dict[str, Any] = {"text": text}
     kw["model_path" if "model_path" in sig else "model"] = model
-    if request.get("voice") and "voice" in sig:
-        kw["voice"] = request["voice"]
-    if request.get("language") and "lang_code" in sig:
-        kw["lang_code"] = request["language"]
+    voice = request.get("voice") or defaults.get("voice")
+    if voice and "voice" in sig:
+        kw["voice"] = voice
+    lang = request.get("language") or defaults.get("lang_code")
+    if lang and "lang_code" in sig:
+        kw["lang_code"] = lang
     if request.get("speed") is not None and "speed" in sig:
         try:
             kw["speed"] = float(request["speed"])
@@ -1013,21 +1099,26 @@ def speech_synthesize() -> None:
                  ("verbose", False), ("play", False)):
         if k in sig:
             kw[k] = v
+    _ensure_short_espeak_data_path()
+    captured = io.StringIO()
     try:
-        generate_audio(**kw)
+        # generate_audio prints to stdout (the bridge's JSON channel) and swallows its own exceptions there,
+        # with the traceback on stderr — capture both so the real reason can be extracted.
+        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+            generate_audio(**kw)
     except Exception as exc:  # noqa: BLE001
-        _fail(f"speech synthesis failed: {exc}")
+        sys.stderr.write(captured.getvalue())
+        _fail(f"speech synthesis failed: {_mlx_audio_reason(str(exc), captured.getvalue())}")
     produced = sorted(glob.glob(prefix + "*.wav"), key=os.path.getmtime)
     if not produced:
-        _fail("speech synthesis produced no audio")
+        sys.stderr.write(captured.getvalue())  # keep the full diagnostic in the log, above the clean last line
+        shutil.rmtree(work_dir, ignore_errors=True)
+        _fail(f"speech synthesis produced no audio: {_mlx_audio_reason('', captured.getvalue())}")
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     shutil.move(produced[0], out_path)
-    for leftover in glob.glob(prefix + "*"):
-        try:
-            os.remove(leftover)
-        except OSError:
-            pass
-    _dump_json({"outputPath": out_path, "provider": "mlx-audio-tts", "model": model})
+    shutil.rmtree(work_dir, ignore_errors=True)
+    _dump_json({"outputPath": out_path, "provider": "mlx-audio-tts", "model": model,
+                "voice": kw.get("voice"), "langCode": kw.get("lang_code")})
 
 
 def _extract_vlm_text(result: Any) -> str:
@@ -1158,6 +1249,26 @@ def _route_hf_cache(path: "str | None") -> None:
         os.makedirs(path, exist_ok=True)
         os.environ["HF_HOME"] = path
         os.environ["HF_HUB_CACHE"] = os.path.join(path, "hub")
+    except Exception:  # noqa: BLE001
+        return
+    # huggingface_hub freezes its cache dirs into module constants at IMPORT time, and the bridge pulls it in
+    # transitively at load (mlx_lm via triattention_runtime) — so the env vars above are too late for any
+    # library that calls snapshot_download() without an explicit cache_dir (mlx_audio does exactly that: it
+    # leaked Kokoro onto the internal disk). snapshot_download reads `constants.HF_HUB_CACHE` at CALL time,
+    # so re-point the live constants too.
+    try:
+        import sys as _sys
+
+        constants = _sys.modules.get("huggingface_hub.constants")
+        if constants is not None:
+            hub = os.path.join(path, "hub")
+            constants.HF_HOME = path
+            constants.HF_HUB_CACHE = hub
+            constants.HUGGINGFACE_HUB_CACHE = hub
+            constants.HF_ASSETS_CACHE = os.path.join(path, "assets")
+            constants.HUGGINGFACE_ASSETS_CACHE = constants.HF_ASSETS_CACHE
+            if hasattr(constants, "HF_XET_CACHE"):
+                constants.HF_XET_CACHE = os.path.join(path, "xet")
     except Exception:  # noqa: BLE001
         pass
 
