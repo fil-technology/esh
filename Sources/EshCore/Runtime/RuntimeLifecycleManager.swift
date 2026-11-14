@@ -14,9 +14,12 @@ public actor RuntimeLifecycleManager {
         var state: ModelRuntimeState
         var estimatedGB: Double?
         var measuredBytes: Int64?
+        /// Last reported resident cache memory (persistent KV/prefix caches) — budgeted on top of weights.
+        var cacheBytes: Int64 = 0
         var activeRequests: Int = 0
         var loadCount: Int = 0
         var lastUsed: Date
+        var budgetGB: Double { (estimatedGB ?? 0) + Double(cacheBytes) / 1_073_741_824 }
         init(install: ModelInstall, estimatedGB: Double?, now: Date) {
             self.install = install
             self.runtime = nil
@@ -99,10 +102,11 @@ public actor RuntimeLifecycleManager {
 
     /// Release a request's hold on a model. Records measured memory (from the generation Metrics),
     /// marks the model warm, and admits the next waiter.
-    public func release(modelID: String, measuredMemoryBytes: Int64? = nil) {
+    public func release(modelID: String, measuredMemoryBytes: Int64? = nil, residentCacheBytes: Int64? = nil) {
         if let resident = residents[modelID] {
             resident.activeRequests = max(0, resident.activeRequests - 1)
             if let measuredMemoryBytes { resident.measuredBytes = measuredMemoryBytes }
+            if let residentCacheBytes { resident.cacheBytes = max(0, residentCacheBytes) }
             resident.lastUsed = clock()
             if resident.activeRequests == 0 { resident.state = .warm }
         }
@@ -114,7 +118,8 @@ public actor RuntimeLifecycleManager {
         let runtime = try await acquire(install: install, priority: priority)
         do {
             let result = try await body(runtime)
-            release(modelID: install.id, measuredMemoryBytes: await runtime.metrics.memoryBytes)
+            let metrics = await runtime.metrics
+            release(modelID: install.id, measuredMemoryBytes: metrics.memoryBytes, residentCacheBytes: metrics.residentCacheBytes)
             return result
         } catch {
             release(modelID: install.id, measuredMemoryBytes: nil)
@@ -142,6 +147,11 @@ public actor RuntimeLifecycleManager {
         }
 
         let estimatedGB = estimator(install)
+        // Cheaper than evicting a whole model: drop idle residents' caches first when the new model would
+        // not otherwise fit.
+        if wouldExceedBudget(modelID: install.id, estimatedGB: estimatedGB) {
+            await releaseIdleCaches(excluding: install.id)
+        }
         do {
             try makeRoom(forModel: install.id, estimatedGB: estimatedGB)
         } catch RuntimeLifecycleError.overBudget {
@@ -215,7 +225,7 @@ public actor RuntimeLifecycleManager {
         let need = (estimatedGB ?? 0) + effectiveExternalReserveGB()
         func currentUsage() -> Double {
             residents.values.filter { $0.install.id != modelID }
-                .reduce(0) { $0 + ($1.estimatedGB ?? 0) }
+                .reduce(0) { $0 + $1.budgetGB }
         }
         // Evict idle (non-active) LRU models until the new one fits and the count limit is met.
         while (currentUsage() + need) > usable || overCountLimit(excluding: modelID) {
@@ -224,6 +234,57 @@ public actor RuntimeLifecycleManager {
         }
         if (currentUsage() + need) > usable {
             throw RuntimeLifecycleError.overBudget(modelID: modelID, neededGB: need, usableGB: usable)
+        }
+    }
+
+    private func wouldExceedBudget(modelID: String, estimatedGB: Double?) -> Bool {
+        guard let usable = usableBudgetGB else { return false }
+        let others = residents.values.filter { $0.install.id != modelID }.reduce(0) { $0 + $1.budgetGB }
+        return others + (estimatedGB ?? 0) + effectiveExternalReserveGB() > usable
+    }
+
+    // MARK: - Resident caches (persistent KV/prefix caches)
+
+    /// Release the caches of every resident that is NOT serving a request. Returns the bytes released (as last
+    /// reported). Active residents are skipped; a runtime additionally processes the release between requests,
+    /// so an in-flight generation is never affected.
+    @discardableResult
+    public func releaseIdleCaches(excluding modelID: String = "") async -> Int64 {
+        let targets = residents.values.filter {
+            $0.install.id != modelID && $0.activeRequests == 0 && $0.runtime is CacheMemoryReporting
+        }
+        var freed: Int64 = 0
+        for resident in targets {
+            guard let reporter = resident.runtime as? CacheMemoryReporting else { continue }
+            freed += resident.cacheBytes
+            resident.cacheBytes = 0
+            await reporter.releaseCaches()
+        }
+        return freed
+    }
+
+    /// React to a system pressure signal. Warning: release idle caches. Critical: release idle caches AND evict
+    /// every idle (non-active) model. Active requests are never interrupted.
+    public func handle(_ event: RuntimePressureEvent) async {
+        switch event {
+        case .memoryWarning:
+            await releaseIdleCaches()
+        case .memoryCritical:
+            await releaseIdleCaches()
+            while let victim = evictionCandidate(excluding: "") { unloadResident(victim) }
+        case .thermalStateChanged, .lowPowerModeChanged:
+            break
+        }
+    }
+
+    /// Subscribe the pool to a pressure source (the system's memory-pressure notifications by default) for the
+    /// lifetime of the returned task. Hosts that own a long-lived pool (`esh serve`) start this once.
+    public nonisolated func monitorPressure(_ source: RuntimePressureSource = SystemRuntimePressureSource()) -> Task<Void, Never> {
+        Task { [weak self] in
+            for await event in source.events() {
+                guard let self else { return }
+                await self.handle(event)
+            }
         }
     }
 
@@ -337,7 +398,7 @@ public actor RuntimeLifecycleManager {
     @discardableResult
     public func reclaimForPressure(targetGB: Double) -> [String] {
         var evicted: [String] = []
-        func usage() -> Double { residents.values.reduce(0) { $0 + ($1.estimatedGB ?? 0) } }
+        func usage() -> Double { residents.values.reduce(0) { $0 + $1.budgetGB } }
         while usage() > targetGB, let victim = evictionCandidate(excluding: "") {
             unloadResident(victim)
             evicted.append(victim.install.id)
@@ -407,14 +468,16 @@ public actor RuntimeLifecycleManager {
                 lastUsedISO8601: formatter.string(from: r.lastUsed)
             )
         }.sorted { $0.modelID < $1.modelID }
-        let estUsage = residents.values.reduce(0.0) { $0 + ($1.estimatedGB ?? 0) }
+        let estUsage = residents.values.reduce(0.0) { $0 + $1.budgetGB }
+        let cacheBytes = residents.values.reduce(Int64(0)) { $0 + $1.cacheBytes }
         return RuntimePoolStatus(
             residents: infos, activeRequests: activeCount,
             estimatedResidentMemoryGB: (estUsage * 10).rounded() / 10,
             usableBudgetGB: usableBudgetGB,
             maxResidentModels: config.maxResidentModels,
             maxConcurrentRequests: config.maxConcurrentRequests,
-            speechReservationGB: (effectiveExternalReserveGB() * 10).rounded() / 10
+            speechReservationGB: (effectiveExternalReserveGB() * 10).rounded() / 10,
+            residentCacheGB: cacheBytes > 0 ? (Double(cacheBytes) / 1_073_741_824 * 100).rounded() / 100 : nil
         )
     }
 

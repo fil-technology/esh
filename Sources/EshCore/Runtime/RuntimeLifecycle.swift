@@ -14,6 +14,15 @@ public enum RuntimeResidency: String, Codable, Sendable {
 /// A runtime that can truthfully report its own residency + health (e.g. a persistent worker that
 /// knows whether its weights are still loaded). The lifecycle manager prefers this over a static
 /// probe so a crashed/unloaded worker is never reported as weights-resident.
+/// A runtime that keeps memory resident between requests beyond its weights (a persistent worker's session
+/// KV/prefix caches) and can release it on demand. The warm pool counts it against its budget, releases idle
+/// caches before evicting whole models, and releases them on memory pressure. Releasing must never affect an
+/// in-flight request (the persistent MLX worker processes the release between requests).
+public protocol CacheMemoryReporting: Sendable {
+    func residentCacheBytes() async -> Int64
+    func releaseCaches() async
+}
+
 public protocol ResidencyReporting {
     var residency: RuntimeResidency { get }
     var isHealthy: Bool { get }
@@ -106,8 +115,11 @@ public struct RuntimePoolStatus: Codable, Sendable, Equatable {
     /// Memory reserved out of the budget for the persistent speech runtime (its live footprint when a
     /// worker is resident, else the static planning headroom). 0 when speech isn't loaded. (M12)
     public var speechReservationGB: Double
+    /// Memory resident runtimes report holding in caches between requests (persistent KV/prefix caches),
+    /// already included in `estimatedResidentMemoryGB`. nil when no runtime reports caches.
+    public var residentCacheGB: Double?
 
-    public init(residents: [ResidentModelInfo], activeRequests: Int, estimatedResidentMemoryGB: Double, usableBudgetGB: Double?, maxResidentModels: Int, maxConcurrentRequests: Int, speechReservationGB: Double = 0) {
+    public init(residents: [ResidentModelInfo], activeRequests: Int, estimatedResidentMemoryGB: Double, usableBudgetGB: Double?, maxResidentModels: Int, maxConcurrentRequests: Int, speechReservationGB: Double = 0, residentCacheGB: Double? = nil) {
         self.residents = residents
         self.residentCount = residents.count
         self.activeRequests = activeRequests
@@ -116,6 +128,7 @@ public struct RuntimePoolStatus: Codable, Sendable, Equatable {
         self.maxResidentModels = maxResidentModels
         self.maxConcurrentRequests = maxConcurrentRequests
         self.speechReservationGB = speechReservationGB
+        self.residentCacheGB = residentCacheGB
     }
 }
 

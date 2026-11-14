@@ -1128,13 +1128,60 @@ def _common_prefix_len(a: list[int], b: list[int]) -> int:
     return i
 
 
-def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache):
-    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)"""
+def _session_cache_key(request: dict) -> str:
+    """Live caches are owned per chat session (isolation), falling back to the runtime's state file."""
+    session = request.get("session") or {}
+    sid = session.get("id") if isinstance(session, dict) else None
+    return f"session:{sid}" if sid else f"state:{request.get('stateFilePath')}"
+
+
+def _live_cache_budget_bytes() -> int:
+    """Total bytes of session KV caches the persistent worker may keep resident between requests."""
+    import os
+
+    override = os.environ.get("ESH_MLX_LIVE_PREFIX_MAX_BYTES")
+    if override:
+        try:
+            return max(0, int(override))
+        except ValueError:
+            pass
+    try:
+        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        physical = 16 * 1024 ** 3
+    return int(min(physical * 0.25, 8 * 1024 ** 3))
+
+
+def _live_cache_resident_bytes() -> int:
+    return sum(_kv_raw_bytes(cache) for _, cache in _LIVE_PREFIX_CACHES.values())
+
+
+def _drop_live_caches() -> int:
+    """Release every resident session cache (worker `drop-caches` op / pressure). Returns bytes released."""
+    freed = _live_cache_resident_bytes()
+    _LIVE_PREFIX_CACHES.clear()
+    try:
+        import mlx.core as mx
+
+        mx.clear_cache()
+    except Exception:  # noqa: BLE001
+        pass
+    return freed
+
+
+def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+                        cache_key=None):
+    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)
+
+    Live caches are owned per session (`cache_key`, default the state file): the entry is POPPED for the
+    duration of the request, so no other request or a `drop-caches` op can touch a cache that is generating.
+    """
     from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
 
+    key = cache_key or state_path
     cache, tokens = None, None
-    if mode == "live" and state_path in _LIVE_PREFIX_CACHES:
-        tokens, cache = _LIVE_PREFIX_CACHES.pop(state_path)
+    if mode == "live" and key in _LIVE_PREFIX_CACHES:
+        tokens, cache = _LIVE_PREFIX_CACHES.pop(key)
     elif state_payload is not None and state_payload.get("cache_tokens") and state_payload.get("snapshot"):
         try:
             cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
@@ -1151,7 +1198,8 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
     return make_prompt_cache(model), full_prompt_tokens, False, 0
 
 
-def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict) -> dict:
+def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict,
+                         cache_key=None) -> dict:
     """Align the cache with the exact token list it holds, persist it per `mode`, return the state payload."""
     from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
 
@@ -1159,21 +1207,32 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
     if offset > len(cache_tokens) and can_trim_prompt_cache(prompt_cache):
         trim_prompt_cache(prompt_cache, offset - len(cache_tokens))  # drop the in-flight token we never read
     cache_tokens = cache_tokens[: _cache_offset(prompt_cache, len(cache_tokens))]
+    raw = _kv_raw_bytes(prompt_cache)
     if mode == "live":
         import os
 
-        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "1")))
-        _LIVE_PREFIX_CACHES[state_path] = (cache_tokens, prompt_cache)
-        while len(_LIVE_PREFIX_CACHES) > slots:
-            _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
-        raw = 0
-        for c in prompt_cache:
-            st = getattr(c, "state", None)
-            if isinstance(st, tuple) and len(st) == 2 and st[0] is not None:
-                raw += int(st[0].nbytes + st[1].nbytes)
-        return {"cache_tokens": cache_tokens, "live": True,
-                "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
-    raw = _kv_raw_bytes(prompt_cache)
+        key = cache_key or state_path
+        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "2")))
+        budget = _live_cache_budget_bytes()
+        retained_reason = None
+        if not can_trim_prompt_cache(prompt_cache):
+            retained_reason = "cache type is not trimmable (TurboQuant/TriAttention/rotating): not retained"
+        elif raw > budget:
+            retained_reason = f"session cache {raw / 1e9:.2f} GB exceeds the live-cache budget {budget / 1e9:.2f} GB"
+        elif _mem_pressure_critical():
+            retained_reason = "memory pressure critical: not retained"
+        if retained_reason is None:
+            _LIVE_PREFIX_CACHES[key] = (cache_tokens, prompt_cache)
+            # evict least-recently-finished sessions beyond the slot count or the byte budget
+            while len(_LIVE_PREFIX_CACHES) > slots or (
+                len(_LIVE_PREFIX_CACHES) > 1 and _live_cache_resident_bytes() > budget
+            ):
+                _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
+        payload = {"cache_tokens": cache_tokens, "live": True,
+                   "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+        if retained_reason:
+            payload["liveNotRetained"] = retained_reason
+        return payload
     skip = _snapshot_skip_reason(state_path, raw, "tokens")
     if skip:
         return {"cache_tokens": cache_tokens, "snapshot": None, "snapshotSkipped": skip,
@@ -1231,6 +1290,7 @@ def _generate_with_loaded_model(
     if prefix_mode != "legacy":
         prompt_cache, prompt_tokens, cache_hit, cached_tokens = _token_prefix_reuse(
             prefix_mode, request["stateFilePath"], state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+            cache_key=_session_cache_key(request),
         )
     elif (
         state_payload is not None
@@ -1328,6 +1388,7 @@ def _generate_with_loaded_model(
         state = _finish_token_prefix(
             prefix_mode, request["stateFilePath"], prompt_cache,
             reused_prefix + list(prompt_tokens) + generated_ids, snapshot_metadata,
+            cache_key=_session_cache_key(request),
         )
         snapshot = state["snapshot"] or {"metadata": state["metadata"]}
         _save_state_file(
@@ -1378,6 +1439,8 @@ def _generate_with_loaded_model(
         # Realized prompt-cache state (not the chosen strategy — what actually happened this request).
         "cacheHit": cache_hit,
         "cachedTokens": cached_tokens,
+        # session caches the (persistent) worker keeps resident between requests — the warm pool budgets this
+        "residentCacheBytes": int(_live_cache_resident_bytes()),
     }
     if spec_stats:
         metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
@@ -2524,6 +2587,9 @@ def mlx_serve() -> None:
                     break
                 elif op == "generate":
                     request_queue.put(msg)
+                elif op == "drop-caches":
+                    # queued (not executed here) so it runs BETWEEN requests, never under a generating cache
+                    request_queue.put(msg)
         finally:
             # stdin closed (parent died) or explicit shutdown → stop the worker.
             stop.set()
@@ -2536,6 +2602,9 @@ def mlx_serve() -> None:
         msg = request_queue.get()
         if msg is None or stop.is_set():
             break
+        if msg.get("op") == "drop-caches":
+            _emit_json_line({"event": "caches-dropped", "freedBytes": int(_drop_live_caches())})
+            continue
         req_id = msg.get("id")
         request = msg.get("request", {})
 

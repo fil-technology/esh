@@ -16,6 +16,9 @@ public struct Metrics: Codable, Hashable, Sendable {
     /// strategy): whether a cached prefix was reused, and how many tokens it saved reprocessing.
     public var cacheHit: Bool?
     public var cachedTokens: Int?
+    /// Memory the runtime keeps resident BETWEEN requests beyond its weights (e.g. a persistent worker's
+    /// session KV/prefix caches). The warm pool budgets it and can release it under pressure.
+    public var residentCacheBytes: Int64?
 
     public init(
         contextTokens: Int? = nil,
@@ -28,7 +31,8 @@ public struct Metrics: Codable, Hashable, Sendable {
         generationTokens: Int? = nil,
         finishReason: String? = nil,
         cacheHit: Bool? = nil,
-        cachedTokens: Int? = nil
+        cachedTokens: Int? = nil,
+        residentCacheBytes: Int64? = nil
     ) {
         self.contextTokens = contextTokens
         self.ttftMilliseconds = ttftMilliseconds
@@ -41,5 +45,6 @@ public struct Metrics: Codable, Hashable, Sendable {
         self.finishReason = finishReason
         self.cacheHit = cacheHit
         self.cachedTokens = cachedTokens
+        self.residentCacheBytes = residentCacheBytes
     }
 }

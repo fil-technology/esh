@@ -123,6 +123,86 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertFalse(hit)
         self.assertEqual(len(to_prefill), len(turn1) + len(gen1) + 2)
 
+    def _finish_live(self, key, prompt, n=4, state=None):
+        state = state or os.path.join(tempfile.mkdtemp(), "state.json")
+        cache = make_prompt_cache(self.model)
+        gen = self._greedy(prompt, cache, n=n)
+        bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key=key)
+        return state, prompt + gen
+
+    def test_live_caches_are_isolated_per_session(self):
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        _, a_tokens = self._finish_live("session:A", list(range(10, 40)), state=state)
+        _, b_tokens = self._finish_live("session:B", list(range(50, 80)), state=state)
+        self.assertEqual(set(bridge._LIVE_PREFIX_CACHES), {"session:A", "session:B"})
+        # session B continuing its own conversation hits ITS cache, and A's stays untouched
+        _, _, hit, reused = bridge._token_prefix_reuse(
+            "live", state, None, b_tokens + [5, 6], make_prompt_cache, self.model, KVCache, cache_key="session:B")
+        self.assertTrue(hit)
+        self.assertEqual(reused, len(b_tokens))
+        self.assertIn("session:A", bridge._LIVE_PREFIX_CACHES)
+        self.assertEqual(bridge._LIVE_PREFIX_CACHES["session:A"][0], a_tokens)
+        # a NEW session never borrows another session's cache, even with an identical prefix
+        _, _, hit, _ = bridge._token_prefix_reuse(
+            "live", state, None, a_tokens + [5], make_prompt_cache, self.model, KVCache, cache_key="session:C")
+        self.assertFalse(hit)
+        self.assertIn("session:A", bridge._LIVE_PREFIX_CACHES)
+
+    def test_an_in_flight_cache_is_owned_by_its_request(self):
+        state, a_tokens = self._finish_live("session:A", list(range(10, 40)))
+        cache, _, hit, _ = bridge._token_prefix_reuse(
+            "live", state, None, a_tokens + [5, 6], make_prompt_cache, self.model, KVCache, cache_key="session:A")
+        self.assertTrue(hit)
+        # while the request runs, a drop (pressure / pool eviction) cannot reach its cache: it was popped
+        self.assertNotIn("session:A", bridge._LIVE_PREFIX_CACHES)
+        bridge._drop_live_caches()
+        out = self._greedy([5, 6], cache, n=3)
+        self.assertEqual(len(out), 3)
+
+    def test_drop_releases_everything_and_reports_bytes(self):
+        self._finish_live("session:A", list(range(10, 40)))
+        held = bridge._live_cache_resident_bytes()
+        self.assertGreater(held, 0)
+        self.assertEqual(bridge._drop_live_caches(), held)
+        self.assertEqual(bridge._live_cache_resident_bytes(), 0)
+
+    def test_live_budget_is_enforced(self):
+        os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"] = "1"
+        try:
+            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            cache = make_prompt_cache(self.model)
+            prompt = list(range(10, 40))
+            gen = self._greedy(prompt, cache, n=4)
+            payload = bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key="session:A")
+            self.assertIn("exceeds the live-cache budget", payload.get("liveNotRetained", ""))
+            self.assertEqual(bridge._LIVE_PREFIX_CACHES, {})
+        finally:
+            del os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"]
+
+    def test_slot_limit_evicts_least_recent_session(self):
+        os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"] = "2"
+        try:
+            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            for key in ("session:A", "session:B", "session:C"):
+                self._finish_live(key, list(range(10, 30)), state=state)
+            self.assertEqual(list(bridge._LIVE_PREFIX_CACHES), ["session:B", "session:C"])
+        finally:
+            del os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"]
+
+    def test_non_trimmable_caches_are_not_retained(self):
+        from mlx_lm.models.cache import RotatingKVCache
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        cache = [RotatingKVCache(max_size=8) for _ in self.model.layers]
+        prompt = list(range(10, 40))
+        gen = self._greedy(prompt, cache, n=4)
+        payload = bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key="session:R")
+        self.assertIn("not trimmable", payload.get("liveNotRetained", ""))
+        self.assertNotIn("session:R", bridge._LIVE_PREFIX_CACHES)
+
+    def test_session_cache_key(self):
+        self.assertEqual(bridge._session_cache_key({"session": {"id": "abc"}, "stateFilePath": "/s"}), "session:abc")
+        self.assertEqual(bridge._session_cache_key({"session": {}, "stateFilePath": "/s"}), "state:/s")
+
     def test_short_overlap_is_a_miss(self):
         state = os.path.join(tempfile.mkdtemp(), "state.json")
         cache = make_prompt_cache(self.model)

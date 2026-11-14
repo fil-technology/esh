@@ -23,7 +23,7 @@ private struct MLXServeGenerateRequest: Encodable, Sendable {
 ///
 /// `RuntimeLifecycleManager` owns instances of this type; eviction/idle/pressure handling and bounded
 /// concurrency live there, not here (no parallel runtime manager).
-final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, @unchecked Sendable {
+final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, CacheMemoryReporting, @unchecked Sendable {
     public let backend: BackendKind = .mlx
     public let modelID: String
 
@@ -126,6 +126,21 @@ final class MLXPersistentRuntime: BackendRuntime, ResidencyReporting, @unchecked
                 if case .cancelled = reason { task.cancel() }
             }
         }
+    }
+
+    // MARK: - CacheMemoryReporting (session KV caches the worker keeps between requests)
+
+    /// Bytes of session KV caches the worker reported holding after its last request (0 when the worker keeps
+    /// none, e.g. the default prefix-cache mode).
+    public func residentCacheBytes() async -> Int64 {
+        lock.withLock { currentMetrics.residentCacheBytes ?? 0 }
+    }
+
+    /// Ask the worker to drop its session KV caches. The worker queues this behind any in-flight request, so a
+    /// running generation keeps its cache; the next turn of an evicted session is a cache miss, never wrong.
+    public func releaseCaches() async {
+        worker.dropCaches()
+        lock.withLock { currentMetrics.residentCacheBytes = 0 }
     }
 
     public func exportRuntimeCache() async throws -> CacheSnapshot {
