@@ -166,23 +166,44 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key=key)
         return state, prompt + gen
 
-    def test_live_caches_are_isolated_per_session(self):
+    def test_stateless_interleaved_conversations_each_find_their_own_cache(self):
+        # esh serve / OpenAI clients: no session ids, every request resends the conversation
         state = os.path.join(tempfile.mkdtemp(), "state.json")
-        _, a_tokens = self._finish_live("session:A", list(range(10, 40)), state=state)
-        _, b_tokens = self._finish_live("session:B", list(range(50, 80)), state=state)
-        self.assertEqual(set(bridge._LIVE_PREFIX_CACHES), {"session:A", "session:B"})
-        # session B continuing its own conversation hits ITS cache, and A's stays untouched
-        _, _, hit, reused = bridge._token_prefix_reuse(
-            "live", state, None, b_tokens + [5, 6], make_prompt_cache, self.model, KVCache, cache_key="session:B")
+        bridge._LAST_LIVE_SLOT = None
+        _, a_tokens = self._finish_live(None, list(range(10, 40)), state=state)
+        bridge._LAST_LIVE_SLOT = None
+        _, b_tokens = self._finish_live(None, list(range(50, 80)), state=state)
+        self.assertEqual(len(bridge._LIVE_PREFIX_CACHES), 2)
+        cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+            "live", state, None, b_tokens + [5, 6], make_prompt_cache, self.model, KVCache)
         self.assertTrue(hit)
-        self.assertEqual(reused, len(b_tokens))
-        self.assertIn("session:A", bridge._LIVE_PREFIX_CACHES)
-        self.assertEqual(bridge._LIVE_PREFIX_CACHES["session:A"][0], a_tokens)
-        # a NEW session never borrows another session's cache, even with an identical prefix
+        self.assertEqual(reused, len(b_tokens))           # B continued from B's cache, not A's
+        remaining = [t for t, _ in bridge._LIVE_PREFIX_CACHES.values()]
+        self.assertEqual(remaining, [a_tokens])            # A's cache untouched while B generates
+        # continuing from the reused cache equals a full recompute of B's conversation
+        self.assertEqual(self._greedy(to_prefill, cache, n=4),
+                         self._greedy(b_tokens + [5, 6], make_prompt_cache(self.model), n=4))
+
+    def test_reuse_across_conversations_is_limited_to_identical_tokens(self):
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        bridge._LAST_LIVE_SLOT = None
+        _, a_tokens = self._finish_live(None, list(range(10, 40)), state=state)
+        other = a_tokens[:20] + [90, 91, 92, 93]            # shares only the first 20 tokens (a system prompt)
+        cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+            "live", state, None, other, make_prompt_cache, self.model, KVCache)
+        self.assertTrue(hit)
+        self.assertEqual(reused, 20)
+        self.assertEqual(self._greedy(to_prefill, cache, n=4),
+                         self._greedy(other, make_prompt_cache(self.model), n=4))
+
+    def test_explicit_key_is_preferred(self):
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        self._finish_live("key:A", list(range(10, 40)), state=state)
+        self._finish_live("key:B", list(range(10, 40)), state=state)   # identical content, different key
         _, _, hit, _ = bridge._token_prefix_reuse(
-            "live", state, None, a_tokens + [5], make_prompt_cache, self.model, KVCache, cache_key="session:C")
-        self.assertFalse(hit)
-        self.assertIn("session:A", bridge._LIVE_PREFIX_CACHES)
+            "live", state, None, list(range(10, 45)), make_prompt_cache, self.model, KVCache, cache_key="key:B")
+        self.assertTrue(hit)
+        self.assertEqual(list(bridge._LIVE_PREFIX_CACHES), ["key:A"])
 
     def test_an_in_flight_cache_is_owned_by_its_request(self):
         state, a_tokens = self._finish_live("session:A", list(range(10, 40)))
@@ -236,8 +257,9 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertNotIn("session:R", bridge._LIVE_PREFIX_CACHES)
 
     def test_session_cache_key(self):
-        self.assertEqual(bridge._session_cache_key({"session": {"id": "abc"}, "stateFilePath": "/s"}), "session:abc")
-        self.assertEqual(bridge._session_cache_key({"session": {}, "stateFilePath": "/s"}), "state:/s")
+        # per-request ChatSession ids are random in esh's request paths: never a key; only an explicit one is
+        self.assertIsNone(bridge._session_cache_key({"session": {"id": "abc"}, "stateFilePath": "/s"}))
+        self.assertEqual(bridge._session_cache_key({"prefixCacheKey": "agent-1"}), "key:agent-1")
 
     def test_tokens_mode_keeps_exactly_one_sidecar_referenced_by_the_state(self):
         state = os.path.join(tempfile.mkdtemp(), "state.json")
