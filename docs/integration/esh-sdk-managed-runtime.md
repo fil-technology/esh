@@ -95,7 +95,12 @@ let runtime = await EshRuntime.makeWithEmbeddedGGUF(
 ```
 
 - No `Process`, no Python, no localhost server: llama.cpp runs in-process on Metal.
-- `EshMLXText` now **compiles on iOS** to an `MLXBackend` stub that reports itself unavailable, so shared code can register it unconditionally. Auto never selects it; pinning an MLX model fails with a typed `pinnedModelUnavailable` explaining why.
+- `EshMLXText` compiles on iOS. #29 makes the macOS sources `#if os(macOS)`, and this branch adds an `MLXBackend` stub so shared code can register it unconditionally; code guarded with `#if os(macOS)` keeps working. The stub is backed by the portable, macOS-tested `UnsupportedPlatformBackend`, so it never advertises or runs anything:
+  - **Capability report:** not ready, no supported features, every feature listed as unavailable with the reason.
+  - **Auto:** never selects it.
+  - **Pinned MLX model, `prewarm` or `stream`:** fail with `EshRuntimeError.backendUnavailable(.mlx, reason)`.
+  - **Direct `loadRuntime`:** throws `BackendUnsupportedOnPlatformError`.
+  - **`textModelReadiness`:** reports `unsupportedOnPlatform`.
 - MLX prefix caching, `live` caching and the Python-side KV guard do not exist on iOS. Embedded GGUF's context is bounded at load by `contextTokens`.
 - **`reusePromptPrefix: true`** (opt-in, off by default) keeps the common token prefix of the previous request in the loaded context and decodes only the new tokens: the in-process equivalent of llama-server's prompt cache. Use it with `.managed()` (a one-shot runtime is freed after each call, so there is nothing to reuse). It holds **one** cached sequence per loaded model: two chats alternating on the same model evict each other's prefix (still correct, just slower).
 - The same `LlamaCppEmbeddedBackend` setup works on macOS (§3, macOS block).
@@ -151,7 +156,8 @@ All failures are `EshRuntimeError`; Studio never needs to know pool internals.
 | Error | When | What to show |
 |---|---|---|
 | `insufficientMemory(modelID:reason:)` | Load refused by the live gate, or a request's context would need too much KV memory | The reason; suggest a smaller model or a shorter conversation |
-| `pinnedModelUnavailable` | Not installed, not ready, or unsupported on this platform | The reason (`textModelReadiness` predicts it) |
+| `pinnedModelUnavailable` | Not installed, or not ready | The reason (`textModelReadiness` predicts it) |
+| `backendUnavailable(kind:reason:)` | The model's backend isn't wired, or can't run on this platform (MLX on iOS) | The reason, and suggest a GGUF build of the model on iOS |
 | `generationFailed(reason:)` | Includes an embedded-GGUF prompt longer than `contextTokens` ("The prompt is N tokens but the model's context window is M tokens…") | Offer to trim history |
 | `noAvailableBackend` | Also after `shutdown()` | Rebuild the runtime |
 | `CancellationError` | The consuming task was cancelled | Nothing |

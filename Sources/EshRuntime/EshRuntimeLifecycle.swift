@@ -195,6 +195,8 @@ extension EshRuntime {
         case is CancellationError: return CancellationError()
         case let e as EshRuntimeError: return e
         case let refused as ModelLoadRefused: return EshRuntimeError.insufficientMemory(modelID: modelID, reason: refused.reason)
+        case let unsupported as BackendUnsupportedOnPlatformError:
+            return EshRuntimeError.backendUnavailable(unsupported.backend, reason: unsupported.reason)
         case let e as RuntimeLifecycleError:
             if case .cancelled = e { return CancellationError() }
             if case .insufficientMemoryForContext = e {
@@ -262,6 +264,10 @@ public extension EshRuntime {
                 lifecycle: nil)
         }
         let traits = backend.lifecycleTraits
+        if let unsupported = backend as? PlatformUnsupportedBackend {
+            return EshTextModelReadiness(modelID: modelID, backend: kind, state: .unsupportedOnPlatform,
+                                         reason: unsupported.unsupportedPlatformReason, lifecycle: traits)
+        }
         if isIOS, !traits.supportsIOS, traits != .unspecified {
             return EshTextModelReadiness(modelID: modelID, backend: kind, state: .unsupportedOnPlatform,
                                          reason: "the \(kind.rawValue) backend does not run on iOS.", lifecycle: traits)

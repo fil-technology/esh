@@ -584,6 +584,9 @@ public actor EshRuntime {
         guard let backend = registry.resolve(install.spec.backend) else {
             throw EshRuntimeError.backendUnavailable(install.spec.backend, reason: "the backend for pinned model '\(modelID)' is not available on this platform.")
         }
+        if let unsupported = backend as? PlatformUnsupportedBackend {
+            throw EshRuntimeError.backendUnavailable(install.spec.backend, reason: unsupported.unsupportedPlatformReason)
+        }
         try ensureReady(backend, install: install, pinned: modelID)
         try ensureLocal(install.spec.backend)
         return Plan(install: install, backend: backend,
@@ -660,6 +663,7 @@ public actor EshRuntime {
         try memorySafetyPreflight(plan)   // live, load-time safety gate (P0) — reject unsafe loads, never hang
         do { return try await plan.backend.loadRuntime(for: plan.install) }
         catch is CancellationError { throw CancellationError() }
+        catch let e as BackendUnsupportedOnPlatformError { throw EshRuntimeError.backendUnavailable(e.backend, reason: e.reason) }
         catch { throw EshRuntimeError.modelLoadFailed(modelID: plan.install.id, reason: Self.reason(from: error)) }
     }
 

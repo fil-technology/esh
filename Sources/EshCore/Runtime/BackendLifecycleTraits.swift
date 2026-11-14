@@ -96,3 +96,61 @@ public enum ContextGrowthGuard {
         }
     }
 }
+
+/// Thrown when code asks a backend that cannot run on this platform to load or validate anything (e.g. MLX text on
+/// iOS). esh never reaches this through routing — Auto skips the backend and a pin fails earlier with a typed
+/// `backendUnavailable` — so it only surfaces when a host calls the backend directly.
+public struct BackendUnsupportedOnPlatformError: Error, LocalizedError, Equatable, Sendable {
+    public let backend: BackendKind
+    public let reason: String
+    public init(backend: BackendKind, reason: String) { self.backend = backend; self.reason = reason }
+    public var errorDescription: String? { "The \(backend.rawValue) backend is not supported on this platform: \(reason)" }
+}
+
+/// A backend that is registered so cross-platform host code compiles, but cannot run on this platform. It advertises
+/// nothing (no supported features, every feature explicitly unavailable, not ready), so Auto never selects it and
+/// `EshRuntime` refuses a pin with `backendUnavailable`; `loadRuntime` and cache validation throw
+/// `BackendUnsupportedOnPlatformError`. Used by EshMLXText's iOS `MLXBackend`; portable so it is tested on macOS.
+public struct UnsupportedPlatformBackend: InferenceBackend, BackendLifecycleDescribing, Sendable {
+    public let kind: BackendKind
+    public let reason: String
+    public let runtimeVersion: String = "unsupported-on-this-platform"
+
+    public init(kind: BackendKind, reason: String) {
+        self.kind = kind
+        self.reason = reason
+    }
+
+    public var error: BackendUnsupportedOnPlatformError { BackendUnsupportedOnPlatformError(backend: kind, reason: reason) }
+
+    public func capabilityReport(for install: ModelInstall) -> BackendCapabilityReport {
+        BackendCapabilityReport(
+            backend: kind, runtimeVersion: runtimeVersion, ready: false, supportedFeatures: [],
+            unavailableFeatures: BackendRuntimeFeature.allCases.map { .init(feature: $0, reason: reason) },
+            warnings: [reason])
+    }
+
+    public func loadRuntime(for install: ModelInstall) async throws -> BackendRuntime { throw error }
+
+    public func makeCompatibilityChecker(for install: ModelInstall) -> CompatibilityChecking { Refuse(error: error) }
+
+    public var lifecycleTraits: BackendLifecycleTraits {
+        BackendLifecycleTraits(residency: .handleCached, inProcess: false, prefixReuse: .none,
+                               serializesRequestsPerModel: true, contextBoundedAtLoad: false,
+                               cancelsDuringPrefill: false, supportsIOS: false)
+    }
+
+    private struct Refuse: CompatibilityChecking {
+        let error: BackendUnsupportedOnPlatformError
+        func validate(manifest: CacheManifest) throws { throw error }
+    }
+}
+
+/// Lets routing recognize a platform-unsupported backend without knowing its concrete type.
+public protocol PlatformUnsupportedBackend {
+    var unsupportedPlatformReason: String { get }
+}
+
+extension UnsupportedPlatformBackend: PlatformUnsupportedBackend {
+    public var unsupportedPlatformReason: String { reason }
+}
