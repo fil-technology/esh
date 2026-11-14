@@ -1004,10 +1004,16 @@ def _lookup_spec_settings(config: dict[str, Any], prompt_cache, mx) -> dict | No
             return None
     except Exception:
         return None
+    exact = os.environ.get("ESH_MLX_LOOKUP_EXACT", "0") == "1"
     return {
         "maxDraft": int(os.environ.get("ESH_MLX_LOOKUP_MAX_DRAFT", "16")),
         "minMatch": int(os.environ.get("ESH_MLX_LOOKUP_MIN_MATCH", "3")),
         "adaptive": os.environ.get("ESH_MLX_LOOKUP_ADAPTIVE", "1") != "0",
+        # MLX forward passes are bit-identical to single-token decoding only for small batches: measured <= 4-5
+        # tokens at short context and <= 2 at 8K/24K (benchmarks/diagnose_verify_numerics.py). Exact mode feeds
+        # at most 2 tokens per verify (the free-checked first guess + 1 draft), so output equals plain greedy.
+        "maxVerify": 2 if exact else int(os.environ.get("ESH_MLX_LOOKUP_MAX_VERIFY", "17")),
+        "exact": exact,
     }
 
 
@@ -1025,7 +1031,7 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
     index = _LookupIndex(history)
     pace = _LookupPace(settings["maxDraft"])
     min_match = settings["minMatch"]
-    stats.update({"mode": "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
+    stats.update({"mode": "lookup-exact" if settings.get("exact") else "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
                   "verifySteps": 0, "suspensions": 0})
 
     def fwd(tokens_array):
@@ -1104,7 +1110,8 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
                 cur = pending
                 continue
             stats["freeHits"] += 1
-            k = pace.choose(len(draft) - 1, match_len) if settings["adaptive"] else len(draft) - 1
+            budget = min(len(draft) - 1, settings.get("maxVerify", 17) - 1)
+            k = pace.choose(budget, match_len) if settings["adaptive"] else budget
             rest = draft[1: 1 + k]
             if not rest:
                 cur = pending
