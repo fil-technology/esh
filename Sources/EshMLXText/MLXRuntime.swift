@@ -25,6 +25,10 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
 
     public var metrics: Metrics { currentMetrics }
 
+    /// `mlx-generate` renders, tokenizes and prefills the prompt itself; a separate `prepare` would load the model
+    /// a second time (in its own `mlx-build-cache` process) for no benefit to the request.
+    public var prepareBeforeGenerateIsRedundant: Bool { true }
+
     public func prepare(session: ChatSession) async throws {
         let normalizedSession = PromptSessionNormalizer().normalized(session: session)
         let response: MLXPrepareResponse = try bridge.run(

@@ -116,7 +116,9 @@ public struct ExternalInferenceService: Sendable {
                     if let nativeGrammar = outcome.nativeGrammar { generation.grammar = nativeGrammar }
 
                     let session = try resolveSession(request: request, install: install)
-                    if request.cacheArtifactID == nil { try await runtime.prepare(session: session) }
+                    if request.cacheArtifactID == nil, !runtime.prepareBeforeGenerateIsRedundant {
+                        try await runtime.prepare(session: session)
+                    }
 
                     let start = ContinuousClock.now
                     var firstAt: ContinuousClock.Instant? = nil
@@ -236,7 +238,7 @@ public struct ExternalInferenceService: Sendable {
             )
         }
 
-        if request.cacheArtifactID == nil {
+        if request.cacheArtifactID == nil, !runtime.prepareBeforeGenerateIsRedundant {
             try await runtime.prepare(session: session)
         }
 
