@@ -44,6 +44,10 @@ public actor RuntimeLifecycleManager {
 
     private var residents: [String: Resident] = [:]
     private var loadingTasks: [String: Task<BackendRuntime, Error>] = [:]
+    /// Unloads started by eviction that may still be releasing memory. A new load awaits them first, so the
+    /// live memory-safety gate in the loader (`loadRuntimeGuarded`) measures memory AFTER eviction instead of
+    /// racing a fire-and-forget teardown (and refusing a load that would actually fit).
+    private var pendingUnloads: [UUID: Task<Void, Never>] = [:]
     private var activeCount = 0
     private var waiters: [Waiter] = []
 
@@ -162,7 +166,11 @@ public actor RuntimeLifecycleManager {
         residents[install.id] = resident
 
         let loader = self.loader
-        let task = Task<BackendRuntime, Error> { try await loader(install) }
+        let evictionsInFlight = Array(pendingUnloads.values)
+        let task = Task<BackendRuntime, Error> {
+            for unload in evictionsInFlight { await unload.value }
+            return try await loader(install)
+        }
         loadingTasks[install.id] = task
         do {
             let runtime = try await task.value
@@ -246,8 +254,16 @@ public actor RuntimeLifecycleManager {
         let runtime = resident.runtime
         resident.runtime = nil
         residents[resident.install.id] = nil
-        if let runtime { Task { await runtime.unload() } }
+        if let runtime {
+            let id = UUID()
+            pendingUnloads[id] = Task { [weak self] in
+                await runtime.unload()
+                await self?.unloadFinished(id)
+            }
+        }
     }
+
+    private func unloadFinished(_ id: UUID) { pendingUnloads[id] = nil }
 
     /// Unload a specific model if it is not active. Returns true if it was unloaded.
     @discardableResult

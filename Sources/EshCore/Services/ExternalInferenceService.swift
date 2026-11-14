@@ -90,7 +90,7 @@ public struct ExternalInferenceService: Sendable {
                     if let manager = lifecycleManager {
                         runtime = try await manager.acquire(install: install, priority: .interactive)
                     } else {
-                        runtime = try await backend.loadRuntime(for: install)
+                        runtime = try await backend.loadRuntimeGuarded(for: install)
                     }
                     let manager = lifecycleManager
                     defer {
@@ -170,7 +170,7 @@ public struct ExternalInferenceService: Sendable {
         if let manager = lifecycleManager {
             runtime = try await manager.acquire(install: install, priority: .interactive)
         } else {
-            runtime = try await backend.loadRuntime(for: install)
+            runtime = try await backend.loadRuntimeGuarded(for: install)
         }
         let lifecycleManager = self.lifecycleManager
         defer {

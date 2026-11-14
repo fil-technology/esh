@@ -322,7 +322,7 @@ struct TUIApplication {
         )
         let backendRegistry = InferenceBackendRegistry.macOS()
         let backend = backendRegistry.backend(for: install)
-        var runtime: any BackendRuntime = try await backend.loadRuntime(for: install)
+        var runtime: any BackendRuntime = try await backend.loadRuntimeGuarded(for: install)
         let chatService = ChatService()
         let inputController = TerminalInputController()
         inputController.start()
@@ -610,7 +610,7 @@ struct TUIApplication {
                 }
                 if newInstall.id != install.id {
                     await runtime.unload()
-                    runtime = try await newBackend.loadRuntime(for: newInstall)
+                    runtime = try await newBackend.loadRuntimeGuarded(for: newInstall)
                     install = newInstall
                 }
                 session.modelID = install.id
@@ -943,7 +943,7 @@ struct TUIApplication {
                     preferredModelID: session.modelID
                 )
                 await runtime.unload()
-                runtime = try await backendRegistry.backend(for: install).loadRuntime(for: install)
+                runtime = try await backendRegistry.backend(for: install).loadRuntimeGuarded(for: install)
                 state = makeScreenState(
                     for: session,
                     installID: install.id,

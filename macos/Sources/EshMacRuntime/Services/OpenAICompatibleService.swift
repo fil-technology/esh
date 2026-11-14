@@ -936,9 +936,9 @@ public struct OpenAICompatibleService: Sendable {
             estimator: { install in max(0.2, Double(install.sizeBytes) / 1_073_741_824 * 1.3) },
             loader: { install in
                 if persistentMLX, install.spec.backend == .mlx {
-                    return try await MLXBackend(persistent: true).loadRuntime(for: install)
+                    return try await MLXBackend(persistent: true).loadRuntimeGuarded(for: install)
                 }
-                return try await registry.backend(for: install).loadRuntime(for: install)
+                return try await registry.backend(for: install).loadRuntimeGuarded(for: install)
             },
             residencyProbe: { install in
                 (persistentMLX && install.spec.backend == .mlx) ? .weightsResident : .handleCached

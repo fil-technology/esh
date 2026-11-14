@@ -17,7 +17,7 @@ enum AgentCommand {
         let modelStore = FileModelStore(root: root)
         let install = try CommandSupport.resolveInstall(identifier: modelIdentifier, modelStore: modelStore)
         let backend = InferenceBackendRegistry.macOS().backend(for: install)
-        let runtime = try await backend.loadRuntime(for: install)
+        let runtime = try await backend.loadRuntimeGuarded(for: install)
         defer { Task { await runtime.unload() } }
 
         let workspaceRootURL = WorkspaceContextLocator(root: root).workspaceRootURL(from: currentDirectoryURL)
