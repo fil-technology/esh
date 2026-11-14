@@ -44,7 +44,7 @@ enum ServeCommand {
                                                                 lifecycleManager: pool)
             },
             transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
-            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion, pool: pool),
             lifecycleManager: pool,
             root: root,
             artifactStore: FileArtifactStore(root: root)
