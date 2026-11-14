@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import Testing
 import EshCore
 @testable import EshRuntime
@@ -42,30 +41,6 @@ private struct SlowBackend: InferenceBackend, @unchecked Sendable {
 }
 private struct NoopChecker: CompatibilityChecking { func validate(manifest: CacheManifest) throws {} }
 
-// A localhost server that delays before responding, so a second concurrent install observes the first in flight.
-private final class SlowHTTPServer: @unchecked Sendable {
-    private let listener: NWListener
-    let port: UInt16
-    init(body: Data, delayMs: Int) throws {
-        listener = try NWListener(using: .tcp, on: .any)
-        listener.newConnectionHandler = { conn in
-            conn.start(queue: .global())
-            conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
-                usleep(useconds_t(delayMs * 1000))
-                let header = "HTTP/1.1 200 OK\r\nContent-Length: \(body.count)\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n"
-                var out = Data(header.utf8); out.append(body)
-                conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
-            }
-        }
-        let sem = DispatchSemaphore(value: 0)
-        listener.stateUpdateHandler = { if case .ready = $0 { sem.signal() } }
-        listener.start(queue: .global()); sem.wait()
-        port = listener.port!.rawValue
-    }
-    func url() -> URL { URL(string: "http://127.0.0.1:\(port)/model.gguf")! }
-    func stop() { listener.cancel() }
-}
-
 private struct FixedProfile: DeviceProfileProviding {
     func currentProfile() -> DeviceProfile {
         DeviceProfile(platform: .iOS, physicalMemoryBytes: 8 << 30, availableMemoryBytes: 4 << 30,
@@ -99,7 +74,8 @@ struct EshRuntimeConcurrencyTests {
 
     @Test func concurrentDuplicateInstallHasExactlyOneWinner() async throws {
         let payload = Data((0..<300_000).map { UInt8($0 % 251) })
-        let server = try SlowHTTPServer(body: payload, delayMs: 150); defer { server.stop() }
+        // Each response is delayed so a second concurrent install observes the first in flight.
+        let server = try await LoopbackHTTPServer.start(body: payload, responseDelayMs: 150); defer { server.stop() }
         let root = PersistenceRoot(rootURL: FileManager.default.temporaryDirectory.appendingPathComponent("esh-m10c-\(UUID())"))
         let mgr = LocalModelManager(root: root, deviceProfileProvider: FixedProfile())
         let sha = LocalModelManager_sha(payload)
