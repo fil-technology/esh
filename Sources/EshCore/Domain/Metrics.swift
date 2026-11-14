@@ -19,6 +19,14 @@ public struct Metrics: Codable, Hashable, Sendable {
     /// Memory the runtime keeps resident BETWEEN requests beyond its weights (e.g. a persistent worker's
     /// session KV/prefix caches). The warm pool budgets it and can release it under pressure.
     public var residentCacheBytes: Int64?
+    /// Prompt prefill throughput (tokens/s) as measured by the backend.
+    public var promptTokensPerSecond: Double?
+    /// Speculative decoding (when enabled): tokens proposed and tokens accepted by verification.
+    public var draftTokens: Int?
+    public var draftAcceptedTokens: Int?
+    /// Set when the runtime silently degraded a requested capability (e.g. the automatic KV mode fell back from
+    /// TurboQuant to a raw cache because its Python dependency is missing) — never nil-and-quiet anymore.
+    public var kvModeFallback: String?
 
     public init(
         contextTokens: Int? = nil,
@@ -32,7 +40,10 @@ public struct Metrics: Codable, Hashable, Sendable {
         finishReason: String? = nil,
         cacheHit: Bool? = nil,
         cachedTokens: Int? = nil,
-        residentCacheBytes: Int64? = nil
+        residentCacheBytes: Int64? = nil,
+        promptTokensPerSecond: Double? = nil,
+        draftTokens: Int? = nil,
+        draftAcceptedTokens: Int? = nil
     ) {
         self.contextTokens = contextTokens
         self.ttftMilliseconds = ttftMilliseconds
@@ -46,5 +57,8 @@ public struct Metrics: Codable, Hashable, Sendable {
         self.cacheHit = cacheHit
         self.cachedTokens = cachedTokens
         self.residentCacheBytes = residentCacheBytes
+        self.promptTokensPerSecond = promptTokensPerSecond
+        self.draftTokens = draftTokens
+        self.draftAcceptedTokens = draftAcceptedTokens
     }
 }

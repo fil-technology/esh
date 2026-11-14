@@ -61,6 +61,22 @@ class CrashSafeTempFileTests(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
 
+class KvModeFallbackTests(unittest.TestCase):
+    def test_auto_turbo_downgrade_is_reported_not_silent(self):
+        from unittest import mock
+        bridge._KV_MODE_FALLBACKS.clear()
+        with mock.patch.object(bridge, "_maybe_apply_turboquant", side_effect=ImportError("No module named 'mlx_vlm'")):
+            mode = bridge._apply_kv_mode([], None, {"kvMode": "auto", "sessionIntent": "documentqa"})
+        self.assertEqual(mode, "raw")
+        self.assertTrue(any("mlx_vlm" in r for r in bridge._KV_MODE_FALLBACKS))
+
+    def test_explicit_turbo_still_fails_loudly(self):
+        from unittest import mock
+        with mock.patch.object(bridge, "_maybe_apply_turboquant", side_effect=ImportError("No module named 'mlx_vlm'")):
+            with self.assertRaises(ImportError):
+                bridge._apply_kv_mode([], None, {"kvMode": "turbo"})
+
+
 class SnapshotDiskGuardTests(unittest.TestCase):
     def _with_free(self, free_bytes):
         import shutil

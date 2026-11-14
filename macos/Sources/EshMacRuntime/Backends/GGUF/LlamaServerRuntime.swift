@@ -46,7 +46,10 @@ public final class LlamaServerRuntime: BackendRuntime, ResidencyReporting, @unch
                 return
             }
             let start = ContinuousClock.now
-            let events = server.generate(body: body)
+            let events = server.generate(body: body, onTimings: { [weak self] timings in
+                guard let self else { return }
+                self.setMetrics(timings.applied(to: self.metrics))
+            })
             let task = Task {
                 var sawFirst = false
                 do {

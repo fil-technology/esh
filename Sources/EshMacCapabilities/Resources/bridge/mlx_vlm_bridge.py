@@ -281,6 +281,9 @@ def _resolve_requested_kv_mode(request: dict[str, Any]) -> str:
     return "raw"
 
 
+_KV_MODE_FALLBACKS: list[str] = []   # reasons the automatic KV mode was downgraded during the current request
+
+
 def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
     effective_mode = _resolve_requested_kv_mode(request)
     requested_mode = request.get("kvMode", "raw")
@@ -302,18 +305,21 @@ def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
                 budget=int(request.get("triattentionBudget", 2048)),
             )
             return "triattention"
-        except Exception:
+        except Exception as exc:
             if requested_mode != "auto":
                 raise
+            _KV_MODE_FALLBACKS.append(f"triattention unavailable ({exc}); using turbo")
             effective_mode = "turbo"
 
     if effective_mode == "turbo":
         try:
             _maybe_apply_turboquant(prompt_cache, bits=turbo_bits, seed=turbo_seed)
             return "turbo"
-        except Exception:
+        except Exception as exc:
             if requested_mode != "auto":
                 raise
+            # e.g. mlx_vlm (TurboQuant) is not installed in the managed venv: say so instead of degrading silently
+            _KV_MODE_FALLBACKS.append(f"turbo unavailable ({exc}); using raw KV cache")
             return "raw"
 
     return "raw"
@@ -1457,6 +1463,7 @@ def _generate_with_loaded_model(
         prompt_tokens = full_prompt_tokens
         prompt_cache = make_prompt_cache(model)
 
+    _KV_MODE_FALLBACKS.clear()
     effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)
 
     prompt_token_count = len(prompt_tokens)
@@ -1591,7 +1598,15 @@ def _generate_with_loaded_model(
         "cachedTokens": cached_tokens,
         # session caches the (persistent) worker keeps resident between requests — the warm pool budgets this
         "residentCacheBytes": int(_live_cache_resident_bytes()),
+        "promptTokensPerSecond": (
+            float(last_response.prompt_tps) if last_response is not None and last_response.prompt_tps else None
+        ),
     }
+    if spec_stats:
+        metrics["draftTokens"] = int(spec_stats.get("drafted") or 0)
+        metrics["draftAcceptedTokens"] = int(spec_stats.get("accepted") or 0)
+    if _KV_MODE_FALLBACKS:
+        metrics["kvModeFallback"] = "; ".join(_KV_MODE_FALLBACKS)
     if spec_stats:
         metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
