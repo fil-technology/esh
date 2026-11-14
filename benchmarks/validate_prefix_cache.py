@@ -75,7 +75,7 @@ class Worker(bench.MLXWorker):
 
 
 def start(args, mode, extra_env=None):
-    env = {} if mode == "legacy" else {"ESH_MLX_PREFIX_CACHE": mode}
+    env = {"ESH_MLX_PREFIX_CACHE": mode}   # explicit: `tokens` is the default since 2026-11
     env.update(extra_env or {})
     w = Worker(args.python, args.model, env, args.floor_gb)
     w.model_id = Path(args.model).name

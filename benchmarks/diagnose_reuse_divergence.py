@@ -32,9 +32,7 @@ from validate_prefix_cache import TURNS  # noqa: E402
 
 def run(model, tokenizer, mx, mods, turns, reuse: bool):
     _, stream_generate, KVCache, make_prompt_cache = mods
-    os.environ.pop("ESH_MLX_PREFIX_CACHE", None)
-    if reuse:
-        os.environ["ESH_MLX_PREFIX_CACHE"] = "tokens"
+    os.environ["ESH_MLX_PREFIX_CACHE"] = "tokens" if reuse else "legacy"   # explicit: tokens is the default
     state = os.path.join(tempfile.mkdtemp(), "s.json")
     msgs, outs = [], []
     for t in turns:

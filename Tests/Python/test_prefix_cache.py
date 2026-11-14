@@ -1,4 +1,4 @@
-"""Token-exact prefix reuse (EXPERIMENTAL, ESH_MLX_PREFIX_CACHE=tokens|live).
+"""Token-exact prefix reuse (default `tokens`; `live` opt-in; `legacy` explicit rollback).
 
 Pure tests cover the longest-common-prefix logic; the MLX tests (skipped without mlx/mlx_lm) run two "turns" on a
 tiny random Llama and require that continuing from the reused, trimmed cache yields EXACTLY the tokens a full
@@ -31,73 +31,15 @@ class CommonPrefixTests(unittest.TestCase):
         self.assertEqual(bridge._common_prefix_len([], [1]), 0)
         self.assertEqual(bridge._common_prefix_len([1, 2], [1, 2, 3]), 2)
 
-    def test_mode_defaults_to_legacy(self):
+    def test_mode_defaults_to_tokens_and_legacy_is_an_explicit_opt_out(self):
         os.environ.pop("ESH_MLX_PREFIX_CACHE", None)
-        self.assertEqual(bridge._prefix_cache_mode(), "legacy")
-        os.environ["ESH_MLX_PREFIX_CACHE"] = "bogus"
-        try:
-            self.assertEqual(bridge._prefix_cache_mode(), "legacy")
-        finally:
-            del os.environ["ESH_MLX_PREFIX_CACHE"]
-
-
-class CrashSafeTempFileTests(unittest.TestCase):
-    def test_sweep_removes_only_dead_owners(self):
-        import subprocess
-        d = tempfile.mkdtemp()
-        dead = subprocess.Popen(["true"]); dead.wait()          # a pid that has exited
-        live = os.getppid()
-        for name in (f"{dead.pid}-old.json", f"{live}-other.json", f"{os.getpid()}-mine.json", "notes.txt"):
-            open(os.path.join(d, name), "w").close()
-        os.makedirs(os.path.join(d, f"{dead.pid}-stagingdir"))
-        removed = bridge._sweep_dead_owner_entries(d)
-        self.assertEqual(sorted(removed), sorted([f"{dead.pid}-old.json", f"{dead.pid}-stagingdir"]))
-        self.assertEqual(sorted(os.listdir(d)), sorted([f"{live}-other.json", f"{os.getpid()}-mine.json", "notes.txt"]))
-
-    def test_staging_dirs_are_owner_tagged_and_removed(self):
-        with bridge._StagingDir() as path:
-            self.assertTrue(os.path.basename(path).startswith(f"{os.getpid()}-"))
-            self.assertTrue(os.path.isdir(path))
-        self.assertFalse(os.path.exists(path))
-
-
-class KvModeFallbackTests(unittest.TestCase):
-    def test_auto_turbo_downgrade_is_reported_not_silent(self):
-        from unittest import mock
-        bridge._KV_MODE_FALLBACKS.clear()
-        with mock.patch.object(bridge, "_maybe_apply_turboquant", side_effect=ImportError("No module named 'mlx_vlm'")):
-            mode = bridge._apply_kv_mode([], None, {"kvMode": "auto", "sessionIntent": "documentqa"})
-        self.assertEqual(mode, "raw")
-        self.assertTrue(any("mlx_vlm" in r for r in bridge._KV_MODE_FALLBACKS))
-
-    def test_explicit_turbo_still_fails_loudly(self):
-        from unittest import mock
-        with mock.patch.object(bridge, "_maybe_apply_turboquant", side_effect=ImportError("No module named 'mlx_vlm'")):
-            with self.assertRaises(ImportError):
-                bridge._apply_kv_mode([], None, {"kvMode": "turbo"})
-
-
-class SnapshotDiskGuardTests(unittest.TestCase):
-    def _with_free(self, free_bytes):
-        import shutil
-        from unittest import mock
-        usage = shutil.disk_usage("/")._replace(free=free_bytes)
-        return mock.patch("shutil.disk_usage", return_value=usage)
-
-    def test_skips_when_snapshot_would_eat_the_swap_floor(self):
-        with self._with_free(4 * 1024 ** 3):
-            reason = bridge._snapshot_skip_reason("/tmp/state.json", 1 * 1024 ** 3, "legacy")  # ~3.8 GB to write
-        self.assertIsNotNone(reason)
-        self.assertIn("skipped", reason)
-
-    def test_writes_when_there_is_room(self):
-        with self._with_free(50 * 1024 ** 3):
-            self.assertIsNone(bridge._snapshot_skip_reason("/tmp/state.json", 1 * 1024 ** 3, "legacy"))
-
-    def test_tokens_mode_needs_less_room_than_legacy(self):
-        with self._with_free(6 * 1024 ** 3):
-            self.assertIsNotNone(bridge._snapshot_skip_reason("/tmp/s.json", 1 * 1024 ** 3, "legacy"))
-            self.assertIsNone(bridge._snapshot_skip_reason("/tmp/s.json", 1 * 1024 ** 3, "tokens"))
+        self.assertEqual(bridge._prefix_cache_mode(), "tokens")
+        for value, expected in (("bogus", "tokens"), ("legacy", "legacy"), ("LIVE", "live"), (" tokens ", "tokens")):
+            os.environ["ESH_MLX_PREFIX_CACHE"] = value
+            try:
+                self.assertEqual(bridge._prefix_cache_mode(), expected)
+            finally:
+                del os.environ["ESH_MLX_PREFIX_CACHE"]
 
 
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")

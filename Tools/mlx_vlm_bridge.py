@@ -1156,7 +1156,8 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
 
 
 # ----------------------------------------------------------------------------------------------------------------
-# Token-exact prefix reuse (EXPERIMENTAL: ESH_MLX_PREFIX_CACHE=tokens|live; unset = legacy string-prefix logic).
+# Token-exact prefix reuse — DEFAULT since 2026-11 (ESH_MLX_PREFIX_CACHE=tokens; `live` opt-in; `legacy` = the old
+# string-prefix logic, kept only as an explicit opt-out/rollback).
 #
 # The legacy path reuses the previous KV snapshot only when the re-rendered previous conversation is a STRING prefix
 # of the new prompt, then replays the last 2 tokens without trimming the restored cache. Measured on 2026-11-14 it
@@ -1222,10 +1223,13 @@ _PREFIX_REUSE_MIN_TOKENS = 8
 
 
 def _prefix_cache_mode() -> str:
+    """`tokens` by default. The legacy string-prefix path never hit on Llama-3/Qwen3 templates and duplicated KV
+    tokens on Mistral's (benchmarks/validate_prefix_cache.py), so it is only used when explicitly requested with
+    ESH_MLX_PREFIX_CACHE=legacy (rollback). Unknown values fall back to the default."""
     import os
 
     mode = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
-    return mode if mode in {"tokens", "live"} else "legacy"
+    return mode if mode in {"tokens", "live", "legacy"} else "tokens"
 
 
 def _common_prefix_len(a: list[int], b: list[int]) -> int:

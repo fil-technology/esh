@@ -158,7 +158,7 @@ def main():
     if reason:
         print("GATED:", reason)
         return
-    variants = [("baseline", {"ESH_MLX_PERSISTENT": "1"}),
+    variants = [("baseline", {"ESH_MLX_PERSISTENT": "1", "ESH_MLX_PREFIX_CACHE": "legacy"}),   # pre-2026-11 default
                 ("tokens", {"ESH_MLX_PERSISTENT": "1", "ESH_MLX_PREFIX_CACHE": "tokens"}),
                 ("live", {"ESH_MLX_PERSISTENT": "1", "ESH_MLX_PREFIX_CACHE": "live"})]
     results, reference = [], {}

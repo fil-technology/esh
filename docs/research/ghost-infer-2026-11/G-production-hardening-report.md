@@ -4,7 +4,7 @@ Branch `perf/inference-hardening`, stacked on `perf/ghost-infer-learnings` (fil-
 stacked on `feat/validated-model-catalog` (fil-technology/esh#23). Machine: M1 Pro, 32 GB, macOS 27.0, mlx 0.32.2,
 mlx-lm 0.31.3, llama.cpp 8660. Raw data lives in `benchmarks/results/`; every number below comes from those files.
 
-**Nothing in this report changes a production default.** The proposed defaults are in §7 and need your approval.
+**Defaults:** `ESH_MLX_PREFIX_CACHE=tokens` became the default after approval (2026-11-14). `legacy` remains an explicit rollback (`ESH_MLX_PREFIX_CACHE=legacy`). Everything else in §7 still needs approval.
 
 ## 1. Changes (isolated commits)
 
@@ -118,11 +118,11 @@ Nothing failed that was left unexplained. Every non-identical output was diagnos
 5. **Speculation output is not bit-exact** (§4). Fine for agents; not for workflows that require byte-reproducibility.
 6. Not re-run on this branch: GGUF `ngram-simple` on a model that copies context at 7B+ (only small models measured) and the CI live speech smoke.
 
-## 7. Recommended defaults (need approval; not applied)
+## 7. Recommended defaults (`tokens` applied after approval; the rest not applied)
 
 | Setting | Recommendation | Why |
 |---|---|---|
-| `ESH_MLX_PREFIX_CACHE=tokens` | **Make default** | It fixes a demonstrated corruption (Mistral) and a never-hits bug (Llama-3/Qwen3). Token-exact, byte-identical on two 7–8B models, −60% agent sessions, ~4× lower peak memory than legacy. |
+| `ESH_MLX_PREFIX_CACHE=tokens` | **Default since 2026-11-14 (approved)**; rollback with `ESH_MLX_PREFIX_CACHE=legacy` | It fixes a demonstrated corruption (Mistral) and a never-hits bug (Llama-3/Qwen3). Token-exact, byte-identical on two 7–8B models, −60% agent sessions, ~4× lower peak memory than legacy. |
 | `ESH_MLX_PREFIX_CACHE=live` | **Default only when the MLX worker is persistent (`esh serve`)**, after one soak with real Ashex sessions | Fastest (−63…−80%) and lowest memory. Accounting, pressure release, isolation and shutdown are now implemented and tested. |
 | `ESH_MLX_PERSISTENT=1` | Recommend with `live` | Required for `live`; already measured 13× faster warm in earlier work. |
 | One-shot prepare skip, load gate, temp-file safety, disk guard, the three bug fixes | **Merge as is** (already default) | Safety and correctness. |
@@ -134,4 +134,4 @@ Nothing failed that was left unexplained. Every non-identical output was diagnos
 
 - **Ready to merge** (tested, safe, compatible): `1f2248e`, `a3f52aa`, `6bd5d7d`, `62b888d`, `2d78576`, `c658c84`, `bbae01e`, `16cb563`, plus the cache-accounting machinery `0f6b260` (inert unless `live` is on).
 - **Merge as opt-in** (flags default off): `f37fda6`, `a255154`, and #24's speculation and GGUF tuning.
-- **Defaults to flip after your approval:** `tokens` now; `live` for the persistent worker after a soak.
+- **Defaults:** `tokens` is now the default (approved). `live` for the persistent worker should follow after a soak with real Ashex sessions.
