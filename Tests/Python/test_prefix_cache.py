@@ -238,6 +238,39 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         bridge._finish_token_prefix("live", state, cache, turn + gen, {}, cache_key="session:Z")
         self.assertEqual(bridge._kv_sidecar_paths(state), [])
 
+    def test_snapshot_from_another_model_is_never_restored(self):
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        cache = make_prompt_cache(self.model)
+        turn = list(range(10, 40))
+        gen = self._greedy(turn, cache, n=4)
+        payload = bridge._finish_token_prefix("tokens", state, cache, turn + gen, {"model_id": "model-A"})
+        bridge._save_state_file(state, {k: v for k, v in payload.items() if k != "metadata"})
+        loaded = bridge._load_state_file(state)
+        _, _, hit, _ = bridge._token_prefix_reuse("tokens", state, loaded, turn + gen + [1, 2], make_prompt_cache,
+                                                  self.model, KVCache, model_id="model-B")
+        self.assertFalse(hit)
+        _, _, hit, _ = bridge._token_prefix_reuse("tokens", state, loaded, turn + gen + [1, 2], make_prompt_cache,
+                                                  self.model, KVCache, model_id="model-A")
+        self.assertTrue(hit)
+
+    def test_quantized_kv_cache_snapshots_round_trip(self):
+        # regression: legacy snapshots of a QuantizedKVCache (kvBits) crashed converting bf16 scales to numpy
+        args = llama.ModelArgs(model_type="llama", hidden_size=128, num_hidden_layers=2, intermediate_size=256,
+                               num_attention_heads=4, rms_norm_eps=1e-5, vocab_size=97, num_key_value_heads=2)
+        model = llama.Model(args)   # head width 32: the smallest MLX quantization group
+        mx.eval(model.parameters())
+        cache = make_prompt_cache(model)
+        model(mx.array(list(range(10, 90)))[None], cache=cache)
+        mx.eval([c.state for c in cache])
+        qcache = [c.to_quantized(group_size=32, bits=8) for c in cache]
+        snap = bridge._prompt_cache_to_snapshot(qcache, {"model_id": "t"})
+        self.assertGreater(int(snap["metadata"]["raw_bytes"]), 0)
+        self.assertIn("mlx_prompt_cache_safetensors_base64", snap["metadata"])
+        restored = bridge._snapshot_to_prompt_cache(snap, KVCache)
+        self.assertEqual(type(restored[0]).__name__, "QuantizedKVCache")
+        self.assertEqual(restored[0].offset, qcache[0].offset)
+        self.assertEqual(bridge._kv_raw_bytes(qcache), int(snap["metadata"]["raw_bytes"]))
+
     def test_short_overlap_is_a_miss(self):
         state = os.path.join(tempfile.mkdtemp(), "state.json")
         cache = make_prompt_cache(self.model)

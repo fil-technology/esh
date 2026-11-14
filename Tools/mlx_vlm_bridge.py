@@ -538,8 +538,15 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_te
         if keys is None or values is None:
             can_save_prompt_cache = False
             continue
-        if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
+        if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache",
+                                        "BatchRotatingKVCache", "QuantizedKVCache"}:
             can_save_prompt_cache = False
+        if isinstance(keys, (list, tuple)) or isinstance(values, (list, tuple)):
+            # QuantizedKVCache (kvBits): state is ([w, scales, biases], [w, scales, biases]). It cannot be expressed
+            # as the numpy tensor list (that conversion crashed every --kv-bits request on bf16 models with
+            # "'bfloat16' is not a valid PEP 3118 buffer format string"); the safetensors blob below restores it.
+            total_bytes += _nested_nbytes(keys) + _nested_nbytes(values)
+            continue
         if not include_tensor_list and type(cache).__name__ in {"KVCache", "RotatingKVCache"}:
             # the safetensors blob below is the restore path; skip the duplicate base64 tensor list
             total_bytes += int(keys.nbytes + values.nbytes)
@@ -1160,15 +1167,24 @@ _SNAPSHOT_DISK_FLOOR_BYTES = 3 * 1024 ** 3
 _SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 1.1}  # legacy: staging + 2x base64; tokens: one sidecar
 
 
+def _nested_nbytes(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return sum(_nested_nbytes(v) for v in value)
+    try:
+        return int(value.nbytes)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _kv_raw_bytes(prompt_cache) -> int:
+    """Resident bytes of a KV cache (plain or quantized: nested [w, scales, biases] states are summed)."""
     total = 0
     for cache in prompt_cache or []:
         state = getattr(cache, "state", None)
-        if isinstance(state, tuple) and len(state) == 2 and state[0] is not None and state[1] is not None:
-            try:
-                total += int(state[0].nbytes + state[1].nbytes)
-            except Exception:  # noqa: BLE001
-                pass
+        if isinstance(state, tuple) and len(state) == 2:
+            total += _nested_nbytes(state[0]) + _nested_nbytes(state[1])
     return total
 
 
@@ -1249,7 +1265,7 @@ def _drop_live_caches() -> int:
 
 
 def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
-                        cache_key=None):
+                        cache_key=None, model_id=None):
     """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)
 
     Live caches are owned per session (`cache_key`, default the state file): the entry is POPPED for the
@@ -1261,7 +1277,13 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
     cache, tokens = None, None
     if mode == "live" and key in _LIVE_PREFIX_CACHES:
         tokens, cache = _LIVE_PREFIX_CACHES.pop(key)
-    elif state_payload is not None and state_payload.get("cache_tokens") and state_payload.get("snapshot"):
+    elif (
+        state_payload is not None
+        and state_payload.get("cache_tokens")
+        and state_payload.get("snapshot")
+        # a snapshot written for a DIFFERENT model (same tokenizer family, different KV shape) is never restored
+        and (model_id is None or state_payload.get("model_id") in (None, model_id))
+    ):
         try:
             cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
             tokens = [int(t) for t in state_payload["cache_tokens"]]
@@ -1321,7 +1343,7 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
     snapshot = _write_kv_sidecar(state_path, prompt_cache, {**metadata, "raw_bytes": str(raw)})
     if snapshot is None:  # cache type safetensors cannot hold -> legacy inline snapshot
         snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
-    return {"cache_tokens": cache_tokens, "snapshot": snapshot}
+    return {"cache_tokens": cache_tokens, "snapshot": snapshot, "model_id": metadata.get("model_id")}
 
 
 def _kv_sidecar_paths(state_path: str) -> list[str]:
@@ -1350,7 +1372,7 @@ def _write_kv_sidecar(state_path: str, prompt_cache, metadata: dict) -> dict | N
 
     from mlx_lm.models.cache import save_prompt_cache
 
-    if any(type(c).__name__ not in {"KVCache", "RotatingKVCache"} for c in prompt_cache):
+    if any(type(c).__name__ not in {"KVCache", "RotatingKVCache", "QuantizedKVCache"} for c in prompt_cache):
         return None
     final = f"{state_path}.{uuid.uuid4().hex[:12]}.kv.safetensors"
     partial = final + ".partial"
@@ -1418,7 +1440,7 @@ def _generate_with_loaded_model(
     if prefix_mode != "legacy":
         prompt_cache, prompt_tokens, cache_hit, cached_tokens = _token_prefix_reuse(
             prefix_mode, request["stateFilePath"], state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
-            cache_key=_session_cache_key(request),
+            cache_key=_session_cache_key(request), model_id=request.get("modelID"),
         )
     elif (
         state_payload is not None
