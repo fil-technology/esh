@@ -13,7 +13,7 @@ import os
 import tempfile
 import unittest
 
-from test_lookup_spec import bridge  # noqa: E402  (shared loader that stubs triattention_runtime)
+from test_lookup_spec import bridge, ensure_real_mlx_lm  # noqa: E402  (shared loader)
 
 try:
     import mlx.core as mx
@@ -67,6 +67,7 @@ class SnapshotDiskGuardTests(unittest.TestCase):
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")
 class PrefixReuseEquivalenceTests(unittest.TestCase):
     def setUp(self):
+        ensure_real_mlx_lm()
         mx.random.seed(3)
         args = llama.ModelArgs(model_type="llama", hidden_size=64, num_hidden_layers=2, intermediate_size=128,
                                num_attention_heads=4, rms_norm_eps=1e-5, vocab_size=97, num_key_value_heads=2)

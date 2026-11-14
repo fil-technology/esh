@@ -34,6 +34,14 @@ def _load_bridge():
 bridge = _load_bridge()
 
 
+def ensure_real_mlx_lm() -> None:
+    """test_mlx_vlm_bridge.py installs stub `mlx_lm` modules in sys.modules and never removes them; drop any stub
+    (stubs have no __file__) so the real-MLX tests below import the real package when run in the same process."""
+    for name in list(sys.modules):
+        if (name == "mlx_lm" or name.startswith("mlx_lm.")) and getattr(sys.modules[name], "__file__", None) is None:
+            del sys.modules[name]
+
+
 class LookupIndexTests(unittest.TestCase):
     def test_never_matches_the_tail_itself(self):
         index = bridge._LookupIndex([5, 6, 7])
@@ -138,6 +146,9 @@ class _Tok:
 
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")
 class GreedyEquivalenceTests(unittest.TestCase):
+    def setUp(self):
+        ensure_real_mlx_lm()
+
     def _model(self):
         import mlx.core as mx
         mx.random.seed(7)
