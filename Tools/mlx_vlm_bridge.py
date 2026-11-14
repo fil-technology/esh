@@ -1072,6 +1072,43 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
 #            skips the per-turn snapshot serialization (the cache's memory stays resident between turns)
 # ----------------------------------------------------------------------------------------------------------------
 
+# Disk-budget guard for KV snapshots (ALL modes). The state file and the safetensors staging file live in the
+# system temp dir, i.e. the INTERNAL volume that also holds swap. Measured 2026-11-14: an 8K-token session's legacy
+# snapshot filled the internal disk (ENOSPC, request failed) and a 32K one drove memory pressure critical; a worker
+# killed mid-save leaked a 3.1 GB staging file. When the encoded snapshot would not fit while keeping
+# MemorySafetyPreflight's 3 GB swap floor, the snapshot is skipped: the next turn is a cache miss, not a failure.
+_SNAPSHOT_DISK_FLOOR_BYTES = 3 * 1024 ** 3
+_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 2.5}  # staging + base64 blob (+ base64 tensor list for legacy)
+
+
+def _kv_raw_bytes(prompt_cache) -> int:
+    total = 0
+    for cache in prompt_cache or []:
+        state = getattr(cache, "state", None)
+        if isinstance(state, tuple) and len(state) == 2 and state[0] is not None and state[1] is not None:
+            try:
+                total += int(state[0].nbytes + state[1].nbytes)
+            except Exception:  # noqa: BLE001
+                pass
+    return total
+
+
+def _snapshot_skip_reason(state_path: str, raw_bytes: int, mode: str) -> str | None:
+    import os
+    import shutil
+
+    needed = int(raw_bytes * _SNAPSHOT_ENCODING_FACTOR.get(mode, 3.8))
+    try:
+        free = min(shutil.disk_usage(os.path.dirname(os.path.abspath(state_path)) or ".").free,
+                   shutil.disk_usage(tempfile.gettempdir()).free)
+    except Exception:  # noqa: BLE001
+        return None
+    if free - needed < _SNAPSHOT_DISK_FLOOR_BYTES:
+        return (f"KV snapshot skipped: ~{needed / 1e9:.1f} GB to write, {free / 1e9:.1f} GB free on the "
+                f"temp volume (keeps a {_SNAPSHOT_DISK_FLOOR_BYTES / 1024 ** 3:.0f} GB swap floor)")
+    return None
+
+
 _LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
 _PREFIX_REUSE_MIN_TOKENS = 8
 
@@ -1136,6 +1173,11 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
                 raw += int(st[0].nbytes + st[1].nbytes)
         return {"cache_tokens": cache_tokens, "live": True,
                 "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+    raw = _kv_raw_bytes(prompt_cache)
+    skip = _snapshot_skip_reason(state_path, raw, "tokens")
+    if skip:
+        return {"cache_tokens": cache_tokens, "snapshot": None, "snapshotSkipped": skip,
+                "metadata": {**metadata, "raw_bytes": str(raw)}}
     snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
     return {"cache_tokens": cache_tokens, "snapshot": snapshot}
 
@@ -1293,11 +1335,20 @@ def _generate_with_loaded_model(
             {**{k: v for k, v in state.items() if k != "metadata"}, "rendered_prompt": rendered_with_reply},
         )
     else:
-        snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=snapshot_metadata)
-        _save_state_file(
-            request["stateFilePath"],
-            {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
-        )
+        raw = _kv_raw_bytes(prompt_cache)
+        skip = _snapshot_skip_reason(request["stateFilePath"], raw, "legacy")
+        if skip:
+            snapshot = {"metadata": {**snapshot_metadata, "raw_bytes": str(raw)}}
+            _save_state_file(
+                request["stateFilePath"],
+                {"snapshot": None, "snapshotSkipped": skip, "rendered_prompt": rendered_with_reply},
+            )
+        else:
+            snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=snapshot_metadata)
+            _save_state_file(
+                request["stateFilePath"],
+                {"snapshot": snapshot, "rendered_prompt": rendered_with_reply},
+            )
 
     metrics = {
         "contextTokens": _cache_offset(prompt_cache, prompt_token_count),

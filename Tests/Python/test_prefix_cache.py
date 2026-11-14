@@ -41,6 +41,29 @@ class CommonPrefixTests(unittest.TestCase):
             del os.environ["ESH_MLX_PREFIX_CACHE"]
 
 
+class SnapshotDiskGuardTests(unittest.TestCase):
+    def _with_free(self, free_bytes):
+        import shutil
+        from unittest import mock
+        usage = shutil.disk_usage("/")._replace(free=free_bytes)
+        return mock.patch("shutil.disk_usage", return_value=usage)
+
+    def test_skips_when_snapshot_would_eat_the_swap_floor(self):
+        with self._with_free(4 * 1024 ** 3):
+            reason = bridge._snapshot_skip_reason("/tmp/state.json", 1 * 1024 ** 3, "legacy")  # ~3.8 GB to write
+        self.assertIsNotNone(reason)
+        self.assertIn("skipped", reason)
+
+    def test_writes_when_there_is_room(self):
+        with self._with_free(50 * 1024 ** 3):
+            self.assertIsNone(bridge._snapshot_skip_reason("/tmp/state.json", 1 * 1024 ** 3, "legacy"))
+
+    def test_tokens_mode_needs_less_room_than_legacy(self):
+        with self._with_free(6 * 1024 ** 3):
+            self.assertIsNotNone(bridge._snapshot_skip_reason("/tmp/s.json", 1 * 1024 ** 3, "legacy"))
+            self.assertIsNone(bridge._snapshot_skip_reason("/tmp/s.json", 1 * 1024 ** 3, "tokens"))
+
+
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")
 class PrefixReuseEquivalenceTests(unittest.TestCase):
     def setUp(self):
@@ -83,6 +106,21 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
 
     def test_live_mode_is_exact(self):
         self._turns("live")
+
+    def test_skipped_snapshot_is_a_clean_miss(self):
+        from unittest import mock
+        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        cache = make_prompt_cache(self.model)
+        turn1 = list(range(10, 40))
+        gen1 = self._greedy(turn1, cache, n=4)
+        with mock.patch.object(bridge, "_snapshot_skip_reason", return_value="KV snapshot skipped: test"):
+            payload = bridge._finish_token_prefix("tokens", state, cache, turn1 + gen1, {})
+        self.assertIsNone(payload["snapshot"])
+        bridge._save_state_file(state, {k: v for k, v in payload.items() if k != "metadata"})
+        _, to_prefill, hit, _ = bridge._token_prefix_reuse(
+            "tokens", state, bridge._load_state_file(state), turn1 + gen1 + [5, 6], make_prompt_cache, self.model, KVCache)
+        self.assertFalse(hit)
+        self.assertEqual(len(to_prefill), len(turn1) + len(gen1) + 2)
 
     def test_short_overlap_is_a_miss(self):
         state = os.path.join(tempfile.mkdtemp(), "state.json")
