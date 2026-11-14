@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -158,3 +159,5 @@ public extension EshRuntime {
                                                         downloadBase: root.huggingFaceCacheURL))
     }
 }
+
+#endif

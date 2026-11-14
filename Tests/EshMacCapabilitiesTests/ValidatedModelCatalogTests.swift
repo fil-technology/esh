@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -243,3 +244,5 @@ private func withEnv(_ vars: [String: String], _ body: () async throws -> Void) 
     defer { for (k, v) in old { if let v { setenv(k, v, 1) } else { unsetenv(k) } } }
     try await body()
 }
+
+#endif

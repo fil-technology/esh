@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -222,3 +223,5 @@ public final class MLXInstructImageEditProvider: CapabilityProvider, CapabilityA
         func set(_ v: CapabilityAvailability) { lock.lock(); value = v; lock.unlock() }
     }
 }
+
+#endif

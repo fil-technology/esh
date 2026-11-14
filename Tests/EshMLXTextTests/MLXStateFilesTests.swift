@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import EshMLXText
@@ -35,3 +36,5 @@ import Testing
         #expect(left == ["22-live.json", "\(getpid())-mine.json", "readme"])
     }
 }
+
+#endif

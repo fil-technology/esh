@@ -82,7 +82,7 @@ One-shot stays the default, so existing consumers are source- and behavior-compa
 - The doc comment on `EshRuntime.init()` claimed "macOS → MLX + GGUF + Apple". It is Apple Foundation Models only on every platform; fixed, with how to wire other backends.
 - The root `Package.swift` header claimed only portable products and no external dependencies; corrected (the opt-in EshVision/EshImageGen products use the mlx-swift graph). The EshMLXText comments now state that it is macOS-only with an iOS stub.
 - Backends declare `BackendLifecycleTraits` (residency, in-process, prefix reuse, context bounded at load, cancellation during prefill, serialization, iOS support). `runtimeStatus().backends` exposes them per wired backend; MLX reports its **effective** prefix-reuse mode using the bridge's own rule.
-- **Readiness.** Capability-model readiness (`modelOptions(for:)`) was already public. Text-model readiness is now public too: `textModelReadiness(_:)`, built from the same checks a request runs, and it loads nothing.
+- **Readiness.** Capability-model readiness (`modelOptions(for:)`) is explicitly public (#30, merged on `main`). Text-model readiness is now public too: `textModelReadiness(_:)`, built from the same checks a request runs, and it loads nothing.
 
 ## 5. SDK vs `esh serve` benchmarks
 

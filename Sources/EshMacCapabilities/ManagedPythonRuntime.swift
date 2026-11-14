@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -238,5 +239,7 @@ struct ManagedPythonRuntime {
         }
     }
 }
+
+#endif
 
 #endif

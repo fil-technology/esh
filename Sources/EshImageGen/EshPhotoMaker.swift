@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import EshCore
 import EshRuntime
@@ -233,3 +234,5 @@ public extension EshRuntime {
             backends: backends, root: root, installProvider: installProvider, additionalProviders: providers)
     }
 }
+
+#endif
