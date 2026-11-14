@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -51,3 +52,5 @@ import EshCore
         #expect(gate.reason.contains("system-volume") || gate.reason.contains("memory"))
     }
 }
+
+#endif

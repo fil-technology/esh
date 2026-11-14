@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 import EshCore
@@ -85,3 +86,5 @@ private func editReq(model: String?) -> ExecutionRequest {
                            "text_encoder_2/model.fp16.safetensors", "vae/diffusion_pytorch_model.fp16.safetensors"])
     }
 }
+
+#endif
