@@ -9,6 +9,7 @@ Ghost Infer was reviewed at revision `2f2a985bf74c8e0e4b288cadb68e77bfc9a554de` 
 | [C-integration-decision.md](C-integration-decision.md) | Backend: no. Per-capability decisions, upstream vs fork, defaults |
 | [D-benchmark-report.md](D-benchmark-report.md) | Reproducible baseline and post-change measurements (M1 Pro, 32 GB) |
 | [F-roadmap.md](F-roadmap.md) | Prioritized follow-ups |
+| [H-final-production-readiness.md](H-final-production-readiness.md) | Final readiness: merge status, KV-growth guard, Ashex and `esh serve` validation, recommended defaults |
 | [G-production-hardening-report.md](G-production-hardening-report.md) | Follow-up: production hardening, validation and merge readiness (branch `perf/inference-hardening`) |
 
 Implementation (branch `perf/ghost-infer-learnings`; everything is **opt-in**, defaults unchanged except the disk guard):
