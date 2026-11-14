@@ -39,6 +39,7 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+TEMPERATURE = 0.0   # --temperature; greedy by default
 BRIDGE = REPO / "Tools" / "mlx_vlm_bridge.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -263,7 +264,8 @@ class MLXWorker:
             "session": {"messages": [{"role": m["role"], "text": m["text"]} for m in messages]},
             "stateFilePath": state_file,
             "kvMode": "raw",
-            "config": {"maxTokens": max_tokens, "temperature": 0.0, "enableThinking": False, **config_extra},
+            "config": {"maxTokens": max_tokens, "temperature": TEMPERATURE, "enableThinking": False,
+                       **({"seed": 7} if TEMPERATURE > 0 else {}), **config_extra},
         }
         t0 = time.perf_counter()
         self._send({"id": rid, "op": "generate", "request": request})
@@ -352,7 +354,7 @@ class LlamaServer:
     def generate(self, messages: list[dict], state_file: str, max_tokens: int, config_extra: dict) -> dict:
         body = {
             "messages": [{"role": m["role"], "content": m["text"]} for m in messages],
-            "stream": True, "max_tokens": max_tokens, "temperature": 0.0, "cache_prompt": True,
+            "stream": True, "max_tokens": max_tokens, "temperature": TEMPERATURE, "cache_prompt": True,
             "timings_per_token": False, "chat_template_kwargs": {"enable_thinking": False},
         }
         req = urllib.request.Request(self.base + "/v1/chat/completions", data=json.dumps(body).encode(),
@@ -544,9 +546,13 @@ def main():
     p.add_argument("--llama-server", default=os.environ.get("ESH_LLAMA_CPP_SERVER", "/opt/homebrew/bin/llama-server"))
     p.add_argument("--port", type=int, default=18087)
     p.add_argument("--ctx", type=int, default=8192)
+    p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--keep-text", action="store_true", help="store full outputs (for divergence analysis)")
     p.add_argument("--out", default=str(REPO / "benchmarks" / "results" / "ghost-infer-study.jsonl"))
-    run(p.parse_args())
+    args = p.parse_args()
+    global TEMPERATURE
+    TEMPERATURE = args.temperature
+    run(args)
 
 
 if __name__ == "__main__":
