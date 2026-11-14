@@ -1,0 +1,531 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-13",
+  "generatedWith": {
+    "python": "3.11.14",
+    "mlxAudio": "0.6.5",
+    "mlx": "0.32.4",
+    "mlxLm": "0.32.2",
+    "transformers": "5.22.2"
+  },
+  "validatedOn": "Apple M1 Pro, 32 GB",
+  "harness": "scripts/model-catalog/validate.py",
+  "entries": [
+    {
+      "id": "prince-canuma/Kokoro-82M",
+      "capability": "audio.synthesizeSpeech",
+      "engine": "mlx-speech-tts",
+      "family": "kokoro",
+      "displayName": "Kokoro 82M",
+      "rank": 1,
+      "isDefault": true,
+      "status": "ok",
+      "extraPackages": [
+        {
+          "module": "misaki",
+          "pip": "misaki>=0.9.4"
+        },
+        {
+          "module": "espeakng_loader",
+          "pip": "espeakng-loader"
+        },
+        {
+          "module": "phonemizer",
+          "pip": "phonemizer-fork"
+        },
+        {
+          "module": "num2words",
+          "pip": "num2words"
+        },
+        {
+          "module": "spacy",
+          "pip": "spacy>=3.8,<3.9"
+        },
+        {
+          "module": "en_core_web_sm",
+          "pip": "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+        }
+      ],
+      "requiredArgs": {
+        "voice": "af_heart",
+        "language": "a"
+      },
+      "weightBytes": 389420170,
+      "firstRunDownloadBytes": 355323809,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 2522170616,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": "Weights Apache-2.0. Its G2P fallback uses phonemizer-fork + espeak-ng (GPL-3.0), pip-installed into the user's managed venv at runtime; do not bundle them inside an app.",
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "3.25s @ 24000 Hz; round-trip via mlx-community/parakeet-tdt-0.6b-v2: \"The quick brown fox jumps over the lazy dog.\" (word overlap 1.00)",
+      "coldRunSeconds": 8.2,
+      "warmRunSeconds": 4.4,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/Kokoro-82M-bf16",
+      "capability": "audio.synthesizeSpeech",
+      "engine": "mlx-speech-tts",
+      "family": "kokoro",
+      "displayName": "Kokoro 82M (bf16)",
+      "rank": 2,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [
+        {
+          "module": "misaki",
+          "pip": "misaki>=0.9.4"
+        },
+        {
+          "module": "espeakng_loader",
+          "pip": "espeakng-loader"
+        },
+        {
+          "module": "phonemizer",
+          "pip": "phonemizer-fork"
+        },
+        {
+          "module": "num2words",
+          "pip": "num2words"
+        },
+        {
+          "module": "spacy",
+          "pip": "spacy>=3.8,<3.9"
+        },
+        {
+          "module": "en_core_web_sm",
+          "pip": "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+        }
+      ],
+      "requiredArgs": {
+        "voice": "af_heart",
+        "language": "a"
+      },
+      "weightBytes": 389410807,
+      "firstRunDownloadBytes": 355322783,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 2508064256,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": "Same G2P stack (GPL-3.0 espeak-ng at runtime) as Kokoro 82M.",
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "3.25s @ 24000 Hz; round-trip via mlx-community/parakeet-tdt-0.6b-v2: \"The quick brown fox jumps over the lazy dog.\" (word overlap 1.00)",
+      "coldRunSeconds": 16.4,
+      "warmRunSeconds": 4.9,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/csm-1b-8bit",
+      "capability": "audio.synthesizeSpeech",
+      "engine": "mlx-speech-tts",
+      "family": "csm",
+      "displayName": "Sesame CSM 1B (8-bit)",
+      "rank": 3,
+      "isDefault": false,
+      "status": "failed",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 1711114573,
+      "firstRunDownloadBytes": 2113019286,
+      "auxiliaryDownloads": [
+        {
+          "repo": "kyutai/moshiko-pytorch-bf16",
+          "bytes": 384644900
+        },
+        {
+          "repo": "unsloth/Llama-3.2-1B",
+          "bytes": 17261909
+        }
+      ],
+      "peakMemoryBytes": 2412251656,
+      "recommendedMinMemoryGB": null,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": false,
+      "sampleCheck": null,
+      "coldRunSeconds": 10.3,
+      "warmRunSeconds": null,
+      "error": "speech synthesis produced no audio: needs access to the gated Hugging Face repo 'sesame/csm-1b' (sign in and accept its license on huggingface.co)",
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": [
+        "models--kyutai--moshiko-pytorch-bf16",
+        "models--unsloth--Llama-3.2-1B"
+      ]
+    },
+    {
+      "id": "mlx-community/Dia-1.6B-fp16",
+      "capability": "audio.synthesizeSpeech",
+      "engine": "mlx-speech-tts",
+      "family": "dia",
+      "displayName": "Dia 1.6B (fp16)",
+      "rank": 4,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 3222365078,
+      "firstRunDownloadBytes": 3529007958,
+      "auxiliaryDownloads": [
+        {
+          "repo": "mlx-community/descript-audio-codec-44khz",
+          "bytes": 306645088
+        }
+      ],
+      "peakMemoryBytes": 7849840408,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "2.69s @ 44100 Hz; round-trip via mlx-community/parakeet-tdt-0.6b-v2: \"The quick brown fox jumps over the lazy dog.\" (word overlap 0.90)",
+      "coldRunSeconds": 93.6,
+      "warmRunSeconds": 118.7,
+      "error": null,
+      "missingModule": null,
+      "note": "Dialogue model: prefix speaker turns with [S1]/[S2].",
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": [
+        "models--mlx-community--descript-audio-codec-44khz"
+      ]
+    },
+    {
+      "id": "mlx-community/bark-small",
+      "capability": "audio.synthesizeSpeech",
+      "engine": "mlx-speech-tts",
+      "family": "bark",
+      "displayName": "Bark Small",
+      "rank": 5,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 1611067080,
+      "firstRunDownloadBytes": 1689261207,
+      "auxiliaryDownloads": [
+        {
+          "repo": "bert-base-multilingual-cased",
+          "bytes": 2957403
+        },
+        {
+          "repo": "mlx-community/encodec-24khz-float32",
+          "bytes": 76152256
+        }
+      ],
+      "peakMemoryBytes": 14351584856,
+      "recommendedMinMemoryGB": 24,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "mit",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "13.47s @ 24000 Hz; round-trip via mlx-community/parakeet-tdt-0.6b-v2: \"Quick brown fox jumps over the lazy dog.\" (word overlap 1.00)",
+      "coldRunSeconds": 171.5,
+      "warmRunSeconds": 139.8,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": [
+        "models--bert-base-multilingual-cased",
+        "models--mlx-community--encodec-24khz-float32"
+      ]
+    },
+    {
+      "id": "mlx-community/parakeet-tdt-0.6b-v2",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "parakeet",
+      "displayName": "Parakeet TDT 0.6B v2 (English)",
+      "rank": 1,
+      "isDefault": true,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 2471865399,
+      "firstRunDownloadBytes": 2471852542,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 2841004720,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "cc-by-4.0",
+      "commercialUse": true,
+      "licenseNote": "CC-BY-4.0: commercial use and redistribution allowed with attribution to NVIDIA.",
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog, every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 7.7,
+      "warmRunSeconds": 3.6,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/parakeet-tdt-0.6b-v3",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "parakeet",
+      "displayName": "Parakeet TDT 0.6B v3 (25 languages)",
+      "rank": 2,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 2509044141,
+      "firstRunDownloadBytes": 2508940517,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 5079945512,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "cc-by-4.0",
+      "commercialUse": true,
+      "licenseNote": "CC-BY-4.0: commercial use and redistribution allowed with attribution to NVIDIA.",
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog, every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 59.5,
+      "warmRunSeconds": 13.6,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "whisper",
+      "displayName": "Whisper Large v3 Turbo",
+      "rank": 3,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 1618636172,
+      "firstRunDownloadBytes": 1618633596,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 3250244464,
+      "recommendedMinMemoryGB": 16,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "mit",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog. Every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 45.6,
+      "warmRunSeconds": 7.3,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/whisper-small-asr-fp16",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "whisper",
+      "displayName": "Whisper Small",
+      "rank": 4,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 485624250,
+      "firstRunDownloadBytes": 485619557,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 2075592792,
+      "recommendedMinMemoryGB": 8,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog. Every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 23.2,
+      "warmRunSeconds": 4.8,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/whisper-base-asr-fp16",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "whisper",
+      "displayName": "Whisper Base",
+      "rank": 5,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 148070180,
+      "firstRunDownloadBytes": 148065824,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 846660976,
+      "recommendedMinMemoryGB": 8,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog, every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 12.3,
+      "warmRunSeconds": 3.6,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    },
+    {
+      "id": "mlx-community/whisper-tiny-asr-fp16",
+      "capability": "audio.transcribe",
+      "engine": "mlx-speech-stt",
+      "family": "whisper",
+      "displayName": "Whisper Tiny",
+      "rank": 6,
+      "isDefault": false,
+      "status": "ok",
+      "extraPackages": [],
+      "requiredArgs": {},
+      "weightBytes": 78774283,
+      "firstRunDownloadBytes": 78769952,
+      "auxiliaryDownloads": [],
+      "peakMemoryBytes": 523519032,
+      "recommendedMinMemoryGB": 8,
+      "minChip": "Apple silicon (M1 or later)",
+      "license": "apache-2.0",
+      "commercialUse": true,
+      "licenseNote": null,
+      "gated": false,
+      "sampleOutputOK": true,
+      "sampleCheck": "\"The quick brown fox jumps over the lazy dog, every model is checked before it ships.\" (word overlap 1.00 vs the `say` fixture)",
+      "coldRunSeconds": 11.0,
+      "warmRunSeconds": 5.4,
+      "error": null,
+      "missingModule": null,
+      "note": null,
+      "lastValidated": {
+        "date": "2026-11-13",
+        "machine": "Apple M1 Pro, 32 GB",
+        "python": "3.11.14",
+        "mlxAudio": "0.6.5",
+        "mlx": "0.32.4",
+        "mlxLm": "0.32.2",
+        "transformers": "5.22.2"
+      },
+      "auxiliaryCacheDirs": []
+    }
+  ]
+}

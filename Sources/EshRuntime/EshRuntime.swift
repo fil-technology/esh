@@ -791,6 +791,21 @@ public extension EshRuntime {
         return CapabilityAvailabilitySnapshot(entries: entries)
     }
 
+    /// The validated concrete models every provider of `capability` can run, each with LIVE per-device state
+    /// (ready / needs setup / download required + size / unsupported on this machine), a memory-fit judgment
+    /// and a one-line note — exactly what a model pill renders. Only providers that run several models report
+    /// (today: the mlx_audio speech engines); others contribute nothing. Sorted by provider, then rank.
+    /// Choose one with `request.model = providerID` + `options["model"] = option.id`.
+    func modelOptions(for capability: CapabilityID) async -> [ModelOptionAvailability] {
+        var rows: [ModelOptionAvailability] = []
+        for provider in capabilityRegistry?.all ?? [] where provider.descriptor.capabilities.contains(capability) {
+            if let reporting = provider as? ModelOptionReporting {
+                rows += await reporting.modelOptionAvailability(for: capability)
+            }
+        }
+        return rows
+    }
+
     /// Whether a capability can produce multiple candidate outputs (variants) in one execution, and the max
     /// esh will produce — aggregated over the capability's providers, so a consumer never hardcodes model
     /// knowledge. `maxCount` is 1 for single-output capabilities. (rc.22)

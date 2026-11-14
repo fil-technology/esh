@@ -1,0 +1,54 @@
+name: mlx speech live smoke
+
+# LIVE synth -> transcribe through the real EshMacCapabilities stack (fresh py3.11 venv provisioned from the
+# shipped manifest, SDK-bundled bridge, Kokoro -> Parakeet). Downloads ~1 GB, so it runs only when the speech
+# path changes, weekly (to catch upstream mlx-audio/misaki drift), and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - "Sources/EshMacCapabilities/**"
+      - "Tools/mlx_vlm_bridge.py"
+      - "scripts/smoke-mlx-speech.sh"
+      - "scripts/model-catalog/**"
+      - "Tests/EshMacCapabilitiesTests/MLXSpeechLiveSmokeTests.swift"
+  push:
+    branches: [main]
+    paths:
+      - "Sources/EshMacCapabilities/**"
+      - "Tools/mlx_vlm_bridge.py"
+      - "scripts/smoke-mlx-speech.sh"
+
+jobs:
+  speech-smoke:
+    name: Kokoro synth -> Parakeet transcribe
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (the managed runtime's version)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Select Xcode with Swift 6.2
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "latest-stable"
+
+      - name: Cache Hugging Face weights
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.esh-smoke-assets
+          key: esh-speech-smoke-weights-${{ hashFiles('Sources/EshMacCapabilities/Resources/catalog/validated-models.json') }}
+
+      - name: Live smoke
+        env:
+          ESH_SMOKE_PYTHON311: python3.11
+          ESH_MLX_SPEECH_SMOKE_ASSETS: ${{ github.workspace }}/.esh-smoke-assets
+        run: |
+          mkdir -p "$ESH_MLX_SPEECH_SMOKE_ASSETS"
+          ./scripts/smoke-mlx-speech.sh

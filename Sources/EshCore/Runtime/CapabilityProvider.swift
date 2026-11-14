@@ -66,6 +66,10 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
     /// or model family — so a non-commercial model can't silently become a commercial-production default. eval/
     /// dogfood use stays available via an explicit pin. Default `true` (permissive) keeps existing providers as-is.
     public var commercialUse: Bool
+    /// The concrete models this provider can run that esh has VALIDATED (provisioned + run on a real job by
+    /// `scripts/model-catalog/validate.py`), with the observed facts. Empty for single-model providers. Live,
+    /// per-device readiness for these comes from `EshRuntime.modelOptions(for:)`.
+    public var modelOptions: [CapabilityModelOption]
 
     public init(id: String,
                 capabilities: [CapabilityID],
@@ -80,7 +84,8 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
                 resourceProfile: CapabilityResourceProfile? = nil,
                 supportsMultipleOutputs: Bool = false,
                 maximumOutputCount: Int = 1,
-                commercialUse: Bool = true) {
+                commercialUse: Bool = true,
+                modelOptions: [CapabilityModelOption] = []) {
         self.id = id
         self.capabilities = capabilities
         self.acceptedInputs = acceptedInputs
@@ -95,6 +100,7 @@ public struct CapabilityProviderDescriptor: Codable, Hashable, Sendable {
         self.supportsMultipleOutputs = supportsMultipleOutputs
         self.maximumOutputCount = maximumOutputCount
         self.commercialUse = commercialUse
+        self.modelOptions = modelOptions
     }
 }
 
