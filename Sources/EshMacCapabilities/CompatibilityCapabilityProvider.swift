@@ -6,18 +6,26 @@ import EshRuntime
 /// preflight → install/repair → execute state machine, forwards the host's events, maps failures to typed
 /// `CompatibilityError`s (never a raw traceback), and reports honest availability into discovery. The same
 /// public `execute`/`stream` contract as every native provider — the consumer sees no difference.
-public final class CompatibilityCapabilityProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, @unchecked Sendable {
+public final class CompatibilityCapabilityProvider: CapabilityProvider, CapabilityAvailabilityRefreshing, ModelOptionReporting, @unchecked Sendable {
     public let descriptor: CapabilityProviderDescriptor
     private let manifest: CompatibilityEngineManifest
     private let host: CompatibilityEngineHost
     private let stateBox: StateBox
     /// When false (non-macOS), the engine is inert and reports `.unsupportedOnPlatform`.
     private let supported: Bool
+    /// The validated per-model catalog (only multi-model engines have entries).
+    private let catalog: ValidatedModelCatalog
+    /// This Mac's physical memory (injectable for deterministic fit tests).
+    private let physicalMemoryBytes: Int64
 
-    public init(manifest: CompatibilityEngineManifest, host: CompatibilityEngineHost, supported: Bool) {
+    public init(manifest: CompatibilityEngineManifest, host: CompatibilityEngineHost, supported: Bool,
+                catalog: ValidatedModelCatalog = .bundled(),
+                physicalMemoryBytes: Int64 = Int64(ProcessInfo.processInfo.physicalMemory)) {
         self.manifest = manifest
         self.host = host
         self.supported = supported
+        self.catalog = catalog
+        self.physicalMemoryBytes = physicalMemoryBytes
         self.stateBox = StateBox(supported ? .notInstalled : .unsupportedOnPlatform)
         self.descriptor = CapabilityProviderDescriptor(
             id: "compat-\(manifest.id.rawValue)",
@@ -34,7 +42,67 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
             // execution-time fit gating; nil keeps legacy native-first selection for engines without a profile.
             resourceProfile: manifest.resourceProfile,
             // Non-commercial engines (Qwen-Image-2.1: Qwen Research License) are pin-only — never Auto-defaulted.
-            commercialUse: manifest.commercialUse)
+            commercialUse: manifest.commercialUse,
+            // Validated concrete models (mlx_audio speech: Kokoro/CSM/…, Parakeet/Whisper) with observed facts.
+            modelOptions: catalog.modelOptions(engine: manifest.id))
+    }
+
+    // MARK: ModelOptionReporting
+
+    /// Live per-device state of every validated option: platform → validation outcome → memory fit → the host's
+    /// batched probe (runtime + model packages + weights on disk). Reduced to pill-ready fit/size/state/note.
+    public func modelOptionAvailability(for capability: CapabilityID) async -> [ModelOptionAvailability] {
+        guard descriptor.capabilities.contains(capability), !descriptor.modelOptions.isEmpty else { return [] }
+        let options = descriptor.modelOptions
+        let runnable = options.filter { $0.isRunnable }
+        var probed: [String: ModelOptionReadiness] = [:]
+        if supported, !runnable.isEmpty {
+            if let modelHost = host as? CompatibilityModelHost {
+                probed = await modelHost.inspectModels(manifest, options: runnable)
+            } else {
+                let engine = await host.inspect(manifest).modelReadiness
+                for option in runnable { probed[option.id] = engine }
+            }
+        }
+        return options.map { option in
+            let fit = ModelOptionAvailability.fit(peakMemoryBytes: option.peakMemoryBytes,
+                                                  physicalMemoryBytes: physicalMemoryBytes)
+            let readiness: ModelOptionReadiness
+            if !supported {
+                readiness = .unsupportedOnPlatform
+            } else if !option.isRunnable {
+                readiness = .notValidated(reason: ModelOptionNotes.notValidatedReason(option))
+            } else if !Self.isAppleSilicon {
+                readiness = .unsupportedOnThisMachine(reason: "Requires Apple silicon")
+            } else if fit == .exceeds, let peak = option.peakMemoryBytes {
+                readiness = .unsupportedOnThisMachine(reason: String(
+                    format: "Needs ~%.1f GB at peak; this Mac has %.0f GB",
+                    Double(peak) / 1_073_741_824, Double(physicalMemoryBytes) / 1_073_741_824))
+            } else {
+                readiness = probed[option.id] ?? .needsSetup(reason: "not inspected yet")
+            }
+            let size: Int64?
+            if case .downloadRequired(let bytes) = readiness { size = bytes ?? option.firstRunDownloadBytes ?? option.weightBytes }
+            else { size = option.firstRunDownloadBytes ?? option.weightBytes }
+            return ModelOptionAvailability(option: option, providerID: descriptor.id, readiness: readiness, fit: fit,
+                                           sizeBytes: size,
+                                           note: ModelOptionNotes.note(readiness: readiness, fit: fit, option: option))
+        }
+    }
+
+    static var isAppleSilicon: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// The model this request will run: the caller's `options["model"]`, else the catalog default (nil for
+    /// single-model engines).
+    func selectedModelID(_ request: ResolvedExecutionRequest) -> String? {
+        if case .string(let v)? = request.request.options.values["model"], !v.isEmpty { return v }
+        return catalog.defaultEntry(engine: manifest.id)?.id
     }
 
     /// Refresh cached availability from a live preflight (call off the hot path, e.g. at discovery time).
@@ -106,6 +174,12 @@ public final class CompatibilityCapabilityProvider: CapabilityProvider, Capabili
                         }
                         state = await host.inspect(manifest); stateBox.set(state)
                         guard case .ready = state else { throw Self.notReadyError(manifest.id, state) }
+                    }
+                    // A validated model with extra packages (beyond the engine's base set) gets them now — e.g. a
+                    // model whose runtime needs a package the default model doesn't.
+                    if let modelHost = host as? CompatibilityModelHost, let modelID = self.selectedModelID(request),
+                       self.catalog.entry(id: modelID, engine: manifest.id) != nil {
+                        try await modelHost.prepareModel(manifest, modelID: modelID)
                     }
                     try Task.checkCancellation()
                     // Execute — forward the host's events verbatim (status/progress/artifactProduced/…).

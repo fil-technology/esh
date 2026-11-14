@@ -32,6 +32,16 @@ jobs:
       - name: Bootstrap runtime
         run: ./scripts/bootstrap.sh
 
+      # Static guard for the Python bridge (the e4fff2d `os` NameError class): no undefined names, and the
+      # SDK-bundled copy must match Tools/. Cheap and deterministic; the LIVE speech smoke is its own workflow.
+      - name: Bridge static check (pyflakes undefined names + copies in sync)
+        run: |
+          python3 -m pip install --quiet pyflakes
+          for f in Sources/EshMacCapabilities/Resources/bridge/mlx_vlm_bridge.py Tools/mlx_vlm_bridge.py; do
+            if python3 -m pyflakes "$f" | grep -E "undefined name"; then echo "undefined name(s) in $f"; exit 1; fi
+          done
+          cmp Sources/EshMacCapabilities/Resources/bridge/mlx_vlm_bridge.py Tools/mlx_vlm_bridge.py
+
       # Build separately so the test steps below can carry a tight wall-clock limit: a hung test process
       # fails within minutes with every thread's backtrace (scripts/ci-swift-test.sh) instead of silently
       # burning the 45-minute job timeout.

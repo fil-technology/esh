@@ -206,6 +206,8 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     let stdin = Pipe(); let stdout = Pipe(); let stderr = Pipe()
                     proc.standardInput = stdin; proc.standardOutput = stdout; proc.standardError = stderr
                     procBox.set(proc)
+                    let exit = ExitLatch()
+                    exit.arm(proc)
                     try proc.run()
                     stdin.fileHandleForWriting.write(requestJSON)
                     try? stdin.fileHandleForWriting.close()
@@ -213,7 +215,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                     // Drain pipes off-thread so a large model can't deadlock on a full pipe buffer.
                     let errData = try await Self.readAll(stderr.fileHandleForReading)
                     _ = try await Self.readAll(stdout.fileHandleForReading)
-                    proc.waitUntilExit()
+                    await exit.wait()
 
                     if Task.isCancelled { continuation.finish(throwing: CancellationError()); return }
                     guard proc.terminationStatus == 0 else {
@@ -271,7 +273,8 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     }
 
     static func bridgeRequest(_ id: CompatibilityEngineID, _ request: ResolvedExecutionRequest,
-                              outputPath: String, root: PersistenceRoot) throws -> Data {
+                              outputPath: String, root: PersistenceRoot,
+                              catalog: ValidatedModelCatalog = .bundled()) throws -> Data {
         let inputs = request.request.inputs
         func firstText() -> String { inputs.compactMap { if case .text(let t) = $0.payload { return t }; return nil }.joined(separator: " ") }
         func firstFile(_ kind: EshAttachment.Kind) -> String? {
@@ -405,8 +408,10 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                 throw CompatibilityError.executionFailed(reason: "transcription requires an audio input")
             }
             dict["audioPath"] = audio
-            dict["model"] = strOpt("model") ?? "mlx-community/parakeet-tdt-0.6b-v2"
-            if let lang = strOpt("language") { dict["language"] = lang }
+            let model = strOpt("model") ?? catalog.defaultEntry(engine: id)?.id ?? "mlx-community/parakeet-tdt-0.6b-v2"
+            let known = catalog.entry(id: model, engine: id)?.requiredArgs ?? [:]
+            dict["model"] = model
+            if let lang = strOpt("language") ?? known["language"] { dict["language"] = lang }
             // mlx_audio fetches/caches the STT model into the configured audio cache on the assets volume.
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         case .speechSynthesize:
@@ -418,9 +423,13 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
                 throw CompatibilityError.executionFailed(reason: "speech synthesis requires a text prompt")
             }
             dict["text"] = text
-            dict["model"] = strOpt("model") ?? "prince-canuma/Kokoro-82M"
-            if let voice = strOpt("voice") { dict["voice"] = voice }
-            if let lang = strOpt("language") { dict["language"] = lang }
+            // Unset knobs take the validated known-good values (Kokoro REQUIRES a voice — without one mlx_audio
+            // has nothing to condition on); the caller's explicit options always win.
+            let model = strOpt("model") ?? catalog.defaultEntry(engine: id)?.id ?? "prince-canuma/Kokoro-82M"
+            let known = catalog.entry(id: model, engine: id)?.requiredArgs ?? [:]
+            dict["model"] = model
+            if let voice = strOpt("voice") ?? known["voice"] { dict["voice"] = voice }
+            if let lang = strOpt("language") ?? known["language"] { dict["language"] = lang }
             if let speed = dblOpt("speed") { dict["speed"] = speed }
             dict["hfCache"] = root.pythonHFCacheURL(family: "audio").path
         }
@@ -432,12 +441,7 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
     /// `hfCache` field: some libraries freeze their cache dir from the environment at import time.
     func bridgeEnvironment(for manifest: CompatibilityEngineManifest, root: PersistenceRoot) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let family: String
-        switch manifest.id {
-        case .imageGeneration, .advancedImageEdit, .qwenImage21: family = "image"
-        default: family = "audio"
-        }
-        let hf = root.pythonHFCacheURL(family: family).path
+        let hf = root.pythonHFCacheURL(family: Self.hfCacheFamily(for: manifest.id)).path
         try? FileManager.default.createDirectory(atPath: hf + "/hub", withIntermediateDirectories: true)
         env["HF_HOME"] = hf
         env["HF_HUB_CACHE"] = hf + "/hub"
@@ -452,6 +456,14 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
             env[iso.envVar] = py
         }
         return env
+    }
+
+    /// The Python bridge's Hugging Face cache family an engine downloads into (`caches/<family>-models`).
+    static func hfCacheFamily(for id: CompatibilityEngineID) -> String {
+        switch id {
+        case .imageGeneration, .advancedImageEdit, .qwenImage21: return "image"
+        default: return "audio"
+        }
     }
 
     /// Resolve a style LoRA to a local adapter path from the image HF cache, or fall back to the HF repo id
@@ -579,6 +591,114 @@ public final class EshManagedPythonHost: CompatibilityEngineHost, @unchecked Sen
         private let lock = NSLock(); private var proc: Process?
         func set(_ p: Process) { lock.lock(); proc = p; lock.unlock() }
         func terminate() { lock.lock(); let p = proc; lock.unlock(); p?.terminate() }
+    }
+
+    /// Awaits a child's exit WITHOUT `Process.waitUntilExit()`. That call spins the current thread's run loop
+    /// waiting for the termination source; on a detached/cooperative thread with no run loop it can block
+    /// forever after the child has already exited and been reaped (observed: the live speech smoke hung for
+    /// 14 min with no child process alive). Install with `arm(_:)` BEFORE `run()`; `wait()` is race-free
+    /// whether the exit lands before or after it is awaited.
+    final class ExitLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var exited = false
+        private var waiter: CheckedContinuation<Void, Never>?
+
+        func arm(_ proc: Process) {
+            proc.terminationHandler = { [self] _ in signal() }
+        }
+
+        func signal() {
+            lock.lock()
+            exited = true
+            let w = waiter; waiter = nil
+            lock.unlock()
+            w?.resume()
+        }
+
+        func wait() async {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if exited { lock.unlock(); c.resume(); return }
+                waiter = c
+                lock.unlock()
+            }
+        }
+    }
+}
+
+
+// MARK: - Per-model readiness + preparation (validated model catalog)
+
+extension EshManagedPythonHost: CompatibilityModelHost {
+    public func inspectModels(_ manifest: CompatibilityEngineManifest,
+                              options: [CapabilityModelOption]) async -> [String: ModelOptionReadiness] {
+        let root = resolvedRoot()
+        guard let python = adoptablePython(root: root) else {
+            return Dictionary(uniqueKeysWithValues: options.map {
+                ($0.id, ModelOptionReadiness.needsSetup(reason: "esh installs the engine runtime on first use"))
+            })
+        }
+        let catalog = ValidatedModelCatalog.bundled()
+        let base = manifest.requiredModules.map(\.module)
+        let extras = Dictionary(uniqueKeysWithValues: options.map {
+            ($0.id, catalog.entry(id: $0.id, engine: manifest.id)?.extraPackages.map(\.module) ?? [])
+        })
+        // ONE interpreter launch for every module of every option.
+        let missing = Self.missingModules(python: python, modules: Array(Set(base + extras.values.flatMap { $0 })))
+        let cache = root.pythonHFCacheURL(family: Self.hfCacheFamily(for: manifest.id))
+        var result: [String: ModelOptionReadiness] = [:]
+        for option in options {
+            let need = base + (extras[option.id] ?? [])
+            let absent = need.filter { missing.contains($0) }
+            if !absent.isEmpty {
+                result[option.id] = .needsSetup(reason: "missing runtime components (\(absent.joined(separator: ", ")))")
+                continue
+            }
+            let aux = catalog.entry(id: option.id, engine: manifest.id)?.auxiliaryDownloads?.map(\.repo) ?? []
+            let cached = ([option.id] + aux).allSatisfy { Self.isRepoCached($0, cache: cache) }
+            result[option.id] = cached ? .ready : .downloadRequired(bytes: option.firstRunDownloadBytes ?? option.weightBytes)
+        }
+        return result
+    }
+
+    public func prepareModel(_ manifest: CompatibilityEngineManifest, modelID: String) async throws {
+        guard let entry = ValidatedModelCatalog.bundled().entry(id: modelID, engine: manifest.id),
+              !entry.extraPackages.isEmpty else { return }
+        let python = try await ensurePython(root: resolvedRoot(), onProgress: { _ in })
+        let missing = Self.missingModules(python: python, modules: entry.extraPackages.map(\.module))
+        let toInstall = entry.extraPackages.filter { missing.contains($0.module) }
+        guard !toInstall.isEmpty else { return }
+        try Self.pipInstall(python: python, packages: toInstall.map(\.pip), onProgress: { _ in })
+    }
+
+    /// Which of `modules` the interpreter cannot find — `importlib.util.find_spec` (locates without importing,
+    /// so probing spaCy/torch-sized packages stays cheap). Unknown/failed probe → treat all as missing.
+    static func missingModules(python: String, modules: [String]) -> Set<String> {
+        guard !modules.isEmpty else { return [] }
+        let script = "import importlib.util,sys\nfor m in sys.argv[1:]:\n    try:\n        ok = importlib.util.find_spec(m) is not None\n    except Exception:\n        ok = False\n    if not ok: print(m)"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: python)
+        p.arguments = ["-c", script] + modules
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run() } catch { return Set(modules) }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return Set(modules) }
+        return Set((String(data: data, encoding: .utf8) ?? "").split(whereSeparator: \.isNewline).map(String.init))
+    }
+
+    /// True when a Hugging Face repo has at least one populated snapshot in the bridge's cache layout.
+    static func isRepoCached(_ repo: String, cache: URL) -> Bool {
+        let snapshots = cache.appendingPathComponent("hub", isDirectory: true)
+            .appendingPathComponent("models--" + repo.replacingOccurrences(of: "/", with: "--"), isDirectory: true)
+            .appendingPathComponent("snapshots", isDirectory: true)
+        let fm = FileManager.default
+        guard let revisions = try? fm.contentsOfDirectory(atPath: snapshots.path) else { return false }
+        return revisions.contains { rev in
+            guard !rev.hasPrefix(".") else { return false }
+            let files = (try? fm.contentsOfDirectory(atPath: snapshots.appendingPathComponent(rev).path)) ?? []
+            return files.contains { !$0.hasPrefix(".") }
+        }
     }
 }
 

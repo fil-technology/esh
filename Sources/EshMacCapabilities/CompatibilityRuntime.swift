@@ -193,3 +193,17 @@ public protocol CompatibilityEngineHost: Sendable {
     func run(_ manifest: CompatibilityEngineManifest, _ request: ResolvedExecutionRequest,
              context: ExecutionContext) -> AsyncThrowingStream<CapabilityEvent, Error>
 }
+
+// MARK: - Multi-model engines (validated model catalog)
+
+/// Optional per-model seam for engines that run several concrete models (the mlx_audio speech engines). The
+/// defaults keep every existing host (and test mock) working: readiness is derived from the engine-wide state
+/// and no model-specific preparation happens.
+public protocol CompatibilityModelHost: CompatibilityEngineHost {
+    /// Live readiness of each validated option, keyed by option id — ONE batched probe (packages + weights on
+    /// disk) rather than a subprocess per model.
+    func inspectModels(_ manifest: CompatibilityEngineManifest,
+                       options: [CapabilityModelOption]) async -> [String: ModelOptionReadiness]
+    /// Make sure a specific model's extra packages (from the validated catalog) are installed before it runs.
+    func prepareModel(_ manifest: CompatibilityEngineManifest, modelID: String) async throws
+}
