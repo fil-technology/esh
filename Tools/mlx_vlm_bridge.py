@@ -727,6 +727,331 @@ def _find_earliest_stop_marker(text: str) -> int | None:
     return earliest
 
 
+# ----------------------------------------------------------------------------------------------------------------
+# Prompt-lookup speculative decoding (EXPERIMENTAL, off by default: ESH_MLX_LOOKUP_SPEC=1).
+#
+# Adapted from the technique in ghost-infer (github.com/affifuddin-hazam/ghost-infer @ 2f2a985, src/lookup.rs —
+# MIT OR Apache-2.0): agent turns re-emit text that is already in the context (whole-file edits, tool-call
+# arguments copied from a file, repeated identifiers), so the conversation itself is a free "draft model". The
+# last tokens are looked up in a pair index over prompt+output; what followed the most recent earlier occurrence
+# is proposed and verified in ONE batched forward pass; the KV cache is trimmed to the accepted prefix.
+#
+# Apple-Silicon specifics (not in ghost-infer): plain steps stay pipelined like mlx-lm's generate_step (the next
+# forward is queued before the current token is read), and the FIRST proposed token is checked against that
+# already-in-flight step for free, so a wrong guess costs only a pipeline bubble, never a wasted verify pass.
+# An adaptive controller (ghost-infer's `Pace` idea) sizes drafts from recent acceptance and suspends speculation
+# with exponential back-off whenever it measures slower than plain decoding (e.g. MoE, where verifying k tokens
+# pulls the union of k tokens' experts through memory).
+#
+# Greedy only (temperature 0, no logits processors, trimmable cache): verification picks the same argmax a plain
+# step would, so output matches plain greedy decoding up to floating-point differences between the batched
+# verify matmul and the single-token one (both are reported by the benchmark, never assumed).
+# ----------------------------------------------------------------------------------------------------------------
+
+_LOOKUP_MAX_MATCH = 24
+_LOOKUP_MAX_CANDIDATES = 48
+
+
+class _LookupIndex:
+    """Token-pair index over the history (ghost-infer's pair index). `propose()` takes the occurrences of the
+    current tail pair (most recent `_LOOKUP_MAX_CANDIDATES`, never the tail itself), extends each match backwards
+    up to `_LOOKUP_MAX_MATCH` tokens, keeps the best (longest match, then longest continuation, then most recent)
+    and returns what followed it plus the match length (longer matches are accepted more often; the controller
+    keys its statistics on it)."""
+
+    def __init__(self, tokens: list[int]):
+        self.tokens: list[int] = []
+        self.pairs: dict[tuple[int, int], list[int]] = {}
+        for t in tokens:
+            self.append(t)
+
+    def append(self, token: int) -> None:
+        self.tokens.append(token)
+        n = len(self.tokens)
+        if n >= 3:  # register the pair ending at n-2 (one behind the tail, so the tail never matches itself)
+            occ = self.pairs.setdefault((self.tokens[n - 3], self.tokens[n - 2]), [])
+            occ.append(n - 2)
+            if len(occ) > 2 * _LOOKUP_MAX_CANDIDATES:
+                del occ[:-_LOOKUP_MAX_CANDIDATES]
+
+    def propose(self, max_draft: int, min_match: int) -> tuple[list[int], int]:
+        t = self.tokens
+        n = len(t)
+        if n < 3 or max_draft <= 0:
+            return [], 0
+        occ = self.pairs.get((t[n - 2], t[n - 1]))
+        if not occ:
+            return [], 0
+        best_key, best_pos, best_len = None, -1, 0
+        for pos in reversed(occ[-_LOOKUP_MAX_CANDIDATES:]):
+            match = 2
+            while match < _LOOKUP_MAX_MATCH and pos - match >= 0 and t[pos - match] == t[n - 1 - match]:
+                match += 1
+            # rank: match length (saturating at 8 — beyond it acceptance barely improves), then how much
+            # continuation is available (an occurrence hugging the tail can only propose 1-2 tokens), then recency
+            key = (min(match, 8), min(n - pos - 1, max_draft), pos)
+            if best_key is None or key > best_key:
+                best_key, best_pos, best_len = key, pos, match
+        if best_len < min_match:
+            return [], 0
+        return t[best_pos + 1: min(best_pos + 1 + max_draft, n)], best_len
+
+
+class _LookupPace:
+    """ghost-infer's `Pace` idea, adapted to esh's pipelined MLX loop.
+
+    * Acceptance: per match-length bucket, a fading estimate of q = P(next draft token accepted | previous ones
+      were), with optimistic priors so new buckets get tried.
+    * Cost: s = EMA of a pipelined plain step; c(L) = EMA of a verify pass that feeds L tokens (prior s*(1+0.06L)).
+    * Decision: after the FREE first-token hit, verifying k more drafts yields 2 + q + ... + q^k tokens
+      (first + accepted + bonus) for s + c(k+1) seconds; plain yields 1/s. Verify the k with the best rate, only
+      if it beats plain by > 5%.
+    * Safety net: realized speculative throughput is compared with plain over windows; when it loses, drafting is
+      suspended for a doubling 16..512 tokens.
+    """
+
+    BUCKETS = (2, 3, 4, 6, 10, 16)
+    PRIOR_Q = (0.35, 0.5, 0.6, 0.7, 0.8, 0.85)
+
+    def __init__(self, max_draft: int):
+        self.max_draft = max(1, max_draft)
+        self.acc = [[q * 4.0, 4.0] for q in self.PRIOR_Q]  # [accepted, trials] faded
+        self.step_s = None
+        self.verify_s: dict[int, float] = {}
+        self.suspended_until = 0
+        self.backoff = 16
+        self.win_tokens = 0
+        self.win_time = 0.0
+        self.win_rounds = 0
+
+    def _bucket(self, match_len: int) -> int:
+        b = 0
+        for i, lo in enumerate(self.BUCKETS):
+            if match_len >= lo:
+                b = i
+        return b
+
+    def q(self, match_len: int) -> float:
+        a, n = self.acc[self._bucket(match_len)]
+        return min(0.98, a / n) if n > 0 else 0.5
+
+    def active(self, produced: int) -> bool:
+        return produced >= self.suspended_until
+
+    def note_plain(self, seconds: float) -> None:
+        if 0 < seconds < 5:
+            self.step_s = seconds if self.step_s is None else 0.9 * self.step_s + 0.1 * seconds
+
+    def cost(self, fed: int) -> float:
+        s = self.step_s or 0.03
+        if fed in self.verify_s:
+            return self.verify_s[fed]
+        known = sorted(self.verify_s)
+        if known:  # scale the nearest measured point linearly in the extra tokens
+            near = min(known, key=lambda k: abs(k - fed))
+            return self.verify_s[near] * (1 + 0.06 * fed) / (1 + 0.06 * near)
+        return s * (1 + 0.06 * fed)
+
+    def choose(self, available: int, match_len: int) -> int:
+        """How many drafts AFTER the free first token to verify (0 = don't verify)."""
+        s = self.step_s
+        if s is None or available <= 0:
+            return min(available, 3)  # no timing yet: a small probe
+        q = self.q(match_len)
+        best_k, best_rate = 0, 1.0 / s
+        expected, qi = 2.0, 1.0
+        for k in range(1, min(available, self.max_draft - 1) + 1):
+            qi *= q
+            expected += qi
+            rate = expected / (s + self.cost(k + 1))
+            if rate > best_rate * 1.05:
+                best_k, best_rate = k, rate
+        return best_k
+
+    def note_verify(self, fed: int, seconds: float, match_len: int, verified: int, accepted: int,
+                    emitted: int, produced: int) -> None:
+        if seconds > 0:
+            old = self.verify_s.get(fed)
+            self.verify_s[fed] = seconds if old is None else 0.8 * old + 0.2 * seconds
+        # geometric acceptance: `accepted` successes then (if accepted < verified) one failure
+        b = self._bucket(match_len)
+        a, n = self.acc[b]
+        trials = accepted + (1 if accepted < verified else 0)
+        self.acc[b] = [a * 0.9 + accepted, n * 0.9 + trials]
+        # realized-throughput safety net
+        self.win_tokens += emitted
+        self.win_time += (self.step_s or 0) + seconds
+        self.win_rounds += 1
+        if self.win_rounds >= 8 and self.step_s:
+            spec_rate = self.win_tokens / self.win_time if self.win_time > 0 else 0
+            if spec_rate < 0.98 / self.step_s:
+                self.suspended_until = produced + self.backoff
+                self.backoff = min(self.backoff * 2, 512)
+            else:
+                self.backoff = 16
+            self.win_tokens, self.win_time, self.win_rounds = 0, 0.0, 0
+
+
+def _lookup_spec_settings(config: dict[str, Any], prompt_cache, mx) -> dict | None:
+    """Return the speculation settings when it is enabled AND exact for this request, else None."""
+    import os
+
+    mode = str(config.get("speculative") or os.environ.get("ESH_MLX_LOOKUP_SPEC", "")).lower()
+    if mode not in {"1", "true", "lookup", "on"}:
+        return None
+    temperature = config.get("temperature")
+    if temperature is None or float(temperature) > 0.0 or config.get("repetitionPenalty") is not None:
+        return None  # sampled / penalised decoding is not exact under greedy verification — fall back
+    try:
+        from mlx_lm.models.cache import can_trim_prompt_cache
+        if not can_trim_prompt_cache(prompt_cache):
+            return None
+    except Exception:
+        return None
+    return {
+        "maxDraft": int(os.environ.get("ESH_MLX_LOOKUP_MAX_DRAFT", "16")),
+        "minMatch": int(os.environ.get("ESH_MLX_LOOKUP_MIN_MATCH", "3")),
+        "adaptive": os.environ.get("ESH_MLX_LOOKUP_ADAPTIVE", "1") != "0",
+    }
+
+
+def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], history: list[int], max_tokens: int,
+                            prompt_cache, settings: dict, stats: dict):
+    """Drop-in for mlx_lm.stream_generate (same response fields the bridge reads) using prompt-lookup
+    speculation. `history` is the FULL token context (cached prefix + new prompt) the lookup searches."""
+    from types import SimpleNamespace
+    from mlx_lm.generate import generation_stream, wired_limit
+    from mlx_lm.models.cache import trim_prompt_cache
+
+    eos = set(getattr(tokenizer, "eos_token_ids", []) or [])
+    detok = tokenizer.detokenizer
+    detok.reset()
+    index = _LookupIndex(history)
+    pace = _LookupPace(settings["maxDraft"])
+    min_match = settings["minMatch"]
+    stats.update({"mode": "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
+                  "verifySteps": 0, "suspensions": 0})
+
+    def fwd(tokens_array):
+        with mx.stream(generation_stream):
+            logits = model(tokens_array[None], cache=prompt_cache)
+            return mx.argmax(logits[0], axis=-1)
+
+    prompt = mx.array(prompt_tokens, mx.uint32)
+    produced = 0
+    finish = None
+    tic = time.perf_counter()
+    prompt_tps = 0.0
+    gen_tic = tic
+
+    def response(text, token, reason=None):
+        elapsed = max(time.perf_counter() - gen_tic, 1e-9)
+        return SimpleNamespace(text=text, token=token, logprobs=None, from_draft=False,
+                               prompt_tokens=prompt.size, prompt_tps=prompt_tps, generation_tokens=produced,
+                               generation_tps=produced / elapsed, peak_memory=mx.get_peak_memory() / 1e9,
+                               finish_reason=reason)
+
+    with wired_limit(model, [generation_stream]):
+        # prefill all but the last prompt token in chunks (as mlx-lm does), then predict the first token
+        y = prompt
+        with mx.stream(generation_stream):
+            while y.size > 1:
+                n = min(2048, y.size - 1)
+                model(y[:n][None], cache=prompt_cache)
+                mx.eval([c.state for c in prompt_cache])
+                y = y[n:]
+                mx.clear_cache()
+        nxt = fwd(y)[-1]
+        mx.async_eval(nxt)
+        cur = nxt  # lazy token not yet read
+        last_mark = None
+        was_suspended = False
+        while True:
+            pending = fwd(cur.reshape(1))[-1]   # queue the NEXT step before reading the current token
+            mx.async_eval(pending)
+            tok = int(cur.item())
+            now = time.perf_counter()
+            if produced == 0:
+                prompt_tps = prompt.size / max(now - tic, 1e-9)
+                gen_tic = now
+            elif last_mark is not None:
+                pace.note_plain(now - last_mark)
+            last_mark = now
+            if tok in eos:
+                finish = "stop"
+                break
+            produced += 1
+            index.append(tok)
+            detok.add_token(tok)
+            if produced >= max_tokens:
+                finish = "length"
+                break
+            yield response(detok.last_segment, tok)
+
+            active = pace.active(produced) if settings["adaptive"] else True
+            if not active:
+                was_suspended = True
+                cur = pending
+                continue
+            if was_suspended:
+                stats["suspensions"] += 1
+                was_suspended = False
+            draft, match_len = index.propose(min(settings["maxDraft"], max_tokens - produced), min_match)
+            if not draft:
+                cur = pending
+                continue
+
+            # free check: `pending` is the model's prediction after `tok` — the first draft token's verdict
+            stats["freeChecks"] += 1
+            first = int(pending.item())
+            if first != draft[0] or first in eos:
+                cur = pending
+                continue
+            stats["freeHits"] += 1
+            k = pace.choose(len(draft) - 1, match_len) if settings["adaptive"] else len(draft) - 1
+            rest = draft[1: 1 + k]
+            if not rest:
+                cur = pending
+                continue
+            t0 = time.perf_counter()
+            preds = fwd(mx.array([first] + rest, mx.uint32)).tolist()
+            verify_s = time.perf_counter() - t0
+            stats["verifySteps"] += 1
+            accepted = 0
+            while accepted < len(rest) and preds[accepted] == rest[accepted]:
+                accepted += 1
+            trim_prompt_cache(prompt_cache, len(rest) - accepted)
+            stats["drafted"] += len(rest)
+            stats["accepted"] += accepted
+            # emit first + accepted drafts; the bonus token preds[accepted] becomes the next current token
+            emit = [first] + rest[:accepted]
+            stopped = False
+            for i, t in enumerate(emit):
+                if t in eos:
+                    trim_prompt_cache(prompt_cache, len(emit) - 1 - i)
+                    finish, stopped = "stop", True
+                    break
+                produced += 1
+                index.append(t)
+                detok.add_token(t)
+                if produced >= max_tokens:
+                    trim_prompt_cache(prompt_cache, len(emit) - 1 - i)
+                    finish, stopped = "length", True
+                    break
+                yield response(detok.last_segment, t)
+            if stopped:
+                break
+            pace.note_verify(1 + len(rest), verify_s, match_len, len(rest), accepted, len(emit) + 1, produced)
+            cur = mx.array(preds[accepted], mx.uint32)
+            last_mark = time.perf_counter()
+
+        detok.finalize()
+        if finish == "stop":
+            produced += 1  # mlx-lm's stream_generate counts the EOS step in generation_tokens; match it
+        stats["acceptanceRate"] = round(stats["accepted"] / stats["drafted"], 3) if stats["drafted"] else None
+        yield response(detok.last_segment, None, finish or "stop")
+
+
 def _generate_with_loaded_model(
     mx,
     stream_generate,
@@ -795,14 +1120,24 @@ def _generate_with_loaded_model(
     stop_hit = False
     pending = ""  # buffered tail that could be the start of a split stop marker
 
-    for response in stream_generate(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=prompt_tokens,
-        max_tokens=config["maxTokens"],
-        prompt_cache=prompt_cache,
-        **_mlx_stream_generation_kwargs(stream_generate, mx, config),
-    ):
+    spec_settings = _lookup_spec_settings(config, prompt_cache, mx)
+    spec_stats: dict = {}
+    if spec_settings is not None:
+        responses = _lookup_stream_generate(
+            mx, model, tokenizer, prompt_tokens, full_prompt_tokens, config["maxTokens"],
+            prompt_cache, spec_settings, spec_stats,
+        )
+    else:
+        responses = stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt_tokens,
+            max_tokens=config["maxTokens"],
+            prompt_cache=prompt_cache,
+            **_mlx_stream_generation_kwargs(stream_generate, mx, config),
+        )
+
+    for response in responses:
         last_response = response
         if response.text:
             pending += response.text
@@ -885,6 +1220,8 @@ def _generate_with_loaded_model(
         "cacheHit": cache_hit,
         "cachedTokens": cached_tokens,
     }
+    if spec_stats:
+        metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
 
 
