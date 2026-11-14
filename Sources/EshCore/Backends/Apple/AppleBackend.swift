@@ -140,3 +140,13 @@ public final class AppleBackendRuntime: BackendRuntime, @unchecked Sendable {
     }
     public func unload() async {}
 }
+
+extension AppleBackend: BackendLifecycleDescribing {
+    /// Apple Foundation Models: the system owns the model and its memory; esh holds only a session handle, so there
+    /// is nothing for esh's pool to keep resident or evict. Fixed system context window. iOS + macOS (26+).
+    public var lifecycleTraits: BackendLifecycleTraits {
+        BackendLifecycleTraits(residency: .handleCached, inProcess: true, prefixReuse: .systemManaged,
+                               serializesRequestsPerModel: false, contextBoundedAtLoad: true,
+                               cancelsDuringPrefill: false, supportsIOS: true)
+    }
+}
