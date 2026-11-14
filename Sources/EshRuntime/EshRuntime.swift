@@ -621,15 +621,9 @@ public actor EshRuntime {
     /// explained error instead of letting macOS swap-thrash. Small/unknown-size models are never gated, so
     /// existing lightweight flows are unaffected. Reuses the existing `HostResourceProbe` + `MemorySafetyPreflight`.
     private func memorySafetyPreflight(_ plan: Plan) throws {
-        let gb = 1_073_741_824.0
-        let catalog = RecommendedModelRegistry().resolve(alias: plan.install.id)
-        let diskProxyGB = Double(plan.install.sizeBytes) / gb * 1.05   // resident ≈ weights + small overhead
-        let requiredPeakGB = catalog?.measuredPeakMemoryGB
-            ?? max(catalog?.estimatedMemoryGB ?? 0, diskProxyGB)
-        guard requiredPeakGB >= MemorySafetyPreflight.smallModelFloorGB else { return }
-        let host = HostResourceProbe.snapshot(root: persistenceRootRef())
-        if case let .gated(reason, _, _) = MemorySafetyPreflight.evaluate(requiredPeakGB: requiredPeakGB, host: host) {
-            throw EshRuntimeError.insufficientMemory(modelID: plan.install.id, reason: reason)
+        do { try ModelLoadSafetyGate.check(plan.install, root: persistenceRootRef()) }
+        catch let refused as ModelLoadRefused {
+            throw EshRuntimeError.insufficientMemory(modelID: plan.install.id, reason: refused.reason)
         }
     }
 

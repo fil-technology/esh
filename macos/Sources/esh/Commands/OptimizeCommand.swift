@@ -162,7 +162,13 @@ enum OptimizeCommand {
         }
         let host = HostMachineProfileService().currentProfile()
         let harness = BenchmarkHarness(eshVersion: AppVersionResolver.currentVersion())
-        let runner = ProductionBenchmarkRunner(root: root)
+        // The macOS backend registry (MLX + GGUF + Apple). `ProductionBenchmarkRunner(root:)` builds the service with
+        // the portable default registry (Apple only), so MLX/GGUF installs hit `preconditionFailure`.
+        let runner = ProductionBenchmarkRunner(service: ExternalInferenceService(
+            modelStore: FileModelStore(root: root),
+            sessionStore: FileSessionStore(root: root),
+            cacheStore: FileCacheStore(root: root),
+            registry: .macOS()))
         let now = ISO8601DateFormatter().string(from: Date())
 
         print("Benchmarking \(install.id) [\(install.spec.backend.rawValue)] through the real inference path…")

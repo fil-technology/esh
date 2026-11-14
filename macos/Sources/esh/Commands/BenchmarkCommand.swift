@@ -85,7 +85,7 @@ enum BenchmarkCommand {
         let cacheService = CacheService(cacheStore: cacheStore)
         let checker = backend.makeCompatibilityChecker(for: install)
 
-        let buildRuntime = try await backend.loadRuntime(for: install)
+        let buildRuntime = try await backend.loadRuntimeGuarded(for: install)
         let buildStopwatch = Stopwatch()
         let buildResult = try await cacheService.buildArtifact(
             runtime: buildRuntime,
@@ -97,7 +97,7 @@ enum BenchmarkCommand {
         let buildMilliseconds = buildStopwatch.elapsedMilliseconds()
         await buildRuntime.unload()
 
-        let loadRuntime = try await backend.loadRuntime(for: install)
+        let loadRuntime = try await backend.loadRuntimeGuarded(for: install)
         let loadStopwatch = Stopwatch()
         _ = try await cacheService.loadArtifactForRuntime(
             id: buildResult.artifact.id,

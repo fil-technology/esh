@@ -33,7 +33,7 @@ enum CacheBuildCommand {
             throw StoreError.invalidManifest("Cache build currently supports MLX models only.")
         }
         let backend = MLXBackend()
-        let runtime = try await backend.loadRuntime(for: install)
+        let runtime = try await backend.loadRuntimeGuarded(for: install)
         defer { Task { await runtime.unload() } }
 
         let contextResolution = try resolveContextPackageIfNeeded(

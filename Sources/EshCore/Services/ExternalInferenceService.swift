@@ -90,11 +90,11 @@ public struct ExternalInferenceService: Sendable {
                     if let manager = lifecycleManager {
                         runtime = try await manager.acquire(install: install, priority: .interactive)
                     } else {
-                        runtime = try await backend.loadRuntime(for: install)
+                        runtime = try await backend.loadRuntimeGuarded(for: install)
                     }
                     let manager = lifecycleManager
                     defer {
-                        if let manager { let id = install.id; Task { await manager.release(modelID: id) } }
+                        if let manager { let id = install.id; Task { let m = await runtime.metrics; await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes) } }
                         else { Task { await runtime.unload() } }
                     }
 
@@ -116,7 +116,11 @@ public struct ExternalInferenceService: Sendable {
                     if let nativeGrammar = outcome.nativeGrammar { generation.grammar = nativeGrammar }
 
                     let session = try resolveSession(request: request, install: install)
-                    if request.cacheArtifactID == nil { try await runtime.prepare(session: session) }
+                    try await guardContextGrowth(install: install, runtime: runtime, messages: request.messages,
+                                                 maxTokens: generation.maxTokens)
+                    if request.cacheArtifactID == nil, !runtime.prepareBeforeGenerateIsRedundant {
+                        try await runtime.prepare(session: session)
+                    }
 
                     let start = ContinuousClock.now
                     var firstAt: ContinuousClock.Instant? = nil
@@ -170,13 +174,16 @@ public struct ExternalInferenceService: Sendable {
         if let manager = lifecycleManager {
             runtime = try await manager.acquire(install: install, priority: .interactive)
         } else {
-            runtime = try await backend.loadRuntime(for: install)
+            runtime = try await backend.loadRuntimeGuarded(for: install)
         }
         let lifecycleManager = self.lifecycleManager
         defer {
             if let manager = lifecycleManager {
                 let id = install.id
-                Task { await manager.release(modelID: id) }
+                Task {
+                    let m = await runtime.metrics
+                    await manager.release(modelID: id, measuredMemoryBytes: m.memoryBytes, residentCacheBytes: m.residentCacheBytes)
+                }
             } else {
                 Task { await runtime.unload() }
             }
@@ -213,6 +220,8 @@ public struct ExternalInferenceService: Sendable {
         }
 
         let session = try resolveSession(request: request, install: install)
+        try await guardContextGrowth(install: install, runtime: runtime, messages: request.messages,
+                                     maxTokens: generation.maxTokens)
         let integration: ExternalInferenceIntegration
         if let cacheArtifactID = request.cacheArtifactID {
             try await loadArtifactIfSupported(
@@ -233,7 +242,7 @@ public struct ExternalInferenceService: Sendable {
             )
         }
 
-        if request.cacheArtifactID == nil {
+        if request.cacheArtifactID == nil, !runtime.prepareBeforeGenerateIsRedundant {
             try await runtime.prepare(session: session)
         }
 
@@ -674,6 +683,30 @@ public struct ExternalInferenceService: Sendable {
 
     private func resolveInstall(identifier: String) throws -> ModelInstall? {
         try resolveInstall(identifier: identifier, installs: modelStore.listInstalls())
+    }
+
+    /// KV-cache growth guard (MLX): before generating, make sure the request's context — the whole prompt plus every
+    /// allowed new token, at the model's real bytes/token — fits safely. With a warm pool, idle caches and idle models
+    /// are reclaimed first (`RuntimeLifecycleManager.ensureHeadroom`); without one (one-shot), the model is not loaded
+    /// yet, so weights + growth are judged together. Fails with an actionable `insufficientMemoryForContext` error
+    /// instead of letting a long context push the machine into swap. GGUF is bounded at load (llama-server `-c`).
+    private func guardContextGrowth(install: ModelInstall, runtime: BackendRuntime,
+                                    messages: [ExternalInferenceMessage], maxTokens: Int) async throws {
+        guard install.spec.backend == .mlx,
+              let perToken = KVCacheEstimator.bytesPerToken(modelDirectory: URL(fileURLWithPath: install.installPath))
+        else { return }
+        let characters = messages.reduce(0) { $0 + $1.text.count }
+        let growth = KVCacheEstimator.growthBytes(bytesPerToken: perToken, promptCharacters: characters,
+                                                  messages: messages.count, maxTokens: maxTokens)
+        if let manager = lifecycleManager {
+            try await manager.ensureHeadroom(forAdditionalBytes: growth, modelID: install.id)
+            return
+        }
+        let growthGB = Double(growth) / 1_073_741_824
+        let weightsGB = runtime.prepareBeforeGenerateIsRedundant ? ModelLoadSafetyGate.requiredPeakGB(for: install) : 0
+        if case let .gated(reason, _, _) = RuntimeLifecycleManager.liveGrowthGate(growthGB + weightsGB) {
+            throw RuntimeLifecycleError.insufficientMemoryForContext(modelID: install.id, neededGB: growthGB, reason: reason)
+        }
     }
 
     private func resolveSession(

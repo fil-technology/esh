@@ -28,7 +28,7 @@ enum CacheLoadCommand {
             throw StoreError.invalidManifest("Cache load currently supports MLX models only.")
         }
         let backend = MLXBackend()
-        let runtime = try await backend.loadRuntime(for: install)
+        let runtime = try await backend.loadRuntimeGuarded(for: install)
         defer { Task { await runtime.unload() } }
 
         let compressor = artifactCompressor(for: artifactID, cacheStore: cacheStore)

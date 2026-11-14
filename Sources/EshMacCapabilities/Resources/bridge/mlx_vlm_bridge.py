@@ -281,6 +281,9 @@ def _resolve_requested_kv_mode(request: dict[str, Any]) -> str:
     return "raw"
 
 
+_KV_MODE_FALLBACKS: list[str] = []   # reasons the automatic KV mode was downgraded during the current request
+
+
 def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
     effective_mode = _resolve_requested_kv_mode(request)
     requested_mode = request.get("kvMode", "raw")
@@ -302,18 +305,21 @@ def _apply_kv_mode(prompt_cache, model, request: dict[str, Any]) -> str:
                 budget=int(request.get("triattentionBudget", 2048)),
             )
             return "triattention"
-        except Exception:
+        except Exception as exc:
             if requested_mode != "auto":
                 raise
+            _KV_MODE_FALLBACKS.append(f"triattention unavailable ({exc}); using turbo")
             effective_mode = "turbo"
 
     if effective_mode == "turbo":
         try:
             _maybe_apply_turboquant(prompt_cache, bits=turbo_bits, seed=turbo_seed)
             return "turbo"
-        except Exception:
+        except Exception as exc:
             if requested_mode != "auto":
                 raise
+            # e.g. mlx_vlm (TurboQuant) is not installed in the managed venv: say so instead of degrading silently
+            _KV_MODE_FALLBACKS.append(f"turbo unavailable ({exc}); using raw KV cache")
             return "raw"
 
     return "raw"
@@ -412,12 +418,91 @@ def _restore_turboquant_codecs(mx, cache: Any, layer: dict[str, Any], keys_state
     cache._ensure_codecs(dummy_keys, dummy_values)
 
 
+# Crash-safe temp files. Bridge staging (safetensors written before base64-encoding / read back) and esh's MLX
+# state files live in owner-named directories (`<pid>-...`). A worker killed mid-save (SIGKILL by a watchdog or the
+# OS) cannot run its own cleanup — measured: a 3.1 GB staging file leaked — so every bridge process sweeps entries
+# whose owner pid is gone when it starts. Live owners (including other esh processes) are never touched.
+_STAGING_DIR_NAME = "esh-mlx-staging"
+_STATE_DIR_NAME = "esh-mlx-state"
+
+
+def _pid_alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+
+
+def _sweep_dead_owner_entries(directory: str) -> list[str]:
+    import os
+    import shutil
+
+    removed = []
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return removed
+    for name in names:
+        head = name.split("-", 1)[0]
+        if not head.isdigit():
+            continue
+        pid = int(head)
+        if pid == os.getpid() or _pid_alive(pid):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            removed.append(name)
+        except OSError:
+            pass
+    return removed
+
+
+def _sweep_stale_temp_files() -> None:
+    import os
+
+    for name in (_STAGING_DIR_NAME, _STATE_DIR_NAME):
+        _sweep_dead_owner_entries(os.path.join(tempfile.gettempdir(), name))
+
+
+class _StagingDir:
+    """`tempfile.TemporaryDirectory` replacement whose directory is owner-tagged so a crash leak is sweepable."""
+
+    def __enter__(self) -> str:
+        import os
+
+        root = os.path.join(tempfile.gettempdir(), _STAGING_DIR_NAME)
+        os.makedirs(root, exist_ok=True)
+        self.path = tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=root)
+        return self.path
+
+    def __exit__(self, *exc) -> None:
+        import shutil
+
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
 def _snapshot_to_prompt_cache(snapshot: dict[str, Any], kv_cache_type):
+    sidecar = snapshot.get("path") if snapshot.get("format") == "mlx-cache-sidecar-v1" else None
+    if sidecar:
+        from mlx_lm.models.cache import load_prompt_cache
+
+        return load_prompt_cache(sidecar)
     prompt_cache_blob = snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64")
     if prompt_cache_blob:
         from mlx_lm.models.cache import load_prompt_cache
 
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with _StagingDir() as temporary_directory:
             cache_file = f"{temporary_directory}/prompt-cache.safetensors"
             with open(cache_file, "wb") as handle:
                 handle.write(base64.b64decode(prompt_cache_blob))
@@ -459,8 +544,15 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_te
         if keys is None or values is None:
             can_save_prompt_cache = False
             continue
-        if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache", "BatchRotatingKVCache"}:
+        if type(cache).__name__ not in {"KVCache", "RotatingKVCache", "ArraysCache", "BatchKVCache",
+                                        "BatchRotatingKVCache", "QuantizedKVCache"}:
             can_save_prompt_cache = False
+        if isinstance(keys, (list, tuple)) or isinstance(values, (list, tuple)):
+            # QuantizedKVCache (kvBits): state is ([w, scales, biases], [w, scales, biases]). It cannot be expressed
+            # as the numpy tensor list (that conversion crashed every --kv-bits request on bf16 models with
+            # "'bfloat16' is not a valid PEP 3118 buffer format string"); the safetensors blob below restores it.
+            total_bytes += _nested_nbytes(keys) + _nested_nbytes(values)
+            continue
         if not include_tensor_list and type(cache).__name__ in {"KVCache", "RotatingKVCache"}:
             # the safetensors blob below is the restore path; skip the duplicate base64 tensor list
             total_bytes += int(keys.nbytes + values.nbytes)
@@ -475,7 +567,7 @@ def _prompt_cache_to_snapshot(prompt_cache, metadata: dict[str, Any], include_te
     metadata = {str(k): str(v) for k, v in metadata.items()}
     metadata["raw_bytes"] = str(total_bytes)
     if can_save_prompt_cache:
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with _StagingDir() as temporary_directory:
             cache_file = f"{temporary_directory}/prompt-cache.safetensors"
             try:
                 save_prompt_cache(cache_file, prompt_cache, metadata)
@@ -912,10 +1004,16 @@ def _lookup_spec_settings(config: dict[str, Any], prompt_cache, mx) -> dict | No
             return None
     except Exception:
         return None
+    exact = os.environ.get("ESH_MLX_LOOKUP_EXACT", "0") == "1"
     return {
         "maxDraft": int(os.environ.get("ESH_MLX_LOOKUP_MAX_DRAFT", "16")),
         "minMatch": int(os.environ.get("ESH_MLX_LOOKUP_MIN_MATCH", "3")),
         "adaptive": os.environ.get("ESH_MLX_LOOKUP_ADAPTIVE", "1") != "0",
+        # MLX forward passes are bit-identical to single-token decoding only for small batches: measured <= 4-5
+        # tokens at short context and <= 2 at 8K/24K (benchmarks/diagnose_verify_numerics.py). Exact mode feeds
+        # at most 2 tokens per verify (the free-checked first guess + 1 draft), so output equals plain greedy.
+        "maxVerify": 2 if exact else int(os.environ.get("ESH_MLX_LOOKUP_MAX_VERIFY", "17")),
+        "exact": exact,
     }
 
 
@@ -933,7 +1031,7 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
     index = _LookupIndex(history)
     pace = _LookupPace(settings["maxDraft"])
     min_match = settings["minMatch"]
-    stats.update({"mode": "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
+    stats.update({"mode": "lookup-exact" if settings.get("exact") else "lookup", "drafted": 0, "accepted": 0, "freeChecks": 0, "freeHits": 0,
                   "verifySteps": 0, "suspensions": 0})
 
     def fwd(tokens_array):
@@ -1012,7 +1110,8 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
                 cur = pending
                 continue
             stats["freeHits"] += 1
-            k = pace.choose(len(draft) - 1, match_len) if settings["adaptive"] else len(draft) - 1
+            budget = min(len(draft) - 1, settings.get("maxVerify", 17) - 1)
+            k = pace.choose(budget, match_len) if settings["adaptive"] else budget
             rest = draft[1: 1 + k]
             if not rest:
                 cur = pending
@@ -1057,7 +1156,8 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
 
 
 # ----------------------------------------------------------------------------------------------------------------
-# Token-exact prefix reuse (EXPERIMENTAL: ESH_MLX_PREFIX_CACHE=tokens|live; unset = legacy string-prefix logic).
+# Token-exact prefix reuse — DEFAULT since 2026-11 (ESH_MLX_PREFIX_CACHE=tokens; `live` opt-in; `legacy` = the old
+# string-prefix logic, kept only as an explicit opt-out/rollback).
 #
 # The legacy path reuses the previous KV snapshot only when the re-rendered previous conversation is a STRING prefix
 # of the new prompt, then replays the last 2 tokens without trimming the restored cache. Measured on 2026-11-14 it
@@ -1078,18 +1178,27 @@ def _lookup_stream_generate(mx, model, tokenizer, prompt_tokens: list[int], hist
 # killed mid-save leaked a 3.1 GB staging file. When the encoded snapshot would not fit while keeping
 # MemorySafetyPreflight's 3 GB swap floor, the snapshot is skipped: the next turn is a cache miss, not a failure.
 _SNAPSHOT_DISK_FLOOR_BYTES = 3 * 1024 ** 3
-_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 2.5}  # staging + base64 blob (+ base64 tensor list for legacy)
+_SNAPSHOT_ENCODING_FACTOR = {"legacy": 3.8, "tokens": 1.1}  # legacy: staging + 2x base64; tokens: one sidecar
+
+
+def _nested_nbytes(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return sum(_nested_nbytes(v) for v in value)
+    try:
+        return int(value.nbytes)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _kv_raw_bytes(prompt_cache) -> int:
+    """Resident bytes of a KV cache (plain or quantized: nested [w, scales, biases] states are summed)."""
     total = 0
     for cache in prompt_cache or []:
         state = getattr(cache, "state", None)
-        if isinstance(state, tuple) and len(state) == 2 and state[0] is not None and state[1] is not None:
-            try:
-                total += int(state[0].nbytes + state[1].nbytes)
-            except Exception:  # noqa: BLE001
-                pass
+        if isinstance(state, tuple) and len(state) == 2:
+            total += _nested_nbytes(state[0]) + _nested_nbytes(state[1])
     return total
 
 
@@ -1109,15 +1218,88 @@ def _snapshot_skip_reason(state_path: str, raw_bytes: int, mode: str) -> str | N
     return None
 
 
+# KV-growth guard (worker side). The warm pool already judged the request's estimated growth before dispatch
+# (RuntimeLifecycleManager.ensureHeadroom); here the worker knows the EXACT tokens it is about to prefill and the
+# model's real KV dimensions, so it re-checks before prefill (dropping its own idle session caches if needed) and
+# watches pressure while generating, stopping cleanly instead of pushing the machine into swap.
+_KV_GUARD_CHECK_EVERY = 256          # generated tokens between pressure checks
+_KV_GUARD_SWAP_FLOOR_BYTES = 3 * 1024 ** 3
+
+
+def _kv_bytes_per_token(model) -> int | None:
+    args = getattr(model, "args", None)
+    if args is None:
+        return None
+    if getattr(args, "text_config", None) and isinstance(args.text_config, dict):
+        g = args.text_config.get
+    else:
+        def g(k, d=None):
+            return getattr(args, k, d)
+    layers = g("num_hidden_layers")
+    heads = g("num_attention_heads")
+    if not layers or not heads:
+        return None
+    kv_heads = g("num_key_value_heads") or heads
+    head_dim = g("head_dim") or (g("hidden_size") // heads if g("hidden_size") else None)
+    if not head_dim:
+        return None
+    return int(layers) * int(kv_heads) * int(head_dim) * 2 * 2
+
+
+def _kv_growth_refusal(growth_bytes: int) -> str | None:
+    """Same rule as MemorySafetyPreflight (no small-model floor): fits in available memory, or the deficit is small
+    and the internal (swap) volume keeps its 3 GB floor. Returns a reason when unsafe, else None."""
+    import os
+    import shutil
+
+    avail_mb = _available_mem_mb()
+    if avail_mb is None or growth_bytes <= 0:
+        return None
+    avail = avail_mb * 1e6
+    if growth_bytes <= avail:
+        return None
+    deficit = growth_bytes - avail
+    try:
+        swap_free = shutil.disk_usage(tempfile.gettempdir()).free
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if swap_free < deficit + _KV_GUARD_SWAP_FLOOR_BYTES or deficit > total * 0.4:
+        return (f"context needs ~{growth_bytes / 1e9:.1f} GB of KV cache but only ~{avail / 1e9:.1f} GB is available "
+                f"and ~{swap_free / 1e9:.1f} GB of internal disk is free for swap")
+    return None
+
+
+def _ensure_kv_headroom(model, new_tokens: int, max_new_tokens: int) -> dict:
+    """Pre-prefill check with exact token counts. Drops this worker's idle session caches if that makes it fit;
+    raises an actionable error otherwise. Returns diagnostics for the metrics."""
+    per_token = _kv_bytes_per_token(model)
+    if not per_token:
+        return {}
+    growth = per_token * (max(0, new_tokens) + max(0, max_new_tokens))
+    reason = _kv_growth_refusal(growth)
+    freed = 0
+    if reason and _LIVE_PREFIX_CACHES:
+        freed = _drop_live_caches()
+        reason = _kv_growth_refusal(growth)
+    if reason:
+        raise RuntimeError(f"Not enough memory for this request's context ({reason}). Shorten the conversation or "
+                           f"max_tokens, close other apps, or use a smaller model.")
+    return {"kvGrowthBytes": int(growth), "kvBytesPerToken": int(per_token), "kvGuardFreedBytes": int(freed)}
+
+
 _LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
 _PREFIX_REUSE_MIN_TOKENS = 8
 
 
 def _prefix_cache_mode() -> str:
+    """`tokens` by default. The legacy string-prefix path never hit on Llama-3/Qwen3 templates and duplicated KV
+    tokens on Mistral's (benchmarks/validate_prefix_cache.py), so it is only used when explicitly requested with
+    ESH_MLX_PREFIX_CACHE=legacy (rollback). Unknown values fall back to the default."""
     import os
 
     mode = os.environ.get("ESH_MLX_PREFIX_CACHE", "").strip().lower()
-    return mode if mode in {"tokens", "live"} else "legacy"
+    return mode if mode in {"tokens", "live", "legacy"} else "tokens"
 
 
 def _common_prefix_len(a: list[int], b: list[int]) -> int:
@@ -1128,14 +1310,90 @@ def _common_prefix_len(a: list[int], b: list[int]) -> int:
     return i
 
 
-def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache):
-    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)"""
+def _session_cache_key(request: dict) -> "str | None":
+    """An EXPLICIT prefix-cache key, only when the caller supplies one (`prefixCacheKey`). esh's request paths build a
+    fresh ChatSession (new random id) per request, and OpenAI-style clients are stateless, so a session id is not a
+    usable key; live caches are matched by token content instead (see `_token_prefix_reuse`)."""
+    key = request.get("prefixCacheKey")
+    return f"key:{key}" if key else None
+
+
+def _live_cache_budget_bytes() -> int:
+    """Total bytes of session KV caches the persistent worker may keep resident between requests."""
+    import os
+
+    override = os.environ.get("ESH_MLX_LIVE_PREFIX_MAX_BYTES")
+    if override:
+        try:
+            return max(0, int(override))
+        except ValueError:
+            pass
+    try:
+        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        physical = 16 * 1024 ** 3
+    return int(min(physical * 0.25, 8 * 1024 ** 3))
+
+
+def _live_cache_resident_bytes() -> int:
+    return sum(_kv_raw_bytes(cache) for _, cache in _LIVE_PREFIX_CACHES.values())
+
+
+def _drop_live_caches() -> int:
+    """Release every resident session cache (worker `drop-caches` op / pressure). Returns bytes released."""
+    freed = _live_cache_resident_bytes()
+    _LIVE_PREFIX_CACHES.clear()
+    try:
+        import mlx.core as mx
+
+        mx.clear_cache()
+    except Exception:  # noqa: BLE001
+        pass
+    return freed
+
+
+_LAST_LIVE_SLOT: "str | None" = None   # slot popped by the current request (the worker serves one request at a time)
+
+
+def _best_live_slot(full_prompt_tokens: list[int], explicit_key: "str | None") -> "str | None":
+    """Pick the retained cache to continue from: the caller's explicit key when given, else (llama.cpp-style slot
+    selection) the one sharing the LONGEST common token prefix with the new prompt, if that prefix is long enough."""
+    if explicit_key is not None and explicit_key in _LIVE_PREFIX_CACHES:
+        return explicit_key
+    best, best_len = None, 0
+    for slot, (tokens, _cache) in _LIVE_PREFIX_CACHES.items():
+        n = _common_prefix_len(tokens, full_prompt_tokens)
+        if n > best_len:
+            best, best_len = slot, n
+    return best if best_len >= _PREFIX_REUSE_MIN_TOKENS else None
+
+
+def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+                        cache_key=None, model_id=None):
+    """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)
+
+    Live mode keeps a few retained caches ("slots"). A request continues from the slot sharing the longest common
+    token prefix with its prompt (or the caller's explicit `prefixCacheKey`), so stateless clients that resend the
+    whole conversation hit, and only exactly matching tokens are ever reused. The chosen slot is POPPED for the
+    duration of the request, so no other request or a `drop-caches` op can touch a cache that is generating.
+    """
     from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
 
+    global _LAST_LIVE_SLOT
+    _LAST_LIVE_SLOT = None
     cache, tokens = None, None
-    if mode == "live" and state_path in _LIVE_PREFIX_CACHES:
-        tokens, cache = _LIVE_PREFIX_CACHES.pop(state_path)
-    elif state_payload is not None and state_payload.get("cache_tokens") and state_payload.get("snapshot"):
+    if mode == "live":
+        slot = _best_live_slot(full_prompt_tokens, cache_key)
+        if slot is not None:
+            tokens, cache = _LIVE_PREFIX_CACHES.pop(slot)
+            _LAST_LIVE_SLOT = slot
+    elif (
+        state_payload is not None
+        and state_payload.get("cache_tokens")
+        and state_payload.get("snapshot")
+        # a snapshot written for a DIFFERENT model (same tokenizer family, different KV shape) is never restored
+        and (model_id is None or state_payload.get("model_id") in (None, model_id))
+    ):
         try:
             cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
             tokens = [int(t) for t in state_payload["cache_tokens"]]
@@ -1151,7 +1409,8 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
     return make_prompt_cache(model), full_prompt_tokens, False, 0
 
 
-def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict) -> dict:
+def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int], metadata: dict,
+                         cache_key=None) -> dict:
     """Align the cache with the exact token list it holds, persist it per `mode`, return the state payload."""
     from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
 
@@ -1159,27 +1418,89 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
     if offset > len(cache_tokens) and can_trim_prompt_cache(prompt_cache):
         trim_prompt_cache(prompt_cache, offset - len(cache_tokens))  # drop the in-flight token we never read
     cache_tokens = cache_tokens[: _cache_offset(prompt_cache, len(cache_tokens))]
+    raw = _kv_raw_bytes(prompt_cache)
     if mode == "live":
         import os
 
-        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "1")))
-        _LIVE_PREFIX_CACHES[state_path] = (cache_tokens, prompt_cache)
-        while len(_LIVE_PREFIX_CACHES) > slots:
-            _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
-        raw = 0
-        for c in prompt_cache:
-            st = getattr(c, "state", None)
-            if isinstance(st, tuple) and len(st) == 2 and st[0] is not None:
-                raw += int(st[0].nbytes + st[1].nbytes)
-        return {"cache_tokens": cache_tokens, "live": True,
-                "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
-    raw = _kv_raw_bytes(prompt_cache)
+        import uuid
+
+        key = cache_key or _LAST_LIVE_SLOT or f"slot:{uuid.uuid4().hex[:12]}"
+        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "2")))
+        budget = _live_cache_budget_bytes()
+        retained_reason = None
+        if not can_trim_prompt_cache(prompt_cache):
+            retained_reason = "cache type is not trimmable (TurboQuant/TriAttention/rotating): not retained"
+        elif raw > budget:
+            retained_reason = f"session cache {raw / 1e9:.2f} GB exceeds the live-cache budget {budget / 1e9:.2f} GB"
+        elif _mem_pressure_critical():
+            retained_reason = "memory pressure critical: not retained"
+        if retained_reason is None:
+            _LIVE_PREFIX_CACHES[key] = (cache_tokens, prompt_cache)
+            # evict least-recently-finished sessions beyond the slot count or the byte budget
+            while len(_LIVE_PREFIX_CACHES) > slots or (
+                len(_LIVE_PREFIX_CACHES) > 1 and _live_cache_resident_bytes() > budget
+            ):
+                _LIVE_PREFIX_CACHES.pop(next(iter(_LIVE_PREFIX_CACHES)))
+        _remove_kv_sidecars(state_path)
+        payload = {"cache_tokens": cache_tokens, "live": True,
+                   "snapshot": None, "metadata": {**metadata, "raw_bytes": str(raw)}}
+        if retained_reason:
+            payload["liveNotRetained"] = retained_reason
+        return payload
     skip = _snapshot_skip_reason(state_path, raw, "tokens")
     if skip:
+        _remove_kv_sidecars(state_path)
         return {"cache_tokens": cache_tokens, "snapshot": None, "snapshotSkipped": skip,
                 "metadata": {**metadata, "raw_bytes": str(raw)}}
-    snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
-    return {"cache_tokens": cache_tokens, "snapshot": snapshot}
+    snapshot = _write_kv_sidecar(state_path, prompt_cache, {**metadata, "raw_bytes": str(raw)})
+    if snapshot is None:  # cache type safetensors cannot hold -> legacy inline snapshot
+        snapshot = _prompt_cache_to_snapshot(prompt_cache, metadata=metadata, include_tensor_list=False)
+    return {"cache_tokens": cache_tokens, "snapshot": snapshot, "model_id": metadata.get("model_id")}
+
+
+def _kv_sidecar_paths(state_path: str) -> list[str]:
+    import glob
+
+    return glob.glob(glob.escape(state_path) + ".*.kv.safetensors*")
+
+
+def _remove_kv_sidecars(state_path: str, keep: str | None = None) -> None:
+    import os
+
+    for path in _kv_sidecar_paths(state_path):
+        if path != keep:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _write_kv_sidecar(state_path: str, prompt_cache, metadata: dict) -> dict | None:
+    """Write the KV cache ONCE, as safetensors next to the state file (no staging copy, no base64 JSON — the
+    legacy snapshot wrote ~2.3x the KV size per turn). Versioned name + atomic rename, and the state JSON only
+    ever references a fully written file; older sidecars are removed after the new one is in place."""
+    import os
+    import uuid
+
+    from mlx_lm.models.cache import save_prompt_cache
+
+    if any(type(c).__name__ not in {"KVCache", "RotatingKVCache", "QuantizedKVCache"} for c in prompt_cache):
+        return None
+    final = f"{state_path}.{uuid.uuid4().hex[:12]}.kv.safetensors"
+    partial = final + ".partial"
+    try:
+        save_prompt_cache(partial, prompt_cache, {str(k): str(v) for k, v in metadata.items()})
+        written = partial if os.path.exists(partial) else partial + ".safetensors"
+        os.replace(written, final)
+    except Exception:  # noqa: BLE001 — a failed sidecar is just a future cache miss
+        for leftover in (partial, partial + ".safetensors"):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+        return None
+    _remove_kv_sidecars(state_path, keep=final)
+    return {"format": "mlx-cache-sidecar-v1", "path": final, "metadata": metadata}
 
 
 def _generate_with_loaded_model(
@@ -1231,6 +1552,7 @@ def _generate_with_loaded_model(
     if prefix_mode != "legacy":
         prompt_cache, prompt_tokens, cache_hit, cached_tokens = _token_prefix_reuse(
             prefix_mode, request["stateFilePath"], state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
+            cache_key=_session_cache_key(request), model_id=request.get("modelID"),
         )
     elif (
         state_payload is not None
@@ -1247,7 +1569,9 @@ def _generate_with_loaded_model(
         prompt_tokens = full_prompt_tokens
         prompt_cache = make_prompt_cache(model)
 
+    _KV_MODE_FALLBACKS.clear()
     effective_kv_mode = _apply_kv_mode(prompt_cache, model, request)
+    kv_guard = _ensure_kv_headroom(model, len(prompt_tokens), int(config.get("maxTokens") or 0))
 
     prompt_token_count = len(prompt_tokens)
     reply_parts = []
@@ -1274,11 +1598,17 @@ def _generate_with_loaded_model(
         )
 
     generated_ids: list[int] = []
+    memory_stop = False
     for response in responses:
         last_response = response
         token_id = getattr(response, "token", None)
         if token_id is not None:
             generated_ids.append(int(token_id))
+            if len(generated_ids) % _KV_GUARD_CHECK_EVERY == 0 and _mem_pressure_critical():
+                # release idle session caches first; if the system is still critical, stop growing this KV cache
+                if not (_LIVE_PREFIX_CACHES and _drop_live_caches() and not _mem_pressure_critical()):
+                    memory_stop = True
+                    break
         if response.text:
             pending += response.text
             # Stop at the model's turn/EOS special token so it can't run away into a
@@ -1328,6 +1658,7 @@ def _generate_with_loaded_model(
         state = _finish_token_prefix(
             prefix_mode, request["stateFilePath"], prompt_cache,
             reused_prefix + list(prompt_tokens) + generated_ids, snapshot_metadata,
+            cache_key=_session_cache_key(request),
         )
         snapshot = state["snapshot"] or {"metadata": state["metadata"]}
         _save_state_file(
@@ -1371,14 +1702,28 @@ def _generate_with_loaded_model(
             int(last_response.generation_tokens) if last_response is not None else None
         ),
         "finishReason": (
-            "cancelled"
+            "memory_pressure"
+            if memory_stop
+            else "cancelled"
             if cancelled
             else (last_response.finish_reason if last_response is not None else None)
         ),
         # Realized prompt-cache state (not the chosen strategy — what actually happened this request).
         "cacheHit": cache_hit,
         "cachedTokens": cached_tokens,
+        # session caches the (persistent) worker keeps resident between requests — the warm pool budgets this
+        "residentCacheBytes": int(_live_cache_resident_bytes()),
+        "promptTokensPerSecond": (
+            float(last_response.prompt_tps) if last_response is not None and last_response.prompt_tps else None
+        ),
     }
+    if kv_guard:
+        metrics.update(kv_guard)
+    if spec_stats:
+        metrics["draftTokens"] = int(spec_stats.get("drafted") or 0)
+        metrics["draftAcceptedTokens"] = int(spec_stats.get("accepted") or 0)
+    if _KV_MODE_FALLBACKS:
+        metrics["kvModeFallback"] = "; ".join(_KV_MODE_FALLBACKS)
     if spec_stats:
         metrics["speculative"] = spec_stats  # experimental path only; absent on the default path
     return {"text": reply, "metrics": metrics, "kvMode": effective_kv_mode}
@@ -2524,6 +2869,9 @@ def mlx_serve() -> None:
                     break
                 elif op == "generate":
                     request_queue.put(msg)
+                elif op == "drop-caches":
+                    # queued (not executed here) so it runs BETWEEN requests, never under a generating cache
+                    request_queue.put(msg)
         finally:
             # stdin closed (parent died) or explicit shutdown → stop the worker.
             stop.set()
@@ -2536,6 +2884,9 @@ def mlx_serve() -> None:
         msg = request_queue.get()
         if msg is None or stop.is_set():
             break
+        if msg.get("op") == "drop-caches":
+            _emit_json_line({"event": "caches-dropped", "freedBytes": int(_drop_live_caches())})
+            continue
         req_id = msg.get("id")
         request = msg.get("request", {})
 
@@ -2678,7 +3029,7 @@ def mlx_export_cache() -> None:
         "metadata": {"model_id": request["modelID"]},
         "tensors": [],
     }
-    if not snapshot.get("tensors") and snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64"):
+    if not snapshot.get("tensors") and (snapshot.get("path") or snapshot.get("metadata", {}).get("mlx_prompt_cache_safetensors_base64")):
         # token-exact prefix mode stores only the safetensors blob; rebuild the tensor list for export
         from mlx_lm.models.cache import KVCache as _KVCache
 
@@ -2954,6 +3305,7 @@ def speech_serve() -> None:
 
 
 def main() -> None:
+    _sweep_stale_temp_files()   # reclaim staging/state files of owners that crashed or were killed
     _install_child_reaper()   # bridge cancellation must reclaim any long-running worker groups (no orphans)
     parser = argparse.ArgumentParser()
     parser.add_argument(

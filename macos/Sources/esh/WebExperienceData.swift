@@ -6,7 +6,8 @@ import EshMacRuntime
 /// esh services — the browser and web layer contain no routing/fit/scheduler/policy logic (thin
 /// client). Returned `Data` is JSON encoded once here and passed through the HTTP handler verbatim.
 enum WebExperienceData {
-    static func provider(root: PersistenceRoot, toolVersion: String?) -> (@Sendable (WebDataRequest) async throws -> Data) {
+    static func provider(root: PersistenceRoot, toolVersion: String?,
+                         pool: RuntimeLifecycleManager? = nil) -> (@Sendable (WebDataRequest) async throws -> Data) {
         let installs = InstallManager(root: root)
         let engineInstalls = EngineInstallManager(root: root)
         let engineManager = GenerativeEngineManager(root: root)
@@ -68,6 +69,12 @@ enum WebExperienceData {
                 // the canonical truth for onboarding and the engine inspector.
                 let report = DoctorService().report(root: root, version: toolVersion)
                 return try enc.encode(report)
+
+            case ("GET", "/v1/runtime"):
+                // Warm-pool truth: resident models, their estimated + measured memory, resident session caches
+                // (persistent KV), active requests and the budget. Read-only; cheap to poll.
+                guard let pool else { throw OpenAICompatibleError.unsupported("No warm pool in this process.") }
+                return try enc.encode(await pool.status())
 
             case ("GET", "/v1/resources"):
                 // Live shared-resource usage (RAM + GPU) for the Engine inspector's meters. Cheap to poll.

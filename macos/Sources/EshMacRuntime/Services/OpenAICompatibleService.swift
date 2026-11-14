@@ -931,19 +931,23 @@ public struct OpenAICompatibleService: Sendable {
         // MLX installs load through a persistent, weights-resident worker owned by this same
         // lifecycle manager; everything else keeps the per-request runtime.
         let persistentMLX = ProcessInfo.processInfo.environment["ESH_MLX_PERSISTENT"] == "1"
-        return RuntimeLifecycleManager(
+        let manager = RuntimeLifecycleManager(
             usableBudgetGB: host.totalMemoryGB.map { max(1, $0 - 3) },
             estimator: { install in max(0.2, Double(install.sizeBytes) / 1_073_741_824 * 1.3) },
             loader: { install in
                 if persistentMLX, install.spec.backend == .mlx {
-                    return try await MLXBackend(persistent: true).loadRuntime(for: install)
+                    return try await MLXBackend(persistent: true).loadRuntimeGuarded(for: install)
                 }
-                return try await registry.backend(for: install).loadRuntime(for: install)
+                return try await registry.backend(for: install).loadRuntimeGuarded(for: install)
             },
             residencyProbe: { install in
                 (persistentMLX && install.spec.backend == .mlx) ? .weightsResident : .handleCached
             }
         )
+        // React to system memory pressure for the pool's lifetime: warning -> release idle session caches;
+        // critical -> also evict idle models. Active requests are never interrupted.
+        _ = manager.monitorPressure()
+        return manager
     }
 
     public init(

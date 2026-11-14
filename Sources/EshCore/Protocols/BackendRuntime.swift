@@ -163,4 +163,14 @@ public protocol BackendRuntime: Sendable {
     func importRuntimeCache(_ snapshot: CacheSnapshot) async throws
     func validateCacheCompatibility(_ manifest: CacheManifest) async throws
     func unload() async
+
+    /// True when `generate` already does everything `prepare` would (so calling `prepare` first only costs time).
+    /// The one-shot MLX runtime's `prepare` is a separate `mlx-build-cache` process that loads the model just to
+    /// prefill the prompt that `mlx-generate` then loads the model again to use — two model loads per request.
+    /// Request paths skip `prepare` when this is true; cache-artifact builders still call it explicitly.
+    var prepareBeforeGenerateIsRedundant: Bool { get }
+}
+
+public extension BackendRuntime {
+    var prepareBeforeGenerateIsRedundant: Bool { false }
 }

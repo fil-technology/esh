@@ -44,7 +44,7 @@ enum ServeCommand {
                                                                 lifecycleManager: pool)
             },
             transcribe: SpeechEndpointSupport.transcribeClosure(lifecycleManager: pool),
-            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion),
+            webData: WebExperienceData.provider(root: root, toolVersion: toolVersion, pool: pool),
             lifecycleManager: pool,
             root: root,
             artifactStore: FileArtifactStore(root: root)
@@ -161,6 +161,8 @@ enum ServeCommand {
         let signalHandler = SignalHandler()
         signalHandler.wait()
         server.stop()
+        // Unload resident models and WAIT for their processes to exit, so no llama-server child outlives esh.
+        await pool.shutdown()
     }
 
     private static func resolvePort(arguments: [String]) throws -> UInt16 {

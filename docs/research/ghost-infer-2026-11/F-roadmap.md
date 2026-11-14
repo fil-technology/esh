@@ -5,7 +5,7 @@ production default changes.
 
 ## P0: promote what was measured here (small, high value)
 
-1. **Make `ESH_MLX_PREFIX_CACHE=tokens` the default.**
+1. ~~**Make `ESH_MLX_PREFIX_CACHE=tokens` the default.**~~ **Done (2026-11-14, approved).** It was validated on 3 models and templates (G report §4). Rollback: `ESH_MLX_PREFIX_CACHE=legacy`.
    - Why: it fixes two defects in the default path (prefix reuse never hits on Llama-3/Qwen3; untrimmed replay can duplicate tokens). Measured −60% session end-to-end on an Ashex-shaped session, with identical outputs.
    - Evidence still needed: a soak in `esh serve` (`ESH_MLX_PERSISTENT=1`) with real Ashex sessions on Qwen3-30B-A3B and Qwen3-Coder; a check that `esh cache export` / TurboQuant compression still works on `tokens` snapshots (export rebuilds the tensor list; tested only by code path).
 2. **Use `live` mode by default when the MLX worker is persistent.** It brought follow-up turns to 0.4–0.6 s time to first token.

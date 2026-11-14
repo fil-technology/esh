@@ -13,8 +13,7 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     public init(
         bridge: MLXBridge,
         install: ModelInstall,
-        stateFileURL: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("esh-runtime-\(UUID().uuidString).json"),
+        stateFileURL: URL = MLXStateFiles.newStateFileURL(),
         metrics: Metrics = .init()
     ) {
         self.bridge = bridge
@@ -25,6 +24,10 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     }
 
     public var metrics: Metrics { currentMetrics }
+
+    /// `mlx-generate` renders, tokenizes and prefills the prompt itself; a separate `prepare` would load the model
+    /// a second time (in its own `mlx-build-cache` process) for no benefit to the request.
+    public var prepareBeforeGenerateIsRedundant: Bool { true }
 
     public func prepare(session: ChatSession) async throws {
         let normalizedSession = PromptSessionNormalizer().normalized(session: session)
@@ -172,7 +175,7 @@ final class MLXRuntime: BackendRuntime, @unchecked Sendable {
     }
 
     public func unload() async {
-        try? FileManager.default.removeItem(at: stateFileURL)
+        MLXStateFiles.remove(stateFileURL)
     }
 
     private func bridgePythonExecutableURL() -> URL {

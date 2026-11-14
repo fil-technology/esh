@@ -98,7 +98,7 @@ final class LlamaServerProcess: @unchecked Sendable {
 
     /// Stream assistant content deltas from `/v1/chat/completions` (SSE). `body` is the fully-formed
     /// OpenAI chat-completions request JSON (with `stream: true`).
-    func generate(body: Data) -> AsyncThrowingStream<String, Error> {
+    func generate(body: Data, onTimings: (@Sendable (LlamaServerTimings) -> Void)? = nil) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -123,6 +123,8 @@ final class LlamaServerProcess: @unchecked Sendable {
                         if let delta = Self.contentDelta(from: data), !delta.isEmpty {
                             continuation.yield(delta)
                         }
+                        // The final chunk carries the server's own prefill/decode/draft measurements.
+                        if let onTimings, let timings = LlamaServerTimings(chunkData: data) { onTimings(timings) }
                     }
                     continuation.finish()
                 } catch {

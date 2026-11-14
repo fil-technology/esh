@@ -170,6 +170,11 @@ final class MLXWorkerProcess: @unchecked Sendable {
         }
     }
 
+    /// Ask the worker to release its session KV caches (processed between requests, never mid-generation).
+    func dropCaches() {
+        try? writeLine(Self.jsonLineOrEmpty(["op": "drop-caches"]))
+    }
+
     func ping() -> Bool {
         (try? writeLine(Self.jsonLineOrEmpty(["op": "ping"]))) != nil && isAlive
     }
