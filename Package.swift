@@ -62,7 +62,9 @@ let llamaTargets: [Target] = {
     let cllama: Target = hasEmbeddedLlama
         ? .binaryTarget(name: "EshCLlama", path: "Vendor/esh_llama.xcframework")
         : .binaryTarget(name: "EshCLlama", url: llamaBinaryURL, checksum: llamaBinaryChecksum)
-    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "EshCLlama"],
+    // Jinja renders the GGUF's own chat template, as llama-server `--jinja` / mlx-lm / transformers do (#41).
+    return [cllama, .target(name: "EshLlamaCpp", dependencies: ["EshCore", "EshRuntime", "EshCLlama",
+                                                                  .product(name: "Jinja", package: "swift-jinja")],
                             swiftSettings: quietDebugSwiftSettings),
             // Embedded GGUF lifecycle/memory tests. Real-model tests are env-gated (ESH_GGUF_TEST_MODEL).
             .testTarget(name: "EshLlamaCppTests", dependencies: ["EshLlamaCpp", "EshRuntime", "EshCore", "EshMLXText"],
@@ -153,6 +155,10 @@ let package = Package(
         // tier. fil-technology fork pinned to an immutable tag; its mlx-swift range admits 0.32.x. Only the opt-in
         // EshImageGen product links it.
         .package(url: "https://github.com/fil-technology/mlx-swift-image-edit.git", exact: "0.2.1-mlx0.32"),
+        // Pure-Swift Jinja engine (deps: swift-collections only; no swift-syntax). EshLlamaCpp renders a GGUF's
+        // embedded chat template with it, so the embedded path formats prompts exactly like llama-server `--jinja`
+        // and mlx-lm (#41). Already in the resolved graph via swift-transformers; same requirement as theirs.
+        .package(url: "https://github.com/huggingface/swift-jinja.git", from: "2.4.2"),
     ],
     targets: [
         // Portable SDK core (M9): contracts, domain types, routing, model-fit, persistence, download,
