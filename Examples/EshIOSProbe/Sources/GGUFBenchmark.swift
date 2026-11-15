@@ -141,6 +141,25 @@ enum GGUFBenchmark {
             Self.log("ESH-M7 eshRuntimePath ERROR=\(error)")
         }
 
+        // 1b) Managed SDK lifecycle on iOS: one load reused across turns, then an awaited shutdown that frees it.
+        do {
+            let managed = EshRuntime(registry: registry, installProvider: StaticInstallProvider([install(path: url.path, size: size)]),
+                                     lifecycle: .managed(.init(maxResidentModels: 1, maxConcurrentRequests: 1)))
+            let m0 = availMB()
+            for turn in 1...3 {
+                let t0 = ContinuousClock.now
+                _ = try await managed.generate(EshGenerationRequest(prompt: "Reply with one word: turn \(turn)",
+                                                                    constraints: .pinned("qwen2.5-1.5b-instruct-q4km"),
+                                                                    config: GenerationConfig(maxTokens: 8, temperature: 0)))
+                Self.log("ESH-M7 managed turn=\(turn) elapsed=\(t0.duration(to: .now)) availMB=\(String(format: "%.0f", availMB()))")
+            }
+            let loads = await managed.runtimeStatus().pool?.residents.first?.loadCount ?? -1
+            await managed.shutdown()
+            Self.log("ESH-M7 managed loadCount=\(loads) availMB_start=\(String(format: "%.0f", m0)) availMB_afterShutdown=\(String(format: "%.0f", availMB()))")
+        } catch {
+            Self.log("ESH-M7 managed ERROR=\(error)")
+        }
+
         // 2) Direct backend lifecycle (same backend EshRuntime uses) for load/warm/cancel/unload/reload.
         let backend = LlamaCppEmbeddedBackend(config: LlamaCppConfig(contextTokens: 2048))
         let inst = install(path: url.path, size: size)

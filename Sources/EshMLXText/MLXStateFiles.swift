@@ -1,4 +1,6 @@
 #if os(macOS)
+// macOS only: the MLX text backend drives a Python bridge through `Process` (one-shot subprocess or persistent
+// worker), which iOS does not allow. On iOS this module provides only an unavailable `MLXBackend` (see MLXBackendUnavailable.swift).
 import Foundation
 
 /// Where MLX runtimes keep their bridge state files (prompt-cache metadata and, in the experimental token-exact
@@ -52,5 +54,4 @@ enum MLXStateFiles {
         return errno == EPERM   // exists but owned by someone else
     }
 }
-
 #endif

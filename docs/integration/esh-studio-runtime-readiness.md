@@ -7,6 +7,8 @@
 - **Scope:** this document only describes esh. It changes no defaults and no Studio code.
 - **Evidence:** `docs/research/ghost-infer-2026-11/` (A–H). Read **H** (final readiness) and **G** (hardening) for the measurements.
 
+> **Update (branch `feat/managed-sdk-runtime`, not merged yet):** §0 facts 1–3, the suspected GGUF leak and §4.2 are addressed there. The `EshRuntime` facade gains a managed lifecycle backed by the same pool as `esh serve`, the leak is confirmed and fixed, EshMLXText compiles on iOS as an explicit "unavailable" stub, and the default-backend comment is corrected. Studio should follow [esh-sdk-managed-runtime.md](esh-sdk-managed-runtime.md) instead of assembling the pool itself.
+
 ## 0. Read this first: three facts that decide the integration
 
 1. **The `EshRuntime` facade, Studio's stable entry point, has no warm pool for text.**
