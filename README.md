@@ -223,6 +223,13 @@ Notes:
 - `/v1/tools` advertises request-side tool support and `/api/tags` provides an Ollama-compatible model list for local-provider probes
 - pass `--api-key <token>` to require `Authorization: Bearer <token>`
 
+**Security model.** `esh serve` is single-tenant: it assumes trusted clients.
+- **Access:** there is one optional shared token (`--api-key`) and no per-user identity, and the server binds to `127.0.0.1` by default.
+- **Cache keys:** prompt-cache keys, whether you send them (`prompt_cache_key`) or esh derives them from a conversation's opening, are performance hints, not security identities. Prefix reuse only ever reuses KV for tokens identical to the start of the request's own prompt, so one conversation's content can't appear in another's context.
+- **Timing side channel:** a faster first token reveals that a prefix was cached, so clients sharing a server can infer what others sent.
+
+Run one server per trust domain. To serve mutually untrusted users, put it behind a gateway that authenticates them and namespaces `prompt_cache_key` per tenant. Tenant-scoped reuse is tracked in #42.
+
 In the interactive TUI (`./esh`), select **OpenAI server** to toggle the same local API while the TUI process stays open. In chat, use `/serve toggle`, `/serve start`, `/serve stop`, or `/serve status`; the header shows whether the local API is on.
 
 ### Launch external coding agents
