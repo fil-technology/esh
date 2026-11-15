@@ -157,7 +157,7 @@ All failures are `EshRuntimeError`; Studio never needs to know pool internals.
 |---|---|---|
 | `insufficientMemory(modelID:reason:)` | Load refused by the live gate, or a request's context would need too much KV memory | The reason; suggest a smaller model or a shorter conversation |
 | `pinnedModelUnavailable` | Not installed, or not ready | The reason (`textModelReadiness` predicts it) |
-| `backendUnavailable(kind:reason:)` | The model's backend isn't wired, or can't run on this platform (MLX on iOS) | The reason, and suggest a GGUF build of the model on iOS |
+| `backendUnavailable(_:reason:)` | The model's backend isn't wired, or can't run on this platform (MLX on iOS) | The reason, and suggest a GGUF build of the model on iOS |
 | `generationFailed(reason:)` | Includes an embedded-GGUF prompt longer than `contextTokens` ("The prompt is N tokens but the model's context window is M tokens…") | Offer to trim history |
 | `noAvailableBackend` | Also after `shutdown()` | Rebuild the runtime |
 | `CancellationError` | The consuming task was cancelled | Nothing |
