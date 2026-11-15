@@ -26,6 +26,32 @@ esh 2.1's **feature freeze** (`docs/2_1_FEATURE_FREEZE.md`) concluded with the *
 
 ## [Unreleased]
 
+### SDK: v2.4.0-rc.37 (managed SDK runtime, conversation-aware MLX caching, GGUF template parity)
+
+Release candidate. Full notes, compatibility notes, dependency revisions, validation and checklist:
+[`docs/releases/v2.4.0-rc.37.md`](docs/releases/v2.4.0-rc.37.md).
+
+- **Added:**
+  - managed SDK runtime (`lifecycle: .managed()`; #31);
+  - readiness, options and status APIs (#23, #30);
+  - conversation-aware MLX live prefix-cache slots, with an optional `GenerationConfig.prefixCacheKey` (OpenAI `prompt_cache_key`) (#39);
+  - mlx_audio STT and TTS compat engines (#22);
+  - opt-in speculative decoding and token-exact prefix reuse (#24).
+- **Changed:**
+  - the embedded GGUF path renders the model's own Jinja chat template, so prompts can include the template's default system prompt (#44);
+  - MLX live slots: 8 (was 2), still byte-budgeted (#39);
+  - live prefix caching is the default in the persistent MLX worker (#27);
+  - `EshLlamaCpp` depends on swift-jinja (+2.17 MB on an iOS app; #44).
+- **Fixed:**
+  - embedded GGUF per-call native memory leak (#31);
+  - 0% MLX prefix reuse under concurrency (#39, #38);
+  - SDK vs `esh serve` GGUF output mismatch (#44, #41);
+  - load gate everywhere, KV accounting and crash-safe temp files (#25);
+  - iOS build scoping (#29);
+  - test and benchmark temp cleanup (#34).
+- **Docs:** `esh serve` single-tenant security model (#43); Studio handoffs (#28, #33, #37).
+- **Known limitations:** #38 (reuse near-ties), #40 (shared snapshot fallback), #42 (no tenant isolation in `esh serve`).
+
 ### SDK — v2.4.0-rc.34 (new music engine: ACE-Step 1.5 — full 48 kHz stereo songs, MIT/commercial-safe)
 
 Adds **ACE-Step 1.5** (github `ace-step/ACE-Step-1.5`) as a first-class `music.generate` engine — the full-**song**
