@@ -122,7 +122,7 @@ One-shot stays the default, so existing consumers are source- and behavior-compa
   - Managed loads once and uses about a third of one-shot's peak memory under concurrency: 1.31 vs 3.68 GB, because one-shot loads one model copy per concurrent request.
   - Without prefix reuse every turn re-prefills (1.7 s TTFT), so serve's llama-server, which has a prompt cache, was 4× faster.
   - **With `reusePromptPrefix`, the SDK is faster than serve**: 3.55 s vs 4.41 s per session, 0.06 s vs 0.07 s follow-up TTFT, 1.31 vs 1.45 GB peak. All SDK GGUF configurations produced identical text.
-  - Serve differs on 3/10 turns because llama-server is a different llama.cpp build from the vendored xcframework, not because of the lifecycle.
+  - Serve differed on 3/10 turns. #41 later found the cause: different prompts, not the engine build. llama-server rendered the GGUF's Jinja template, which adds Qwen's default system prompt, while the embedded path used llama.cpp's built-in template mapping. After the embedded path rendered the same template, both produced identical text on all 10 turns (0.5B and 1.5B, 96 tokens).
 - **Memory after shutdown:** RSS returns to 0.03–0.27 GB, and no worker or llama-server processes are left behind in any configuration.
 - **Decode throughput** is unchanged by the lifecycle: 33–35 tok/s for MLX 8B and 62–64 tok/s for GGUF 1.5B.
 
@@ -131,7 +131,7 @@ One-shot stays the default, so existing consumers are source- and behavior-compa
 1. **iOS is build-verified, not device-measured.** The embedded backend and the managed lifecycle are the same code on iOS and macOS, and CI builds EshCore, EshRuntime, the EshMLXText stub and the probe apps (the probe now also runs `.managed()`). The memory numbers here are macOS (`phys_footprint`). A device run of `Examples/EshIOSProbe` is the remaining step.
 2. **Embedded GGUF prefix reuse is opt-in and single-sequence.** It was identical to full prefill on Qwen2.5 0.5B/1.5B, but llama.cpp doesn't guarantee batch-invariant numerics, so it isn't the default without your approval. One cached sequence per loaded model: alternating chats on one model evict each other's prefix.
 3. **One request at a time per loaded GGUF model**, and a decoding request occupies a cooperative-pool thread (llama.cpp calls are synchronous inside the actor). Concurrent chats on one model queue; different models run in parallel up to `maxConcurrentRequests`.
-4. **The SDK's embedded GGUF and serve's llama-server are different llama.cpp builds** (vendored xcframework pin vs the installed `llama-server`). Their greedy outputs can differ on some turns; that is the engine, not the lifecycle (see §5).
+4. **The SDK's embedded GGUF and serve's llama-server are different llama.cpp builds** (vendored xcframework pin vs the installed `llama-server`). The output differences seen here were caused by prompt formatting, fixed in #41. With identical prompt tokens, the outputs matched. Different builds can still differ numerically on other models or longer outputs.
 5. **Real system memory pressure wasn't triggered** (it would affect every app). The pool's reactions are unit-tested with injected events, as for `esh serve`.
 6. **A managed runtime dropped without `shutdown()`** cancels its background tasks and frees native GGUF contexts through their owner's `deinit`. A persistent MLX worker exits when its stdin closes, which is not awaited. Call `shutdown()` on teardown.
 7. **Apple Foundation Models are not pooled** (the system owns the model). The facade passes them through unchanged.

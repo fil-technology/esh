@@ -236,10 +236,22 @@ actor LlamaContext {
                             reusePromptPrefix: config.reusePromptPrefix)
     }
 
-    /// Format the session using the model's built-in chat template when available; else a simple fallback.
+    /// Format the session with the model's own chat template: rendered as Jinja (like llama-server `--jinja`, mlx-lm
+    /// and transformers), else llama.cpp's built-in template mapping, else a plain fallback.
     func formatPrompt(session: ChatSession) -> String {
         let normalized = PromptSessionNormalizer().normalized(session: session)
         let msgs = normalized.messages
+        let roleName: (Message.Role) -> String = { $0 == .system ? "system" : ($0 == .user ? "user" : "assistant") }
+        if let model, let vocab, let tmpl = llama_model_chat_template(model, nil) {
+            let bos = tokenText(llama_vocab_bos(vocab), vocab: vocab)
+            if let rendered = GGUFChatTemplate.render(
+                template: String(cString: tmpl),
+                turns: msgs.map { .init(role: roleName($0.role), content: $0.text) },
+                bosToken: bos, eosToken: tokenText(llama_vocab_eos(vocab), vocab: vocab)) {
+                return GGUFChatTemplate.strippingTemplateBOS(rendered, bosToken: bos,
+                                                             tokenizerAddsBOS: llama_vocab_get_add_bos(vocab))
+            }
+        }
         if let model, let tmpl = llama_model_chat_template(model, nil) {
             // Build C llama_chat_message array; keep Swift strings alive for the call.
             let roles: [UnsafeMutablePointer<CChar>] = msgs.map { strdup($0.role == .system ? "system" : ($0.role == .user ? "user" : "assistant"))! }
@@ -264,6 +276,11 @@ actor LlamaContext {
         // Fallback: plain role-tagged concatenation.
         return msgs.map { ($0.role == .user ? "User: " : $0.role == .assistant ? "Assistant: " : "") + $0.text }
             .joined(separator: "\n") + "\nAssistant:"
+    }
+
+    private func tokenText(_ token: llama_token, vocab: OpaquePointer) -> String? {
+        guard token != LLAMA_TOKEN_NULL, let text = llama_vocab_get_text(vocab, token) else { return nil }
+        return String(cString: text)
     }
 
     func generate(prompt: String, config: GenerationConfig,
