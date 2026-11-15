@@ -102,7 +102,7 @@ All errors are `EshRuntimeError`, apart from task cancellation:
 |---|---|
 | `insufficientMemory(modelID:reason:)` | Suggest a smaller model or a shorter conversation |
 | `pinnedModelUnavailable` | Not installed or not ready; `textModelReadiness` predicts this |
-| `backendUnavailable(kind:reason:)` | Backend not wired, or MLX on iOS; suggest a GGUF build |
+| `backendUnavailable(_:reason:)` | Backend not wired, or MLX on iOS; suggest a GGUF build |
 | `generationFailed(reason:)` | Includes GGUF context overflow; offer to trim history |
 | `noAvailableBackend` | Also thrown after `shutdown()`; rebuild the runtime |
 | `CancellationError` | Nothing to show |
