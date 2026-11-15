@@ -121,8 +121,9 @@ Each subsection gives the implementation, public interface, platforms, configura
   - Rollback: `ESH_MLX_PREFIX_CACHE=tokens`.
   - If `live` can't hold a session, it falls back to the token-exact snapshot (#27).
 - **Behavior:**
-  - Keeps the last N session KV caches resident (slots, default 2).
-  - Matches them by token content, like llama.cpp's slot selection; esh request session IDs are random.
+  - Keeps up to N conversations' KV caches resident (slots, LRU, `ESH_MLX_LIVE_PREFIX_SLOTS`, default 8; default 2 before #38's fix). The byte budget below is the real bound.
+  - Slots are keyed by **conversation identity**: the caller's `GenerationConfig.prefixCacheKey` (OpenAI `prompt_cache_key`), or else a hash of the conversation's opening messages, which stays the same on every turn because callers resend the whole history. The key also fingerprints the model and KV layout, so a cache built under other settings is never reused.
+  - A request takes only its own conversation's slot. Without one, it may copy the longest exact shared prefix (for example a common system prompt) from another conversation's slot; that slot is never modified or taken.
   - A cache is popped while its request runs, so it's never shared with another request or dropped mid-generation.
   - Budget: `ESH_MLX_LIVE_PREFIX_MAX_BYTES`, default min(25% of RAM, 8 GiB).
   - Not retained under critical pressure.

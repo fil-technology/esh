@@ -47,6 +47,8 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
     public var kvGroupSize: Int?
     public var quantizedKVStart: Int?
     public var stop: OpenAIStopSequences?
+    /// OpenAI `prompt_cache_key`: the conversation's identity for prefix-cache reuse (see `GenerationConfig.prefixCacheKey`).
+    public var promptCacheKey: String?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -70,6 +72,7 @@ public struct OpenAIChatCompletionsRequest: Codable, Hashable, Sendable {
         case kvGroupSize = "kv_group_size"
         case quantizedKVStart = "quantized_kv_start"
         case stop
+        case promptCacheKey = "prompt_cache_key"
     }
 }
 
@@ -110,6 +113,8 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
     public var kvGroupSize: Int?
     public var quantizedKVStart: Int?
     public var stop: OpenAIStopSequences?
+    /// OpenAI `prompt_cache_key`: the conversation's identity for prefix-cache reuse (see `GenerationConfig.prefixCacheKey`).
+    public var promptCacheKey: String?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -133,6 +138,7 @@ public struct OpenAIResponsesRequest: Codable, Hashable, Sendable {
         case kvGroupSize = "kv_group_size"
         case quantizedKVStart = "quantized_kv_start"
         case stop
+        case promptCacheKey = "prompt_cache_key"
     }
 }
 
@@ -1372,7 +1378,8 @@ public struct OpenAICompatibleService: Sendable {
                 kvQuantScheme: request.kvQuantScheme,
                 kvGroupSize: request.kvGroupSize,
                 quantizedKVStart: request.quantizedKVStart,
-                stop: request.stop?.values
+                stop: request.stop?.values,
+                prefixCacheKey: request.promptCacheKey
             ),
             responseFormat: eshResponseFormat(from: request.responseFormat)
         )
@@ -1483,7 +1490,7 @@ public struct OpenAICompatibleService: Sendable {
                         thinkingStartToken: request.thinkingStartToken, thinkingEndToken: request.thinkingEndToken,
                         kvBits: request.kvBits, kvQuantScheme: request.kvQuantScheme,
                         kvGroupSize: request.kvGroupSize, quantizedKVStart: request.quantizedKVStart,
-                        stop: request.stop?.values),
+                        stop: request.stop?.values, prefixCacheKey: request.promptCacheKey),
                     responseFormat: eshResponseFormat(from: request.responseFormat))
                 let execSentinel = "\u{01}ESHEXEC:"
                 for try await chunk in streamClosure(external) where chunk.isEmpty == false {
@@ -1541,7 +1548,8 @@ public struct OpenAICompatibleService: Sendable {
                 kvQuantScheme: request.kvQuantScheme,
                 kvGroupSize: request.kvGroupSize,
                 quantizedKVStart: request.quantizedKVStart,
-                stop: request.stop?.values
+                stop: request.stop?.values,
+                prefixCacheKey: request.promptCacheKey
             ),
             responseFormat: eshResponseFormat(from: request.responseFormat)
         )

@@ -1289,6 +1289,7 @@ def _ensure_kv_headroom(model, new_tokens: int, max_new_tokens: int) -> dict:
 
 
 _LIVE_PREFIX_CACHES: "dict[str, tuple[list[int], Any]]" = {}
+_LIVE_PREFIX_DEFAULT_SLOTS = 8   # conversation slots (LRU); bytes are bounded by _live_cache_budget_bytes()
 _PREFIX_REUSE_MIN_TOKENS = 8
 
 
@@ -1322,12 +1323,49 @@ def _common_prefix_len(a: list[int], b: list[int]) -> int:
     return i
 
 
+# Request fields that change the KV cache's layout. A slot built under different values is never reused.
+_KV_LAYOUT_FIELDS = ("kvBits", "kvQuantScheme", "kvGroupSize", "quantizedKVStart")
+
+
+def _kv_layout_fingerprint(request: dict) -> str:
+    import hashlib
+
+    config = request.get("config") or {}
+    parts = [str(request.get("modelID") or ""), str(request.get("kvMode") or "")]
+    parts += [str(config.get(field)) for field in _KV_LAYOUT_FIELDS]
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:12]
+
+
+def _conversation_identity(request: dict) -> "str | None":
+    """Stable identity of the conversation a request continues.
+
+    * explicit: the caller's `prefixCacheKey` (SDK `GenerationConfig.prefixCacheKey`, OpenAI `prompt_cache_key`), top
+      level or in `config`;
+    * derived: a hash of the conversation's opening messages (everything up to and including the first user message).
+      esh builds a fresh ChatSession (new random id) per request and OpenAI clients are stateless, but they resend the
+      whole history, so the opening is the same on every turn. Conversations with an identical opening share an
+      identity; that only costs reuse, never correctness (reuse is always an exact token-prefix match).
+    """
+    import hashlib
+
+    explicit = request.get("prefixCacheKey") or (request.get("config") or {}).get("prefixCacheKey")
+    if explicit:
+        return f"key:{explicit}"
+    opening = []
+    for message in (request.get("session") or {}).get("messages") or []:
+        opening.append([message.get("role"), message.get("text", message.get("content"))])
+        if message.get("role") == "user":
+            break
+    if not opening:
+        return None
+    return "conv:" + hashlib.sha256(json.dumps(opening, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 def _session_cache_key(request: dict) -> "str | None":
-    """An EXPLICIT prefix-cache key, only when the caller supplies one (`prefixCacheKey`). esh's request paths build a
-    fresh ChatSession (new random id) per request, and OpenAI-style clients are stateless, so a session id is not a
-    usable key; live caches are matched by token content instead (see `_token_prefix_reuse`)."""
-    key = request.get("prefixCacheKey")
-    return f"key:{key}" if key else None
+    """The live-slot key: conversation identity + KV-layout fingerprint (model, kv mode and quantization settings), so
+    a cache built for another model or KV layout is never reused. None when the request has no messages."""
+    identity = _conversation_identity(request)
+    return f"{identity}#{_kv_layout_fingerprint(request)}" if identity else None
 
 
 def _live_cache_budget_bytes() -> int:
@@ -1367,38 +1405,77 @@ def _drop_live_caches() -> int:
 _LAST_LIVE_SLOT: "str | None" = None   # slot popped by the current request (the worker serves one request at a time)
 
 
-def _best_live_slot(full_prompt_tokens: list[int], explicit_key: "str | None") -> "str | None":
-    """Pick the retained cache to continue from: the caller's explicit key when given, else (llama.cpp-style slot
-    selection) the one sharing the LONGEST common token prefix with the new prompt, if that prefix is long enough."""
-    if explicit_key is not None and explicit_key in _LIVE_PREFIX_CACHES:
-        return explicit_key
+def _best_live_slot(full_prompt_tokens: list[int], own_key: "str | None") -> "str | None":
+    """The OTHER slot sharing the longest common token prefix with the new prompt (if long enough), restricted to the
+    same KV layout as `own_key`. The request's own slot is handled by the caller."""
+    layout = own_key.rsplit("#", 1)[-1] if own_key else None
     best, best_len = None, 0
     for slot, (tokens, _cache) in _LIVE_PREFIX_CACHES.items():
+        if slot == own_key or (layout is not None and slot.rsplit("#", 1)[-1] != layout):
+            continue
         n = _common_prefix_len(tokens, full_prompt_tokens)
         if n > best_len:
             best, best_len = slot, n
     return best if best_len >= _PREFIX_REUSE_MIN_TOKENS else None
 
 
+def _borrow_live_prefix(donor: str, full_prompt_tokens: list[int], make_prompt_cache, model):
+    """COPY the exact shared token prefix out of another conversation's slot, leaving that slot untouched. Only plain
+    `KVCache` layers are copied, and only if the copy fits the live-cache budget; otherwise None (full prefill)."""
+    import mlx.core as mx
+
+    tokens, cache = _LIVE_PREFIX_CACHES[donor]
+    n = min(_common_prefix_len(tokens, full_prompt_tokens), len(full_prompt_tokens) - 1)
+    if n < _PREFIX_REUSE_MIN_TOKENS or _cache_offset(cache, -1) != len(tokens):
+        return None
+    if any(type(layer).__name__ != "KVCache" for layer in cache):
+        return None
+    need = int(_kv_raw_bytes(cache) * n / max(1, len(tokens)))
+    if _live_cache_resident_bytes() + need > _live_cache_budget_bytes():
+        return None
+    copy = make_prompt_cache(model)
+    if len(copy) != len(cache) or any(type(layer).__name__ != "KVCache" for layer in copy):
+        return None
+    for src, dst in zip(cache, copy):
+        keys, values = src.state
+        dst.state = (mx.array(keys[..., :n, :]), mx.array(values[..., :n, :]))
+    mx.eval([layer.keys for layer in copy] + [layer.values for layer in copy])
+    return tokens[:n], copy
+
+
+_LAST_PREFIX_SOURCE: "str | None" = None   # where the current request's reused prefix came from (metrics)
+
+
 def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, make_prompt_cache, model, KVCache,
                         cache_key=None, model_id=None):
     """-> (prompt_cache, prompt_tokens_to_prefill, cache_hit, reused_tokens)
 
-    Live mode keeps a few retained caches ("slots"). A request continues from the slot sharing the longest common
-    token prefix with its prompt (or the caller's explicit `prefixCacheKey`), so stateless clients that resend the
-    whole conversation hit, and only exactly matching tokens are ever reused. The chosen slot is POPPED for the
-    duration of the request, so no other request or a `drop-caches` op can touch a cache that is generating.
+    Live mode keeps a bounded set of retained caches ("slots") keyed by conversation (`_session_cache_key`). A request
+    continues from its OWN conversation's slot, which is POPPED for the duration of the request, so no other request
+    or a `drop-caches` op can touch a cache that is generating. Without one, it may borrow the longest exact shared
+    prefix from another conversation's slot as a COPY (that slot is never modified or taken). Only exactly matching
+    tokens are ever reused. Requests without messages (no identity) keep the content-matching behaviour.
     """
     from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
 
-    global _LAST_LIVE_SLOT
+    global _LAST_LIVE_SLOT, _LAST_PREFIX_SOURCE
     _LAST_LIVE_SLOT = None
+    _LAST_PREFIX_SOURCE = None
     cache, tokens = None, None
     if mode == "live":
-        slot = _best_live_slot(full_prompt_tokens, cache_key)
-        if slot is not None:
-            tokens, cache = _LIVE_PREFIX_CACHES.pop(slot)
-            _LAST_LIVE_SLOT = slot
+        if cache_key is not None and cache_key in _LIVE_PREFIX_CACHES:
+            tokens, cache = _LIVE_PREFIX_CACHES.pop(cache_key)
+            _LAST_LIVE_SLOT, _LAST_PREFIX_SOURCE = cache_key, "own"
+        else:
+            donor = _best_live_slot(full_prompt_tokens, cache_key)
+            if donor is not None and cache_key is None:
+                tokens, cache = _LIVE_PREFIX_CACHES.pop(donor)
+                _LAST_LIVE_SLOT, _LAST_PREFIX_SOURCE = donor, "own"
+            elif donor is not None:
+                borrowed = _borrow_live_prefix(donor, full_prompt_tokens, make_prompt_cache, model)
+                if borrowed is not None:
+                    tokens, cache = borrowed
+                    _LAST_PREFIX_SOURCE = "borrowed"
     if cache is None and (
         state_payload is not None
         and state_payload.get("cache_tokens")
@@ -1409,6 +1486,7 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
         try:
             cache = _snapshot_to_prompt_cache(state_payload["snapshot"], KVCache)
             tokens = [int(t) for t in state_payload["cache_tokens"]]
+            _LAST_PREFIX_SOURCE = "snapshot"
         except Exception:  # noqa: BLE001 — an unreadable snapshot is just a miss
             cache, tokens = None, None
     if cache is not None and tokens is not None and can_trim_prompt_cache(cache):
@@ -1418,6 +1496,7 @@ def _token_prefix_reuse(mode, state_path, state_payload, full_prompt_tokens, mak
             if reuse >= _PREFIX_REUSE_MIN_TOKENS:
                 trim_prompt_cache(cache, offset - reuse)
                 return cache, full_prompt_tokens[reuse:], True, reuse
+    _LAST_PREFIX_SOURCE = None
     return make_prompt_cache(model), full_prompt_tokens, False, 0
 
 
@@ -1437,7 +1516,8 @@ def _finish_token_prefix(mode, state_path, prompt_cache, cache_tokens: list[int]
         import uuid
 
         key = cache_key or _LAST_LIVE_SLOT or f"slot:{uuid.uuid4().hex[:12]}"
-        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", "2")))
+        # at most this many conversations keep a slot; the byte budget below is the real memory bound
+        slots = max(1, int(os.environ.get("ESH_MLX_LIVE_PREFIX_SLOTS", str(_LIVE_PREFIX_DEFAULT_SLOTS))))
         budget = _live_cache_budget_bytes()
         retained_reason = None
         if not can_trim_prompt_cache(prompt_cache):
@@ -1726,6 +1806,8 @@ def _generate_with_loaded_model(
         # Realized prompt-cache state (not the chosen strategy — what actually happened this request).
         "cacheHit": cache_hit,
         "cachedTokens": cached_tokens,
+        "prefixCacheSource": _LAST_PREFIX_SOURCE if cache_hit else None,   # own | borrowed | snapshot
+        "liveCacheSlots": len(_LIVE_PREFIX_CACHES),
         # session caches the (persistent) worker keeps resident between requests — the warm pool budgets this
         "residentCacheBytes": int(_live_cache_resident_bytes()),
         "prefixCacheMode": prefix_mode,

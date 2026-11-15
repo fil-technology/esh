@@ -138,6 +138,30 @@ struct OpenAICompatibleServiceTests {
     }
 
     @Test
+    func chatCompletionsForwardsPromptCacheKeyAsConversationIdentity() async throws {
+        let capture = RequestCapture()
+        let service = OpenAICompatibleService(
+            infer: { externalRequest in
+                await capture.store(externalRequest)
+                return ExternalInferenceResponse(modelID: "demo-model", backend: .mlx, integration: .init(mode: "direct"),
+                                                 outputText: "done", metrics: .init())
+            },
+            installedModels: { [] }
+        )
+        let keyed = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: Data("""
+            {"model": "demo-model", "messages": [{"role": "user", "content": "hi"}], "prompt_cache_key": "chat-42"}
+            """.utf8))
+        _ = try await service.chatCompletions(keyed)
+        #expect(try #require(await capture.load()).generation.prefixCacheKey == "chat-42")
+
+        let unkeyed = try JSONCoding.decoder.decode(OpenAIChatCompletionsRequest.self, from: Data("""
+            {"model": "demo-model", "messages": [{"role": "user", "content": "hi"}]}
+            """.utf8))
+        _ = try await service.chatCompletions(unkeyed)
+        #expect(try #require(await capture.load()).generation.prefixCacheKey == nil)
+    }
+
+    @Test
     func chatCompletionsForwardsJsonSchemaToTheInferenceLayer() async throws {
         // json_schema is no longer blanket-rejected. It is forwarded to the inference layer so the
         // per-backend CapabilityResolver can enforce it natively (GGUF, via llama-server constrained
