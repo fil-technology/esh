@@ -1,6 +1,6 @@
 # Managed inference through the esh SDK: Studio integration guide
 
-**For:** esh Studio (macOS + iOS) and any app that embeds esh. **Applies to:** the `feat/managed-sdk-runtime` branch (not merged yet).
+**For:** esh Studio (macOS + iOS) and any app that embeds esh. **Applies to:** esh `main` from `e1d1271` (#31) onward. Short version for Studio: [esh-studio-sdk-handoff.md](esh-studio-sdk-handoff.md).
 
 This replaces §0 and §4.2 of [esh-studio-runtime-readiness.md](esh-studio-runtime-readiness.md): Studio no longer needs to assemble the pooled path itself. Measurements and the GGUF leak investigation are in [docs/research/managed-sdk-runtime-2026-11.md](../research/managed-sdk-runtime-2026-11.md).
 

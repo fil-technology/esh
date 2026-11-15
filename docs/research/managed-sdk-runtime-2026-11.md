@@ -1,6 +1,6 @@
 # Unifying SDK and server runtime management (2026-11-14)
 
-Branch `feat/managed-sdk-runtime`, from `main` at `998a00d`. Machine: M1 Pro, 32 GB, macOS. Integration guide for Studio: [docs/integration/esh-sdk-managed-runtime.md](../integration/esh-sdk-managed-runtime.md).
+Branch `feat/managed-sdk-runtime`, from `main` at `998a00d`; merged in #31 (`e1d1271`). Machine: M1 Pro, 32 GB, macOS. Integration guide for Studio: [docs/integration/esh-sdk-managed-runtime.md](../integration/esh-sdk-managed-runtime.md).
 
 ## 1. Embedded llama.cpp (GGUF) resource ownership audit
 
