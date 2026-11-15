@@ -33,17 +33,22 @@ from validate_prefix_cache import TURNS  # noqa: E402
 def run(model, tokenizer, mx, mods, turns, reuse: bool):
     _, stream_generate, KVCache, make_prompt_cache = mods
     os.environ["ESH_MLX_PREFIX_CACHE"] = "tokens" if reuse else "legacy"   # explicit: tokens is the default
-    state = os.path.join(tempfile.mkdtemp(), "s.json")
     msgs, outs = [], []
-    for t in turns:
-        msgs.append({"role": "user", "text": t})
-        sf = state if reuse else os.path.join(tempfile.mkdtemp(), "s.json")
-        req = {"modelID": "diag", "kvMode": "raw", "stateFilePath": sf, "session": {"id": "d", "messages": msgs},
-               "config": {"maxTokens": 120, "temperature": 0.0, "enableThinking": False}}
-        r = bridge._generate_with_loaded_model(mx, stream_generate, KVCache, make_prompt_cache, model, tokenizer,
-                                               req, on_token=lambda _t: None)
-        msgs.append({"role": "assistant", "text": r["text"]})
-        outs.append(r["text"])
+    # State files and their KV sidecars (hundreds of MB each) are removed when the run ends, even on error.
+    with tempfile.TemporaryDirectory(prefix="esh-diag-") as tmp:
+        state = os.path.join(tmp, "s.json")
+        for t in turns:
+            msgs.append({"role": "user", "text": t})
+            # No reuse: a fresh state per turn, deleted as soon as the turn is done.
+            with tempfile.TemporaryDirectory(prefix="turn-", dir=tmp) as turn_tmp:
+                sf = state if reuse else os.path.join(turn_tmp, "s.json")
+                req = {"modelID": "diag", "kvMode": "raw", "stateFilePath": sf,
+                       "session": {"id": "d", "messages": msgs},
+                       "config": {"maxTokens": 120, "temperature": 0.0, "enableThinking": False}}
+                r = bridge._generate_with_loaded_model(mx, stream_generate, KVCache, make_prompt_cache, model,
+                                                       tokenizer, req, on_token=lambda _t: None)
+            msgs.append({"role": "assistant", "text": r["text"]})
+            outs.append(r["text"])
     return outs, msgs
 
 
