@@ -62,3 +62,14 @@ func generationConfigDecodesDefaultsAndSamplingOptions() throws {
     #expect(defaults.maxTokens == 512)
     #expect(defaults.temperature == 0.7)
 }
+
+@Test
+func generationConfigCarriesPrefixCacheKeyThroughCoding() throws {
+    let config = GenerationConfig(maxTokens: 8, prefixCacheKey: "conversation-1")
+    let data = try JSONEncoder().encode(config)
+    #expect(String(decoding: data, as: UTF8.self).contains("\"prefixCacheKey\":\"conversation-1\""))
+    #expect(try JSONDecoder().decode(GenerationConfig.self, from: data).prefixCacheKey == "conversation-1")
+    let snake = Data(#"{"max_tokens": 4, "prompt_cache_key": "c2"}"#.utf8)
+    #expect(try JSONDecoder().decode(GenerationConfig.self, from: snake).prefixCacheKey == "c2")
+    #expect(try JSONDecoder().decode(GenerationConfig.self, from: Data("{}".utf8)).prefixCacheKey == nil)
+}

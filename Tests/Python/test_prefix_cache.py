@@ -255,9 +255,159 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertNotIn("session:R", bridge._LIVE_PREFIX_CACHES)
 
     def test_session_cache_key(self):
-        # per-request ChatSession ids are random in esh's request paths: never a key; only an explicit one is
+        # per-request ChatSession ids are random in esh's request paths: never part of the key
         self.assertIsNone(bridge._session_cache_key({"session": {"id": "abc"}, "stateFilePath": "/s"}))
-        self.assertEqual(bridge._session_cache_key({"prefixCacheKey": "agent-1"}), "key:agent-1")
+        explicit = bridge._session_cache_key({"prefixCacheKey": "agent-1"})
+        self.assertTrue(explicit.startswith("key:agent-1#"))
+        in_config = bridge._session_cache_key({"config": {"prefixCacheKey": "agent-1"}})
+        self.assertEqual(explicit, in_config)
+
+    @staticmethod
+    def _req(messages, **extra):
+        return {"modelID": "m", "kvMode": "raw", "session": {"id": "random", "messages": messages}, **extra}
+
+    def test_conversation_identity_is_stable_across_turns_and_distinct_between_conversations(self):
+        sys_msg = {"role": "system", "text": "You are terse."}
+        a1 = self._req([sys_msg, {"role": "user", "text": "Hello A"}])
+        a3 = self._req([sys_msg, {"role": "user", "text": "Hello A"}, {"role": "assistant", "text": "Hi"},
+                        {"role": "user", "text": "More"}])
+        a3["session"]["id"] = "another-random-id"            # a new ChatSession per request, as esh builds them
+        b1 = self._req([sys_msg, {"role": "user", "text": "Hello B"}])
+        self.assertEqual(bridge._session_cache_key(a1), bridge._session_cache_key(a3))
+        self.assertNotEqual(bridge._session_cache_key(a1), bridge._session_cache_key(b1))
+        # OpenAI-style "content" keys derive the same identity as "text"
+        self.assertEqual(bridge._session_cache_key(a1), bridge._session_cache_key(
+            self._req([{"role": "system", "content": "You are terse."}, {"role": "user", "content": "Hello A"}])))
+
+    def test_kv_layout_or_model_change_changes_the_key(self):
+        base = self._req([{"role": "user", "text": "Hi"}], config={"maxTokens": 8})
+        same = self._req([{"role": "user", "text": "Hi"}], config={"maxTokens": 99, "temperature": 0.9})
+        quant = self._req([{"role": "user", "text": "Hi"}], config={"kvBits": 4})
+        other_model = {**base, "modelID": "other"}
+        self.assertEqual(bridge._session_cache_key(base), bridge._session_cache_key(same))  # sampling: no effect
+        self.assertNotEqual(bridge._session_cache_key(base), bridge._session_cache_key(quant))
+        self.assertNotEqual(bridge._session_cache_key(base), bridge._session_cache_key(other_model))
+
+    def test_a_new_conversation_borrows_a_shared_prefix_without_touching_the_donor(self):
+        import numpy as np
+        state = self._state_path()
+        _, a_tokens = self._finish_live("conv:A#L", list(range(10, 40)), state=state)
+        donor_tokens, donor_cache = bridge._LIVE_PREFIX_CACHES["conv:A#L"]
+        before = [np.array(layer.state[0]) for layer in donor_cache]
+        b_prompt = a_tokens[:20] + [90, 91, 92, 93]          # shares a 20-token preamble with A
+        cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+            "live", state, None, b_prompt, make_prompt_cache, self.model, KVCache, cache_key="conv:B#L")
+        self.assertTrue(hit)
+        self.assertEqual(reused, 20)
+        self.assertEqual(bridge._LAST_PREFIX_SOURCE, "borrowed")
+        got = self._greedy(to_prefill, cache, n=4)           # B generates on its copy
+        self.assertEqual(got, self._greedy(b_prompt, make_prompt_cache(self.model), n=4))
+        # A's slot is still there, with the same tokens and the same KV values
+        self.assertIn("conv:A#L", bridge._LIVE_PREFIX_CACHES)
+        tokens_after, cache_after = bridge._LIVE_PREFIX_CACHES["conv:A#L"]
+        self.assertEqual(tokens_after, donor_tokens)
+        for b, layer in zip(before, cache_after):
+            self.assertTrue(np.array_equal(b, np.array(layer.state[0])))
+        # and A continues from its own slot
+        _, _, hit_a, reused_a = bridge._token_prefix_reuse(
+            "live", state, None, a_tokens + [5], make_prompt_cache, self.model, KVCache, cache_key="conv:A#L")
+        self.assertTrue(hit_a)
+        self.assertEqual(reused_a, len(a_tokens))
+
+    def test_no_borrowing_across_kv_layouts(self):
+        state = self._state_path()
+        _, a_tokens = self._finish_live("conv:A#L1", list(range(10, 40)), state=state)
+        _, _, hit, _ = bridge._token_prefix_reuse(
+            "live", state, None, a_tokens[:20] + [90, 91], make_prompt_cache, self.model, KVCache, cache_key="conv:B#L2")
+        self.assertFalse(hit)
+        self.assertIn("conv:A#L1", bridge._LIVE_PREFIX_CACHES)
+
+    def test_borrowing_respects_the_live_budget(self):
+        from unittest import mock
+        state = self._state_path()
+        _, a_tokens = self._finish_live("conv:A#L", list(range(10, 40)), state=state)
+        held = bridge._live_cache_resident_bytes()
+        with mock.patch.object(bridge, "_live_cache_budget_bytes", return_value=held):   # no room for a copy
+            _, to_prefill, hit, _ = bridge._token_prefix_reuse(
+                "live", state, None, a_tokens[:20] + [90, 91], make_prompt_cache, self.model, KVCache,
+                cache_key="conv:B#L")
+        self.assertFalse(hit)
+        self.assertEqual(len(to_prefill), 22)                # full prefill fallback
+
+    def test_interleaved_conversations_beyond_two_keep_their_own_slots(self):
+        # issue #38: 3 conversations interleaved turn by turn used to thrash 2 LRU slots (0% reuse)
+        state = self._state_path()
+        history = {k: list(range(start, start + 20)) for k, start in (("conv:A#L", 10), ("conv:B#L", 40),
+                                                                      ("conv:C#L", 70))}
+        for key, toks in history.items():
+            _, history[key] = self._finish_live(key, toks, state=state)
+        for _round in range(2):
+            for key in history:
+                prompt = history[key] + [3, 4]
+                cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+                    "live", state, None, prompt, make_prompt_cache, self.model, KVCache, cache_key=key)
+                self.assertTrue(hit, key)
+                self.assertEqual(reused, len(history[key]))
+                self.assertEqual(bridge._LAST_PREFIX_SOURCE, "own")
+                gen = self._greedy(to_prefill, cache, n=2)
+                bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key=key)
+                history[key] = prompt + gen
+        self.assertEqual(set(bridge._LIVE_PREFIX_CACHES), set(history))
+
+    def test_more_conversations_than_slots_evicts_lru_and_misses_cleanly(self):
+        os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"] = "2"
+        try:
+            state = self._state_path()
+            toks = {}
+            for key, start in (("conv:A#L", 10), ("conv:B#L", 40), ("conv:C#L", 70)):
+                _, toks[key] = self._finish_live(key, list(range(start, start + 20)), state=state)
+            self.assertEqual(list(bridge._LIVE_PREFIX_CACHES), ["conv:B#L", "conv:C#L"])   # A was least recent
+            prompt = toks["conv:A#L"] + [3]
+            cache, to_prefill, hit, _ = bridge._token_prefix_reuse(
+                "live", state, None, prompt, make_prompt_cache, self.model, KVCache, cache_key="conv:A#L")
+            self.assertFalse(hit)                            # evicted: full prefill, still exact
+            self.assertEqual(self._greedy(to_prefill, cache, n=3),
+                             self._greedy(prompt, make_prompt_cache(self.model), n=3))
+        finally:
+            del os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"]
+
+    def test_aliased_identity_with_diverging_histories_reuses_only_the_exact_shared_prefix(self):
+        # Two conversations share an identity: an identical opening (derived key) or the same caller-supplied key from
+        # two clients. Each later turn must reuse ONLY tokens identical to its own prompt, and generate exactly what
+        # a full recompute of its own history generates; nothing from the other conversation can carry over.
+        for key in ("conv:same-opening#L", "key:aliased-by-two-clients#L"):
+            bridge._LIVE_PREFIX_CACHES.clear()
+            state = self._state_path()
+            opening = list(range(10, 30))                    # identical first turn
+            a_hist = opening + [31, 32, 33, 34, 35, 36]      # A's private history
+            b_hist = opening + [61, 62, 63, 64, 65, 66, 67]  # B's private history
+            self._finish_live(key, a_hist, state=state)
+            for hist in (b_hist, a_hist + [40], b_hist + [70]):
+                cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+                    "live", state, None, hist, make_prompt_cache, self.model, KVCache, cache_key=key)
+                stored = None
+                if hit:
+                    self.assertLessEqual(reused, len(hist) - 1)
+                    self.assertEqual(to_prefill, hist[reused:])
+                got = self._greedy(to_prefill, cache, n=4)
+                self.assertEqual(got, self._greedy(hist, make_prompt_cache(self.model), n=4), key)
+                bridge._finish_token_prefix("live", state, cache, hist + got, {}, cache_key=key)
+                stored = bridge._LIVE_PREFIX_CACHES[key][0]
+                self.assertEqual(stored, hist + got)         # the slot holds exactly this request's tokens
+
+    def test_a_failed_request_leaves_no_partial_slot(self):
+        state, a_tokens = self._finish_live("conv:A#L", list(range(10, 40)))
+        cache, _, hit, _ = bridge._token_prefix_reuse(
+            "live", state, None, a_tokens + [5], make_prompt_cache, self.model, KVCache, cache_key="conv:A#L")
+        self.assertTrue(hit)
+        # the request fails here: _finish_token_prefix is never called for it
+        self.assertNotIn("conv:A#L", bridge._LIVE_PREFIX_CACHES)
+        prompt = a_tokens + [5, 6]
+        cache2, to_prefill, hit2, _ = bridge._token_prefix_reuse(
+            "live", state, None, prompt, make_prompt_cache, self.model, KVCache, cache_key="conv:A#L")
+        self.assertFalse(hit2)                               # next turn: clean full prefill
+        self.assertEqual(self._greedy(to_prefill, cache2, n=3),
+                         self._greedy(prompt, make_prompt_cache(self.model), n=3))
 
     def test_tokens_mode_keeps_exactly_one_sidecar_referenced_by_the_state(self):
         state = self._state_path()

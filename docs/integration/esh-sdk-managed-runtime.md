@@ -30,7 +30,7 @@ public enum EshRuntimeLifecycle: Sendable {
 | Model load | Every call | Once; reused until evicted, unloaded or shut down |
 | After the call | Runtime released: native context freed, MLX state file and KV sidecar removed, worker stopped | Stays warm in the pool |
 | Use for | Occasional calls, tools, CLIs | Chat, agents, anything multi-turn |
-| MLX prefix reuse (macOS) | None across calls | `live` in the persistent worker (default rule), `tokens` otherwise |
+| MLX prefix reuse (macOS) | None across calls | `live` in the persistent worker (default rule), `tokens` otherwise. Per conversation: `GenerationConfig.prefixCacheKey`, or derived from the opening messages |
 | Concurrency | Unbounded; each call loads its own copy (memory multiplies) | Bounded by `maxConcurrentRequests`; one shared copy per model |
 | Memory-pressure response | Nothing resident to release | Idle caches released on warning; idle models evicted on critical |
 | `shutdown()` | Releases capability providers only | Unloads every model, awaited; refuses new text work afterwards |

@@ -30,6 +30,7 @@
 
   On iOS, use `maxResidentModels: 1` and `maxConcurrentRequests: 1`.
 - **Each turn:** send the whole conversation. Requests stay independent; reuse happens below the API.
+- **Several conversations at once (macOS MLX):** each conversation keeps its own prefix cache (up to 8, LRU, within the memory budget). For a stable identity, set `GenerationConfig.prefixCacheKey` to the chat's id; without it, esh derives one from the conversation's opening messages, so two chats with an identical opening share a cache.
 - **Cancelling:** cancel the consuming task. The concurrency slot is freed and the model stays warm. GGUF also stops during prefill.
 - **Switching models:** pin a different id. Active requests are never evicted.
 - **After `shutdown()`:** the runtime is finished. Build a new one to continue.

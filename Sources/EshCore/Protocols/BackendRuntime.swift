@@ -25,6 +25,13 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
     /// Caller-supplied stop sequences (OpenAI `stop`). Generation halts when any is produced. This is
     /// in addition to — never a replacement for — the model's native end-of-turn stop.
     public var stop: [String]?
+    /// Stable identity of the conversation this request continues (OpenAI `prompt_cache_key`). Backends that keep
+    /// reusable prefix caches (the persistent MLX worker) key them by it, so interleaved conversations each keep their
+    /// own prefix. Optional: without it the MLX worker derives an identity from the conversation's opening messages.
+    /// It never changes what is generated, only which cached prefix may be reused (always an exact token match).
+    /// It is not an authorization boundary and is not scoped per client: requests sharing a key share one cache slot,
+    /// which can cost reuse but never mixes content.
+    public var prefixCacheKey: String?
 
     public init(
         maxTokens: Int = 512,
@@ -44,7 +51,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         quantizedKVStart: Int? = nil,
         jsonSchema: String? = nil,
         grammar: String? = nil,
-        stop: [String]? = nil
+        stop: [String]? = nil,
+        prefixCacheKey: String? = nil
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -64,6 +72,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         self.jsonSchema = jsonSchema
         self.grammar = grammar
         self.stop = stop
+        self.prefixCacheKey = prefixCacheKey
     }
 
     enum CodingKeys: String, CodingKey {
@@ -85,6 +94,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         case jsonSchema
         case grammar
         case stop
+        case prefixCacheKey
     }
 
     enum SnakeCaseCodingKeys: String, CodingKey {
@@ -103,6 +113,7 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         case quantizedKVStart = "quantized_kv_start"
         case jsonSchema = "json_schema"
         case grammar
+        case prefixCacheKey = "prompt_cache_key"
     }
 
     public init(from decoder: Decoder) throws {
@@ -145,6 +156,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
         self.grammar = try container.decodeIfPresent(String.self, forKey: .grammar)
             ?? snakeContainer.decodeIfPresent(String.self, forKey: .grammar)
         self.stop = try container.decodeIfPresent([String].self, forKey: .stop)
+        self.prefixCacheKey = try container.decodeIfPresent(String.self, forKey: .prefixCacheKey)
+            ?? snakeContainer.decodeIfPresent(String.self, forKey: .prefixCacheKey)
     }
 }
 
