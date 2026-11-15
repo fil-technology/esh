@@ -29,6 +29,8 @@ public struct GenerationConfig: Codable, Hashable, Sendable {
     /// reusable prefix caches (the persistent MLX worker) key them by it, so interleaved conversations each keep their
     /// own prefix. Optional: without it the MLX worker derives an identity from the conversation's opening messages.
     /// It never changes what is generated, only which cached prefix may be reused (always an exact token match).
+    /// It is not an authorization boundary and is not scoped per client: requests sharing a key share one cache slot,
+    /// which can cost reuse but never mixes content.
     public var prefixCacheKey: String?
 
     public init(

@@ -371,6 +371,30 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         finally:
             del os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"]
 
+    def test_aliased_identity_with_diverging_histories_reuses_only_the_exact_shared_prefix(self):
+        # Two conversations share an identity: an identical opening (derived key) or the same caller-supplied key from
+        # two clients. Each later turn must reuse ONLY tokens identical to its own prompt, and generate exactly what
+        # a full recompute of its own history generates; nothing from the other conversation can carry over.
+        for key in ("conv:same-opening#L", "key:aliased-by-two-clients#L"):
+            bridge._LIVE_PREFIX_CACHES.clear()
+            state = self._state_path()
+            opening = list(range(10, 30))                    # identical first turn
+            a_hist = opening + [31, 32, 33, 34, 35, 36]      # A's private history
+            b_hist = opening + [61, 62, 63, 64, 65, 66, 67]  # B's private history
+            self._finish_live(key, a_hist, state=state)
+            for hist in (b_hist, a_hist + [40], b_hist + [70]):
+                cache, to_prefill, hit, reused = bridge._token_prefix_reuse(
+                    "live", state, None, hist, make_prompt_cache, self.model, KVCache, cache_key=key)
+                stored = None
+                if hit:
+                    self.assertLessEqual(reused, len(hist) - 1)
+                    self.assertEqual(to_prefill, hist[reused:])
+                got = self._greedy(to_prefill, cache, n=4)
+                self.assertEqual(got, self._greedy(hist, make_prompt_cache(self.model), n=4), key)
+                bridge._finish_token_prefix("live", state, cache, hist + got, {}, cache_key=key)
+                stored = bridge._LIVE_PREFIX_CACHES[key][0]
+                self.assertEqual(stored, hist + got)         # the slot holds exactly this request's tokens
+
     def test_a_failed_request_leaves_no_partial_slot(self):
         state, a_tokens = self._finish_live("conv:A#L", list(range(10, 40)))
         cache, _, hit, _ = bridge._token_prefix_reuse(

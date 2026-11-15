@@ -1345,6 +1345,10 @@ def _conversation_identity(request: dict) -> "str | None":
       esh builds a fresh ChatSession (new random id) per request and OpenAI clients are stateless, but they resend the
       whole history, so the opening is the same on every turn. Conversations with an identical opening share an
       identity; that only costs reuse, never correctness (reuse is always an exact token-prefix match).
+
+    The identity is a cache optimization, NOT an isolation or authorization boundary: isolation comes from exact token
+    matching (only KV for tokens identical to this request's own prompt prefix is ever reused). Explicit keys are not
+    scoped per client (esh serve has one shared API key), so identical keys from different clients share a slot.
     """
     import hashlib
 

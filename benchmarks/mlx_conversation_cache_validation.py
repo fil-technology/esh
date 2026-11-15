@@ -108,12 +108,15 @@ def converse(s, name, turns, log, model=MODEL, key=None):
     return out
 
 
-def run_pass(s, convos, concurrent, key_prefix=None):
+def run_pass(s, convos, concurrent, key_prefix=None, same_key=None):
     log, box = [], {}
+    if same_key:   # every conversation sends the SAME caller key (two clients aliasing one key)
+        key_prefix = None
     t0 = time.perf_counter()
     if concurrent:
         ths = [threading.Thread(target=lambda n=n, t=t: box.__setitem__(
-            n, converse(s, n, t, log, key=f"{key_prefix}-{n}" if key_prefix else None))) for n, t in convos.items()]
+            n, converse(s, n, t, log, key=same_key or (f"{key_prefix}-{n}" if key_prefix else None))))
+            for n, t in convos.items()]
         [th.start() for th in ths]
         [th.join() for th in ths]
     else:
@@ -138,10 +141,10 @@ def summarize(log, done):
             "meanTTFTLaterTurns": round(sum(x["ttft"] or 0 for x in later) / max(1, len(later)), 4)}
 
 
-def timed_pass(s, convos, concurrent, key_prefix=None):
+def timed_pass(s, convos, concurrent, key_prefix=None, same_key=None):
     """Run a pass and attach worker metrics. Client log order is completion order of each request's response."""
     before = len([e for e in events() if e["event"] == "done"])
-    box, log, wall = run_pass(s, convos, concurrent, key_prefix)
+    box, log, wall = run_pass(s, convos, concurrent, key_prefix, same_key)
     done = [e for e in events() if e["event"] == "done"][before:]
     # sort client log by completion time so it lines up with the worker's sequential done events
     log_sorted = sorted(log, key=lambda x: x[2]["_end"]) if log and "_end" in log[0][2] else log
@@ -299,6 +302,38 @@ def main():
                                       "sources": [x["source"] for x in summ["requests"]]})
                 print("canary", shared, mode, rep, "leaks", len(leaks), "recall", recall,
                       "hit", summ["hitRateLaterTurns"], flush=True)
+    # E10: identical OPENING, different private histories -> the conversations share an identity (derived), or all
+    # send one caller key. Reuse must stay an exact-prefix optimization: no canary may cross over, and each
+    # conversation's output is compared with the same conversation run alone on a fresh server.
+    opening = "Let's start a new chat about my project. Acknowledge briefly."
+    same_open = {f"c{i}": [opening, f"My project codename is {c}. Acknowledge in one short sentence.",
+                           "What is my project codename? Reply with only the codename.",
+                           "Repeat my project codename once more, exactly."] for i, c in enumerate(canaries)}
+    alone = {}
+    for n, turns in same_open.items():
+        s = server("new")
+        try:
+            alone[n], _, _ = run_pass(s, {n: turns}, False)
+        finally:
+            s.stop()
+            time.sleep(2)
+    res["sameOpening"] = []
+    for mode in ("derived", "derived", "derived", "one-shared-key"):
+        s = server("new")
+        try:
+            box, summ, _ = timed_pass(s, same_open, True, same_key="shared-key" if mode == "one-shared-key" else None)
+        finally:
+            s.stop()
+            time.sleep(2)
+        leaks = [(i, t, txt) for i, c in enumerate(canaries) for t, txt in enumerate(box[f"c{i}"])
+                 if any(o.split("-")[0] in txt.upper() for o in canaries if o != c)]
+        recall = [canaries[i].lower() in box[f"c{i}"][2].lower() for i in range(3)]
+        same_as_alone = {n: [a == b for a, b in zip(box[n], alone[n][n])] for n in box}
+        res["sameOpening"].append({"identity": mode, "leaks": leaks, "recall": recall, "sameAsAlone": same_as_alone,
+                                   "sources": [(x["req"], x["cachedTokens"], x["source"]) for x in summ["requests"]]})
+        print("same-opening", mode, "leaks", len(leaks), "recall", recall, "sameAsAlone", same_as_alone, flush=True)
+    res["canary"] += [{**r, "sharedPrefix": "identical-opening"} for r in res["sameOpening"]]
+
     json.dump(res, open(OUT, "w"), indent=1)
     regressions = [c for c in res["canary"] if c["leaks"] or not all(c["recall"])]
     print("canary regressions:", len(regressions))
