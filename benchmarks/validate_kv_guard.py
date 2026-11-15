@@ -35,11 +35,14 @@ def main():
     model, tok = bridge._load_mlx_model(load, a.model)
     cfg = json.loads((Path(a.model) / "config.json").read_text())
     results = {}
+    # Default state files (and KV sidecars) live here; TemporaryDirectory removes it when main() ends or on exit.
+    scratch = tempfile.TemporaryDirectory(prefix="esh-kvguard-")
+    fresh = iter(range(1_000_000))
 
     def gen(max_tokens, text="Write a numbered list of twenty fruits.", mode="tokens", state=None):
         os.environ["ESH_MLX_PREFIX_CACHE"] = mode
         req = {"modelID": "kv-guard", "kvMode": "raw", "session": {"messages": [{"role": "user", "text": text}]},
-               "stateFilePath": state or os.path.join(tempfile.mkdtemp(), "s.json"),
+               "stateFilePath": state or os.path.join(scratch.name, f"s{next(fresh)}.json"),
                "config": {"maxTokens": max_tokens, "temperature": 0.0, "enableThinking": False}}
         return bridge._generate_with_loaded_model(mx, stream_generate, KVCache, make_prompt_cache, model, tok, req,
                                                   on_token=lambda _t: None)

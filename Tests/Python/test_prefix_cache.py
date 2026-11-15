@@ -66,6 +66,12 @@ class CommonPrefixTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_MLX, "needs mlx + mlx_lm")
 class PrefixReuseEquivalenceTests(unittest.TestCase):
+    def _state_path(self) -> str:
+        """A state-file path in a temp directory removed after the test (with its KV sidecars)."""
+        tmp = tempfile.TemporaryDirectory(prefix="esh-prefix-test-")
+        self.addCleanup(tmp.cleanup)
+        return os.path.join(tmp.name, "state.json")
+
     def setUp(self):
         ensure_real_mlx_lm()
         mx.random.seed(3)
@@ -89,7 +95,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         return out
 
     def _turns(self, mode):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         turn1 = list(range(10, 40))                    # 30-token "conversation"
         cache = make_prompt_cache(self.model)
         gen1 = self._greedy(turn1, cache)
@@ -116,7 +122,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
 
     def test_skipped_snapshot_is_a_clean_miss(self):
         from unittest import mock
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         cache = make_prompt_cache(self.model)
         turn1 = list(range(10, 40))
         gen1 = self._greedy(turn1, cache, n=4)
@@ -130,7 +136,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertEqual(len(to_prefill), len(turn1) + len(gen1) + 2)
 
     def _finish_live(self, key, prompt, n=4, state=None):
-        state = state or os.path.join(tempfile.mkdtemp(), "state.json")
+        state = state or self._state_path()
         cache = make_prompt_cache(self.model)
         gen = self._greedy(prompt, cache, n=n)
         bridge._finish_token_prefix("live", state, cache, prompt + gen, {}, cache_key=key)
@@ -138,7 +144,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
 
     def test_stateless_interleaved_conversations_each_find_their_own_cache(self):
         # esh serve / OpenAI clients: no session ids, every request resends the conversation
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         bridge._LAST_LIVE_SLOT = None
         _, a_tokens = self._finish_live(None, list(range(10, 40)), state=state)
         bridge._LAST_LIVE_SLOT = None
@@ -155,7 +161,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
                          self._greedy(b_tokens + [5, 6], make_prompt_cache(self.model), n=4))
 
     def test_reuse_across_conversations_is_limited_to_identical_tokens(self):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         bridge._LAST_LIVE_SLOT = None
         _, a_tokens = self._finish_live(None, list(range(10, 40)), state=state)
         other = a_tokens[:20] + [90, 91, 92, 93]            # shares only the first 20 tokens (a system prompt)
@@ -167,7 +173,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
                          self._greedy(other, make_prompt_cache(self.model), n=4))
 
     def test_explicit_key_is_preferred(self):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         self._finish_live("key:A", list(range(10, 40)), state=state)
         self._finish_live("key:B", list(range(10, 40)), state=state)   # identical content, different key
         _, _, hit, _ = bridge._token_prefix_reuse(
@@ -196,7 +202,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
     def test_live_budget_is_enforced(self):
         os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"] = "1"
         try:
-            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            state = self._state_path()
             cache = make_prompt_cache(self.model)
             prompt = list(range(10, 40))
             gen = self._greedy(prompt, cache, n=4)
@@ -209,7 +215,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
     def test_slot_limit_evicts_least_recent_session(self):
         os.environ["ESH_MLX_LIVE_PREFIX_SLOTS"] = "2"
         try:
-            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            state = self._state_path()
             for key in ("session:A", "session:B", "session:C"):
                 self._finish_live(key, list(range(10, 30)), state=state)
             self.assertEqual(list(bridge._LIVE_PREFIX_CACHES), ["session:B", "session:C"])
@@ -219,7 +225,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
     def test_live_that_cannot_retain_falls_back_to_a_token_exact_snapshot(self):
         os.environ["ESH_MLX_LIVE_PREFIX_MAX_BYTES"] = "1"
         try:
-            state = os.path.join(tempfile.mkdtemp(), "state.json")
+            state = self._state_path()
             cache = make_prompt_cache(self.model)
             turn = list(range(10, 40))
             gen = self._greedy(turn, cache, n=4)
@@ -240,7 +246,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
 
     def test_non_trimmable_caches_are_not_retained(self):
         from mlx_lm.models.cache import RotatingKVCache
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         cache = [RotatingKVCache(max_size=8) for _ in self.model.layers]
         prompt = list(range(10, 40))
         gen = self._greedy(prompt, cache, n=4)
@@ -254,7 +260,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertEqual(bridge._session_cache_key({"prefixCacheKey": "agent-1"}), "key:agent-1")
 
     def test_tokens_mode_keeps_exactly_one_sidecar_referenced_by_the_state(self):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         cache = make_prompt_cache(self.model)
         turn = list(range(10, 40))
         gen = self._greedy(turn, cache, n=4)
@@ -269,7 +275,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertEqual(bridge._kv_sidecar_paths(state), [])
 
     def test_snapshot_from_another_model_is_never_restored(self):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         cache = make_prompt_cache(self.model)
         turn = list(range(10, 40))
         gen = self._greedy(turn, cache, n=4)
@@ -302,7 +308,7 @@ class PrefixReuseEquivalenceTests(unittest.TestCase):
         self.assertEqual(bridge._kv_raw_bytes(qcache), int(snap["metadata"]["raw_bytes"]))
 
     def test_short_overlap_is_a_miss(self):
-        state = os.path.join(tempfile.mkdtemp(), "state.json")
+        state = self._state_path()
         cache = make_prompt_cache(self.model)
         turn1 = list(range(10, 30))
         gen1 = self._greedy(turn1, cache, n=4)

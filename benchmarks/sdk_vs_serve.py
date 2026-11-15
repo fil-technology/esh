@@ -111,7 +111,8 @@ def main():
     if a.mlx_model:
         SKIP_ONESHOT_CONCURRENT[a.mlx_model] = True
     sc = script(a.max_tokens, a.context)
-    script_path = Path(tempfile.mkdtemp()) / "script.json"
+    script_dir = tempfile.TemporaryDirectory(prefix="esh-sdk-vs-serve-")   # removed when main() returns
+    script_path = Path(script_dir.name) / "script.json"
     script_path.write_text(json.dumps(sc))
     raw = str(Path(a.out).with_suffix(".sdk-raw.jsonl"))
     results, port = [], a.port
